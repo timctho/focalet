@@ -16,6 +16,7 @@ var tests = new (string Name, Action Body)[]
     ("Wrong, resumed, and expired launches never auto-bind", InvalidLaunchDoesNotBind),
     ("Invocation context includes bounded sanitized visible text", InvocationContextIncludesVisibleText),
     ("Invocation context prioritizes selected text across multiple captures", InvocationContextPrioritizesSelection),
+    ("Context preview omits confidence and safety metadata", ContextPreviewOmitsInternalMetadata),
     ("Context tokens use URL abbreviations and remain unique", ContextTokensUseUrlAbbreviations),
     ("Codex reasoning deltas are preserved as thinking output", ReasoningDeltaIsPreserved),
     ("Codex commentary is preserved as thinking output", CommentaryIsPreservedAsThinking),
@@ -228,6 +229,23 @@ static void InvocationContextPrioritizesSelection()
         context.IndexOf("the exact highlighted sentence", StringComparison.Ordinal) <
         context.IndexOf("surrounding page content", StringComparison.Ordinal),
         "Selected text did not precede lower-priority visible text.");
+}
+
+static void ContextPreviewOmitsInternalMetadata()
+{
+    var now = new DateTimeOffset(2026, 8, 25, 2, 0, 0, TimeSpan.Zero);
+    var snapshot = Snapshot("preview", now);
+
+    var preview = ContextFormatter.FormatPreview(snapshot, now.AddSeconds(1));
+    Contains("Pointer target: Button named \"Save\"", preview);
+    True(!preview.Contains("confidence medium", StringComparison.OrdinalIgnoreCase), "Pointer confidence leaked into the context preview.");
+    True(!preview.Contains("Snapshot confidence:", StringComparison.Ordinal), "Snapshot confidence leaked into the context preview.");
+    True(!preview.Contains("Safety:", StringComparison.Ordinal), "The safety footer leaked into the context preview.");
+
+    var invocation = ContextFormatter.FormatInvocation(snapshot, now.AddSeconds(1));
+    Contains("confidence medium", invocation);
+    Contains("Snapshot confidence: high", invocation);
+    Contains("Safety:", invocation);
 }
 
 static void ContextTokensUseUrlAbbreviations()

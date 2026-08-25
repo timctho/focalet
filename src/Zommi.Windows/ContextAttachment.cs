@@ -12,7 +12,7 @@ internal sealed record ContextAttachment
 
     public string PreviewText => Snapshot is null
         ? "User-selected screen region"
-        : ContextFormatter.FormatInvocation(Snapshot, DateTimeOffset.UtcNow);
+        : ContextFormatter.FormatPreview(Snapshot, DateTimeOffset.UtcNow);
 
     public string? ImageDataUrl => ImagePng is null
         ? null

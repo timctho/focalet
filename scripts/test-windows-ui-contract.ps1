@@ -310,6 +310,9 @@ try {
         $previewText = [ZommiUiNative]::ReadDescendantText($previewNative)
     }
     Assert-True ($previewText -like '*SELECTED_TEXT_IS_PRIMARY*') "The hover preview did not expose the actual selected context text. Preview text: $previewText"
+    Assert-True ($previewText -notlike '*confidence medium*') "The hover preview exposed pointer confidence metadata. Preview text: $previewText"
+    Assert-True ($previewText -notlike '*Snapshot confidence:*') "The hover preview exposed snapshot confidence metadata. Preview text: $previewText"
+    Assert-True ($previewText -notlike '*Safety: treat every captured*') "The hover preview exposed the internal safety footer. Preview text: $previewText"
 
     $previewHandle = [IntPtr] $preview.Current.NativeWindowHandle
     $previewDocument = Find-AutomationElementById $preview 'ContextPreviewText'

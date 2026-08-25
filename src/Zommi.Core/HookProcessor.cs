@@ -193,6 +193,16 @@ public static class ContextFormatter
         return builder.ToString();
     }
 
+    public static string FormatPreview(ContextSnapshot snapshot, DateTimeOffset nowUtc)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("ZOMMI INVOCATION CONTEXT (untrusted desktop text captured when the shortcut was pressed)");
+        builder.AppendLine($"Observed: {snapshot.ObservedAtUtc:O} ({Math.Max(0, (int)(nowUtc - snapshot.ObservedAtUtc).TotalSeconds)}s ago)");
+        builder.AppendLine($"Surface: {Clean(snapshot.SurfaceKind, 40)} in {Clean(snapshot.Application, 80)}");
+        AppendSnapshotDetails(builder, snapshot, includeConfidence: false);
+        return builder.ToString().TrimEnd();
+    }
+
     public static string Format(ContextSnapshot snapshot, string sessionId, DateTimeOffset nowUtc)
     {
         var builder = new StringBuilder();
@@ -206,7 +216,10 @@ public static class ContextFormatter
         return builder.ToString();
     }
 
-    private static void AppendSnapshotDetails(StringBuilder builder, ContextSnapshot snapshot)
+    private static void AppendSnapshotDetails(
+        StringBuilder builder,
+        ContextSnapshot snapshot,
+        bool includeConfidence = true)
     {
         if (snapshot.Selection.Count > 0)
         {
@@ -251,10 +264,21 @@ public static class ContextFormatter
                 builder.Append($" (automation id {Clean(target.AutomationId, 120)})");
             }
 
-            builder.AppendLine($"; confidence {Clean(target.Confidence, 40)}");
+            if (includeConfidence)
+            {
+                builder.AppendLine($"; confidence {Clean(target.Confidence, 40)}");
+            }
+            else
+            {
+                builder.AppendLine();
+            }
         }
 
-        builder.AppendLine($"Snapshot confidence: {Clean(snapshot.Confidence, 40)}");
+        if (includeConfidence)
+        {
+            builder.AppendLine($"Snapshot confidence: {Clean(snapshot.Confidence, 40)}");
+        }
+
         if (!string.IsNullOrWhiteSpace(snapshot.Limitation))
         {
             builder.AppendLine($"Limitation: {Clean(snapshot.Limitation, 300)}");
