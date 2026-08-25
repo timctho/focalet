@@ -9,6 +9,11 @@ internal static class Program
     {
         RuntimeOptions.Apply(args);
 
+        if (args.Contains("--electron-host", StringComparer.OrdinalIgnoreCase))
+        {
+            return ElectronNativeHost.Run();
+        }
+
         if (args.Contains("--zommi-hook", StringComparer.OrdinalIgnoreCase))
         {
             return RunHook(args);
