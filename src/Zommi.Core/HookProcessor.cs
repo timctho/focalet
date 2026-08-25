@@ -4,7 +4,10 @@ using System.Text.Json.Serialization;
 
 namespace Zommi.Core;
 
-public sealed class HookProcessor(StateStore stateStore, IContextSnapshotReader? snapshotReader = null)
+public sealed class HookProcessor(
+    StateStore stateStore,
+    IContextSnapshotReader? snapshotReader = null,
+    string? launchToken = null)
 {
     private static readonly JsonSerializerOptions InputOptions = new()
     {
@@ -38,6 +41,7 @@ public sealed class HookProcessor(StateStore stateStore, IContextSnapshotReader?
         if (eventName.Equals("SessionStart", StringComparison.OrdinalIgnoreCase))
         {
             UpdatePresence(hookEvent, "active", nowUtc);
+            TryBindLaunchedSession(hookEvent, nowUtc);
             return string.Empty;
         }
 
@@ -93,6 +97,50 @@ public sealed class HookProcessor(StateStore stateStore, IContextSnapshotReader?
         });
     }
 
+    private void TryBindLaunchedSession(HookEventEnvelope hookEvent, DateTimeOffset nowUtc)
+    {
+        var intent = stateStore.ReadLaunchIntent();
+        if (intent is null)
+        {
+            return;
+        }
+
+        if (intent.ExpiresAtUtc < nowUtc)
+        {
+            stateStore.DeleteLaunchIntent();
+            return;
+        }
+
+        if (!string.Equals(hookEvent.Source, "startup", StringComparison.OrdinalIgnoreCase) ||
+            string.IsNullOrWhiteSpace(launchToken) ||
+            !string.Equals(intent.Token, launchToken, StringComparison.Ordinal) ||
+            !SameDirectory(intent.ExpectedWorkingDirectory, hookEvent.WorkingDirectory))
+        {
+            return;
+        }
+
+        stateStore.WriteBinding(new BindingState
+        {
+            SessionId = hookEvent.SessionId,
+            Mode = CaptureMode.Active,
+            UpdatedAtUtc = nowUtc,
+        });
+        stateStore.DeleteLaunchIntent();
+    }
+
+    private static bool SameDirectory(string expected, string? actual)
+    {
+        if (string.IsNullOrWhiteSpace(actual))
+        {
+            return false;
+        }
+
+        return string.Equals(
+            expected.TrimEnd('/', '\\'),
+            actual.TrimEnd('/', '\\'),
+            StringComparison.Ordinal);
+    }
+
     private sealed record HookEventEnvelope
     {
         [JsonPropertyName("session_id")]
@@ -109,6 +157,9 @@ public sealed class HookProcessor(StateStore stateStore, IContextSnapshotReader?
 
         [JsonPropertyName("hook_event_name")]
         public string? HookEventName { get; init; }
+
+        [JsonPropertyName("source")]
+        public string? Source { get; init; }
     }
 }
 

@@ -12,6 +12,8 @@ var tests = new (string Name, Action Body)[]
     ("Expired and future snapshots emit nothing", InvalidFreshness),
     ("Malformed hook input fails open", MalformedInput),
     ("SessionEnd marks a session ended", SessionEndMarksEnded),
+    ("A matching fresh WSL launch binds its exact new session", MatchingLaunchAutoBinds),
+    ("Wrong, resumed, and expired launches never auto-bind", InvalidLaunchDoesNotBind),
     ("The latest snapshot atomically replaces the prior one", LatestSnapshotWins),
     ("Hook installation preserves, de-duplicates, and uninstalls cleanly", HookConfigurationRoundTrip),
 };
@@ -143,6 +145,48 @@ static void SessionEndMarksEnded()
     });
 }
 
+static void MatchingLaunchAutoBinds()
+{
+    WithStore((store, now) =>
+    {
+        const string token = "matching-launch-token";
+        store.WriteLaunchIntent(LaunchIntent(token, now));
+        var processor = new HookProcessor(store, launchToken: token);
+
+        Equal(string.Empty, processor.Process(Event("SessionStart", TestData.SessionA, "startup", "/home/tester"), now.AddSeconds(1)));
+
+        var binding = NotNull(store.ReadBinding());
+        Equal(TestData.SessionA, binding.SessionId);
+        Equal(CaptureMode.Active, binding.Mode);
+        True(store.ReadLaunchIntent() is null, "A consumed launch intent remained on disk.");
+    });
+}
+
+static void InvalidLaunchDoesNotBind()
+{
+    WithStore((store, now) =>
+    {
+        store.WriteLaunchIntent(LaunchIntent("expected-token", now));
+        _ = new HookProcessor(store, launchToken: "wrong-token")
+            .Process(Event("SessionStart", TestData.SessionA, "startup", "/home/tester"), now.AddSeconds(1));
+        True(store.ReadBinding() is null, "A hook with the wrong launch token was bound.");
+
+        _ = new HookProcessor(store, launchToken: "expected-token")
+            .Process(Event("SessionStart", TestData.SessionA, "resume", "/home/tester"), now.AddSeconds(2));
+        True(store.ReadBinding() is null, "A resumed session was bound as a fresh launch.");
+
+        _ = new HookProcessor(store, launchToken: "expected-token")
+            .Process(Event("SessionStart", TestData.SessionA, "startup", "/different/directory"), now.AddSeconds(3));
+        True(store.ReadBinding() is null, "A session in the wrong directory was bound.");
+
+        store.WriteLaunchIntent(LaunchIntent("expected-token", now) with { ExpiresAtUtc = now.AddSeconds(3) });
+        _ = new HookProcessor(store, launchToken: "expected-token")
+            .Process(Event("SessionStart", TestData.SessionA, "startup", "/home/tester"), now.AddSeconds(4));
+        True(store.ReadBinding() is null, "An expired launch intent was bound.");
+        True(store.ReadLaunchIntent() is null, "An expired launch intent was not removed.");
+    });
+}
+
 static void LatestSnapshotWins()
 {
     WithStore((store, now) =>
@@ -235,6 +279,14 @@ static BindingState Binding(string? sessionId, CaptureMode mode, DateTimeOffset 
     UpdatedAtUtc = now,
 };
 
+static SessionLaunchIntent LaunchIntent(string token, DateTimeOffset now) => new()
+{
+    Token = token,
+    ExpectedWorkingDirectory = "/home/tester",
+    CreatedAtUtc = now,
+    ExpiresAtUtc = now.AddMinutes(2),
+};
+
 static ContextSnapshot Snapshot(string id, DateTimeOffset observedAt) => new()
 {
     SnapshotId = id,
@@ -256,13 +308,18 @@ static ContextSnapshot Snapshot(string id, DateTimeOffset observedAt) => new()
     Confidence = "high",
 };
 
-static string Event(string eventName, string sessionId) => JsonSerializer.Serialize(new
+static string Event(
+    string eventName,
+    string sessionId,
+    string? source = null,
+    string workingDirectory = @"C:\work\zommi") => JsonSerializer.Serialize(new
 {
     session_id = sessionId,
     turn_id = "turn-1",
-    cwd = @"C:\work\zommi",
+    cwd = workingDirectory,
     hook_event_name = eventName,
     model = "test-model",
+    source,
     prompt = "question that must not be retained",
 });
 

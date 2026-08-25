@@ -15,6 +15,7 @@ public sealed class StateStore : IContextSnapshotReader
     private const string BindingFile = "binding.json";
     private const string SnapshotFile = "snapshot.json";
     private const string DeliveryFile = "delivery.json";
+    private const string LaunchIntentFile = "launch-intent.json";
 
     private readonly JsonSerializerOptions jsonOptions = new()
     {
@@ -61,6 +62,12 @@ public sealed class StateStore : IContextSnapshotReader
     public DeliveryReceipt? ReadDelivery() => Read<DeliveryReceipt>(Path.Combine(RootDirectory, DeliveryFile));
 
     public void WriteDelivery(DeliveryReceipt receipt) => Write(Path.Combine(RootDirectory, DeliveryFile), receipt);
+
+    public SessionLaunchIntent? ReadLaunchIntent() => Read<SessionLaunchIntent>(Path.Combine(RootDirectory, LaunchIntentFile));
+
+    public void WriteLaunchIntent(SessionLaunchIntent intent) => Write(Path.Combine(RootDirectory, LaunchIntentFile), intent);
+
+    public void DeleteLaunchIntent() => TryDelete(Path.Combine(RootDirectory, LaunchIntentFile));
 
     public IReadOnlyList<SessionPresence> ReadSessions()
     {

@@ -20,6 +20,17 @@ public sealed record BindingState
     public DateTimeOffset UpdatedAtUtc { get; init; }
 }
 
+public sealed record SessionLaunchIntent
+{
+    public required string Token { get; init; }
+
+    public required string ExpectedWorkingDirectory { get; init; }
+
+    public DateTimeOffset CreatedAtUtc { get; init; }
+
+    public DateTimeOffset ExpiresAtUtc { get; init; }
+}
+
 public sealed record LocatorInfo
 {
     public required string Kind { get; init; }

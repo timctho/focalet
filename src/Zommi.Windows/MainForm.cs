@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.IO;
 using Zommi.Core;
 
@@ -16,8 +15,8 @@ internal sealed class MainForm : Form
     private readonly StateStore stateStore;
     private readonly SharedSnapshotStore snapshots;
     private readonly ForegroundContextCapture capture;
+    private readonly bool autoLaunch;
     private readonly System.Windows.Forms.Timer timer = new() { Interval = 700 };
-    private readonly ComboBox sessionCombo = new() { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
     private readonly Label modeLabel = new() { AutoSize = true };
     private readonly Label hookLabel = new() { AutoSize = true };
     private readonly Label sessionDetailLabel = new() { AutoSize = true, MaximumSize = new Size(430, 0) };
@@ -29,16 +28,22 @@ internal sealed class MainForm : Form
     private readonly Label deliveryValue = CreateReadout();
     private readonly Button pauseButton = CreateButton("Pause");
     private readonly Button freezeButton = CreateButton("Freeze");
-    private readonly TextBox workingDirectoryText = new() { Dock = DockStyle.Fill };
+    private readonly Button newCodexButton = CreateButton("New Codex in WSL");
 
-    private string sessionSignature = string.Empty;
-    private DateTimeOffset lastSessionRefresh = DateTimeOffset.MinValue;
+    private string integrationStatus = "Preparing WSL";
+    private bool launchInProgress;
+    private bool closing;
 
-    public MainForm(StateStore stateStore, SharedSnapshotStore snapshots, ForegroundContextCapture capture)
+    public MainForm(
+        StateStore stateStore,
+        SharedSnapshotStore snapshots,
+        ForegroundContextCapture capture,
+        bool autoLaunch)
     {
         this.stateStore = stateStore;
         this.snapshots = snapshots;
         this.capture = capture;
+        this.autoLaunch = autoLaunch;
 
         Text = "Zommi — live context for Codex";
         StartPosition = FormStartPosition.Manual;
@@ -54,11 +59,22 @@ internal sealed class MainForm : Form
 
         pauseButton.Click += (_, _) => TogglePause();
         freezeButton.Click += (_, _) => ToggleFreeze();
+        newCodexButton.Click += async (_, _) => await LaunchNewWslCodexAsync();
         timer.Tick += (_, _) => OnTick();
         FormClosing += (_, _) => StopCaptureOnExit();
+        Shown += async (_, _) =>
+        {
+            if (this.autoLaunch)
+            {
+                await LaunchNewWslCodexAsync();
+            }
+            else
+            {
+                integrationStatus = "Automatic launch disabled";
+                RenderState();
+            }
+        };
 
-        workingDirectoryText.Text = Environment.CurrentDirectory;
-        RefreshSessions(force: true);
         RenderState();
         timer.Start();
     }
@@ -84,7 +100,7 @@ internal sealed class MainForm : Form
         };
         var subtitle = new Label
         {
-            Text = "Structured desktop context for one exact Codex session",
+            Text = "Live desktop context for a fresh Codex session in WSL",
             AutoSize = true,
             ForeColor = Muted,
             Margin = new Padding(2, 0, 0, 10),
@@ -103,20 +119,13 @@ internal sealed class MainForm : Form
 
         var sessionCard = CreateCard("CODEX SESSION");
         var sessionGrid = sessionCard.Controls.OfType<TableLayoutPanel>().Single();
-        sessionGrid.Controls.Add(sessionCombo, 0, 0);
-        var refreshButton = CreateButton("Refresh");
-        refreshButton.Click += (_, _) => RefreshSessions(force: true);
-        sessionGrid.Controls.Add(refreshButton, 1, 0);
-        var bindButton = CreateButton("Bind");
-        bindButton.Click += (_, _) => BindSelectedSession();
-        sessionGrid.Controls.Add(bindButton, 2, 0);
         sessionGrid.SetColumnSpan(sessionDetailLabel, 3);
-        sessionGrid.Controls.Add(sessionDetailLabel, 0, 1);
+        sessionGrid.Controls.Add(sessionDetailLabel, 0, 0);
         var detachButton = CreateButton("Detach");
         detachButton.Click += (_, _) => Detach();
-        sessionGrid.Controls.Add(detachButton, 0, 2);
-        sessionGrid.Controls.Add(pauseButton, 1, 2);
-        sessionGrid.Controls.Add(freezeButton, 2, 2);
+        sessionGrid.Controls.Add(detachButton, 0, 1);
+        sessionGrid.Controls.Add(pauseButton, 1, 1);
+        sessionGrid.Controls.Add(freezeButton, 2, 1);
         root.Controls.Add(sessionCard);
 
         var snapshotCard = CreateCard("LATEST EPHEMERAL SNAPSHOT");
@@ -129,22 +138,19 @@ internal sealed class MainForm : Form
         AddReadout(snapshotGrid, "Last handoff", deliveryValue, 5);
         root.Controls.Add(snapshotCard);
 
-        var launchCard = CreateCard("CODEX CLI");
+        var launchCard = CreateCard("CODEX CLI IN WSL");
         var launchGrid = launchCard.Controls.OfType<TableLayoutPanel>().Single();
-        launchGrid.SetColumnSpan(workingDirectoryText, 2);
-        launchGrid.Controls.Add(workingDirectoryText, 0, 0);
-        var browseButton = CreateButton("Browse…");
-        browseButton.Click += (_, _) => BrowseWorkingDirectory();
-        launchGrid.Controls.Add(browseButton, 2, 0);
-        var newButton = CreateButton("New Codex");
-        newButton.Click += (_, _) => OpenCodex(resume: false);
-        launchGrid.Controls.Add(newButton, 0, 1);
-        var resumeButton = CreateButton("Resume Codex");
-        resumeButton.Click += (_, _) => OpenCodex(resume: true);
-        launchGrid.Controls.Add(resumeButton, 1, 1);
-        var installButton = CreateButton("Install hook");
-        installButton.Click += (_, _) => InstallHook();
-        launchGrid.Controls.Add(installButton, 2, 1);
+        var launchDescription = new Label
+        {
+            Text = "Zommi installs its local hook, opens the default WSL distribution, starts a new Codex CLI chat, and binds it automatically.",
+            AutoSize = true,
+            MaximumSize = new Size(400, 0),
+            ForeColor = Muted,
+        };
+        launchGrid.SetColumnSpan(launchDescription, 3);
+        launchGrid.Controls.Add(launchDescription, 0, 0);
+        launchGrid.SetColumnSpan(newCodexButton, 3);
+        launchGrid.Controls.Add(newCodexButton, 0, 1);
         root.Controls.Add(launchCard);
 
         var privacy = new Label
@@ -266,9 +272,14 @@ internal sealed class MainForm : Form
                 snapshots.DeleteSnapshot();
             }
 
-            if (DateTimeOffset.UtcNow - lastSessionRefresh > TimeSpan.FromSeconds(3))
+            var launchIntent = stateStore.ReadLaunchIntent();
+            if (launchIntent is not null && launchIntent.ExpiresAtUtc < DateTimeOffset.UtcNow)
             {
-                RefreshSessions(force: false);
+                stateStore.DeleteLaunchIntent();
+                if (stateStore.ReadBinding()?.SessionId is null)
+                {
+                    integrationStatus = "Codex session was not detected";
+                }
             }
 
             RenderState();
@@ -280,64 +291,6 @@ internal sealed class MainForm : Form
         }
     }
 
-    private void RefreshSessions(bool force)
-    {
-        lastSessionRefresh = DateTimeOffset.UtcNow;
-        var binding = stateStore.ReadBinding();
-        var sessions = stateStore.ReadSessions()
-            .Where(session => session.SeenAtUtc > DateTimeOffset.UtcNow.AddHours(-12) ||
-                              string.Equals(session.SessionId, binding?.SessionId, StringComparison.OrdinalIgnoreCase))
-            .OrderBy(session => session.State.Equals("active", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
-            .ThenByDescending(session => session.SeenAtUtc)
-            .ToArray();
-        var signature = string.Join('|', sessions.Select(session => $"{session.SessionId}:{session.State}:{session.SeenAtUtc.ToUnixTimeSeconds()}"));
-        if (!force && signature == sessionSignature)
-        {
-            return;
-        }
-
-        sessionSignature = signature;
-        var selectedId = (sessionCombo.SelectedItem as SessionChoice)?.Session.SessionId ?? binding?.SessionId;
-        sessionCombo.BeginUpdate();
-        sessionCombo.Items.Clear();
-        foreach (var session in sessions)
-        {
-            sessionCombo.Items.Add(new SessionChoice(session));
-        }
-
-        sessionCombo.SelectedItem = sessionCombo.Items
-            .Cast<SessionChoice>()
-            .FirstOrDefault(choice => string.Equals(choice.Session.SessionId, selectedId, StringComparison.OrdinalIgnoreCase));
-        if (sessionCombo.SelectedIndex < 0 && sessionCombo.Items.Count > 0)
-        {
-            sessionCombo.SelectedIndex = 0;
-        }
-
-        sessionCombo.EndUpdate();
-    }
-
-    private void BindSelectedSession()
-    {
-        if (sessionCombo.SelectedItem is not SessionChoice choice)
-        {
-            MessageBox.Show(
-                this,
-                "No Codex session has announced itself yet. Install and trust the hook, then start or resume Codex.",
-                "No session available",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
-            return;
-        }
-
-        stateStore.WriteBinding(new BindingState
-        {
-            SessionId = choice.Session.SessionId,
-            Mode = CaptureMode.Active,
-            UpdatedAtUtc = DateTimeOffset.UtcNow,
-        });
-        RenderState();
-    }
-
     private void Detach()
     {
         stateStore.WriteBinding(new BindingState
@@ -346,6 +299,7 @@ internal sealed class MainForm : Form
             Mode = CaptureMode.Detached,
             UpdatedAtUtc = DateTimeOffset.UtcNow,
         });
+        stateStore.DeleteLaunchIntent();
         snapshots.DeleteSnapshot();
         RenderState();
     }
@@ -406,8 +360,11 @@ internal sealed class MainForm : Form
             _ => "○ Detached",
         };
         modeLabel.ForeColor = binding.Mode == CaptureMode.Active ? Accent : binding.Mode == CaptureMode.Detached ? Muted : Warning;
-        hookLabel.Text = HookInstaller.IsInstalled() ? "Hook installed" : "Hook not installed";
-        hookLabel.ForeColor = HookInstaller.IsInstalled() ? Accent : Warning;
+        hookLabel.Text = integrationStatus;
+        hookLabel.ForeColor = integrationStatus.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
+                              integrationStatus.Contains("not detected", StringComparison.OrdinalIgnoreCase)
+            ? Warning
+            : Accent;
         pauseButton.Text = binding.Mode == CaptureMode.Paused ? "Resume" : "Pause";
         freezeButton.Text = binding.Mode == CaptureMode.Frozen ? "Unfreeze" : "Freeze";
         pauseButton.Enabled = binding.SessionId is not null;
@@ -416,9 +373,12 @@ internal sealed class MainForm : Form
         var boundSession = stateStore.ReadSessions().FirstOrDefault(session =>
             string.Equals(session.SessionId, binding.SessionId, StringComparison.OrdinalIgnoreCase));
         sessionDetailLabel.ForeColor = Muted;
-        sessionDetailLabel.Text = binding.SessionId is null
-            ? "Detached. Choose a session explicitly; Zommi never guesses."
-            : $"Bound exactly to {binding.SessionId}\n{boundSession?.WorkingDirectory ?? "Working directory unavailable"}";
+        var launchIntent = stateStore.ReadLaunchIntent();
+        sessionDetailLabel.Text = binding.SessionId is not null
+            ? $"Bound exactly to {binding.SessionId}\n{boundSession?.WorkingDirectory ?? "Working directory unavailable"}"
+            : launchIntent is not null && launchIntent.ExpiresAtUtc >= DateTimeOffset.UtcNow
+                ? "Starting a fresh Codex session in the default WSL distribution…"
+                : "No Codex session is bound.";
 
         var snapshot = snapshots.ReadSnapshot();
         if (snapshot is null)
@@ -446,83 +406,85 @@ internal sealed class MainForm : Form
             : $"Snapshot {delivery.SnapshotId[..Math.Min(8, delivery.SnapshotId.Length)]} → {delivery.SessionId[..Math.Min(8, delivery.SessionId.Length)]} · {Age(delivery.DeliveredAtUtc)}";
     }
 
-    private void InstallHook()
+    private async Task LaunchNewWslCodexAsync()
     {
-        try
+        if (launchInProgress)
         {
-            var result = HookInstaller.Install();
-            var nativeBackupMessage = result.NativeBackupPath is null ? string.Empty : $"\nNative backup: {result.NativeBackupPath}";
-            var wslMessage = result.WslHooksPath is not null
-                ? $"\nWSL hook: {result.WslHooksPath}" + (result.WslBackupPath is null ? string.Empty : $"\nWSL backup: {result.WslBackupPath}")
-                : $"\nWSL hook was not installed: {result.WslError}";
-            MessageBox.Show(
-                this,
-                $"Native hook: {result.NativeHooksPath}{nativeBackupMessage}{wslMessage}\n\nIn each Codex environment, run /hooks and trust the Zommi definitions. If a running CLI does not list them, exit and run codex resume --last.",
-                "Codex hooks installed",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
-            RenderState();
-        }
-        catch (Exception exception)
-        {
-            MessageBox.Show(this, exception.Message, "Hook installation failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
-        }
-    }
-
-    private void BrowseWorkingDirectory()
-    {
-        using var dialog = new FolderBrowserDialog
-        {
-            Description = "Choose the working directory for Codex",
-            SelectedPath = Directory.Exists(workingDirectoryText.Text) ? workingDirectoryText.Text : Environment.CurrentDirectory,
-            UseDescriptionForTitle = true,
-        };
-        if (dialog.ShowDialog(this) == DialogResult.OK)
-        {
-            workingDirectoryText.Text = dialog.SelectedPath;
-        }
-    }
-
-    private void OpenCodex(bool resume)
-    {
-        var workingDirectory = workingDirectoryText.Text.Trim();
-        if (!Directory.Exists(workingDirectory))
-        {
-            MessageBox.Show(this, "Choose an existing working directory first.", "Invalid directory", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
+        launchInProgress = true;
+        newCodexButton.Enabled = false;
+        integrationStatus = "Preparing WSL";
+        RenderState();
+
+        var previousBinding = stateStore.ReadBinding();
+        var launchToken = Guid.NewGuid().ToString("N");
         try
         {
-            var codexArguments = resume ? "codex resume" : "codex";
-            try
+            var stateRoot = stateStore.RootDirectory;
+            var channel = Environment.GetEnvironmentVariable("ZOMMI_CHANNEL");
+            var installResult = await Task.Run(() => HookInstaller.InstallWsl(launchToken, stateRoot, channel));
+            if (closing)
             {
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = "wt.exe",
-                    Arguments = $"-d \"{workingDirectory}\" {codexArguments}",
-                    UseShellExecute = true,
-                });
+                return;
             }
-            catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException)
+
+            var now = DateTimeOffset.UtcNow;
+            stateStore.WriteLaunchIntent(new SessionLaunchIntent
             {
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = "cmd.exe",
-                    Arguments = $"/k cd /d \"{workingDirectory}\" && {codexArguments}",
-                    UseShellExecute = true,
-                });
-            }
+                Token = launchToken,
+                ExpectedWorkingDirectory = installResult.Environment.LinuxHome,
+                CreatedAtUtc = now,
+                ExpiresAtUtc = now.AddMinutes(2),
+            });
+            stateStore.WriteBinding(new BindingState
+            {
+                SessionId = null,
+                Mode = CaptureMode.Detached,
+                UpdatedAtUtc = now,
+            });
+            snapshots.DeleteSnapshot();
+
+            await Task.Run(() => WslCodexLauncher.Launch(installResult.Environment));
+            integrationStatus = $"WSL ready · {installResult.Environment.DistroName}";
         }
         catch (Exception exception)
         {
-            MessageBox.Show(this, $"Could not start Codex: {exception.Message}", "Launch failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            stateStore.DeleteLaunchIntent();
+            stateStore.WriteBinding(previousBinding ?? new BindingState
+            {
+                SessionId = null,
+                Mode = CaptureMode.Detached,
+                UpdatedAtUtc = DateTimeOffset.UtcNow,
+            });
+            if (!closing)
+            {
+                integrationStatus = "WSL launch failed";
+                MessageBox.Show(
+                    this,
+                    $"Could not start a fresh Codex session in WSL: {exception.Message}",
+                    "Launch failed",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+        }
+        finally
+        {
+            launchInProgress = false;
+            if (!closing && !IsDisposed)
+            {
+                newCodexButton.Enabled = true;
+                RenderState();
+            }
         }
     }
 
     private void StopCaptureOnExit()
     {
+        closing = true;
         timer.Stop();
+        stateStore.DeleteLaunchIntent();
         var binding = stateStore.ReadBinding();
         if (binding?.SessionId is not null)
         {
@@ -540,20 +502,4 @@ internal sealed class MainForm : Form
         return seconds < 60 ? $"{seconds}s ago" : $"{seconds / 60}m ago";
     }
 
-    private sealed record SessionChoice(SessionPresence Session)
-    {
-        public override string ToString()
-        {
-            var directory = string.IsNullOrWhiteSpace(Session.WorkingDirectory)
-                ? "unknown folder"
-                : Path.GetFileName(Session.WorkingDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-            if (string.IsNullOrWhiteSpace(directory))
-            {
-                directory = Session.WorkingDirectory;
-            }
-
-            var id = Session.SessionId[..Math.Min(8, Session.SessionId.Length)];
-            return $"{(Session.State == "active" ? "●" : "○")} {directory} · {id} · {Age(Session.SeenAtUtc)}";
-        }
-    }
 }

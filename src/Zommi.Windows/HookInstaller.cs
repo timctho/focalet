@@ -6,6 +6,16 @@ namespace Zommi.Windows;
 
 internal static class HookInstaller
 {
+    internal sealed record WslEnvironment(
+        string DistroName,
+        string LinuxHome,
+        string HooksPath,
+        string Command);
+
+    internal sealed record WslInstallResult(
+        WslEnvironment Environment,
+        string? BackupPath);
+
     internal sealed record InstallResult(
         string NativeHooksPath,
         string? NativeBackupPath,
@@ -25,9 +35,8 @@ internal static class HookInstaller
         var nativeBackup = CodexHookConfiguration.Install(HooksPath, BuildHookCommand());
         try
         {
-            var (wslHooksPath, wslCommand) = ResolveWslHook();
-            var wslBackup = CodexHookConfiguration.Install(wslHooksPath, wslCommand);
-            return new InstallResult(HooksPath, nativeBackup, wslHooksPath, wslBackup, null);
+            var wsl = InstallWsl();
+            return new InstallResult(HooksPath, nativeBackup, wsl.Environment.HooksPath, wsl.BackupPath, null);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
         {
@@ -61,7 +70,20 @@ internal static class HookInstaller
         return $"{Quote(processPath)} {CodexHookConfiguration.CommandMarker}";
     }
 
-    internal static (string HooksPath, string Command) ResolveWslHook()
+    public static WslInstallResult InstallWsl(
+        string? launchToken = null,
+        string? stateRoot = null,
+        string? channel = null)
+    {
+        var environment = ResolveWslHook(launchToken, stateRoot, channel);
+        var backupPath = CodexHookConfiguration.Install(environment.HooksPath, environment.Command);
+        return new WslInstallResult(environment, backupPath);
+    }
+
+    internal static WslEnvironment ResolveWslHook(
+        string? launchToken = null,
+        string? stateRoot = null,
+        string? channel = null)
     {
         var wrapperPath = Path.Combine(AppContext.BaseDirectory, "Zommi.WslHook.ps1");
         var hookExecutable = Path.Combine(AppContext.BaseDirectory, "Zommi.Hook.exe");
@@ -108,8 +130,16 @@ internal static class HookInstaller
         var linuxHome = lines[1].TrimStart('/').Replace('/', '\\');
         var wslHooksPath = $@"\\wsl.localhost\{distroName}\{linuxHome}\.codex\hooks.json";
         var command = $"/init /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -ExecutionPolicy Bypass -File {QuoteForPosixShell(wrapperPath)}";
-        return (wslHooksPath, command);
+        command = AppendPowerShellArgument(command, "StateRoot", stateRoot);
+        command = AppendPowerShellArgument(command, "Channel", channel);
+        command = AppendPowerShellArgument(command, "LaunchToken", launchToken);
+        return new WslEnvironment(distroName, lines[1], wslHooksPath, command);
     }
+
+    private static string AppendPowerShellArgument(string command, string name, string? value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? command
+            : $"{command} -{name} {QuoteForPosixShell(value)}";
 
     private static string QuoteForPosixShell(string value) => $"'{value.Replace("'", "'\"'\"'", StringComparison.Ordinal)}'";
 

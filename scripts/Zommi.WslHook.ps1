@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string] $StateRoot,
-    [string] $Channel
+    [string] $Channel,
+    [string] $LaunchToken
 )
 
 # PowerShell is the console-subsystem bridge between WSL's stdin/stdout and the
@@ -18,6 +19,9 @@ try {
     }
     if (-not [string]::IsNullOrWhiteSpace($Channel)) {
         $arguments += ' --channel "' + $Channel.Replace('"', '\"') + '"'
+    }
+    if (-not [string]::IsNullOrWhiteSpace($LaunchToken)) {
+        $arguments += ' --launch-token "' + $LaunchToken.Replace('"', '\"') + '"'
     }
 
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo

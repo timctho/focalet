@@ -100,4 +100,27 @@ internal static class AcceptanceProbe
             return 1;
         }
     }
+
+    public static int WslLaunchPlan()
+    {
+        try
+        {
+            var environment = HookInstaller.ResolveWslHook("acceptance-launch-token");
+            var startInfo = WslCodexLauncher.BuildStartInfo("wt.exe", environment, useWindowsTerminal: true);
+            Console.Out.Write(JsonSerializer.Serialize(new
+            {
+                startInfo.FileName,
+                arguments = startInfo.ArgumentList,
+                environment.DistroName,
+                environment.LinuxHome,
+                environment.Command,
+            }));
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.Write(exception);
+            return 1;
+        }
+    }
 }

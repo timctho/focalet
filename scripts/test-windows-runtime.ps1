@@ -153,7 +153,7 @@ public static class ZommiNativeWindow {
     } | ConvertTo-Json
     [IO.File]::WriteAllText((Join-Path $stateRoot 'binding.json'), $initialBinding)
 
-    $gui = Start-Process -FilePath $executable -ArgumentList $globalArguments -PassThru
+    $gui = Start-Process -FilePath $executable -ArgumentList "$globalArguments --no-auto-launch" -PassThru
     $guiReady = $false
     for ($attempt = 0; $attempt -lt 100; $attempt++) {
         Start-Sleep -Milliseconds 100
@@ -208,6 +208,17 @@ public static class ZommiNativeWindow {
         Assert-True ($wslJson.hooksPath -like '\\wsl.localhost\*\.codex\hooks.json') 'WSL hook discovery returned an invalid hooks path.'
         Assert-True ($wslJson.command -like '*Zommi.WslHook.ps1*') 'WSL hook discovery returned an invalid command.'
         $results.wslHookDiscovery = 'passed'
+
+        $wslLaunchPlan = Invoke-CapturedProcess $executable "--acceptance-wsl-launch-plan $globalArguments" $null
+        Assert-True ($wslLaunchPlan.ExitCode -eq 0) "WSL launch planning failed: $($wslLaunchPlan.StandardError)"
+        $wslLaunchJson = $wslLaunchPlan.StandardOutput | ConvertFrom-Json
+        Assert-True ($wslLaunchJson.fileName -eq 'wt.exe') 'The WSL launch did not target Windows Terminal.'
+        Assert-True ($wslLaunchJson.arguments -contains 'wsl.exe') 'The Windows Terminal launch did not target WSL.'
+        Assert-True ($wslLaunchJson.arguments -contains $wslLaunchJson.distroName) 'The WSL launch omitted the discovered default distribution.'
+        Assert-True ($wslLaunchJson.arguments -contains $wslLaunchJson.linuxHome) 'The WSL launch omitted the discovered Linux home directory.'
+        Assert-True ($wslLaunchJson.arguments -contains 'exec codex --dangerously-bypass-hook-trust') 'The WSL launch did not start a fresh trusted-automation Codex session.'
+        Assert-True ($wslLaunchJson.command -like '*-LaunchToken*acceptance-launch-token*') 'The WSL hook did not carry the exact launch token.'
+        $results.wslFreshSessionLaunchPlan = 'passed'
     }
 
     $ownerOutput = Join-Path $temporaryRoot 'owner.stdout.txt'

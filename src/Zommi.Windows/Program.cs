@@ -11,7 +11,7 @@ internal static class Program
 
         if (args.Contains("--zommi-hook", StringComparer.OrdinalIgnoreCase))
         {
-            return RunHook();
+            return RunHook(args);
         }
 
         if (args.Contains("--acceptance-probe", StringComparer.OrdinalIgnoreCase))
@@ -29,20 +29,27 @@ internal static class Program
             return AcceptanceProbe.DiscoverWsl();
         }
 
+        if (args.Contains("--acceptance-wsl-launch-plan", StringComparer.OrdinalIgnoreCase))
+        {
+            return AcceptanceProbe.WslLaunchPlan();
+        }
+
         ApplicationConfiguration.Initialize();
         var store = new StateStore(StateStore.GetDefaultRoot());
         using var snapshots = SharedSnapshotStore.CreateOwner();
-        Application.Run(new MainForm(store, snapshots, new ForegroundContextCapture()));
+        var autoLaunch = !args.Contains("--no-auto-launch", StringComparer.OrdinalIgnoreCase);
+        Application.Run(new MainForm(store, snapshots, new ForegroundContextCapture(), autoLaunch));
         return 0;
     }
 
-    private static int RunHook()
+    private static int RunHook(IReadOnlyList<string> args)
     {
         try
         {
             var input = Console.In.ReadToEnd();
             var store = new StateStore(StateStore.GetDefaultRoot());
-            var output = new HookProcessor(store, new SharedSnapshotReader()).Process(input, DateTimeOffset.UtcNow);
+            var launchToken = RuntimeOptions.Read(args, "--launch-token");
+            var output = new HookProcessor(store, new SharedSnapshotReader(), launchToken).Process(input, DateTimeOffset.UtcNow);
             if (!string.IsNullOrEmpty(output))
             {
                 Console.Out.Write(output);
