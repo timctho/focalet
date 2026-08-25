@@ -1,28 +1,32 @@
 [CmdletBinding()]
 param(
     [ValidateSet('win-x64', 'win-arm64')]
-    [string] $Runtime = 'win-x64'
+    [string] $Runtime = 'win-x64',
+
+    [switch] $SkipPublish
 )
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $outputDirectory = Join-Path $repositoryRoot "artifacts/zommi-$Runtime"
 
-dotnet publish (Join-Path $repositoryRoot 'src/Zommi.Windows/Zommi.Windows.csproj') `
-    --configuration Release `
-    --runtime $Runtime `
-    --self-contained true `
-    -p:PublishSingleFile=true `
-    -p:IncludeNativeLibrariesForSelfExtract=true `
-    --output $outputDirectory
+if (-not $SkipPublish) {
+    dotnet publish (Join-Path $repositoryRoot 'src/Zommi.Windows/Zommi.Windows.csproj') `
+        --configuration Release `
+        --runtime $Runtime `
+        --self-contained true `
+        -p:PublishSingleFile=true `
+        -p:IncludeNativeLibrariesForSelfExtract=true `
+        --output $outputDirectory
 
-dotnet publish (Join-Path $repositoryRoot 'src/Zommi.Hook/Zommi.Hook.csproj') `
-    --configuration Release `
-    --runtime $Runtime `
-    --self-contained true `
-    -p:PublishSingleFile=true `
-    -p:IncludeNativeLibrariesForSelfExtract=true `
-    --output $outputDirectory
+    dotnet publish (Join-Path $repositoryRoot 'src/Zommi.Hook/Zommi.Hook.csproj') `
+        --configuration Release `
+        --runtime $Runtime `
+        --self-contained true `
+        -p:PublishSingleFile=true `
+        -p:IncludeNativeLibrariesForSelfExtract=true `
+        --output $outputDirectory
+}
 
 Copy-Item (Join-Path $repositoryRoot 'docs/windows-prototype.md') $outputDirectory
 Copy-Item (Join-Path $repositoryRoot 'docs/windows-acceptance.md') $outputDirectory
