@@ -1,8 +1,9 @@
 # Zommi
 
-Zommi is a local floating context companion for Codex. On Windows it stays in
-the tray, opens beside the pointer on a global shortcut, and uses Codex
-app-server in the default WSL distribution for the conversation.
+Zommi is a local floating context companion for Codex. Its cross-platform
+Electron shell stays in the tray, opens beside the pointer on a global
+shortcut, and uses Codex app-server for the conversation. Windows delegates
+UI Automation capture and WSL transport to a packaged native host.
 
 Its goal is to let someone browse, point, and ask naturally while their chosen
 agent receives a compact description of what they are seeing. Zommi does not
@@ -15,13 +16,17 @@ defined in [CONTEXT.md](CONTEXT.md).
 
 ## Status
 
-Windows shortcut-to-answer prototype implemented. It provides:
+The Electron rewrite is implemented for Windows, macOS, and Linux. The current
+Windows package has controlled native acceptance; the macOS and Linux packages
+have assembly/unit evidence but still need real native-desktop acceptance. The
+product provides:
 
 - a tray-resident, rounded dark-glass floating chat modeled on Pickle Glass;
 - `Alt+A` invocation that captures and moves the existing window beside the
   pointer instead of toggling it away;
 - cumulative URL-abbreviated context tokens directly in the composer;
-- a separate floating raw-context preview when a token is hovered;
+- an in-window raw-context preview that stays open while the pointer enters it
+  and supports scrolling without visible scrollbars;
 - `Alt+Shift+A` drag selection for image context;
 - selected text as the primary context when the accessibility provider exposes
   it;
@@ -31,11 +36,11 @@ Windows shortcut-to-answer prototype implemented. It provides:
   tool lifecycle/output, and final replies; and
 - conversation continuity across invocations.
 
-The earlier single-context candidate passed a native Windows 11 regression and
-live Chrome Amazon walkthrough. The current Glass/multi-context candidate has
-passing cross-platform contracts, a native seeded UI contract, and live Codex
-thinking/tool/image transport probes; its unlocked-desktop browser walkthrough
-still needs a fresh rerun. Evidence boundaries are tracked in
+The Electron candidate has passing JS/.NET contracts, a native seeded UI
+contract, an explicit Alt+Shift+A image-selection contract, and a controlled
+real-Edge Alt+A-to-Codex streaming run. The earlier WinForms candidate's live
+Amazon walkthrough is historical and has not been rerun on Electron. Evidence
+boundaries are tracked in
 [docs/acceptance-report.md](docs/acceptance-report.md).
 
 Build and walkthrough instructions are in
@@ -60,9 +65,10 @@ Codex CLI must already be installed, signed in, and available on the WSL shell
 `PATH`. The prototype is unsigned, so Windows SmartScreen may require **More
 info → Run anyway** on first launch.
 
-Run the cross-platform contract checks with:
+Run the Electron and managed contract checks with:
 
 ```sh
+npm --prefix src/Zommi.Electron test
 dotnet run --project tests/Zommi.Tests/Zommi.Tests.csproj
 ```
 
