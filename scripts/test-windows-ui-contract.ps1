@@ -317,6 +317,8 @@ try {
     $previewHandle = [IntPtr] $preview.Current.NativeWindowHandle
     $previewDocument = Find-AutomationElementById $preview 'ContextPreviewText'
     Assert-True ($null -ne $previewDocument) 'The context preview text area was not exposed through UI Automation.'
+    $previewImage = Find-AutomationElementById $preview 'ContextPreviewImage'
+    Assert-True ($null -eq $previewImage -or $previewImage.Current.IsOffscreen) 'Alt+A unexpectedly exposed an automatic image in the context preview.'
     $previewBounds = $preview.Current.BoundingRectangle
     $previewPointerX = [int] ($previewBounds.X + ($previewBounds.Width / 2))
     $previewPointerY = [int] ($previewBounds.Y + ($previewBounds.Height / 2))

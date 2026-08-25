@@ -575,6 +575,7 @@ try {
     $pageCapture = Invoke-CapturedProcess $executable '--acceptance-capture-once' 30
     Assert-True ($pageCapture.ExitCode -eq 0) "The pointer page capture probe failed: $($pageCapture.StandardError)"
     $pageCaptureJson = $pageCapture.StandardOutput | ConvertFrom-Json
+    Assert-True ($null -eq $pageCaptureJson.PSObject.Properties['viewportImageBytes']) 'Alt+A unexpectedly exposed an automatic viewport image.'
     $pageCaptureText = [string]::Join(' ', @($pageCaptureJson.snapshot.visibleText))
     Assert-True ($pageCaptureJson.snapshot.locator.value -eq $browserUri) 'The pointer page capture probe omitted the browser URL.'
     Assert-True ($null -ne $pageCaptureJson.snapshot.indicatedTarget) "The pointer page capture probe omitted the hovered accessibility target. Capture: $($pageCapture.StandardOutput)"
