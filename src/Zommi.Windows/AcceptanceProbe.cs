@@ -153,7 +153,12 @@ internal static class AcceptanceProbe
         {
             using var client = new CodexAppServerClient();
             var statuses = new List<string>();
-            client.StatusChanged += status => statuses.Add(status);
+            client.StatusChanged += status =>
+            {
+                statuses.Add(status);
+                Console.Error.WriteLine(status);
+                Console.Error.Flush();
+            };
             client.EnsureStartedAsync().WaitAsync(TimeSpan.FromSeconds(45)).GetAwaiter().GetResult();
             Console.Out.Write(JsonSerializer.Serialize(new
             {
@@ -162,6 +167,64 @@ internal static class AcceptanceProbe
                 statuses,
             }));
             return client.IsReady ? 0 : 3;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.Write(exception);
+            return 1;
+        }
+    }
+
+    public static int AppServerTurn()
+    {
+        try
+        {
+            using var client = new CodexAppServerClient();
+            var response = new System.Text.StringBuilder();
+            var statuses = new List<string>();
+            var completed = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            client.AgentMessageDelta += delta => response.Append(delta);
+            client.StatusChanged += statusMessage =>
+            {
+                statuses.Add(statusMessage);
+                Console.Error.WriteLine(statusMessage);
+                Console.Error.Flush();
+            };
+            client.TurnCompleted += status => completed.TrySetResult(status);
+            client.EnsureStartedAsync().WaitAsync(TimeSpan.FromSeconds(45)).GetAwaiter().GetResult();
+
+            var now = DateTimeOffset.UtcNow;
+            var context = new ContextSnapshot
+            {
+                SnapshotId = "app-server-turn-probe",
+                ObservedAtUtc = now,
+                ExpiresAtUtc = now.AddMinutes(1),
+                SurfaceKind = "Window",
+                Application = "Zommi acceptance",
+                ProcessName = "zommi-acceptance",
+                WindowTitle = "Relay acceptance",
+                VisibleText = ["ZOMMI_CONTEXT_MARKER"],
+                Confidence = "high",
+            };
+            client.StartTurnAsync(
+                    "Reply with exactly ZOMMI_RELAY_READY and nothing else.",
+                    context)
+                .WaitAsync(TimeSpan.FromSeconds(45))
+                .GetAwaiter()
+                .GetResult();
+            var status = completed.Task.WaitAsync(TimeSpan.FromSeconds(120)).GetAwaiter().GetResult();
+            var responseText = response.ToString();
+            Console.Out.Write(JsonSerializer.Serialize(new
+            {
+                threadId = client.ThreadId,
+                status,
+                response = responseText,
+                statuses,
+            }));
+            return status.Equals("completed", StringComparison.OrdinalIgnoreCase) &&
+                   responseText.Contains("ZOMMI_RELAY_READY", StringComparison.Ordinal)
+                ? 0
+                : 3;
         }
         catch (Exception exception)
         {

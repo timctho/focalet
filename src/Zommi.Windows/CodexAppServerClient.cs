@@ -73,14 +73,16 @@ internal sealed class CodexAppServerClient : IDisposable
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-            StandardInputEncoding = Encoding.UTF8,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8,
+            StandardInputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            StandardOutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            StandardErrorEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
         };
         startInfo.ArgumentList.Add("-e");
         startInfo.ArgumentList.Add("sh");
         startInfo.ArgumentList.Add("-lc");
-        startInfo.ArgumentList.Add("cd \"$HOME\" && exec codex app-server");
+        startInfo.ArgumentList.Add(
+            "cd \"$HOME\" && exec codex app-server " +
+            "-c 'model_providers.github-copilot.http_headers={\"Editor-Version\"=\"vscode/1.104.1\"}'");
 
         var startedProcess = new Process
         {
@@ -97,6 +99,7 @@ internal sealed class CodexAppServerClient : IDisposable
         process = startedProcess;
         _ = ReadLoopAsync(startedProcess, cancellationToken);
         _ = ReadStandardErrorAsync(startedProcess, cancellationToken);
+        StatusChanged?.Invoke("Codex app-server launched…");
 
         var version = typeof(CodexAppServerClient).Assembly.GetName().Version?.ToString() ?? "0.0.0";
         _ = await SendRequestAsync(
@@ -111,6 +114,7 @@ internal sealed class CodexAppServerClient : IDisposable
                 },
             },
             cancellationToken).ConfigureAwait(false);
+        StatusChanged?.Invoke("Codex app-server initialized…");
         await SendNotificationAsync("initialized", new { }, cancellationToken).ConfigureAwait(false);
 
         var threadResponse = await SendRequestAsync(
@@ -259,14 +263,23 @@ internal sealed class CodexAppServerClient : IDisposable
                     break;
                 case "turn/completed":
                     var status = "completed";
+                    string? turnDetail = null;
                     if (parameters.TryGetProperty("turn", out var turn) &&
                         turn.TryGetProperty("status", out var statusElement))
                     {
                         status = statusElement.ValueKind == JsonValueKind.String
                             ? statusElement.GetString() ?? status
                             : statusElement.ToString();
+                        if (!status.Equals("completed", StringComparison.OrdinalIgnoreCase))
+                        {
+                            turnDetail = turn.ToString();
+                        }
                     }
 
+                    if (turnDetail is not null)
+                    {
+                        StatusChanged?.Invoke($"Codex turn {status}: {turnDetail}");
+                    }
                     TurnCompleted?.Invoke(status);
                     break;
                 case "error":

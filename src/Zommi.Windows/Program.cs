@@ -39,6 +39,11 @@ internal static class Program
             return AcceptanceProbe.AppServerHandshake();
         }
 
+        if (args.Contains("--acceptance-app-server-turn", StringComparer.OrdinalIgnoreCase))
+        {
+            return AcceptanceProbe.AppServerTurn();
+        }
+
         ApplicationConfiguration.Initialize();
         var autoLaunch = !args.Contains("--no-auto-launch", StringComparer.OrdinalIgnoreCase);
         Application.Run(new MainForm(new ForegroundContextCapture(), new CodexAppServerClient(), autoLaunch));
