@@ -265,7 +265,7 @@ public static class ContextFormatter
         if (snapshot.IndicatedTarget is not null)
         {
             var target = snapshot.IndicatedTarget;
-            builder.Append("Pointer target: ");
+            builder.Append("Mouse pointer: ");
             builder.Append(Clean(target.ControlType ?? "unknown control", 80));
             if (!string.IsNullOrWhiteSpace(target.Name))
             {

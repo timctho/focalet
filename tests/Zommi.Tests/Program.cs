@@ -253,7 +253,8 @@ static void ContextPreviewOmitsInternalMetadata()
     var snapshot = Snapshot("preview", now);
 
     var preview = ContextFormatter.FormatPreview(snapshot, now.AddSeconds(1));
-    Contains("Pointer target: Button named \"Save\"", preview);
+    Contains("Mouse pointer: Button named \"Save\"", preview);
+    True(!preview.Contains("Pointer target:", StringComparison.Ordinal), "The old pointer-target label remained in the context preview.");
     True(!preview.Contains("confidence medium", StringComparison.OrdinalIgnoreCase), "Pointer confidence leaked into the context preview.");
     True(!preview.Contains("Snapshot confidence:", StringComparison.Ordinal), "Snapshot confidence leaked into the context preview.");
     True(!preview.Contains("Safety:", StringComparison.Ordinal), "The safety footer leaked into the context preview.");
