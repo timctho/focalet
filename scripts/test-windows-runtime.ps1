@@ -587,11 +587,9 @@ try {
     $accessibilityTreeJson = $accessibilityTree | ConvertTo-Json -Depth 100 -Compress
     Assert-True ($accessibilityTreeJson -like "*$bodyMarker*") 'The browser accessibility tree omitted rendered page content.'
     Assert-True ($accessibilityTreeJson -like "*$tableMarker*" -or $accessibilityTreeJson -like "*$tableCellMarker*") 'The browser accessibility tree omitted the semantic table fixture.'
-    Assert-True ($pageCaptureJson.viewportImageBytes -gt 0) 'The deliberate browser capture did not include an automatic viewport PNG.'
     Assert-True ($pageCaptureText -like "*$browserMarker*") 'The pointer page capture probe omitted the page text.'
     Assert-True ($pageCaptureText -like "*$longPageTailMarker*") 'The pointer page capture probe truncated the long webpage before its tail marker.'
     $results.browserAccessibilityTree = "passed ($($accessibilityTree.nodeCount) nodes; truncated=$($accessibilityTree.truncated))"
-    $results.browserViewportImageBytes = [int] $pageCaptureJson.viewportImageBytes
     $results.longPageFlatCapture = "passed ($(@($pageCaptureJson.snapshot.visibleText).Count) items; $($pageCaptureText.Length) chars)"
     $pointerBefore = [ZommiNativeWindow]::CursorPosition()
     $shortcut = Invoke-ZommiShortcut $gui

@@ -1,9 +1,7 @@
-using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Text.Json.Serialization;
 using System.Windows.Automation;
 using Zommi.Core;
 
@@ -18,19 +16,7 @@ internal sealed class ForegroundContextCapture
     private const int MaximumAccessibilityNodes = 256;
     private const int MaximumAccessibilityCharacters = 20_000;
     private const int MaximumAccessibilityDepth = 24;
-    private const int MaximumViewportImageDimension = 1_600;
-
-    internal sealed record CaptureResult(
-        ContextSnapshot? Snapshot,
-        bool PreservePrevious,
-        [property: JsonIgnore] byte[]? ViewportPng = null)
-    {
-        public int ViewportImageBytes => ViewportPng?.Length ?? 0;
-    }
-
-    private sealed record BrowserAccessibilityCapture(
-        AccessibilityTreeInfo? Tree,
-        Rectangle? ViewportBounds);
+    internal sealed record CaptureResult(ContextSnapshot? Snapshot, bool PreservePrevious);
 
     private static readonly HashSet<string> BrowserProcesses = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -137,16 +123,12 @@ internal sealed class ForegroundContextCapture
                 Locator = locator,
                 Selection = selection,
                 VisibleText = visibleText,
-                AccessibilityTree = browserAccessibility?.Tree,
+                AccessibilityTree = browserAccessibility,
                 IndicatedTarget = indicatedTarget,
                 Confidence = locator is not null || visibleText.Count > 0 ? "high" : indicatedTarget is not null ? "medium" : "limited",
                 Limitation = limitation,
             };
-            var viewportPng = surfaceKind == "Browser"
-                ? TryCaptureBrowserViewport(
-                    browserAccessibility?.ViewportBounds ?? TryReadClientBounds(windowHandle))
-                : null;
-            return new CaptureResult(snapshot, PreservePrevious: false, viewportPng);
+            return new CaptureResult(snapshot, PreservePrevious: false);
         }
     }
 
@@ -429,7 +411,7 @@ internal sealed class ForegroundContextCapture
         }
     }
 
-    private static BrowserAccessibilityCapture? TryReadBrowserAccessibility(
+    private static AccessibilityTreeInfo? TryReadBrowserAccessibility(
         IntPtr windowHandle,
         NativeMethods.Point point)
     {
@@ -447,18 +429,15 @@ internal sealed class ForegroundContextCapture
                 MaximumAccessibilityCharacters,
                 MaximumAccessibilityDepth);
             var capturedRoot = CaptureAccessibilityNode(document, budget, depth: 0);
-            var viewportBounds = ToScreenRectangle(document.Current.BoundingRectangle);
-            return new BrowserAccessibilityCapture(
-                capturedRoot is null
-                    ? null
-                    : new AccessibilityTreeInfo
-                    {
-                        Source = "windows-uia-control-view",
-                        NodeCount = budget.NodeCount,
-                        Truncated = budget.Truncated,
-                        Roots = [capturedRoot],
-                    },
-                viewportBounds);
+            return capturedRoot is null
+                ? null
+                : new AccessibilityTreeInfo
+                {
+                    Source = "windows-uia-control-view",
+                    NodeCount = budget.NodeCount,
+                    Truncated = budget.Truncated,
+                    Roots = [capturedRoot],
+                };
         }
         catch (Exception exception) when (exception is ElementNotAvailableException or InvalidOperationException or COMException)
         {
@@ -610,49 +589,6 @@ internal sealed class ForegroundContextCapture
             .Cast<string>()
             .ToArray();
         return names.Length == 0 ? null : names;
-    }
-
-    private static byte[]? TryCaptureBrowserViewport(Rectangle? requestedBounds)
-    {
-        if (requestedBounds is not { Width: > 0, Height: > 0 } bounds)
-        {
-            return null;
-        }
-
-        var visibleBounds = Rectangle.Intersect(bounds, SystemInformation.VirtualScreen);
-        if (visibleBounds.Width <= 0 || visibleBounds.Height <= 0)
-        {
-            return null;
-        }
-
-        try
-        {
-            return ScreenCapture.CapturePng(visibleBounds, MaximumViewportImageDimension);
-        }
-        catch (Exception exception) when (exception is ExternalException or ArgumentException or Win32Exception)
-        {
-            return null;
-        }
-    }
-
-    private static Rectangle? TryReadClientBounds(IntPtr windowHandle)
-    {
-        if (!NativeMethods.GetClientRect(windowHandle, out var rectangle))
-        {
-            return null;
-        }
-
-        var origin = new NativeMethods.Point();
-        if (!NativeMethods.ClientToScreen(windowHandle, ref origin))
-        {
-            return null;
-        }
-
-        return new Rectangle(
-            origin.X,
-            origin.Y,
-            rectangle.Right - rectangle.Left,
-            rectangle.Bottom - rectangle.Top);
     }
 
     private static Rectangle? ToScreenRectangle(System.Windows.Rect bounds)
@@ -925,23 +861,6 @@ internal sealed class ForegroundContextCapture
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool GetCursorPos(out Point point);
-
-        [DllImport("user32.dll")]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        internal static extern bool GetClientRect(IntPtr windowHandle, out Rect rectangle);
-
-        [DllImport("user32.dll")]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        internal static extern bool ClientToScreen(IntPtr windowHandle, ref Point point);
-
-        [StructLayout(LayoutKind.Sequential)]
-        internal struct Rect
-        {
-            internal int Left;
-            internal int Top;
-            internal int Right;
-            internal int Bottom;
-        }
 
         [StructLayout(LayoutKind.Sequential)]
         internal struct Point
