@@ -222,7 +222,7 @@ function Assert-ComposerFocused {
 function Invoke-ZommiShortcut {
     param([System.Diagnostics.Process] $Process)
 
-    [ZommiNativeWindow]::PressCtrlEnter()
+    [ZommiNativeWindow]::PressAltA()
     $window = Wait-ZommiWindow $Process 3
     $dispatch = 'synthetic-keyboard'
     if ($null -eq $window) {
@@ -277,7 +277,8 @@ function Send-ChatTurn {
     )
 
     $composer = Assert-ComposerFocused $Window
-    Set-AutomationValue $composer $Prompt
+    $attached = Get-AutomationText $composer
+    Set-AutomationValue $composer ($attached + $Prompt)
     $send = Find-AutomationElementById $Window 'SendMessage'
     Assert-True ($null -ne $send) 'The Send button was not exposed through UI Automation.'
     Invoke-AutomationElement $send
@@ -362,12 +363,12 @@ public static class ZommiNativeWindow {
         return point;
     }
 
-    public static void PressCtrlEnter() {
+    public static void PressAltA() {
         const uint KeyUp = 0x0002;
-        keybd_event(0x11, 0, 0, UIntPtr.Zero);
-        keybd_event(0x0D, 0, 0, UIntPtr.Zero);
-        keybd_event(0x0D, 0, KeyUp, UIntPtr.Zero);
-        keybd_event(0x11, 0, KeyUp, UIntPtr.Zero);
+        keybd_event(0x12, 0, 0, UIntPtr.Zero);
+        keybd_event(0x41, 0, 0, UIntPtr.Zero);
+        keybd_event(0x41, 0, KeyUp, UIntPtr.Zero);
+        keybd_event(0x12, 0, KeyUp, UIntPtr.Zero);
     }
 
     public static void PressEscape() {
@@ -418,7 +419,7 @@ public static class ZommiNativeWindow {
 '@
 
 $existingZommi = @(Get-Process -Name Zommi -ErrorAction SilentlyContinue)
-Assert-True ($existingZommi.Count -eq 0) 'Close every running Zommi instance before running acceptance so Ctrl+Enter can be verified.'
+Assert-True ($existingZommi.Count -eq 0) 'Close every running Zommi instance before running acceptance so Alt+A can be verified.'
 
 $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ('zommi-floating-chat-' + [Guid]::NewGuid().ToString('N'))
 $executable = Join-Path $temporaryRoot 'Zommi.exe'
@@ -517,7 +518,7 @@ try {
     $shortcut = Invoke-ZommiShortcut $gui
     $chat = $shortcut.Window
     $results.shortcutDispatch = $shortcut.Dispatch
-    Assert-True ($null -ne $chat) 'Ctrl+Enter did not open the floating chat.'
+    Assert-True ($null -ne $chat) 'Alt+A did not open the floating chat.'
     $pointerAfter = [ZommiNativeWindow]::CursorPosition()
     Assert-True ($pointerBefore.X -eq $pointerAfter.X -and $pointerBefore.Y -eq $pointerAfter.Y) "Opening Zommi moved the mouse pointer from $($pointerBefore.X),$($pointerBefore.Y) to $($pointerAfter.X),$($pointerAfter.Y)."
     $chatBounds = $chat.Current.BoundingRectangle
@@ -526,21 +527,19 @@ try {
         $pointerAfter.Y -ge $chatBounds.Y -and
         $pointerAfter.Y -lt ($chatBounds.Y + $chatBounds.Height)
     Assert-True (-not $pointerInsideChat) 'The floating chat opened under the pointer.'
-    Assert-True ($null -ne (Find-AutomationElement $chat 'Ctrl + Enter')) 'Zommi did not register Ctrl+Enter as its global shortcut.'
+    Assert-True ($null -ne (Find-AutomationElement $chat 'Alt + A · image  Alt + Shift + A')) 'Zommi did not expose its Alt+A shortcuts.'
 
-    $context = Find-AutomationElementById $chat 'InvocationContext'
-    Assert-True ($null -ne $context) 'Invocation context was not exposed through UI Automation.'
-    $contextText = [string] $context.Current.Name
-    Assert-True ($contextText -eq '[context]') "The attached page context was not represented by the compact [context] chip. Visible text: $contextText"
-    Assert-True ($contextText -notlike "*$browserMarker*" -and $contextText -notlike "*$browserUri*") 'Raw page context leaked into the visible context chip.'
-    [void] (Assert-ComposerFocused $chat)
+    $composer = Assert-ComposerFocused $chat
+    $contextText = Get-AutomationText $composer
+    Assert-True ($contextText -eq '[context] ') "The attached page context was not inserted in the composer. Visible text: $contextText"
+    Assert-True ($contextText -notlike "*$browserMarker*" -and $contextText -notlike "*$browserUri*") 'Raw page context leaked into the visible composer token.'
     $threadId = Wait-ThreadId $gui
     Assert-True (-not [string]::IsNullOrWhiteSpace($threadId)) 'The floating chat did not expose its Codex thread id.'
     $pagePrompt = 'Reply with the exact token from the attached page context that starts with ZOMMI_PAGE_ and nothing else.'
     $transcript = Send-ChatTurn $gui $chat $pagePrompt $browserMarker
     Assert-True ($transcript -like "*$pagePrompt*") 'The typed page prompt did not appear in the chat transcript.'
     $visiblePageTurn = [string] $transcript
-    Assert-True ($visiblePageTurn.Contains("[context] $pagePrompt")) 'The page turn did not visibly attach [context] to the user message.'
+    Assert-True ($visiblePageTurn.Contains("[context] $pagePrompt")) 'The page turn did not preserve its composer context token.'
     Assert-True ((Wait-ThreadId $gui) -eq $threadId) 'The page turn switched Codex threads.'
     $results.webpageHoverShortcutFocusStream = 'passed'
 
@@ -589,12 +588,12 @@ try {
     $folderPointerBefore = [ZommiNativeWindow]::CursorPosition()
     $shortcut = Invoke-ZommiShortcut $gui
     $chat = $shortcut.Window
-    Assert-True ($null -ne $chat) 'Ctrl+Enter did not reopen Zommi over File Explorer.'
+    Assert-True ($null -ne $chat) 'Alt+A did not reopen Zommi over File Explorer.'
     $folderPointerAfter = [ZommiNativeWindow]::CursorPosition()
     Assert-True ($folderPointerBefore.X -eq $folderPointerAfter.X -and $folderPointerBefore.Y -eq $folderPointerAfter.Y) 'The Explorer invocation moved the mouse pointer.'
-    $context = Find-AutomationElementById $chat 'InvocationContext'
-    $contextText = [string] $context.Current.Name
-    Assert-True ($contextText -eq '[context]') 'The Explorer context was not represented by the compact [context] chip.'
+    $composer = Assert-ComposerFocused $chat
+    $contextText = Get-AutomationText $composer
+    Assert-True ($contextText -eq '[file-explorer] ') 'The Explorer context token was not inserted in the composer.'
     Assert-True ((Wait-ThreadId $gui) -eq $threadId) 'Reinvoking Zommi over Explorer created a new Codex thread.'
     $folderPrompt = 'Reply with only the selected file name from the attached folder context.'
     $transcript = Send-ChatTurn $gui $chat $folderPrompt 'selected-zommi-file.txt'
@@ -634,12 +633,12 @@ try {
     $windowPointerBefore = [ZommiNativeWindow]::CursorPosition()
     $shortcut = Invoke-ZommiShortcut $gui
     $chat = $shortcut.Window
-    Assert-True ($null -ne $chat) 'Ctrl+Enter did not reopen Zommi over an arbitrary window.'
+    Assert-True ($null -ne $chat) 'Alt+A did not reopen Zommi over an arbitrary window.'
     $windowPointerAfter = [ZommiNativeWindow]::CursorPosition()
     Assert-True ($windowPointerBefore.X -eq $windowPointerAfter.X -and $windowPointerBefore.Y -eq $windowPointerAfter.Y) 'The arbitrary-window invocation moved the pointer.'
-    $context = Find-AutomationElementById $chat 'InvocationContext'
-    $contextText = [string] $context.Current.Name
-    Assert-True ($contextText -eq '[context]') 'The arbitrary-window context was not represented by the compact [context] chip.'
+    $composer = Assert-ComposerFocused $chat
+    $contextText = Get-AutomationText $composer
+    Assert-True ($contextText -eq '[notepad] ') 'The arbitrary-window context token was not inserted in the composer.'
     Assert-True ((Wait-ThreadId $gui) -eq $threadId) 'Reinvoking Zommi over an arbitrary window created a new Codex thread.'
     $windowPrompt = 'Reply with the exact token from the attached window context that starts with ZOMMI_WINDOW_ and nothing else.'
     $transcript = Send-ChatTurn $gui $chat $windowPrompt $windowMarker

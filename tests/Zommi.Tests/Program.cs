@@ -19,6 +19,7 @@ var tests = new (string Name, Action Body)[]
     ("Context tokens use URL abbreviations and remain unique", ContextTokensUseUrlAbbreviations),
     ("Codex reasoning deltas are preserved as thinking output", ReasoningDeltaIsPreserved),
     ("Codex tool lifecycle and command output are preserved", ToolStreamingIsPreserved),
+    ("Every current Codex tool item type is surfaced", EveryToolItemTypeIsSurfaced),
     ("The latest snapshot atomically replaces the prior one", LatestSnapshotWins),
     ("Hook installation preserves, de-duplicates, and uninstalls cleanly", HookConfigurationRoundTrip),
 };
@@ -298,6 +299,46 @@ static void ToolStreamingIsPreserved()
         deltaDocument.RootElement));
     Equal(CodexStreamKind.ToolOutput, delta.Kind);
     Equal("README.md\n", delta.Text);
+}
+
+static void EveryToolItemTypeIsSurfaced()
+{
+    var toolTypes = new[]
+    {
+        "commandExecution",
+        "fileChange",
+        "mcpToolCall",
+        "dynamicToolCall",
+        "collabAgentToolCall",
+        "subAgentActivity",
+        "webSearch",
+        "imageView",
+        "sleep",
+        "imageGeneration",
+        "enteredReviewMode",
+        "exitedReviewMode",
+        "contextCompaction",
+    };
+
+    foreach (var type in toolTypes)
+    {
+        using var document = JsonDocument.Parse($$"""
+            {
+              "threadId": "thread-1",
+              "turnId": "turn-1",
+              "startedAtMs": 1,
+              "item": {
+                "type": "{{type}}",
+                "id": "{{type}}-1",
+                "status": "inProgress",
+                "changes": []
+              }
+            }
+            """);
+        var update = NotNull(CodexStreamProtocol.ParseNotification("item/started", document.RootElement));
+        Equal(CodexStreamKind.Tool, update.Kind);
+        Equal($"{type}-1", update.ItemId);
+    }
 }
 
 static void LatestSnapshotWins()

@@ -50,7 +50,19 @@ public static class CodexStreamProtocol
             ItemId = ReadString(parameters, "itemId"),
         },
         "item/commandExecution/outputDelta" => Delta(CodexStreamKind.ToolOutput, "Command output", parameters),
+        "item/commandExecution/terminalInteraction" => Delta(CodexStreamKind.ToolOutput, "Terminal input", parameters, "stdin"),
+        "item/fileChange/outputDelta" => Delta(CodexStreamKind.ToolOutput, "File change output", parameters),
+        "item/fileChange/patchUpdated" => new CodexStreamUpdate
+        {
+            Kind = CodexStreamKind.ToolOutput,
+            Lifecycle = CodexStreamLifecycle.Delta,
+            Title = "Patch update",
+            Text = FormatFileChanges(parameters),
+            ItemId = ReadString(parameters, "itemId"),
+        },
         "item/mcpToolCall/progress" => Delta(CodexStreamKind.ToolOutput, "Tool progress", parameters, "message"),
+        "item/autoApprovalReview/started" => ParseApprovalReview(parameters, CodexStreamLifecycle.Started),
+        "item/autoApprovalReview/completed" => ParseApprovalReview(parameters, CodexStreamLifecycle.Completed),
         "item/started" => ParseItem(parameters, CodexStreamLifecycle.Started),
         "item/completed" => ParseItem(parameters, CodexStreamLifecycle.Completed),
         _ => null,
@@ -117,9 +129,24 @@ public static class CodexStreamProtocol
                 "MCP tool",
                 JoinNonEmpty(" · ", ReadString(item, "server"), ReadString(item, "tool"))),
             "dynamicToolCall" => Tool(lifecycle, itemId, status, "Tool", ReadString(item, "tool")),
-            "collabToolCall" => Tool(lifecycle, itemId, status, "Agent tool", ReadString(item, "tool")),
+            "collabToolCall" or "collabAgentToolCall" => Tool(lifecycle, itemId, status, "Agent tool", ReadString(item, "tool")),
+            "subAgentActivity" => Tool(
+                lifecycle,
+                itemId,
+                status,
+                "Sub-agent",
+                JoinNonEmpty(" · ", ReadString(item, "kind"), ReadString(item, "agentPath"))),
             "webSearch" => Tool(lifecycle, itemId, status, "Web search", ReadString(item, "query")),
             "imageView" => Tool(lifecycle, itemId, status, "View image", ReadString(item, "path")),
+            "sleep" => Tool(lifecycle, itemId, status, "Wait", $"{ReadString(item, "durationMs")} ms"),
+            "imageGeneration" => Tool(
+                lifecycle,
+                itemId,
+                status,
+                "Image generation",
+                JoinNonEmpty(Environment.NewLine, ReadString(item, "revisedPrompt"), ReadString(item, "savedPath"))),
+            "enteredReviewMode" => Tool(lifecycle, itemId, status, "Review", ReadString(item, "review")),
+            "exitedReviewMode" => Tool(lifecycle, itemId, status, "Review completed", ReadString(item, "review")),
             "contextCompaction" => Tool(lifecycle, itemId, status, "Context", "Compacting conversation"),
             _ => null,
         };
@@ -139,6 +166,24 @@ public static class CodexStreamProtocol
             ItemId = itemId,
             Status = status,
         };
+
+    private static CodexStreamUpdate ParseApprovalReview(
+        JsonElement parameters,
+        CodexStreamLifecycle lifecycle)
+    {
+        var reviewText = string.Empty;
+        if (parameters.TryGetProperty("review", out var review))
+        {
+            reviewText = JoinNonEmpty(" · ", ReadString(review, "riskLevel"), ReadString(review, "rationale"));
+        }
+
+        return Tool(
+            lifecycle,
+            ReadString(parameters, "targetItemId") ?? ReadString(parameters, "reviewId"),
+            ReadString(parameters, "decisionSource"),
+            "Approval review",
+            reviewText);
+    }
 
     private static string FormatFileChanges(JsonElement item)
     {

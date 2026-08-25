@@ -306,12 +306,12 @@ public static class ZommiAmazonNative {
         }
     }
 
-    public static void PressCtrlEnter() {
+    public static void PressAltA() {
         const uint KeyUp = 0x0002;
-        keybd_event(0x11, 0, 0, UIntPtr.Zero);
-        keybd_event(0x0D, 0, 0, UIntPtr.Zero);
-        keybd_event(0x0D, 0, KeyUp, UIntPtr.Zero);
-        keybd_event(0x11, 0, KeyUp, UIntPtr.Zero);
+        keybd_event(0x12, 0, 0, UIntPtr.Zero);
+        keybd_event(0x41, 0, 0, UIntPtr.Zero);
+        keybd_event(0x41, 0, KeyUp, UIntPtr.Zero);
+        keybd_event(0x12, 0, KeyUp, UIntPtr.Zero);
     }
 
     public static void ClickAt(int x, int y) {
@@ -410,22 +410,22 @@ try {
     Assert-True ([ZommiAmazonNative]::Activate($chromeWindow)) 'Could not restore Chrome before invoking Zommi.'
     [void] [ZommiAmazonNative]::SetCursorPos($pointerX, $pointerY)
     Start-Sleep -Milliseconds 300
-    [ZommiAmazonNative]::PressCtrlEnter()
+    [ZommiAmazonNative]::PressAltA()
     $chat = Wait-ZommiWindow $zommi 20
     Assert-True ($null -ne $chat) 'The global shortcut did not open the floating Zommi chat.'
 
     $chatBounds = $chat.Current.BoundingRectangle
     $pointerInside = $pointerX -ge $chatBounds.X -and $pointerX -lt ($chatBounds.X + $chatBounds.Width) -and $pointerY -ge $chatBounds.Y -and $pointerY -lt ($chatBounds.Y + $chatBounds.Height)
     Assert-True (-not $pointerInside) 'The floating chat covered the indicated point.'
-    $context = Find-AutomationElementById $chat 'InvocationContext'
-    Assert-True ($null -ne $context -and $context.Current.Name -eq '[context]') 'The page context was not represented by a compact [context] chip.'
-    foreach ($term in $product.Terms) {
-        Assert-True ($context.Current.Name.IndexOf($term, [StringComparison]::OrdinalIgnoreCase) -lt 0) 'Raw product text leaked into the visible context chip.'
-    }
-
     $composer = Find-AutomationElementById $chat 'ZommiComposer'
     Assert-True ($null -ne $composer -and $composer.Current.HasKeyboardFocus) 'The floating composer was not focused.'
-    Set-AutomationValue $composer "what's this product"
+    $contextToken = Get-AutomationText $composer
+    Assert-True ($contextToken -eq '[amazon.com] ') 'The Amazon URL abbreviation was not inserted in the composer.'
+    foreach ($term in $product.Terms) {
+        Assert-True ($contextToken.IndexOf($term, [StringComparison]::OrdinalIgnoreCase) -lt 0) 'Raw product text leaked into the visible context token.'
+    }
+
+    Set-AutomationValue $composer ($contextToken + "what's this product")
     $browserBounds = $chromeRoot.Current.BoundingRectangle
     $evidenceBounds = New-Object System.Drawing.Rectangle(
         [int] $browserBounds.X,
@@ -451,7 +451,7 @@ try {
             if ($null -ne $transcript -and $null -ne $status) {
                 $transcriptText = Get-AutomationText $transcript
                 $answerStart = $transcriptText.LastIndexOf('Codex', [StringComparison]::Ordinal)
-                if ($answerStart -ge 0 -and $status.Current.Name -like 'Codex status: Codex ready*') {
+                if ($answerStart -ge 0 -and $status.Current.Name -like 'Codex status: ready*') {
                     $response = $transcriptText.Substring($answerStart + 'Codex'.Length).Trim()
                     if ($status.Current.Name -match 'thread ([0-9a-f-]{36})') {
                         $codexThreadId = $Matches[1]
@@ -463,7 +463,7 @@ try {
         Start-Sleep -Milliseconds 300
     }
     Assert-True (-not [string]::IsNullOrWhiteSpace($response)) "Codex did not answer the live Amazon question. Transcript: $transcriptText"
-    Assert-True ($transcriptText.Contains("[context] what's this product")) 'The visible user turn did not show [context] with the typed question.'
+    Assert-True ($transcriptText.Contains("[amazon.com] what's this product")) 'The visible user turn did not show the Amazon context token with the typed question.'
     foreach ($term in $product.Terms) {
         Assert-True ($response.IndexOf($term, [StringComparison]::OrdinalIgnoreCase) -ge 0) "Codex response did not identify '$term': $response"
     }
@@ -476,7 +476,7 @@ try {
         expectedTerms = $product.Terms
         response = $response
         codexThreadId = $codexThreadId
-        contextChip = $context.Current.Name
+        contextToken = $contextToken
         pointer = "$pointerX,$pointerY"
         floatingWindowBounds = "$($chatBounds.X),$($chatBounds.Y),$($chatBounds.Width),$($chatBounds.Height)"
         beforeScreenshot = $beforePath

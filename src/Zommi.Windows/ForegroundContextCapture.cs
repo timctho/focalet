@@ -16,11 +16,6 @@ internal sealed class ForegroundContextCapture
         "brave", "chrome", "firefox", "msedge", "opera",
     };
 
-    private static readonly HashSet<string> IgnoredProcesses = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "cmd", "code", "conhost", "cursor", "devenv", "idea64", "openconsole", "powershell", "pwsh", "rider64", "windowsterminal", "wt", "zommi",
-    };
-
     public CaptureResult Capture(DateTimeOffset nowUtc)
     {
         if (!NativeMethods.GetCursorPos(out var pointer))
@@ -61,15 +56,10 @@ internal sealed class ForegroundContextCapture
         using (process)
         {
             var processName = process.ProcessName;
-            if (IgnoredProcesses.Contains(processName))
-            {
-                return new CaptureResult(null, PreservePrevious: true);
-            }
-
             var title = ReadWindowText(windowHandle);
             string surfaceKind;
             LocatorInfo? locator = null;
-            IReadOnlyList<string> selection = [];
+            IReadOnlyList<string> selection = TryReadSelectedText(windowHandle);
             string? limitation;
             string application;
 
@@ -86,7 +76,13 @@ internal sealed class ForegroundContextCapture
             {
                 surfaceKind = "File Explorer";
                 application = "File Explorer";
-                (locator, selection) = TryReadExplorer(windowHandle);
+                var explorer = TryReadExplorer(windowHandle);
+                locator = explorer.Locator;
+                selection = selection
+                    .Concat(explorer.Selection)
+                    .Distinct(StringComparer.Ordinal)
+                    .Take(8)
+                    .ToArray();
                 limitation = locator is null
                     ? "Explorer did not expose a filesystem path for this window."
                     : null;
@@ -152,6 +148,64 @@ internal sealed class ForegroundContextCapture
         }
 
         return null;
+    }
+
+    private static IReadOnlyList<string> TryReadSelectedText(IntPtr windowHandle)
+    {
+        try
+        {
+            var root = AutomationElement.FromHandle(windowHandle);
+            var candidates = new List<AutomationElement>();
+            var focused = AutomationElement.FocusedElement;
+            if (focused is not null && IsWithinWindow(focused, root))
+            {
+                var current = focused;
+                for (var depth = 0; current is not null && depth < 12; depth++)
+                {
+                    candidates.Add(current);
+                    if (current.Equals(root))
+                    {
+                        break;
+                    }
+
+                    current = TreeWalker.ControlViewWalker.GetParent(current);
+                }
+            }
+
+            var documentCondition = new PropertyCondition(
+                AutomationElement.ControlTypeProperty,
+                ControlType.Document);
+            candidates.AddRange(root
+                .FindAll(TreeScope.Descendants, documentCondition)
+                .Cast<AutomationElement>()
+                .Take(12));
+
+            var selected = new VisibleTextCollector(maximumItems: 8, maximumCharacters: 6000);
+            foreach (var candidate in candidates.DistinctBy(element => element.GetRuntimeId().Aggregate(17, (hash, part) => (hash * 31) + part)))
+            {
+                if (candidate.Current.IsPassword ||
+                    !candidate.TryGetCurrentPattern(TextPattern.Pattern, out var patternObject))
+                {
+                    continue;
+                }
+
+                foreach (var range in ((TextPattern)patternObject).GetSelection())
+                {
+                    selected.Add(range.GetText(4000));
+                }
+
+                if (selected.IsFull)
+                {
+                    break;
+                }
+            }
+
+            return selected.Items;
+        }
+        catch (Exception exception) when (exception is ElementNotAvailableException or InvalidOperationException or COMException)
+        {
+            return [];
+        }
     }
 
     private static Uri? ParseBrowserUrl(string? value)

@@ -5,38 +5,47 @@ namespace Zommi.Windows;
 
 internal sealed class MainForm : Form
 {
-    private const int HotkeyId = 0x5A4D;
+    private const int ContextHotkeyId = 0x5A4D;
+    private const int ImageHotkeyId = 0x5A4E;
     private const int WmHotkey = 0x0312;
-    private const uint ModControl = 0x0002;
+    private const uint ModAlt = 0x0001;
     private const uint ModShift = 0x0004;
-    private const uint VkReturn = 0x0D;
-    private const uint VkSpace = 0x20;
+    private const uint VkA = 0x41;
 
-    private static readonly Color Background = Color.FromArgb(24, 27, 36);
-    private static readonly Color Panel = Color.FromArgb(34, 39, 51);
-    private static readonly Color Muted = Color.FromArgb(158, 166, 184);
-    private static readonly Color TextColor = Color.FromArgb(240, 242, 247);
-    private static readonly Color Accent = Color.FromArgb(111, 220, 181);
-    private static readonly Color ContextChip = Color.FromArgb(43, 76, 69);
-    private static readonly Color Warning = Color.FromArgb(255, 193, 92);
+    private static readonly Color Background = Color.FromArgb(47, 47, 48);
+    private static readonly Color Panel = Color.FromArgb(57, 57, 58);
+    private static readonly Color Muted = Color.FromArgb(181, 181, 183);
+    private static readonly Color TextColor = Color.FromArgb(246, 246, 246);
+    private static readonly Color Accent = Color.FromArgb(216, 232, 255);
+    private static readonly Color ContextChip = Color.FromArgb(76, 83, 94);
+    private static readonly Color ThinkingColor = Color.FromArgb(193, 199, 210);
+    private static readonly Color ToolColor = Color.FromArgb(173, 215, 202);
+    private static readonly Color Warning = Color.FromArgb(255, 190, 102);
 
     private readonly ForegroundContextCapture capture;
     private readonly CodexAppServerClient codex;
     private readonly bool autoLaunch;
-    private readonly Label contextLabel = new();
     private readonly Label statusLabel = new();
     private readonly Label shortcutLabel = new();
+    private readonly Label queryLabel = new();
     private readonly RichTextBox transcript = new();
-    private readonly TextBox input = new();
+    private readonly RichTextBox input = new();
     private readonly Button sendButton = new();
+    private readonly Button copyButton = new();
     private readonly Button closeButton = new();
     private readonly NotifyIcon trayIcon = new();
+    private readonly ContextPreviewForm contextPreview = new();
+    private readonly List<ContextAttachment> attachments = [];
+    private readonly HashSet<string> activityHeaders = new(StringComparer.Ordinal);
+    private readonly HashSet<string> activityWithDelta = new(StringComparer.Ordinal);
 
-    private ContextSnapshot? invocationContext;
     private bool turnActive;
     private bool closeRequested;
-    private bool hotkeyRegistered;
+    private bool contextHotkeyRegistered;
+    private bool imageHotkeyRegistered;
     private bool responsePrefixPending;
+    private bool stylingComposer;
+    private ContextAttachment? previewedAttachment;
 
     public MainForm(ForegroundContextCapture capture, CodexAppServerClient codex, bool autoLaunch)
     {
@@ -45,8 +54,8 @@ internal sealed class MainForm : Form
         this.autoLaunch = autoLaunch;
 
         Text = "Zommi — floating Codex chat";
-        ClientSize = new Size(560, 450);
-        MinimumSize = new Size(460, 360);
+        ClientSize = new Size(760, 390);
+        MinimumSize = new Size(540, 270);
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
         ShowInTaskbar = false;
@@ -63,8 +72,12 @@ internal sealed class MainForm : Form
         ConfigureTrayIcon();
 
         sendButton.Click += async (_, _) => await SendCurrentMessageAsync();
+        copyButton.Click += (_, _) => CopyTranscript();
         closeButton.Click += (_, _) => HideChat();
         input.KeyDown += InputKeyDown;
+        input.TextChanged += (_, _) => StyleContextTokens();
+        input.MouseMove += InputMouseMove;
+        input.MouseLeave += (_, _) => HideContextPreview();
         KeyDown += (_, eventArgs) =>
         {
             if (eventArgs.KeyCode == Keys.Escape)
@@ -74,21 +87,21 @@ internal sealed class MainForm : Form
         };
         HandleCreated += (_, _) =>
         {
-            RegisterInvocationHotkey();
+            RegisterInvocationHotkeys();
             ApplyGlassEffect();
         };
-        HandleDestroyed += (_, _) => UnregisterInvocationHotkey();
+        HandleDestroyed += (_, _) => UnregisterInvocationHotkeys();
         Resize += (_, _) => ApplyRoundedRegion();
         Paint += (_, eventArgs) =>
         {
-            using var border = new Pen(Color.FromArgb(92, 119, 143), 1f);
+            using var border = new Pen(Color.FromArgb(116, 116, 119), 1f);
             eventArgs.Graphics.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
         };
         FormClosing += OnFormClosing;
         Shown += OnShown;
 
         codex.StatusChanged += status => PostToUi(() => RenderStatus(status));
-        codex.AgentMessageDelta += delta => PostToUi(() => AppendAgentDelta(delta));
+        codex.StreamUpdate += update => PostToUi(() => AppendStreamUpdate(update));
         codex.TurnCompleted += status => PostToUi(() => CompleteTurn(status));
     }
 
@@ -98,110 +111,126 @@ internal sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             BackColor = Background,
-            Padding = new Padding(14),
+            Padding = new Padding(18, 12, 18, 12),
             ColumnCount = 1,
-            RowCount = 5,
+            RowCount = 4,
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-        var header = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            AutoSize = true,
-            ColumnCount = 3,
-        };
-        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        var title = new Label
-        {
-            Text = "Zommi",
-            AutoSize = true,
-            Font = new Font("Segoe UI Semibold", 15f),
-            ForeColor = TextColor,
-            Margin = new Padding(0, 2, 10, 3),
-        };
-        shortcutLabel.AutoSize = true;
-        shortcutLabel.ForeColor = Muted;
-        shortcutLabel.Anchor = AnchorStyles.Left;
-        shortcutLabel.Margin = new Padding(0, 8, 0, 0);
-        StyleButton(closeButton, "×");
-        closeButton.Font = new Font("Segoe UI", 13f);
-        closeButton.Padding = new Padding(2, 0, 2, 0);
-        closeButton.Margin = new Padding(8, 0, 0, 0);
-        header.Controls.Add(title, 0, 0);
-        header.Controls.Add(shortcutLabel, 1, 0);
-        header.Controls.Add(closeButton, 2, 0);
-        root.Controls.Add(header, 0, 0);
-
-        contextLabel.Name = "InvocationContext";
-        contextLabel.AutoSize = true;
-        contextLabel.Anchor = AnchorStyles.Left;
-        contextLabel.Font = new Font("Segoe UI Semibold", 9f);
-        contextLabel.Padding = new Padding(10, 5, 10, 5);
-        contextLabel.Margin = new Padding(0, 8, 0, 10);
-        SetInvocationContextState(
-            attached: false,
-            description: "Press the shortcut while hovering over a page, window, or folder.");
-        root.Controls.Add(contextLabel, 0, 1);
+        root.Controls.Add(BuildHeader(), 0, 0);
 
         transcript.Dock = DockStyle.Fill;
         transcript.Name = "CodexTranscript";
-        transcript.AccessibleName = "Codex conversation";
+        transcript.AccessibleName = "Codex conversation including thinking and tool activity";
         transcript.ReadOnly = true;
         transcript.BorderStyle = BorderStyle.None;
         transcript.BackColor = Background;
         transcript.ForeColor = TextColor;
-        transcript.Font = new Font("Segoe UI", 10f);
+        transcript.Font = new Font("Segoe UI", 10.5f);
         transcript.DetectUrls = true;
-        transcript.Margin = new Padding(0, 0, 0, 10);
-        root.Controls.Add(transcript, 0, 2);
+        transcript.Margin = new Padding(8, 14, 8, 12);
+        transcript.ScrollBars = RichTextBoxScrollBars.Vertical;
+        root.Controls.Add(transcript, 0, 1);
 
+        root.Controls.Add(BuildComposer(), 0, 2);
+
+        shortcutLabel.AutoSize = true;
+        shortcutLabel.ForeColor = Muted;
+        shortcutLabel.Margin = new Padding(4, 9, 0, 0);
+        shortcutLabel.Text = "Alt + A · image  Alt + Shift + A";
+        root.Controls.Add(shortcutLabel, 0, 3);
+        return root;
+    }
+
+    private Control BuildHeader()
+    {
+        var header = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            ColumnCount = 4,
+            Padding = new Padding(4, 2, 0, 8),
+        };
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        statusLabel.Name = "CodexStatus";
+        statusLabel.AccessibleName = "Codex status";
+        statusLabel.AutoSize = true;
+        statusLabel.ForeColor = Muted;
+        statusLabel.Font = new Font("Segoe UI Semibold", 9.5f);
+        statusLabel.Margin = new Padding(0, 7, 14, 0);
+        statusLabel.Text = "◉  starting…";
+
+        queryLabel.AutoEllipsis = true;
+        queryLabel.Dock = DockStyle.Fill;
+        queryLabel.TextAlign = ContentAlignment.MiddleRight;
+        queryLabel.ForeColor = Color.FromArgb(224, 224, 225);
+        queryLabel.Margin = new Padding(8, 7, 10, 0);
+        queryLabel.Text = "Ask Codex about what you see";
+
+        StyleButton(copyButton, "▣");
+        copyButton.Name = "CopyTranscript";
+        copyButton.AccessibleName = "Copy transcript";
+        copyButton.Font = new Font("Segoe UI Symbol", 11f);
+        copyButton.Margin = new Padding(4, 0, 4, 0);
+
+        StyleButton(closeButton, "×");
+        closeButton.AccessibleName = "Hide Zommi";
+        closeButton.Font = new Font("Segoe UI", 13f);
+        closeButton.Margin = new Padding(4, 0, 0, 0);
+
+        header.Controls.Add(statusLabel, 0, 0);
+        header.Controls.Add(queryLabel, 1, 0);
+        header.Controls.Add(copyButton, 2, 0);
+        header.Controls.Add(closeButton, 3, 0);
+        MakeDraggable(header, statusLabel, queryLabel);
+        return header;
+    }
+
+    private Control BuildComposer()
+    {
         var composer = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             AutoSize = true,
             BackColor = Panel,
-            Padding = new Padding(8),
+            Padding = new Padding(12, 10, 10, 10),
             ColumnCount = 2,
+            Margin = new Padding(0),
         };
         composer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         composer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
         input.Multiline = true;
         input.Name = "ZommiComposer";
-        input.AccessibleName = "Zommi message";
-        input.AcceptsReturn = true;
+        input.AccessibleName = "Zommi message with attached context tokens";
+        input.AccessibleDescription = "Context tokens appear here as soon as Alt+A or Alt+Shift+A captures them.";
+        input.AcceptsTab = false;
         input.BorderStyle = BorderStyle.None;
         input.BackColor = Panel;
         input.ForeColor = TextColor;
         input.Font = new Font("Segoe UI", 10.5f);
-        input.PlaceholderText = "Ask about what you are hovering…";
-        input.MinimumSize = new Size(0, 58);
+        input.MinimumSize = new Size(0, 66);
         input.Dock = DockStyle.Fill;
-        input.ScrollBars = ScrollBars.Vertical;
-        StyleButton(sendButton, "Send");
+        input.ScrollBars = RichTextBoxScrollBars.Vertical;
+
+        StyleButton(sendButton, "Send  ↵");
         sendButton.Name = "SendMessage";
         sendButton.AccessibleName = "Send message";
-        sendButton.BackColor = Color.FromArgb(55, 92, 81);
+        sendButton.BackColor = Color.FromArgb(83, 83, 85);
         sendButton.Anchor = AnchorStyles.Bottom;
-        sendButton.Margin = new Padding(8, 4, 0, 0);
+        sendButton.Margin = new Padding(10, 4, 0, 0);
+
         composer.Controls.Add(input, 0, 0);
         composer.Controls.Add(sendButton, 1, 0);
-        root.Controls.Add(composer, 0, 3);
-
-        statusLabel.AutoSize = true;
-        statusLabel.Name = "CodexStatus";
-        statusLabel.AccessibleName = "Codex status";
-        statusLabel.ForeColor = Muted;
-        statusLabel.Margin = new Padding(2, 8, 0, 0);
-        statusLabel.Text = "Starting…";
-        root.Controls.Add(statusLabel, 0, 4);
-        return root;
+        return composer;
     }
 
     private static void StyleButton(Button button, string text)
@@ -210,22 +239,41 @@ internal sealed class MainForm : Form
         button.AutoSize = true;
         button.FlatStyle = FlatStyle.Flat;
         button.FlatAppearance.BorderSize = 0;
-        button.BackColor = Color.FromArgb(46, 53, 70);
+        button.BackColor = Color.FromArgb(67, 67, 69);
         button.ForeColor = TextColor;
         button.Padding = new Padding(8, 3, 8, 3);
         button.Cursor = Cursors.Hand;
     }
 
+    private void MakeDraggable(params Control[] controls)
+    {
+        foreach (var control in controls)
+        {
+            control.MouseDown += (_, eventArgs) =>
+            {
+                if (eventArgs.Button != MouseButtons.Left)
+                {
+                    return;
+                }
+
+                _ = NativeMethods.ReleaseCapture();
+                _ = NativeMethods.SendMessage(Handle, NativeMethods.WmNcLButtonDown, NativeMethods.HtCaption, 0);
+            };
+        }
+    }
+
     private void ConfigureTrayIcon()
     {
         var menu = new ContextMenuStrip();
-        menu.Items.Add("Open floating chat", null, (_, _) => ShowChat(captureUnderlyingContext: false));
+        menu.Items.Add("Open floating chat", null, (_, _) => ShowChat());
+        menu.Items.Add("Capture context (Alt+A)", null, (_, _) => CaptureContextAndShow());
+        menu.Items.Add("Select image context (Alt+Shift+A)", null, (_, _) => SelectImageContext());
         menu.Items.Add("Exit Zommi", null, (_, _) => ExitApplication());
         trayIcon.Icon = SystemIcons.Application;
         trayIcon.Text = "Zommi floating Codex chat";
         trayIcon.ContextMenuStrip = menu;
         trayIcon.Visible = true;
-        trayIcon.DoubleClick += (_, _) => ShowChat(captureUnderlyingContext: false);
+        trayIcon.DoubleClick += (_, _) => ShowChat();
     }
 
     private async void OnShown(object? sender, EventArgs eventArgs)
@@ -236,7 +284,7 @@ internal sealed class MainForm : Form
             trayIcon.ShowBalloonTip(
                 2500,
                 "Zommi is ready",
-                $"Hover over anything and press {shortcutLabel.Text} to chat with Codex.",
+                "Hover over anything and press Alt+A. Use Alt+Shift+A to select image context.",
                 ToolTipIcon.Info);
             try
             {
@@ -249,77 +297,133 @@ internal sealed class MainForm : Form
         }
         else
         {
-            ShowChat(captureUnderlyingContext: false);
+            ShowChat();
             RenderStatus("Acceptance mode · Codex relay disabled");
         }
     }
 
     protected override void WndProc(ref Message message)
     {
-        if (message.Msg == WmHotkey && message.WParam.ToInt32() == HotkeyId)
+        if (message.Msg == WmHotkey)
         {
-            if (Visible)
+            if (message.WParam.ToInt32() == ContextHotkeyId)
             {
-                if (!string.IsNullOrWhiteSpace(input.Text) && !turnActive)
-                {
-                    _ = SendCurrentMessageAsync();
-                }
-                else
-                {
-                    HideChat();
-                }
-            }
-            else
-            {
-                ShowChat(captureUnderlyingContext: true);
+                CaptureContextAndShow();
+                return;
             }
 
-            return;
+            if (message.WParam.ToInt32() == ImageHotkeyId)
+            {
+                SelectImageContext();
+                return;
+            }
         }
 
         base.WndProc(ref message);
     }
 
-    private void RegisterInvocationHotkey()
+    private void RegisterInvocationHotkeys()
     {
-        if (NativeMethods.RegisterHotKey(Handle, HotkeyId, ModControl, VkReturn))
-        {
-            hotkeyRegistered = true;
-            shortcutLabel.Text = "Ctrl + Enter";
-            return;
-        }
+        contextHotkeyRegistered = NativeMethods.RegisterHotKey(Handle, ContextHotkeyId, ModAlt, VkA);
+        imageHotkeyRegistered = NativeMethods.RegisterHotKey(Handle, ImageHotkeyId, ModAlt | ModShift, VkA);
 
-        if (NativeMethods.RegisterHotKey(Handle, HotkeyId, ModControl | ModShift, VkSpace))
+        if (!contextHotkeyRegistered || !imageHotkeyRegistered)
         {
-            hotkeyRegistered = true;
-            shortcutLabel.Text = "Ctrl + Shift + Space";
-            RenderStatus("Ctrl + Enter was unavailable; using Ctrl + Shift + Space.", warning: true);
-            return;
-        }
+            var unavailable = new List<string>();
+            if (!contextHotkeyRegistered)
+            {
+                unavailable.Add("Alt+A");
+            }
 
-        shortcutLabel.Text = "Shortcut unavailable";
-        RenderStatus("Windows could not register a global Zommi shortcut.", warning: true);
-    }
+            if (!imageHotkeyRegistered)
+            {
+                unavailable.Add("Alt+Shift+A");
+            }
 
-    private void UnregisterInvocationHotkey()
-    {
-        if (hotkeyRegistered)
-        {
-            _ = NativeMethods.UnregisterHotKey(Handle, HotkeyId);
-            hotkeyRegistered = false;
+            RenderStatus($"Shortcut unavailable: {string.Join(", ", unavailable)}", warning: true);
         }
     }
 
-    private void ShowChat(bool captureUnderlyingContext)
+    private void UnregisterInvocationHotkeys()
+    {
+        if (contextHotkeyRegistered)
+        {
+            _ = NativeMethods.UnregisterHotKey(Handle, ContextHotkeyId);
+            contextHotkeyRegistered = false;
+        }
+
+        if (imageHotkeyRegistered)
+        {
+            _ = NativeMethods.UnregisterHotKey(Handle, ImageHotkeyId);
+            imageHotkeyRegistered = false;
+        }
+    }
+
+    private void CaptureContextAndShow()
     {
         var preservePointer = NativeMethods.GetCursorPos(out var pointerBeforeFocus);
-        if (captureUnderlyingContext)
+        var result = capture.Capture(DateTimeOffset.UtcNow);
+        if (result.Snapshot is not null)
         {
-            var result = capture.Capture(DateTimeOffset.UtcNow);
-            invocationContext = result.Snapshot;
-            RenderInvocationContext();
+            AddAttachment(new ContextAttachment
+            {
+                Token = ContextTokens.Create(result.Snapshot, attachments.Select(item => item.Token)),
+                Snapshot = result.Snapshot,
+            });
+            RenderStatus($"Attached {attachments[^1].Token}");
+        }
+        else if (!result.PreservePrevious)
+        {
+            RenderStatus("No accessible context was exposed under the pointer", warning: true);
         }
 
+        ShowChat();
+        if (preservePointer)
+        {
+            _ = NativeMethods.SetCursorPos(pointerBeforeFocus.X, pointerBeforeFocus.Y);
+        }
+    }
+
+    private void SelectImageContext()
+    {
+        var wasVisible = Visible;
+        HideContextPreview();
+        Hide();
+        using var selector = new RegionSelectionForm();
+        var dialogResult = selector.ShowDialog();
+        if (dialogResult == DialogResult.OK && selector.Result is { } result)
+        {
+            var token = ContextTokens.CreateImage(attachments.Select(item => item.Token));
+            AddAttachment(new ContextAttachment
+            {
+                Token = token,
+                ImagePng = result.Png,
+            });
+            RenderStatus($"Attached {token} · {result.Bounds.Width}×{result.Bounds.Height}");
+            ShowChat();
+        }
+        else if (wasVisible)
+        {
+            ShowChat();
+        }
+    }
+
+    private void AddAttachment(ContextAttachment attachment)
+    {
+        attachments.Add(attachment);
+        if (input.TextLength > 0 && !char.IsWhiteSpace(input.Text[^1]))
+        {
+            input.AppendText(" ");
+        }
+
+        input.AppendText(attachment.Token + " ");
+        input.SelectionStart = input.TextLength;
+        StyleContextTokens();
+    }
+
+    private void ShowChat()
+    {
+        var preservePointer = NativeMethods.GetCursorPos(out var pointerBeforeFocus);
         PositionAwayFromPointer();
         if (!Visible)
         {
@@ -339,11 +443,8 @@ internal sealed class MainForm : Form
 
     private void HideChat()
     {
+        HideContextPreview();
         Hide();
-        invocationContext = null;
-        SetInvocationContextState(
-            attached: false,
-            description: "Press the shortcut while hovering over a page, window, or folder.");
     }
 
     private void PositionAwayFromPointer()
@@ -373,44 +474,87 @@ internal sealed class MainForm : Form
             Math.Clamp(y, workArea.Top, Math.Max(workArea.Top, workArea.Bottom - Height)));
     }
 
-    private void RenderInvocationContext()
+    private void StyleContextTokens()
     {
-        var snapshot = invocationContext;
-        if (snapshot is null)
+        if (stylingComposer || input.IsDisposed)
         {
-            SetInvocationContextState(
-                attached: false,
-                description: "No accessible context was exposed under the pointer. Your typed message will still be sent.");
             return;
         }
 
-        var parts = new List<string> { snapshot.Application };
-        if (snapshot.Locator is not null)
+        stylingComposer = true;
+        try
         {
-            parts.Add(snapshot.Locator.Value);
-        }
+            attachments.RemoveAll(attachment =>
+                !input.Text.Contains(attachment.Token, StringComparison.Ordinal));
+            var selectionStart = input.SelectionStart;
+            var selectionLength = input.SelectionLength;
+            input.SelectAll();
+            input.SelectionColor = TextColor;
+            input.SelectionBackColor = Panel;
 
-        if (snapshot.IndicatedTarget is not null)
+            foreach (var attachment in attachments)
+            {
+                var offset = 0;
+                while ((offset = input.Text.IndexOf(attachment.Token, offset, StringComparison.Ordinal)) >= 0)
+                {
+                    input.Select(offset, attachment.Token.Length);
+                    input.SelectionColor = Accent;
+                    input.SelectionBackColor = ContextChip;
+                    offset += attachment.Token.Length;
+                }
+            }
+
+            input.Select(
+                Math.Min(selectionStart, input.TextLength),
+                Math.Min(selectionLength, Math.Max(0, input.TextLength - selectionStart)));
+        }
+        finally
         {
-            var target = snapshot.IndicatedTarget;
-            parts.Add($"{target.ControlType ?? "target"}: {target.Name ?? "unnamed"}");
+            stylingComposer = false;
         }
-
-        if (snapshot.VisibleText.Count > 0)
-        {
-            parts.Add(string.Join(" · ", snapshot.VisibleText.Take(3)));
-        }
-
-        SetInvocationContextState(attached: true, description: string.Join(Environment.NewLine, parts));
     }
 
-    private void SetInvocationContextState(bool attached, string description)
+    private void InputMouseMove(object? sender, MouseEventArgs eventArgs)
     {
-        contextLabel.Text = attached ? "[context]" : "[no context]";
-        contextLabel.AccessibleName = contextLabel.Text;
-        contextLabel.AccessibleDescription = description;
-        contextLabel.BackColor = attached ? ContextChip : Panel;
-        contextLabel.ForeColor = attached ? Accent : Muted;
+        var attachment = FindAttachmentAt(input.GetCharIndexFromPosition(eventArgs.Location));
+        if (attachment is null)
+        {
+            HideContextPreview();
+            input.Cursor = Cursors.IBeam;
+            return;
+        }
+
+        input.Cursor = Cursors.Hand;
+        if (!ReferenceEquals(previewedAttachment, attachment) || !contextPreview.Visible)
+        {
+            previewedAttachment = attachment;
+            contextPreview.ShowContext(attachment, Cursor.Position);
+        }
+    }
+
+    private ContextAttachment? FindAttachmentAt(int characterIndex)
+    {
+        foreach (var attachment in attachments)
+        {
+            var offset = 0;
+            while ((offset = input.Text.IndexOf(attachment.Token, offset, StringComparison.Ordinal)) >= 0)
+            {
+                if (characterIndex >= offset && characterIndex < offset + attachment.Token.Length)
+                {
+                    return attachment;
+                }
+
+                offset += attachment.Token.Length;
+            }
+        }
+
+        return null;
+    }
+
+    private void HideContextPreview()
+    {
+        previewedAttachment = null;
+        contextPreview.Hide();
     }
 
     private async Task SendCurrentMessageAsync()
@@ -420,22 +564,48 @@ internal sealed class MainForm : Form
             return;
         }
 
-        var message = input.Text.Trim();
+        var visibleMessage = input.Text.Trim();
+        var activeAttachments = attachments
+            .Where(attachment => visibleMessage.Contains(attachment.Token, StringComparison.Ordinal))
+            .ToArray();
+        var message = visibleMessage;
+        foreach (var attachment in activeAttachments)
+        {
+            message = message.Replace(attachment.Token, " ", StringComparison.Ordinal);
+        }
+
+        message = string.Join(' ', message.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
         if (message.Length == 0)
         {
             return;
         }
 
+        var snapshots = activeAttachments
+            .Select(attachment => attachment.Snapshot)
+            .Where(snapshot => snapshot is not null)
+            .Cast<ContextSnapshot>()
+            .ToArray();
+        var images = activeAttachments
+            .Select(attachment => attachment.ImageDataUrl)
+            .Where(image => image is not null)
+            .Cast<string>()
+            .ToArray();
+
         turnActive = true;
         responsePrefixPending = true;
+        activityHeaders.Clear();
+        activityWithDelta.Clear();
         sendButton.Enabled = false;
         input.Enabled = false;
-        AppendTranscript("You", invocationContext is null ? message : $"[context] {message}", Accent);
+        queryLabel.Text = message;
+        AppendTranscript("You", visibleMessage, Accent);
         input.Clear();
-        RenderStatus("Codex is working…");
+        attachments.RemoveAll(attachment => activeAttachments.Contains(attachment));
+        HideContextPreview();
+        RenderStatus("thinking…");
         try
         {
-            await codex.StartTurnAsync(message, invocationContext);
+            await codex.StartTurnAsync(message, snapshots, images);
         }
         catch (Exception exception)
         {
@@ -460,6 +630,85 @@ internal sealed class MainForm : Form
         }
     }
 
+    private void AppendStreamUpdate(CodexStreamUpdate update)
+    {
+        if (update.Kind == CodexStreamKind.Assistant)
+        {
+            AppendAgentDelta(update.Text);
+            return;
+        }
+
+        var itemKey = update.ItemId ?? $"{update.Kind}:{update.Title}";
+        if (update.Lifecycle == CodexStreamLifecycle.Started)
+        {
+            EnsureActivityHeader(itemKey, update);
+            if (update.Text.Length > 0 && update.Kind != CodexStreamKind.Thinking)
+            {
+                AppendActivityText(update.Text + Environment.NewLine, update.Kind);
+            }
+
+            RenderStatus(update.Kind == CodexStreamKind.Thinking ? "thinking…" : $"using {update.Title.ToLowerInvariant()}…");
+            return;
+        }
+
+        if (update.Lifecycle == CodexStreamLifecycle.Delta)
+        {
+            EnsureActivityHeader(itemKey, update);
+            if (update.Text.Length > 0)
+            {
+                AppendActivityText(update.Text, update.Kind);
+                activityWithDelta.Add(itemKey);
+            }
+
+            RenderStatus(update.Kind == CodexStreamKind.Thinking ? "thinking…" : $"using {update.Title.ToLowerInvariant()}…");
+            return;
+        }
+
+        EnsureActivityHeader(itemKey, update);
+        if (!activityWithDelta.Contains(itemKey) && update.Text.Length > 0)
+        {
+            AppendActivityText(update.Text + Environment.NewLine, update.Kind);
+        }
+
+        if (update.Kind == CodexStreamKind.Tool && !string.IsNullOrWhiteSpace(update.Status))
+        {
+            AppendActivityText($"  ↳ {update.Status}{Environment.NewLine}", update.Kind);
+        }
+
+        AppendActivityText(Environment.NewLine, update.Kind);
+    }
+
+    private void EnsureActivityHeader(string itemKey, CodexStreamUpdate update)
+    {
+        if (!activityHeaders.Add(itemKey))
+        {
+            return;
+        }
+
+        var title = update.Kind switch
+        {
+            CodexStreamKind.Thinking => "◉  thinking…",
+            CodexStreamKind.Plan => "◇  plan",
+            CodexStreamKind.ToolOutput => "↳  tool output",
+            _ => $"◇  {update.Title.ToLowerInvariant()}",
+        };
+        transcript.SelectionStart = transcript.TextLength;
+        transcript.SelectionFont = new Font(transcript.Font, FontStyle.Bold);
+        transcript.SelectionColor = update.Kind == CodexStreamKind.Thinking ? ThinkingColor : ToolColor;
+        transcript.AppendText(title + Environment.NewLine);
+        transcript.SelectionFont = transcript.Font;
+    }
+
+    private void AppendActivityText(string text, CodexStreamKind kind)
+    {
+        transcript.SelectionStart = transcript.TextLength;
+        transcript.SelectionFont = transcript.Font;
+        transcript.SelectionColor = kind == CodexStreamKind.Thinking ? ThinkingColor : Muted;
+        transcript.AppendText(text);
+        transcript.SelectionStart = transcript.TextLength;
+        transcript.ScrollToCaret();
+    }
+
     private void AppendAgentDelta(string delta)
     {
         if (delta.Length == 0)
@@ -469,7 +718,7 @@ internal sealed class MainForm : Form
 
         if (responsePrefixPending)
         {
-            AppendTranscript("Codex", string.Empty, Color.FromArgb(142, 190, 255), appendTrailingNewline: false);
+            AppendTranscript("Codex", string.Empty, TextColor, appendTrailingNewline: false);
             responsePrefixPending = false;
         }
 
@@ -492,8 +741,8 @@ internal sealed class MainForm : Form
         sendButton.Enabled = true;
         input.Enabled = true;
         RenderStatus(status.Equals("completed", StringComparison.OrdinalIgnoreCase)
-            ? "Codex ready"
-            : $"Codex turn: {status}",
+            ? "ready"
+            : $"turn {status}",
             warning: !status.Equals("completed", StringComparison.OrdinalIgnoreCase));
         input.Focus();
     }
@@ -520,9 +769,18 @@ internal sealed class MainForm : Form
         transcript.ScrollToCaret();
     }
 
+    private void CopyTranscript()
+    {
+        if (!string.IsNullOrWhiteSpace(transcript.Text))
+        {
+            Clipboard.SetText(transcript.Text);
+            RenderStatus("copied");
+        }
+    }
+
     private void RenderStatus(string status, bool warning = false)
     {
-        statusLabel.Text = status;
+        statusLabel.Text = $"◉  {status}";
         statusLabel.AccessibleName = codex.ThreadId is null
             ? $"Codex status: {status}"
             : $"Codex status: {status}; thread {codex.ThreadId}";
@@ -560,6 +818,7 @@ internal sealed class MainForm : Form
 
         trayIcon.Visible = false;
         trayIcon.Dispose();
+        contextPreview.Dispose();
         codex.Dispose();
     }
 
@@ -604,7 +863,7 @@ internal sealed class MainForm : Form
             return;
         }
 
-        var regionHandle = NativeMethods.CreateRoundRectRgn(0, 0, Width + 1, Height + 1, 24, 24);
+        var regionHandle = NativeMethods.CreateRoundRectRgn(0, 0, Width + 1, Height + 1, 26, 26);
         if (regionHandle == IntPtr.Zero)
         {
             return;
@@ -619,6 +878,9 @@ internal sealed class MainForm : Form
 
     private static class NativeMethods
     {
+        internal const int WmNcLButtonDown = 0x00A1;
+        internal const int HtCaption = 0x0002;
+
         internal enum DwmWindowAttribute
         {
             UseImmersiveDarkMode = 20,
@@ -651,6 +913,13 @@ internal sealed class MainForm : Form
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool SetCursorPos(int x, int y);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool ReleaseCapture();
+
+        [DllImport("user32.dll")]
+        internal static extern IntPtr SendMessage(IntPtr windowHandle, int message, int wParam, int lParam);
 
         [DllImport("dwmapi.dll")]
         internal static extern int DwmSetWindowAttribute(
