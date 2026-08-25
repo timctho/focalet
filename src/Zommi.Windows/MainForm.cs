@@ -146,6 +146,7 @@ internal sealed class MainForm : Form
         root.Controls.Add(BuildComposer(), 0, 2);
 
         shortcutLabel.AutoSize = true;
+        shortcutLabel.Name = "ZommiShortcuts";
         shortcutLabel.ForeColor = Muted;
         shortcutLabel.Margin = new Padding(4, 9, 0, 0);
         shortcutLabel.Text = "Alt + A · image  Alt + Shift + A";
@@ -333,6 +334,8 @@ internal sealed class MainForm : Form
     {
         contextHotkeyRegistered = NativeMethods.RegisterHotKey(Handle, ContextHotkeyId, ModAlt, VkA);
         imageHotkeyRegistered = NativeMethods.RegisterHotKey(Handle, ImageHotkeyId, ModAlt | ModShift, VkA);
+        shortcutLabel.AccessibleDescription =
+            $"Alt+A registered: {contextHotkeyRegistered}; Alt+Shift+A registered: {imageHotkeyRegistered}";
 
         if (!contextHotkeyRegistered || !imageHotkeyRegistered)
         {
