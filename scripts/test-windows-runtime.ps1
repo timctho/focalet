@@ -3,8 +3,6 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $ExecutablePath,
 
-    [string] $HookExecutablePath,
-
     [switch] $SkipBrowser
 )
 
@@ -27,7 +25,7 @@ function Invoke-CapturedProcess {
     param(
         [string] $FilePath,
         [string] $Arguments,
-        [AllowNull()][string] $StandardInput
+        [int] $TimeoutSeconds = 180
     )
 
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
@@ -37,255 +35,527 @@ function Invoke-CapturedProcess {
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
-    $startInfo.RedirectStandardInput = $null -ne $StandardInput
 
     $process = New-Object System.Diagnostics.Process
     $process.StartInfo = $startInfo
     Assert-True ($process.Start()) "Could not start $FilePath."
-    if ($null -ne $StandardInput) {
-        $process.StandardInput.WriteLine($StandardInput)
-        $process.StandardInput.Close()
+    $standardOutput = $process.StandardOutput.ReadToEndAsync()
+    $standardError = $process.StandardError.ReadToEndAsync()
+    if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+        & taskkill.exe /PID $process.Id /T /F 2>&1 | Out-Null
+        throw "$FilePath timed out after $TimeoutSeconds seconds."
     }
-
-    $standardOutput = $process.StandardOutput.ReadToEnd()
-    $standardError = $process.StandardError.ReadToEnd()
     $process.WaitForExit()
     return [pscustomobject]@{
         ExitCode = $process.ExitCode
-        StandardOutput = $standardOutput
-        StandardError = $standardError
+        StandardOutput = $standardOutput.Result
+        StandardError = $standardError.Result
     }
 }
 
-function Invoke-Hook {
-    param([string] $Executable, [string] $GlobalArguments, [string] $SessionId)
-    $hookEvent = @{
-        session_id = $SessionId
-        turn_id = 'windows-runtime-turn'
-        cwd = 'C:\zommi-acceptance'
-        hook_event_name = 'UserPromptSubmit'
-        model = 'acceptance-model'
-        prompt = 'Use the current context.'
-    } | ConvertTo-Json -Compress
+function Find-AutomationElement {
+    param(
+        [System.Windows.Automation.AutomationElement] $Root,
+        [string] $Name
+    )
 
-    return Invoke-CapturedProcess $Executable "--zommi-hook $GlobalArguments" $hookEvent
+    $condition = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::NameProperty,
+        $Name)
+    return $Root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
 }
 
-function Invoke-UiButton {
-    param([IntPtr] $WindowHandle, [string] $Name)
-    $root = [System.Windows.Automation.AutomationElement]::FromHandle($WindowHandle)
-    $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $Name)
-    $button = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
-    Assert-True ($null -ne $button) "The '$Name' button was not exposed through UI Automation."
-    $pattern = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-    $pattern.Invoke()
-    Start-Sleep -Milliseconds 350
+function Find-AutomationElementById {
+    param(
+        [System.Windows.Automation.AutomationElement] $Root,
+        [string] $AutomationId
+    )
+
+    $condition = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
+        $AutomationId)
+    return $Root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
 }
 
-if (-not [Environment]::Is64BitOperatingSystem -or [Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+function Find-ControlTypeElement {
+    param(
+        [System.Windows.Automation.AutomationElement] $Root,
+        [System.Windows.Automation.ControlType] $ControlType
+    )
+
+    $condition = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        $ControlType)
+    return $Root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
+}
+
+function Find-ZommiWindow {
+    param([System.Diagnostics.Process] $Process)
+
+    $desktop = [System.Windows.Automation.AutomationElement]::RootElement
+    $windows = $desktop.FindAll(
+        [System.Windows.Automation.TreeScope]::Children,
+        [System.Windows.Automation.Condition]::TrueCondition)
+    foreach ($candidate in $windows) {
+        try {
+            if ($candidate.Current.ProcessId -eq $Process.Id -and
+                $candidate.Current.Name -like 'Zommi*' -and
+                -not $candidate.Current.IsOffscreen) {
+                return $candidate
+            }
+        } catch {
+            # The desktop window list can change while it is enumerated.
+        }
+    }
+    return $null
+}
+
+function Wait-ZommiWindow {
+    param(
+        [System.Diagnostics.Process] $Process,
+        [int] $TimeoutSeconds = 15
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $window = Find-ZommiWindow $Process
+        if ($null -ne $window) {
+            return $window
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    return $null
+}
+
+function Get-AutomationText {
+    param([System.Windows.Automation.AutomationElement] $Element)
+
+    $textPatternObject = $null
+    if ($Element.TryGetCurrentPattern(
+        [System.Windows.Automation.TextPattern]::Pattern,
+        [ref] $textPatternObject)) {
+        return [string] ([System.Windows.Automation.TextPattern] $textPatternObject).DocumentRange.GetText(-1)
+    }
+    $valuePatternObject = $null
+    if ($Element.TryGetCurrentPattern(
+        [System.Windows.Automation.ValuePattern]::Pattern,
+        [ref] $valuePatternObject)) {
+        return [string] ([System.Windows.Automation.ValuePattern] $valuePatternObject).Current.Value
+    }
+    if ($Element.Current.NativeWindowHandle -ne 0) {
+        return [ZommiNativeWindow]::ReadWindowText([IntPtr] $Element.Current.NativeWindowHandle)
+    }
+    return [string] $Element.Current.Name
+}
+
+function Set-AutomationValue {
+    param(
+        [System.Windows.Automation.AutomationElement] $Element,
+        [string] $Value
+    )
+
+    $pattern = $Element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+    ([System.Windows.Automation.ValuePattern] $pattern).SetValue($Value)
+}
+
+function Invoke-AutomationElement {
+    param([System.Windows.Automation.AutomationElement] $Element)
+    $pattern = $Element.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+    ([System.Windows.Automation.InvokePattern] $pattern).Invoke()
+}
+
+function Wait-TranscriptText {
+    param(
+        [System.Diagnostics.Process] $Process,
+        [string] $Expected,
+        [int] $TimeoutSeconds = 120
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $window = Find-ZommiWindow $Process
+        if ($null -ne $window) {
+            $transcript = Find-AutomationElementById $window 'CodexTranscript'
+            if ($null -ne $transcript) {
+                $text = Get-AutomationText $transcript
+                if ($text -like "*$Expected*") {
+                    return $text
+                }
+            }
+        }
+        Start-Sleep -Milliseconds 200
+    }
+    return $null
+}
+
+function Wait-ThreadId {
+    param(
+        [System.Diagnostics.Process] $Process,
+        [int] $TimeoutSeconds = 60
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $window = Find-ZommiWindow $Process
+        if ($null -ne $window) {
+            $status = Find-AutomationElementById $window 'CodexStatus'
+            if ($null -ne $status) {
+                $statusText = [string] $status.Current.Name
+                if ($statusText -match 'thread ([0-9a-f-]{36})') {
+                    return $Matches[1]
+                }
+            }
+        }
+        Start-Sleep -Milliseconds 200
+    }
+    return $null
+}
+
+function Assert-ComposerFocused {
+    param([System.Windows.Automation.AutomationElement] $Window)
+    $composer = Find-AutomationElementById $Window 'ZommiComposer'
+    Assert-True ($null -ne $composer) 'The floating composer was not exposed through UI Automation.'
+    Assert-True $composer.Current.HasKeyboardFocus 'The floating composer did not receive keyboard focus.'
+    return $composer
+}
+
+function Invoke-ZommiShortcut {
+    param([System.Diagnostics.Process] $Process)
+
+    [ZommiNativeWindow]::PressCtrlEnter()
+    $window = Wait-ZommiWindow $Process 3
+    $dispatch = 'synthetic-keyboard'
+    if ($null -eq $window) {
+        Assert-True ([ZommiNativeWindow]::SendZommiHotkey([uint32] $Process.Id)) 'Could not deliver WM_HOTKEY to the hidden Zommi form.'
+        $window = Wait-ZommiWindow $Process 15
+        $dispatch = 'wm-hotkey-fallback'
+    }
+    return [pscustomobject]@{
+        Window = $window
+        Dispatch = $dispatch
+    }
+}
+
+function Activate-Window {
+    param(
+        [IntPtr] $WindowHandle,
+        [int] $ProcessId,
+        [string] $Title = ''
+    )
+
+    $shell = New-Object -ComObject WScript.Shell
+    for ($attempt = 0; $attempt -lt 10; $attempt++) {
+        try {
+            [System.Windows.Automation.AutomationElement]::FromHandle($WindowHandle).SetFocus()
+        } catch {
+            # Continue with native activation when the UIA provider is transient.
+        }
+        [void] [ZommiNativeWindow]::Activate($WindowHandle)
+        [void] $shell.AppActivate($ProcessId)
+        if (-not [string]::IsNullOrWhiteSpace($Title)) {
+            [void] $shell.AppActivate($Title)
+        }
+        Start-Sleep -Milliseconds 150
+        $foreground = [ZommiNativeWindow]::GetForegroundWindow()
+        $foregroundProcessId = [ZommiNativeWindow]::GetWindowProcessId($foreground)
+        $foregroundTitle = [ZommiNativeWindow]::ReadWindowText($foreground)
+        if ($foreground -eq $WindowHandle -or
+            $foregroundProcessId -eq $ProcessId -or
+            (-not [string]::IsNullOrWhiteSpace($Title) -and $foregroundTitle -like "*$Title*")) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Send-ChatTurn {
+    param(
+        [System.Diagnostics.Process] $Process,
+        [System.Windows.Automation.AutomationElement] $Window,
+        [string] $Prompt,
+        [string] $Expected
+    )
+
+    $composer = Assert-ComposerFocused $Window
+    Set-AutomationValue $composer $Prompt
+    $send = Find-AutomationElementById $Window 'SendMessage'
+    Assert-True ($null -ne $send) 'The Send button was not exposed through UI Automation.'
+    Invoke-AutomationElement $send
+    $transcript = Wait-TranscriptText $Process $Expected
+    if ($null -eq $transcript) {
+        $latestWindow = Find-ZommiWindow $Process
+        $latestTranscript = Find-AutomationElementById $latestWindow 'CodexTranscript'
+        $latestStatus = Find-AutomationElementById $latestWindow 'CodexStatus'
+        $latestComposer = Find-AutomationElementById $latestWindow 'ZommiComposer'
+        $transcriptText = if ($null -eq $latestTranscript) { '<missing>' } else { Get-AutomationText $latestTranscript }
+        $statusText = if ($null -eq $latestStatus) { '<missing>' } else { [string] $latestStatus.Current.Name }
+        $composerText = if ($null -eq $latestComposer) { '<missing>' } else { Get-AutomationText $latestComposer }
+        throw "Codex did not stream '$Expected' into the floating chat. Transcript: $transcriptText Status: $statusText Composer: $composerText"
+    }
+    return $transcript
+}
+
+if (-not [Environment]::Is64BitOperatingSystem -or
+    [Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
     throw 'This acceptance script requires 64-bit Windows.'
 }
 
-$temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ('zommi-runtime-' + [Guid]::NewGuid().ToString('N'))
-$stateRoot = Join-Path $temporaryRoot 'state'
-$executable = Join-Path $temporaryRoot 'Zommi.exe'
-$hookExecutable = Join-Path $temporaryRoot 'Zommi.Hook.exe'
-$channel = 'acceptance-' + [Guid]::NewGuid().ToString('N')
-$sessionA = '11111111-1111-1111-1111-111111111111'
-$sessionB = '22222222-2222-2222-2222-222222222222'
-$globalArguments = '--state-root {0} --channel {1}' -f (Quote-Argument $stateRoot), (Quote-Argument $channel)
-$owner = $null
-$controlProbe = $null
-$explorerWindow = $null
-$edgeWindow = $null
-$edgeProfile = $null
-$results = [ordered]@{}
-
-try {
-    if ([string]::IsNullOrWhiteSpace($HookExecutablePath)) {
-        $HookExecutablePath = Join-Path (Split-Path -Parent $ExecutablePath) 'Zommi.Hook.exe'
-    }
-    Assert-True (Test-Path -LiteralPath $HookExecutablePath) 'Zommi.Hook.exe was not found next to the Windows prototype.'
-    New-Item -ItemType Directory -Force -Path $temporaryRoot, $stateRoot | Out-Null
-    Copy-Item -LiteralPath $ExecutablePath -Destination $executable
-    Copy-Item -LiteralPath $HookExecutablePath -Destination $hookExecutable
-
-    Add-Type @'
+Add-Type -AssemblyName UIAutomationClient
+Add-Type @'
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
+
 public static class ZommiNativeWindow {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Point {
+        public int X;
+        public int Y;
+    }
+
     [DllImport("user32.dll")]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")]
     public static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")]
+    public static extern bool GetCursorPos(out Point point);
+    [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")]
-    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr processId);
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr parameter);
+    [DllImport("user32.dll")]
+    private static extern int GetWindowTextLength(IntPtr hWnd);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowText(IntPtr hWnd, StringBuilder value, int maximumCount);
+    [DllImport("user32.dll")]
+    private static extern bool PostMessage(IntPtr hWnd, uint message, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")]
     private static extern bool AttachThreadInput(uint attach, uint attachTo, bool value);
     [DllImport("user32.dll")]
     private static extern bool BringWindowToTop(IntPtr hWnd);
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr hWnd, int command);
+    [DllImport("user32.dll")]
+    private static extern void SwitchToThisWindow(IntPtr hWnd, bool altTab);
+    [DllImport("user32.dll")]
+    private static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
+
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr parameter);
+    private static uint searchProcessId;
+    private static IntPtr searchResult;
+
+    private static bool FindProcessWindow(IntPtr hWnd, IntPtr parameter) {
+        uint processId;
+        GetWindowThreadProcessId(hWnd, out processId);
+        if (processId == searchProcessId && GetWindowTextLength(hWnd) > 0) {
+            searchResult = hWnd;
+            return false;
+        }
+        return true;
+    }
+
+    public static Point CursorPosition() {
+        Point point;
+        GetCursorPos(out point);
+        return point;
+    }
+
+    public static void PressCtrlEnter() {
+        const uint KeyUp = 0x0002;
+        keybd_event(0x11, 0, 0, UIntPtr.Zero);
+        keybd_event(0x0D, 0, 0, UIntPtr.Zero);
+        keybd_event(0x0D, 0, KeyUp, UIntPtr.Zero);
+        keybd_event(0x11, 0, KeyUp, UIntPtr.Zero);
+    }
+
+    public static void PressEscape() {
+        const uint KeyUp = 0x0002;
+        keybd_event(0x1B, 0, 0, UIntPtr.Zero);
+        keybd_event(0x1B, 0, KeyUp, UIntPtr.Zero);
+    }
+
+    public static bool SendZommiHotkey(uint processId) {
+        searchProcessId = processId;
+        searchResult = IntPtr.Zero;
+        EnumWindows(FindProcessWindow, IntPtr.Zero);
+        return searchResult != IntPtr.Zero && PostMessage(searchResult, 0x0312, (IntPtr)0x5A4D, IntPtr.Zero);
+    }
+
+    public static int GetWindowProcessId(IntPtr window) {
+        uint processId;
+        GetWindowThreadProcessId(window, out processId);
+        return (int)processId;
+    }
+
+    public static string ReadWindowText(IntPtr window) {
+        int length = GetWindowTextLength(window);
+        StringBuilder value = new StringBuilder(length + 1);
+        GetWindowText(window, value, value.Capacity);
+        return value.ToString();
+    }
 
     public static bool Activate(IntPtr target) {
+        const uint KeyUp = 0x0002;
         IntPtr foreground = GetForegroundWindow();
-        uint foregroundThread = GetWindowThreadProcessId(foreground, IntPtr.Zero);
-        uint targetThread = GetWindowThreadProcessId(target, IntPtr.Zero);
+        uint ignored;
+        uint foregroundThread = GetWindowThreadProcessId(foreground, out ignored);
+        uint targetThread = GetWindowThreadProcessId(target, out ignored);
         bool attached = foregroundThread != targetThread && AttachThreadInput(foregroundThread, targetThread, true);
         try {
+            keybd_event(0x12, 0, 0, UIntPtr.Zero);
             ShowWindow(target, 9);
             BringWindowToTop(target);
+            SwitchToThisWindow(target, true);
             return SetForegroundWindow(target);
         } finally {
+            keybd_event(0x12, 0, KeyUp, UIntPtr.Zero);
             if (attached) AttachThreadInput(foregroundThread, targetThread, false);
         }
     }
 }
 '@
-    Add-Type -AssemblyName UIAutomationClient
 
-    $initialBinding = [ordered]@{
-        sessionId = $sessionA
-        mode = 'active'
-        updatedAtUtc = [DateTimeOffset]::UtcNow.ToString('o')
-    } | ConvertTo-Json
-    [IO.File]::WriteAllText((Join-Path $stateRoot 'binding.json'), $initialBinding)
+$existingZommi = @(Get-Process -Name Zommi -ErrorAction SilentlyContinue)
+Assert-True ($existingZommi.Count -eq 0) 'Close every running Zommi instance before running acceptance so Ctrl+Enter can be verified.'
 
-    $gui = Start-Process -FilePath $executable -ArgumentList "$globalArguments --no-auto-launch" -PassThru
-    $guiReady = $false
-    for ($attempt = 0; $attempt -lt 100; $attempt++) {
+$temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ('zommi-floating-chat-' + [Guid]::NewGuid().ToString('N'))
+$executable = Join-Path $temporaryRoot 'Zommi.exe'
+$gui = $null
+$edgeWindow = $null
+$edgeProfile = $null
+$explorerWindow = $null
+$notepadWindow = $null
+$results = [ordered]@{}
+
+try {
+    New-Item -ItemType Directory -Force -Path $temporaryRoot | Out-Null
+    Copy-Item -LiteralPath $ExecutablePath -Destination $executable
+
+    $handshake = Invoke-CapturedProcess $executable '--acceptance-app-server-handshake' 90
+    Assert-True ($handshake.ExitCode -eq 0) "Windows to WSL app-server handshake failed: $($handshake.StandardError)"
+    $handshakeJson = $handshake.StandardOutput | ConvertFrom-Json
+    Assert-True $handshakeJson.ready 'The app-server handshake did not create a Codex thread.'
+    $results.appServerHandshake = 'passed'
+
+    $relay = Invoke-CapturedProcess $executable '--acceptance-app-server-turn' 180
+    Assert-True ($relay.ExitCode -eq 0) "Windows to WSL Codex turn failed: $($relay.StandardError)"
+    $relayJson = $relay.StandardOutput | ConvertFrom-Json
+    Assert-True ($relayJson.status -eq 'completed') "The relay turn ended as '$($relayJson.status)'."
+    Assert-True ($relayJson.response -eq 'ZOMMI_RELAY_READY') "Unexpected relay response: '$($relayJson.response)'."
+    $results.appServerTurn = 'passed'
+
+    $gui = Start-Process -FilePath $executable -PassThru
+    Start-Sleep -Milliseconds 1500
+    $gui.Refresh()
+    Assert-True (-not $gui.HasExited) 'Zommi exited during hidden tray startup.'
+    Assert-True ($null -eq (Find-ZommiWindow $gui)) 'Zommi showed its chat before the shortcut was pressed.'
+    $results.hiddenTrayStartup = 'passed'
+
+    if ($SkipBrowser) {
+        throw '-SkipBrowser is diagnostic only; full floating-chat acceptance requires Edge.'
+    }
+
+    $edgeCandidates = @(
+        @(
+            (Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'),
+            (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe')
+        ) | Where-Object { Test-Path $_ }
+    )
+    Assert-True ($edgeCandidates.Count -gt 0) 'Microsoft Edge is not installed.'
+    $edgeExecutable = $edgeCandidates[0]
+    $browserMarker = 'ZOMMI_PAGE_' + [Guid]::NewGuid().ToString('N')
+    $buttonName = 'Hover target ' + $browserMarker
+    $bodyMarker = 'Visible page text ' + $browserMarker
+    $browserTitle = 'Zommi Acceptance ' + $browserMarker
+    $htmlPath = Join-Path $temporaryRoot 'zommi-browser-acceptance.html'
+    $html = "<!doctype html><title>$browserTitle</title><main><h1>$bodyMarker</h1><button style='margin:160px;font-size:30px'>$buttonName</button></main>"
+    [IO.File]::WriteAllText($htmlPath, $html)
+    $browserUri = ([Uri] $htmlPath).AbsoluteUri
+    $edgeProfile = Join-Path $temporaryRoot 'edge-profile'
+    $edgeArguments = '--user-data-dir={0} --no-first-run --no-default-browser-check --force-renderer-accessibility --disable-features=msEdgeFirstRunExperience --new-window {1}' -f (Quote-Argument $edgeProfile), (Quote-Argument $browserUri)
+    Start-Process -FilePath $edgeExecutable -ArgumentList $edgeArguments | Out-Null
+
+    for ($attempt = 0; $attempt -lt 150 -and $null -eq $edgeWindow; $attempt++) {
         Start-Sleep -Milliseconds 100
-        $gui.Refresh()
-        if ($gui.MainWindowHandle -ne 0 -and $gui.MainWindowTitle -like 'Zommi*') {
-            $guiReady = $true
-            break
-        }
+        $edgeWindow = Get-Process msedge -ErrorAction SilentlyContinue | Where-Object {
+            $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -like "*$browserTitle*"
+        } | Select-Object -First 1
     }
-    Assert-True $guiReady 'Zommi did not open a native Windows GUI window.'
-    $results.gui = 'passed'
-
-    $controlProbeArguments = "--acceptance-probe --session $sessionA --seconds 30 $globalArguments"
-    $controlProbe = Start-Process -FilePath $executable -ArgumentList $controlProbeArguments -PassThru
-    $controlProbeReady = $false
-    for ($attempt = 0; $attempt -lt 100; $attempt++) {
-        Start-Sleep -Milliseconds 100
-        $readyHook = Invoke-Hook $hookExecutable $globalArguments $sessionA
-        if ($readyHook.StandardOutput -like '*https://windows-runtime-probe.example/zommi*') {
-            $controlProbeReady = $true
-            break
-        }
-        if ($controlProbe.HasExited) {
-            break
-        }
+    Assert-True ($null -ne $edgeWindow) 'The isolated Edge acceptance window did not open.'
+    $edgeActivated = Activate-Window ([IntPtr] $edgeWindow.MainWindowHandle) $edgeWindow.Id $browserTitle
+    if (-not $edgeActivated) {
+        $actualForeground = [ZommiNativeWindow]::GetForegroundWindow()
+        $actualProcessId = [ZommiNativeWindow]::GetWindowProcessId($actualForeground)
+        $actualProcess = Get-Process -Id $actualProcessId -ErrorAction SilentlyContinue
+        throw "Could not activate the isolated Edge window. Expected hwnd=$($edgeWindow.MainWindowHandle) pid=$($edgeWindow.Id); actual hwnd=$actualForeground pid=$actualProcessId process=$($actualProcess.ProcessName)."
     }
-    Assert-True $controlProbeReady 'The capture-control shared-memory probe did not become ready.'
-    Invoke-UiButton ([IntPtr] $gui.MainWindowHandle) 'Freeze'
-    $binding = Get-Content -Raw (Join-Path $stateRoot 'binding.json') | ConvertFrom-Json
-    Assert-True ($binding.mode -eq 'frozen') "Freeze did not persist the frozen capture mode. Actual binding: $($binding | ConvertTo-Json -Compress)"
-    $frozenHook = Invoke-Hook $hookExecutable $globalArguments $sessionA
-    Assert-True ($frozenHook.StandardOutput -like '*https://windows-runtime-probe.example/zommi*') 'Frozen context was not handed off.'
+    Start-Sleep -Milliseconds 500
 
-    Invoke-UiButton ([IntPtr] $gui.MainWindowHandle) 'Unfreeze'
-    $binding = Get-Content -Raw (Join-Path $stateRoot 'binding.json') | ConvertFrom-Json
-    Assert-True ($binding.mode -eq 'active') 'Unfreeze did not restore active capture.'
-    Invoke-UiButton ([IntPtr] $gui.MainWindowHandle) 'Pause'
-    $binding = Get-Content -Raw (Join-Path $stateRoot 'binding.json') | ConvertFrom-Json
-    Assert-True ($binding.mode -eq 'paused') 'Pause did not persist the paused capture mode.'
-    $pausedHook = Invoke-Hook $hookExecutable $globalArguments $sessionA
-    Assert-True ([string]::IsNullOrWhiteSpace($pausedHook.StandardOutput)) 'Paused capture emitted hook context.'
-
-    Invoke-UiButton ([IntPtr] $gui.MainWindowHandle) 'Resume'
-    $binding = Get-Content -Raw (Join-Path $stateRoot 'binding.json') | ConvertFrom-Json
-    Assert-True ($binding.mode -eq 'active') 'Resume did not restore active capture.'
-    Invoke-UiButton ([IntPtr] $gui.MainWindowHandle) 'Detach'
-    $binding = Get-Content -Raw (Join-Path $stateRoot 'binding.json') | ConvertFrom-Json
-    Assert-True ($binding.mode -eq 'detached' -and $null -eq $binding.sessionId) 'Detach did not remove the exact session binding.'
-    $detachedHook = Invoke-Hook $hookExecutable $globalArguments $sessionA
-    Assert-True ([string]::IsNullOrWhiteSpace($detachedHook.StandardOutput)) 'Detached capture emitted hook context.'
-    $results.captureControls = 'passed'
-    Stop-Process -Id $controlProbe.Id -Force
-    $controlProbe.WaitForExit()
-    $controlProbe = $null
-
-    [void] $gui.CloseMainWindow()
-    Assert-True ($gui.WaitForExit(5000)) 'Zommi GUI did not close cleanly.'
-
-    if (Get-Command wsl.exe -ErrorAction SilentlyContinue) {
-        Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $HookExecutablePath) 'Zommi.WslHook.ps1') -Destination (Join-Path $temporaryRoot 'Zommi.WslHook.ps1')
-        $wslDiscovery = Invoke-CapturedProcess $executable "--acceptance-discover-wsl $globalArguments" $null
-        Assert-True ($wslDiscovery.ExitCode -eq 0) "WSL hook discovery failed: $($wslDiscovery.StandardError)"
-        $wslJson = $wslDiscovery.StandardOutput | ConvertFrom-Json
-        Assert-True ($wslJson.hooksPath -like '\\wsl.localhost\*\.codex\hooks.json') 'WSL hook discovery returned an invalid hooks path.'
-        Assert-True ($wslJson.command -like '*Zommi.WslHook.ps1*') 'WSL hook discovery returned an invalid command.'
-        $results.wslHookDiscovery = 'passed'
-
-        $wslLaunchPlan = Invoke-CapturedProcess $executable "--acceptance-wsl-launch-plan $globalArguments" $null
-        Assert-True ($wslLaunchPlan.ExitCode -eq 0) "WSL launch planning failed: $($wslLaunchPlan.StandardError)"
-        $wslLaunchJson = $wslLaunchPlan.StandardOutput | ConvertFrom-Json
-        Assert-True ($wslLaunchJson.fileName -eq 'wt.exe') 'The WSL launch did not target Windows Terminal.'
-        Assert-True ($wslLaunchJson.arguments -contains 'wsl.exe') 'The Windows Terminal launch did not target WSL.'
-        Assert-True ($wslLaunchJson.arguments -contains $wslLaunchJson.distroName) 'The WSL launch omitted the discovered default distribution.'
-        Assert-True ($wslLaunchJson.arguments -contains $wslLaunchJson.linuxHome) 'The WSL launch omitted the discovered Linux home directory.'
-        Assert-True ($wslLaunchJson.arguments -contains 'exec codex --dangerously-bypass-hook-trust') 'The WSL launch did not start a fresh trusted-automation Codex session.'
-        Assert-True ($wslLaunchJson.command -like '*-LaunchToken*acceptance-launch-token*') 'The WSL hook did not carry the exact launch token.'
-        Assert-True ($wslLaunchJson.command -like '*--zommi-hook*') 'The WSL hook command omitted its installer identity marker.'
-        Assert-True $wslLaunchJson.hookConfigurationValidated 'The generated WSL hook command was rejected by the hook configuration installer.'
-        $results.wslFreshSessionLaunchPlan = 'passed'
-    }
-
-    $ownerOutput = Join-Path $temporaryRoot 'owner.stdout.txt'
-    $ownerError = Join-Path $temporaryRoot 'owner.stderr.txt'
-    $ownerArguments = "--acceptance-probe --session $sessionA --seconds 60 $globalArguments"
-    $owner = Start-Process -FilePath $executable -ArgumentList $ownerArguments -RedirectStandardOutput $ownerOutput -RedirectStandardError $ownerError -PassThru
-    $ownerReady = $false
-    for ($attempt = 0; $attempt -lt 100; $attempt++) {
-        Start-Sleep -Milliseconds 100
-        if (Test-Path $ownerOutput) {
-            $readyText = Get-Content -Raw $ownerOutput
-            if ($readyText -like "READY $sessionA*") {
-                $ownerReady = $true
-                break
-            }
-        }
-        if ($owner.HasExited) {
-            break
-        }
-    }
-    if (-not $ownerReady) {
-        $probeError = if (Test-Path $ownerError) { Get-Content -Raw $ownerError } else { '' }
-        throw "The shared-memory probe did not become ready. $probeError"
-    }
-
-    $boundHook = Invoke-Hook $hookExecutable $globalArguments $sessionA
-    Assert-True ($boundHook.ExitCode -eq 0) "The bound hook failed: $($boundHook.StandardError)"
-    $boundJson = $boundHook.StandardOutput | ConvertFrom-Json
-    $additionalContext = $boundJson.hookSpecificOutput.additionalContext
-    Assert-True ($additionalContext -like '*https://windows-runtime-probe.example/zommi*') 'The Windows hook did not read the shared-memory snapshot.'
-    Assert-True ($additionalContext -like "*Exact Codex session: $sessionA*") 'The Windows hook output did not preserve the exact session id.'
-
-    $wrongHook = Invoke-Hook $hookExecutable $globalArguments $sessionB
-    Assert-True ($wrongHook.ExitCode -eq 0) "The wrong-session hook failed: $($wrongHook.StandardError)"
-    Assert-True ([string]::IsNullOrWhiteSpace($wrongHook.StandardOutput)) 'An unbound session received Zommi context.'
-    $results.exactSessionHook = 'passed'
-
-    Stop-Process -Id $owner.Id -Force
-    $owner.WaitForExit()
-    $owner = $null
+    $edgeRoot = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr] $edgeWindow.MainWindowHandle)
+    $button = Find-AutomationElement $edgeRoot $buttonName
+    Assert-True ($null -ne $button) 'Edge did not expose the hovered acceptance button.'
+    $buttonBounds = $button.Current.BoundingRectangle
+    [void] [ZommiNativeWindow]::SetCursorPos(
+        [int] ($buttonBounds.X + ($buttonBounds.Width / 2)),
+        [int] ($buttonBounds.Y + ($buttonBounds.Height / 2)))
     Start-Sleep -Milliseconds 250
-    $closedHook = Invoke-Hook $hookExecutable $globalArguments $sessionA
-    Assert-True ([string]::IsNullOrWhiteSpace($closedHook.StandardOutput)) 'Context survived after the shared-memory owner exited.'
-    Assert-True (-not (Test-Path (Join-Path $stateRoot 'snapshot.json'))) 'A snapshot was written to disk.'
-    $results.ephemeralSharedMemory = 'passed'
+    $foregroundBeforeShortcut = [ZommiNativeWindow]::GetForegroundWindow()
+    $foregroundProcessId = [ZommiNativeWindow]::GetWindowProcessId($foregroundBeforeShortcut)
+    $foregroundProcess = Get-Process -Id $foregroundProcessId -ErrorAction SilentlyContinue
+    $foregroundTitle = [ZommiNativeWindow]::ReadWindowText($foregroundBeforeShortcut)
+    Assert-True ($null -ne $foregroundProcess -and $foregroundProcess.ProcessName -eq 'msedge' -and $foregroundTitle -like "*$browserTitle*") "The controlled Edge page was not foreground immediately before the shortcut. Actual process=$($foregroundProcess.ProcessName) title=$foregroundTitle."
+    $pageCapture = Invoke-CapturedProcess $executable '--acceptance-capture-once' 30
+    Assert-True ($pageCapture.ExitCode -eq 0) "The pointer page capture probe failed: $($pageCapture.StandardError)"
+    $pageCaptureJson = $pageCapture.StandardOutput | ConvertFrom-Json
+    $pageCaptureText = [string]::Join(' ', @($pageCaptureJson.snapshot.visibleText))
+    Assert-True ($pageCaptureJson.snapshot.locator.value -eq $browserUri) 'The pointer page capture probe omitted the browser URL.'
+    Assert-True ($null -ne $pageCaptureJson.snapshot.indicatedTarget) "The pointer page capture probe omitted the hovered accessibility target. Capture: $($pageCapture.StandardOutput)"
+    Assert-True ($pageCaptureText -like "*$browserMarker*") 'The pointer page capture probe omitted the page text.'
+    $pointerBefore = [ZommiNativeWindow]::CursorPosition()
+    $shortcut = Invoke-ZommiShortcut $gui
+    $chat = $shortcut.Window
+    $results.shortcutDispatch = $shortcut.Dispatch
+    Assert-True ($null -ne $chat) 'Ctrl+Enter did not open the floating chat.'
+    $pointerAfter = [ZommiNativeWindow]::CursorPosition()
+    Assert-True ($pointerBefore.X -eq $pointerAfter.X -and $pointerBefore.Y -eq $pointerAfter.Y) "Opening Zommi moved the mouse pointer from $($pointerBefore.X),$($pointerBefore.Y) to $($pointerAfter.X),$($pointerAfter.Y)."
+    $chatBounds = $chat.Current.BoundingRectangle
+    $pointerInsideChat = $pointerAfter.X -ge $chatBounds.X -and
+        $pointerAfter.X -lt ($chatBounds.X + $chatBounds.Width) -and
+        $pointerAfter.Y -ge $chatBounds.Y -and
+        $pointerAfter.Y -lt ($chatBounds.Y + $chatBounds.Height)
+    Assert-True (-not $pointerInsideChat) 'The floating chat opened under the pointer.'
+    Assert-True ($null -ne (Find-AutomationElement $chat 'Ctrl + Enter')) 'Zommi did not register Ctrl+Enter as its global shortcut.'
 
-    $explorerFolder = Join-Path $temporaryRoot ('explorer-marker-' + [Guid]::NewGuid().ToString('N'))
+    $context = Find-AutomationElementById $chat 'InvocationContext'
+    Assert-True ($null -ne $context) 'Invocation context was not exposed through UI Automation.'
+    $contextText = [string] $context.Current.Name
+    Assert-True ($contextText -eq '[context]') "The attached page context was not represented by the compact [context] chip. Visible text: $contextText"
+    Assert-True ($contextText -notlike "*$browserMarker*" -and $contextText -notlike "*$browserUri*") 'Raw page context leaked into the visible context chip.'
+    [void] (Assert-ComposerFocused $chat)
+    $threadId = Wait-ThreadId $gui
+    Assert-True (-not [string]::IsNullOrWhiteSpace($threadId)) 'The floating chat did not expose its Codex thread id.'
+    $pagePrompt = 'Reply with the exact token from the attached page context that starts with ZOMMI_PAGE_ and nothing else.'
+    $transcript = Send-ChatTurn $gui $chat $pagePrompt $browserMarker
+    Assert-True ($transcript -like "*$pagePrompt*") 'The typed page prompt did not appear in the chat transcript.'
+    $visiblePageTurn = [string] $transcript
+    Assert-True ($visiblePageTurn.Contains("[context] $pagePrompt")) 'The page turn did not visibly attach [context] to the user message.'
+    Assert-True ((Wait-ThreadId $gui) -eq $threadId) 'The page turn switched Codex threads.'
+    $results.webpageHoverShortcutFocusStream = 'passed'
+
+    [ZommiNativeWindow]::PressEscape()
+    Start-Sleep -Milliseconds 300
+    Assert-True ($null -eq (Find-ZommiWindow $gui)) 'Escape did not hide the floating chat.'
+
+    $folderMarker = 'zommi-folder-' + [Guid]::NewGuid().ToString('N')
+    $explorerFolder = Join-Path $temporaryRoot $folderMarker
     $selectedFile = Join-Path $explorerFolder 'selected-zommi-file.txt'
     New-Item -ItemType Directory -Path $explorerFolder | Out-Null
-    [IO.File]::WriteAllText($selectedFile, 'zommi acceptance')
+    [IO.File]::WriteAllText($selectedFile, 'zommi folder acceptance')
     Start-Process -FilePath explorer.exe -ArgumentList (Quote-Argument $explorerFolder) | Out-Null
     $shell = New-Object -ComObject Shell.Application
-    for ($attempt = 0; $attempt -lt 100 -and $null -eq $explorerWindow; $attempt++) {
+    for ($attempt = 0; $attempt -lt 120 -and $null -eq $explorerWindow; $attempt++) {
         Start-Sleep -Milliseconds 100
         foreach ($candidate in @($shell.Windows())) {
             try {
@@ -294,96 +564,96 @@ public static class ZommiNativeWindow {
                     break
                 }
             } catch {
-                # A shell surface without a Folder view is not the target Explorer window.
+                # A shell surface without a Folder view is not the target.
             }
         }
     }
     Assert-True ($null -ne $explorerWindow) 'The acceptance Explorer window did not open.'
     $explorerWindow.Document.SelectItem($selectedFile, 29)
-    $explorerCapture = $null
-    for ($attempt = 0; $attempt -lt 5; $attempt++) {
-        [void] [ZommiNativeWindow]::Activate([IntPtr] ([int64] $explorerWindow.HWND))
-        Start-Sleep -Milliseconds 500
-        $explorerCapture = Invoke-CapturedProcess $executable "--acceptance-capture-once $globalArguments" $null
-        if ($explorerCapture.ExitCode -eq 0) {
-            break
-        }
+    $explorerProcessId = [ZommiNativeWindow]::GetWindowProcessId([IntPtr] ([int64] $explorerWindow.HWND))
+    Assert-True (Activate-Window ([IntPtr] ([int64] $explorerWindow.HWND)) $explorerProcessId $folderMarker) 'Could not activate the acceptance Explorer window.'
+    Start-Sleep -Milliseconds 500
+    $explorerRoot = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr] ([int64] $explorerWindow.HWND))
+    $fileElement = Find-AutomationElement $explorerRoot 'selected-zommi-file.txt'
+    if ($null -ne $fileElement) {
+        $fileBounds = $fileElement.Current.BoundingRectangle
+        [void] [ZommiNativeWindow]::SetCursorPos(
+            [int] ($fileBounds.X + ($fileBounds.Width / 2)),
+            [int] ($fileBounds.Y + ($fileBounds.Height / 2)))
     }
-    Assert-True ($null -ne $explorerCapture -and $explorerCapture.ExitCode -eq 0) "Explorer capture failed. stdout=$($explorerCapture.StandardOutput) stderr=$($explorerCapture.StandardError) foreground=$([ZommiNativeWindow]::GetForegroundWindow()) expected=$($explorerWindow.HWND)"
-    $explorerJson = $explorerCapture.StandardOutput | ConvertFrom-Json
-    Assert-True ($explorerJson.snapshot.surfaceKind -eq 'File Explorer') 'Explorer was not classified as File Explorer.'
-    Assert-True ([string]::Equals([string] $explorerJson.snapshot.locator.value, $explorerFolder, [StringComparison]::OrdinalIgnoreCase)) 'Explorer folder-path capture was incorrect.'
-    Assert-True (@($explorerJson.snapshot.selection) -contains $selectedFile) 'Explorer selection capture was incorrect.'
-    $results.explorerPathAndSelection = 'passed'
-    $explorerWindow.Quit()
-    $explorerWindow = $null
+    $folderCapture = Invoke-CapturedProcess $executable '--acceptance-capture-once' 30
+    Assert-True ($folderCapture.ExitCode -eq 0) "The pointer Explorer capture probe failed: $($folderCapture.StandardError)"
+    $folderCaptureJson = $folderCapture.StandardOutput | ConvertFrom-Json
+    Assert-True ($folderCaptureJson.snapshot.locator.value -eq $explorerFolder) 'The pointer Explorer capture probe omitted the folder path.'
+    Assert-True (@($folderCaptureJson.snapshot.selection) -contains $selectedFile) 'The pointer Explorer capture probe omitted the selected file.'
+    $folderPointerBefore = [ZommiNativeWindow]::CursorPosition()
+    $shortcut = Invoke-ZommiShortcut $gui
+    $chat = $shortcut.Window
+    Assert-True ($null -ne $chat) 'Ctrl+Enter did not reopen Zommi over File Explorer.'
+    $folderPointerAfter = [ZommiNativeWindow]::CursorPosition()
+    Assert-True ($folderPointerBefore.X -eq $folderPointerAfter.X -and $folderPointerBefore.Y -eq $folderPointerAfter.Y) 'The Explorer invocation moved the mouse pointer.'
+    $context = Find-AutomationElementById $chat 'InvocationContext'
+    $contextText = [string] $context.Current.Name
+    Assert-True ($contextText -eq '[context]') 'The Explorer context was not represented by the compact [context] chip.'
+    Assert-True ((Wait-ThreadId $gui) -eq $threadId) 'Reinvoking Zommi over Explorer created a new Codex thread.'
+    $folderPrompt = 'Reply with only the selected file name from the attached folder context.'
+    $transcript = Send-ChatTurn $gui $chat $folderPrompt 'selected-zommi-file.txt'
+    Assert-True ($transcript -like "*$browserMarker*" -and $transcript -like '*selected-zommi-file.txt*') 'The same floating transcript did not preserve both turns.'
+    Assert-True ((Wait-ThreadId $gui) -eq $threadId) 'The Explorer turn switched Codex threads.'
+    $results.folderHoverReinvokeSameThread = 'passed'
 
-    if (-not $SkipBrowser) {
-        $edgeCandidates = @(
-            @(
-                (Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'),
-                (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe')
-            ) | Where-Object { Test-Path $_ }
-        )
-        Assert-True ($edgeCandidates.Count -gt 0) 'Microsoft Edge is not installed.'
-        $edgeExecutable = $edgeCandidates[0]
-        $browserMarker = [Guid]::NewGuid().ToString('N')
-        $browserTitle = "Zommi Acceptance $browserMarker"
-        $buttonName = "Zommi Target $browserMarker"
-        $htmlPath = Join-Path $temporaryRoot 'zommi-browser-acceptance.html'
-        $html = "<!doctype html><title>$browserTitle</title><button style='margin:160px;font-size:30px'>$buttonName</button>"
-        [IO.File]::WriteAllText($htmlPath, $html)
-        $browserUri = ([Uri] $htmlPath).AbsoluteUri
-        $edgeProfile = Join-Path $temporaryRoot 'edge-profile'
-        $edgeArguments = '--user-data-dir={0} --no-first-run --no-default-browser-check --force-renderer-accessibility --disable-features=msEdgeFirstRunExperience --new-window {1}' -f (Quote-Argument $edgeProfile), (Quote-Argument $browserUri)
-        Start-Process -FilePath $edgeExecutable -ArgumentList $edgeArguments | Out-Null
+    [ZommiNativeWindow]::PressEscape()
+    Start-Sleep -Milliseconds 300
+    Assert-True ($null -eq (Find-ZommiWindow $gui)) 'Escape did not hide Zommi after the Explorer turn.'
 
-        for ($attempt = 0; $attempt -lt 150 -and $null -eq $edgeWindow; $attempt++) {
-            Start-Sleep -Milliseconds 100
-            $edgeWindow = Get-Process msedge -ErrorAction SilentlyContinue | Where-Object {
-                $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -like "*$browserTitle*"
-            } | Select-Object -First 1
-        }
-        Assert-True ($null -ne $edgeWindow) 'The isolated Edge acceptance window did not open.'
-        [void] [ZommiNativeWindow]::Activate([IntPtr] $edgeWindow.MainWindowHandle)
-        Start-Sleep -Milliseconds 750
-
-        $automationRoot = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr] $edgeWindow.MainWindowHandle)
-        $nameCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $buttonName)
-        $button = $automationRoot.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $nameCondition)
-        Assert-True ($null -ne $button) 'The browser did not expose the acceptance button through UI Automation.'
-        $bounds = $button.Current.BoundingRectangle
-        [void] [ZommiNativeWindow]::SetCursorPos([int] ($bounds.X + ($bounds.Width / 2)), [int] ($bounds.Y + ($bounds.Height / 2)))
-        Start-Sleep -Milliseconds 250
-
-        $browserCapture = $null
-        for ($attempt = 0; $attempt -lt 5; $attempt++) {
-            [void] [ZommiNativeWindow]::Activate([IntPtr] $edgeWindow.MainWindowHandle)
-            Start-Sleep -Milliseconds 300
-            $browserCapture = Invoke-CapturedProcess $executable "--acceptance-capture-once $globalArguments" $null
-            if ($browserCapture.ExitCode -eq 0) {
-                break
-            }
-        }
-        Assert-True ($null -ne $browserCapture -and $browserCapture.ExitCode -eq 0) "Browser capture failed. stdout=$($browserCapture.StandardOutput) stderr=$($browserCapture.StandardError)"
-        $browserJson = $browserCapture.StandardOutput | ConvertFrom-Json
-        Assert-True ($browserJson.snapshot.surfaceKind -eq 'Browser') 'Edge was not classified as a browser.'
-        Assert-True ([string]::Equals([string] $browserJson.snapshot.locator.value, $browserUri, [StringComparison]::OrdinalIgnoreCase)) 'Browser URL capture was incorrect.'
-        Assert-True ($browserJson.snapshot.indicatedTarget.name -eq $buttonName) 'Browser pointer-target capture was incorrect.'
-        $results.browserUrlAndTarget = 'passed'
-        [void] $edgeWindow.CloseMainWindow()
-        $edgeWindow = $null
+    $windowMarker = 'ZOMMI_WINDOW_' + [Guid]::NewGuid().ToString('N')
+    $notepadPath = Join-Path $temporaryRoot ($windowMarker + '.txt')
+    [IO.File]::WriteAllText($notepadPath, "Visible arbitrary window text: $windowMarker")
+    Start-Process -FilePath notepad.exe -ArgumentList (Quote-Argument $notepadPath) | Out-Null
+    for ($attempt = 0; $attempt -lt 120 -and $null -eq $notepadWindow; $attempt++) {
+        Start-Sleep -Milliseconds 100
+        $notepadWindow = Get-Process notepad -ErrorAction SilentlyContinue | Where-Object {
+            $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -like "*$windowMarker*"
+        } | Select-Object -First 1
     }
+    Assert-True ($null -ne $notepadWindow) 'The acceptance Notepad window did not open.'
+    Assert-True (Activate-Window ([IntPtr] $notepadWindow.MainWindowHandle) $notepadWindow.Id $windowMarker) 'Could not activate the acceptance Notepad window.'
+    Start-Sleep -Milliseconds 500
+    $notepadRoot = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr] $notepadWindow.MainWindowHandle)
+    $document = Find-ControlTypeElement $notepadRoot ([System.Windows.Automation.ControlType]::Document)
+    Assert-True ($null -ne $document) 'Notepad did not expose its document through UI Automation.'
+    $documentBounds = $document.Current.BoundingRectangle
+    [void] [ZommiNativeWindow]::SetCursorPos(
+        [int] ($documentBounds.X + [Math]::Min(80, $documentBounds.Width / 2)),
+        [int] ($documentBounds.Y + [Math]::Min(30, $documentBounds.Height / 2)))
+    $windowCapture = Invoke-CapturedProcess $executable '--acceptance-capture-once' 30
+    Assert-True ($windowCapture.ExitCode -eq 0) "The pointer arbitrary-window capture probe failed: $($windowCapture.StandardError)"
+    $windowCaptureJson = $windowCapture.StandardOutput | ConvertFrom-Json
+    $windowCaptureText = [string]::Join(' ', @($windowCaptureJson.snapshot.visibleText))
+    Assert-True ($windowCaptureText -like "*$windowMarker*") 'The pointer arbitrary-window capture probe omitted visible text.'
+    $windowPointerBefore = [ZommiNativeWindow]::CursorPosition()
+    $shortcut = Invoke-ZommiShortcut $gui
+    $chat = $shortcut.Window
+    Assert-True ($null -ne $chat) 'Ctrl+Enter did not reopen Zommi over an arbitrary window.'
+    $windowPointerAfter = [ZommiNativeWindow]::CursorPosition()
+    Assert-True ($windowPointerBefore.X -eq $windowPointerAfter.X -and $windowPointerBefore.Y -eq $windowPointerAfter.Y) 'The arbitrary-window invocation moved the pointer.'
+    $context = Find-AutomationElementById $chat 'InvocationContext'
+    $contextText = [string] $context.Current.Name
+    Assert-True ($contextText -eq '[context]') 'The arbitrary-window context was not represented by the compact [context] chip.'
+    Assert-True ((Wait-ThreadId $gui) -eq $threadId) 'Reinvoking Zommi over an arbitrary window created a new Codex thread.'
+    $windowPrompt = 'Reply with the exact token from the attached window context that starts with ZOMMI_WINDOW_ and nothing else.'
+    $transcript = Send-ChatTurn $gui $chat $windowPrompt $windowMarker
+    Assert-True ($transcript -like "*$browserMarker*" -and $transcript -like '*selected-zommi-file.txt*' -and $transcript -like "*$windowMarker*") 'The floating transcript did not preserve all three turns.'
+    Assert-True ((Wait-ThreadId $gui) -eq $threadId) 'The arbitrary-window turn switched Codex threads.'
+    $results.windowHoverReinvokeSameThread = 'passed'
 
+    $results.codexThreadId = $threadId
     $results.windowsVersion = [Environment]::OSVersion.VersionString
     $results.executableSha256 = (Get-FileHash -Algorithm SHA256 $executable).Hash.ToLowerInvariant()
     $results | ConvertTo-Json
 } finally {
-    if ($null -ne $owner -and -not $owner.HasExited) {
-        Stop-Process -Id $owner.Id -Force -ErrorAction SilentlyContinue
-    }
-    if ($null -ne $controlProbe -and -not $controlProbe.HasExited) {
-        Stop-Process -Id $controlProbe.Id -Force -ErrorAction SilentlyContinue
+    if ($null -ne $gui -and -not $gui.HasExited) {
+        & taskkill.exe /PID $gui.Id /T /F 2>&1 | Out-Null
     }
     if ($null -ne $explorerWindow) {
         try { $explorerWindow.Quit() } catch { }
@@ -397,6 +667,9 @@ public static class ZommiNativeWindow {
         } | ForEach-Object {
             Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
         }
+    }
+    if ($null -ne $notepadWindow -and -not $notepadWindow.HasExited) {
+        Stop-Process -Id $notepadWindow.Id -Force -ErrorAction SilentlyContinue
     }
     Start-Sleep -Milliseconds 250
     Remove-Item -LiteralPath $temporaryRoot -Recurse -Force -ErrorAction SilentlyContinue

@@ -23,7 +23,20 @@ internal sealed class ForegroundContextCapture
 
     public CaptureResult Capture(DateTimeOffset nowUtc)
     {
-        var windowHandle = NativeMethods.GetForegroundWindow();
+        if (!NativeMethods.GetCursorPos(out var pointer))
+        {
+            return new CaptureResult(null, PreservePrevious: true);
+        }
+
+        var hitWindow = NativeMethods.WindowFromPoint(pointer);
+        var windowHandle = hitWindow == IntPtr.Zero
+            ? IntPtr.Zero
+            : NativeMethods.GetAncestor(hitWindow, NativeMethods.GetRoot);
+        if (windowHandle == IntPtr.Zero)
+        {
+            windowHandle = hitWindow;
+        }
+
         if (windowHandle == IntPtr.Zero)
         {
             return new CaptureResult(null, PreservePrevious: true);
@@ -90,8 +103,8 @@ internal sealed class ForegroundContextCapture
                 return new CaptureResult(null, PreservePrevious: false);
             }
 
-            var indicatedTarget = TryReadPointerTarget(processId);
-            var visibleText = TryReadVisibleText(windowHandle, processId);
+            var indicatedTarget = TryReadPointerTarget(windowHandle, pointer);
+            var visibleText = TryReadVisibleText(windowHandle, pointer);
             return new CaptureResult(new ContextSnapshot
             {
                 SnapshotId = Guid.NewGuid().ToString("D"),
@@ -209,17 +222,13 @@ internal sealed class ForegroundContextCapture
         return (null, []);
     }
 
-    private static IndicatedTargetInfo? TryReadPointerTarget(uint foregroundProcessId)
+    private static IndicatedTargetInfo? TryReadPointerTarget(IntPtr windowHandle, NativeMethods.Point point)
     {
-        if (!NativeMethods.GetCursorPos(out var point))
-        {
-            return null;
-        }
-
         try
         {
+            var root = AutomationElement.FromHandle(windowHandle);
             var element = AutomationElement.FromPoint(new System.Windows.Point(point.X, point.Y));
-            if (element.Current.ProcessId != foregroundProcessId || element.Current.IsPassword)
+            if (!IsWithinWindow(element, root) || element.Current.IsPassword)
             {
                 return null;
             }
@@ -240,29 +249,26 @@ internal sealed class ForegroundContextCapture
         }
     }
 
-    private static IReadOnlyList<string> TryReadVisibleText(IntPtr windowHandle, uint foregroundProcessId)
+    private static IReadOnlyList<string> TryReadVisibleText(IntPtr windowHandle, NativeMethods.Point point)
     {
         try
         {
             var collector = new VisibleTextCollector(maximumItems: 32, maximumCharacters: 6000);
             var root = AutomationElement.FromHandle(windowHandle);
 
-            if (NativeMethods.GetCursorPos(out var point))
+            var hovered = AutomationElement.FromPoint(new System.Windows.Point(point.X, point.Y));
+            if (IsWithinWindow(hovered, root) && !hovered.Current.IsPassword)
             {
-                var hovered = AutomationElement.FromPoint(new System.Windows.Point(point.X, point.Y));
-                if (hovered.Current.ProcessId == foregroundProcessId && !hovered.Current.IsPassword)
+                var current = hovered;
+                for (var depth = 0; depth < 16 && current is not null; depth++)
                 {
-                    var current = hovered;
-                    for (var depth = 0; depth < 10 && current is not null; depth++)
+                    CollectElementText(current, collector, includeDocumentText: true);
+                    if (current.Equals(root))
                     {
-                        CollectElementText(current, collector, includeDocumentText: true);
-                        if (current.Equals(root))
-                        {
-                            break;
-                        }
-
-                        current = TreeWalker.ControlViewWalker.GetParent(current);
+                        break;
                     }
+
+                    current = TreeWalker.ControlViewWalker.GetParent(current);
                 }
             }
 
@@ -290,6 +296,34 @@ internal sealed class ForegroundContextCapture
         {
             return [];
         }
+    }
+
+    private static bool IsWithinWindow(AutomationElement element, AutomationElement root)
+    {
+        try
+        {
+            if (element.Current.ProcessId == root.Current.ProcessId)
+            {
+                return true;
+            }
+
+            var current = element;
+            for (var depth = 0; depth < 48 && current is not null; depth++)
+            {
+                if (current.Equals(root))
+                {
+                    return true;
+                }
+
+                current = TreeWalker.RawViewWalker.GetParent(current);
+            }
+        }
+        catch (Exception exception) when (exception is ElementNotAvailableException or InvalidOperationException or COMException)
+        {
+            return false;
+        }
+
+        return false;
     }
 
     private static void CollectElementText(
@@ -421,8 +455,13 @@ internal sealed class ForegroundContextCapture
 
     private static class NativeMethods
     {
+        internal const uint GetRoot = 2;
+
         [DllImport("user32.dll")]
-        internal static extern IntPtr GetForegroundWindow();
+        internal static extern IntPtr WindowFromPoint(Point point);
+
+        [DllImport("user32.dll")]
+        internal static extern IntPtr GetAncestor(IntPtr windowHandle, uint flags);
 
         [DllImport("user32.dll", EntryPoint = "GetWindowTextLengthW", CharSet = CharSet.Unicode)]
         internal static extern int GetWindowTextLength(IntPtr windowHandle);

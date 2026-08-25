@@ -17,6 +17,7 @@ internal sealed class MainForm : Form
     private static readonly Color Muted = Color.FromArgb(158, 166, 184);
     private static readonly Color TextColor = Color.FromArgb(240, 242, 247);
     private static readonly Color Accent = Color.FromArgb(111, 220, 181);
+    private static readonly Color ContextChip = Color.FromArgb(43, 76, 69);
     private static readonly Color Warning = Color.FromArgb(255, 193, 92);
 
     private readonly ForegroundContextCapture capture;
@@ -51,6 +52,8 @@ internal sealed class MainForm : Form
         ShowInTaskbar = false;
         TopMost = true;
         KeyPreview = true;
+        DoubleBuffered = true;
+        Opacity = 0.96;
         BackColor = Background;
         ForeColor = TextColor;
         Font = new Font("Segoe UI", 9.5f);
@@ -69,8 +72,18 @@ internal sealed class MainForm : Form
                 HideChat();
             }
         };
-        HandleCreated += (_, _) => RegisterInvocationHotkey();
+        HandleCreated += (_, _) =>
+        {
+            RegisterInvocationHotkey();
+            ApplyGlassEffect();
+        };
         HandleDestroyed += (_, _) => UnregisterInvocationHotkey();
+        Resize += (_, _) => ApplyRoundedRegion();
+        Paint += (_, eventArgs) =>
+        {
+            using var border = new Pen(Color.FromArgb(92, 119, 143), 1f);
+            eventArgs.Graphics.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
+        };
         FormClosing += OnFormClosing;
         Shown += OnShown;
 
@@ -126,19 +139,19 @@ internal sealed class MainForm : Form
         header.Controls.Add(closeButton, 2, 0);
         root.Controls.Add(header, 0, 0);
 
-        contextLabel.AutoEllipsis = true;
-        contextLabel.AccessibleName = "Invocation context";
-        contextLabel.AutoSize = false;
-        contextLabel.Height = 58;
-        contextLabel.Dock = DockStyle.Fill;
-        contextLabel.BackColor = Panel;
-        contextLabel.ForeColor = Muted;
-        contextLabel.Padding = new Padding(10, 8, 10, 8);
+        contextLabel.Name = "InvocationContext";
+        contextLabel.AutoSize = true;
+        contextLabel.Anchor = AnchorStyles.Left;
+        contextLabel.Font = new Font("Segoe UI Semibold", 9f);
+        contextLabel.Padding = new Padding(10, 5, 10, 5);
         contextLabel.Margin = new Padding(0, 8, 0, 10);
-        contextLabel.Text = "Press the shortcut while hovering over a page, window, or folder.";
+        SetInvocationContextState(
+            attached: false,
+            description: "Press the shortcut while hovering over a page, window, or folder.");
         root.Controls.Add(contextLabel, 0, 1);
 
         transcript.Dock = DockStyle.Fill;
+        transcript.Name = "CodexTranscript";
         transcript.AccessibleName = "Codex conversation";
         transcript.ReadOnly = true;
         transcript.BorderStyle = BorderStyle.None;
@@ -160,6 +173,7 @@ internal sealed class MainForm : Form
         composer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         composer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         input.Multiline = true;
+        input.Name = "ZommiComposer";
         input.AccessibleName = "Zommi message";
         input.AcceptsReturn = true;
         input.BorderStyle = BorderStyle.None;
@@ -171,6 +185,7 @@ internal sealed class MainForm : Form
         input.Dock = DockStyle.Fill;
         input.ScrollBars = ScrollBars.Vertical;
         StyleButton(sendButton, "Send");
+        sendButton.Name = "SendMessage";
         sendButton.AccessibleName = "Send message";
         sendButton.BackColor = Color.FromArgb(55, 92, 81);
         sendButton.Anchor = AnchorStyles.Bottom;
@@ -180,6 +195,7 @@ internal sealed class MainForm : Form
         root.Controls.Add(composer, 0, 3);
 
         statusLabel.AutoSize = true;
+        statusLabel.Name = "CodexStatus";
         statusLabel.AccessibleName = "Codex status";
         statusLabel.ForeColor = Muted;
         statusLabel.Margin = new Padding(2, 8, 0, 0);
@@ -296,6 +312,7 @@ internal sealed class MainForm : Form
 
     private void ShowChat(bool captureUnderlyingContext)
     {
+        var preservePointer = NativeMethods.GetCursorPos(out var pointerBeforeFocus);
         if (captureUnderlyingContext)
         {
             var result = capture.Capture(DateTimeOffset.UtcNow);
@@ -314,13 +331,19 @@ internal sealed class MainForm : Form
         BringToFront();
         input.Focus();
         input.SelectionStart = input.TextLength;
+        if (preservePointer)
+        {
+            _ = NativeMethods.SetCursorPos(pointerBeforeFocus.X, pointerBeforeFocus.Y);
+        }
     }
 
     private void HideChat()
     {
         Hide();
         invocationContext = null;
-        contextLabel.Text = "Press the shortcut while hovering over a page, window, or folder.";
+        SetInvocationContextState(
+            attached: false,
+            description: "Press the shortcut while hovering over a page, window, or folder.");
     }
 
     private void PositionAwayFromPointer()
@@ -355,7 +378,9 @@ internal sealed class MainForm : Form
         var snapshot = invocationContext;
         if (snapshot is null)
         {
-            contextLabel.Text = "No accessible context was exposed under the pointer. Your typed message will still be sent.";
+            SetInvocationContextState(
+                attached: false,
+                description: "No accessible context was exposed under the pointer. Your typed message will still be sent.");
             return;
         }
 
@@ -376,7 +401,16 @@ internal sealed class MainForm : Form
             parts.Add(string.Join(" · ", snapshot.VisibleText.Take(3)));
         }
 
-        contextLabel.Text = string.Join(Environment.NewLine, parts);
+        SetInvocationContextState(attached: true, description: string.Join(Environment.NewLine, parts));
+    }
+
+    private void SetInvocationContextState(bool attached, string description)
+    {
+        contextLabel.Text = attached ? "[context]" : "[no context]";
+        contextLabel.AccessibleName = contextLabel.Text;
+        contextLabel.AccessibleDescription = description;
+        contextLabel.BackColor = attached ? ContextChip : Panel;
+        contextLabel.ForeColor = attached ? Accent : Muted;
     }
 
     private async Task SendCurrentMessageAsync()
@@ -396,7 +430,7 @@ internal sealed class MainForm : Form
         responsePrefixPending = true;
         sendButton.Enabled = false;
         input.Enabled = false;
-        AppendTranscript("You", message, Accent);
+        AppendTranscript("You", invocationContext is null ? message : $"[context] {message}", Accent);
         input.Clear();
         RenderStatus("Codex is working…");
         try
@@ -489,6 +523,12 @@ internal sealed class MainForm : Form
     private void RenderStatus(string status, bool warning = false)
     {
         statusLabel.Text = status;
+        statusLabel.AccessibleName = codex.ThreadId is null
+            ? $"Codex status: {status}"
+            : $"Codex status: {status}; thread {codex.ThreadId}";
+        statusLabel.AccessibleDescription = codex.ThreadId is null
+            ? status
+            : $"Codex thread {codex.ThreadId}";
         statusLabel.ForeColor = warning ? Warning : Muted;
     }
 
@@ -529,8 +569,73 @@ internal sealed class MainForm : Form
         Close();
     }
 
+    private void ApplyGlassEffect()
+    {
+        if (!IsHandleCreated)
+        {
+            return;
+        }
+
+        var enabled = 1;
+        _ = NativeMethods.DwmSetWindowAttribute(
+            Handle,
+            NativeMethods.DwmWindowAttribute.UseImmersiveDarkMode,
+            ref enabled,
+            sizeof(int));
+        var corner = (int)NativeMethods.DwmWindowCornerPreference.Round;
+        _ = NativeMethods.DwmSetWindowAttribute(
+            Handle,
+            NativeMethods.DwmWindowAttribute.WindowCornerPreference,
+            ref corner,
+            sizeof(int));
+        var backdrop = (int)NativeMethods.DwmSystemBackdropType.TransientWindow;
+        _ = NativeMethods.DwmSetWindowAttribute(
+            Handle,
+            NativeMethods.DwmWindowAttribute.SystemBackdropType,
+            ref backdrop,
+            sizeof(int));
+        ApplyRoundedRegion();
+    }
+
+    private void ApplyRoundedRegion()
+    {
+        if (Width <= 0 || Height <= 0)
+        {
+            return;
+        }
+
+        var regionHandle = NativeMethods.CreateRoundRectRgn(0, 0, Width + 1, Height + 1, 24, 24);
+        if (regionHandle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var replacement = System.Drawing.Region.FromHrgn(regionHandle);
+        _ = NativeMethods.DeleteObject(regionHandle);
+        var previous = Region;
+        Region = replacement;
+        previous?.Dispose();
+    }
+
     private static class NativeMethods
     {
+        internal enum DwmWindowAttribute
+        {
+            UseImmersiveDarkMode = 20,
+            WindowCornerPreference = 33,
+            SystemBackdropType = 38,
+        }
+
+        internal enum DwmWindowCornerPreference
+        {
+            Round = 2,
+        }
+
+        internal enum DwmSystemBackdropType
+        {
+            TransientWindow = 3,
+        }
+
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool RegisterHotKey(IntPtr windowHandle, int id, uint modifiers, uint virtualKey);
@@ -542,6 +647,30 @@ internal sealed class MainForm : Form
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool GetCursorPos(out Point point);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool SetCursorPos(int x, int y);
+
+        [DllImport("dwmapi.dll")]
+        internal static extern int DwmSetWindowAttribute(
+            IntPtr windowHandle,
+            DwmWindowAttribute attribute,
+            ref int attributeValue,
+            int attributeSize);
+
+        [DllImport("gdi32.dll")]
+        internal static extern IntPtr CreateRoundRectRgn(
+            int left,
+            int top,
+            int right,
+            int bottom,
+            int widthEllipse,
+            int heightEllipse);
+
+        [DllImport("gdi32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool DeleteObject(IntPtr graphicsObject);
 
         [StructLayout(LayoutKind.Sequential)]
         internal struct Point
