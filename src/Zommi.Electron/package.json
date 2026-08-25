@@ -1,0 +1,18 @@
+{
+  "name": "zommi-electron",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "main": "main.mjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.mjs",
+    "package:windows": "node scripts/package-electron.mjs --platform win32 --arch x64",
+    "package:linux": "node scripts/package-electron.mjs --platform linux --arch x64",
+    "package:mac": "node scripts/package-electron.mjs --platform darwin --arch arm64"
+  },
+  "devDependencies": {
+    "@electron/get": "4.0.2",
+    "electron": "44.0.0"
+  }
+}

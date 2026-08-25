@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'">
+  <title>Zommi — floating Codex chat</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="glass" aria-label="Zommi floating Codex chat">
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
+
+    <header class="titlebar">
+      <button id="HideZommi" class="round-button no-drag" aria-label="Hide Zommi" title="Hide">×</button>
+      <div class="drag-region" aria-hidden="true"></div>
+      <button id="ExpandZommi" class="round-button no-drag expand" aria-label="Expand Zommi" title="Expand">↗</button>
+    </header>
+
+    <section id="QueryBubble" class="query-bubble empty" aria-live="polite">Ask Codex about what you see</section>
+
+    <section id="CodexTranscript" class="transcript" role="log" aria-live="polite" aria-label="Codex conversation including thinking and tool activity">
+      <div class="welcome">
+        <div class="orb"></div>
+        <p>Context is ready when you are.</p>
+      </div>
+    </section>
+
+    <aside id="ContextPreview" class="context-preview" aria-label="Attached context preview" hidden>
+      <div class="preview-head">
+        <span id="PreviewTitle">Context</span>
+        <button id="ClosePreview" aria-label="Close context preview">×</button>
+      </div>
+      <img id="ContextPreviewImage" alt="Attached visual context preview" hidden>
+      <pre id="ContextPreviewText" tabindex="0"></pre>
+    </aside>
+
+    <section class="composer-shell" aria-label="Message composer">
+      <div id="ContextChips" class="context-chips" aria-label="Attached contexts"></div>
+      <div class="composer-row">
+        <button id="SelectImage" class="composer-button plus" aria-label="Select image context" title="Select image context">+</button>
+        <textarea id="ZommiComposer" rows="1" aria-label="Zommi message with attached context tokens" placeholder="Ask Codex"></textarea>
+        <button id="SendMessage" class="composer-button send" aria-label="Send message" title="Send">↑</button>
+      </div>
+    </section>
+
+    <footer>
+      <span id="CodexStatus" role="status">starting…</span>
+      <span id="ZommiShortcuts" aria-label="Alt+A and Alt+Shift+A shortcut status">Alt+A context · Alt+Shift+A image</span>
+    </footer>
+  </main>
+  <script type="module" src="renderer.mjs"></script>
+</body>
+</html>
