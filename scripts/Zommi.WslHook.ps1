@@ -2,7 +2,8 @@
 param(
     [string] $StateRoot,
     [string] $Channel,
-    [string] $LaunchToken
+    [string] $LaunchToken,
+    [string] $CommandMarker
 )
 
 # PowerShell is the console-subsystem bridge between WSL's stdin/stdout and the

@@ -230,6 +230,8 @@ public static class ZommiNativeWindow {
         Assert-True ($wslLaunchJson.arguments -contains $wslLaunchJson.linuxHome) 'The WSL launch omitted the discovered Linux home directory.'
         Assert-True ($wslLaunchJson.arguments -contains 'exec codex --dangerously-bypass-hook-trust') 'The WSL launch did not start a fresh trusted-automation Codex session.'
         Assert-True ($wslLaunchJson.command -like '*-LaunchToken*acceptance-launch-token*') 'The WSL hook did not carry the exact launch token.'
+        Assert-True ($wslLaunchJson.command -like '*--zommi-hook*') 'The WSL hook command omitted its installer identity marker.'
+        Assert-True $wslLaunchJson.hookConfigurationValidated 'The generated WSL hook command was rejected by the hook configuration installer.'
         $results.wslFreshSessionLaunchPlan = 'passed'
     }
 

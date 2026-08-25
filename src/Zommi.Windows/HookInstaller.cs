@@ -133,6 +133,7 @@ internal static class HookInstaller
         command = AppendPowerShellArgument(command, "StateRoot", stateRoot);
         command = AppendPowerShellArgument(command, "Channel", channel);
         command = AppendPowerShellArgument(command, "LaunchToken", launchToken);
+        command = AppendPowerShellArgument(command, "CommandMarker", CodexHookConfiguration.CommandMarker);
         return new WslEnvironment(distroName, lines[1], wslHooksPath, command);
     }
 

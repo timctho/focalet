@@ -1,3 +1,4 @@
+using System.IO;
 using System.Text.Json;
 using Zommi.Core;
 
@@ -109,10 +110,14 @@ internal static class AcceptanceProbe
 
     public static int WslLaunchPlan()
     {
+        var validationDirectory = Path.Combine(Path.GetTempPath(), $"zommi-wsl-command-{Guid.NewGuid():N}");
         try
         {
             var environment = HookInstaller.ResolveWslHook("acceptance-launch-token");
             var startInfo = WslCodexLauncher.BuildStartInfo("wt.exe", environment, useWindowsTerminal: true);
+            var validationHooksPath = Path.Combine(validationDirectory, "hooks.json");
+            _ = CodexHookConfiguration.Install(validationHooksPath, environment.Command);
+            var hookConfigurationValidated = CodexHookConfiguration.IsInstalled(validationHooksPath);
             Console.Out.Write(JsonSerializer.Serialize(new
             {
                 startInfo.FileName,
@@ -120,6 +125,7 @@ internal static class AcceptanceProbe
                 environment.DistroName,
                 environment.LinuxHome,
                 environment.Command,
+                hookConfigurationValidated,
             }));
             return 0;
         }
@@ -127,6 +133,17 @@ internal static class AcceptanceProbe
         {
             Console.Error.Write(exception);
             return 1;
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(validationDirectory, recursive: true);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // Acceptance cleanup must not obscure the actual probe result.
+            }
         }
     }
 }
