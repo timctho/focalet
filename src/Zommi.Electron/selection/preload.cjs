@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('zommiSelection', {
   complete: (rectangle) => ipcRenderer.send('selection:complete', rectangle),

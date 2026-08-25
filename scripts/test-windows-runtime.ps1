@@ -9,6 +9,12 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+$electronNativeHost = Join-Path (Split-Path -Parent $ExecutablePath) 'resources/native/Zommi.exe'
+if (Test-Path -LiteralPath $electronNativeHost -PathType Leaf) {
+    & (Join-Path $PSScriptRoot 'test-windows-electron-runtime.ps1') @PSBoundParameters
+    return
+}
+
 function Assert-True {
     param([bool] $Condition, [string] $Message)
     if (-not $Condition) {

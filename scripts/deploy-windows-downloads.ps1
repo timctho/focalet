@@ -134,6 +134,7 @@ try {
     }
 
     $startedProcessId = $null
+    $electronProcessCount = 0
     if (-not $NoStart) {
         $startedProcess = Start-Process `
             -FilePath (Join-Path $targetDirectory 'Zommi.exe') `
@@ -153,16 +154,19 @@ try {
                 throw "The deployed Zommi process exited with code $($startedProcess.ExitCode)."
             }
             $runningTargets = @(Get-ExactTargetProcesses (Join-Path $targetDirectory 'Zommi.exe'))
-            if ($runningTargets.Count -eq 1 -and $runningTargets[0].ProcessId -eq $startedProcess.Id) {
+            if ($runningTargets.Count -ge 3 -and
+                $runningTargets.ProcessId -contains $startedProcess.Id) {
                 break
             }
             Start-Sleep -Milliseconds 250
         } while ([DateTime]::UtcNow -lt $processDeadline)
 
-        if ($runningTargets.Count -ne 1 -or $runningTargets[0].ProcessId -ne $startedProcess.Id) {
-            throw "Expected exactly one deployed Zommi process; found $($runningTargets.Count)."
+        if ($runningTargets.Count -lt 3 -or
+            $runningTargets.ProcessId -notcontains $startedProcess.Id) {
+            throw "Expected the Electron browser process and its children; found $($runningTargets.Count) exact-path processes."
         }
         $startedProcessId = $startedProcess.Id
+        $electronProcessCount = $runningTargets.Count
     }
 
     if ($hadDirectoryBackup) {
@@ -180,6 +184,7 @@ try {
         archiveSha256 = $targetArchiveHash.ToLowerInvariant()
         stoppedProcesses = $stoppedProcessCount
         startedProcessId = $startedProcessId
+        electronProcessCount = $electronProcessCount
     } | ConvertTo-Json
 }
 catch {

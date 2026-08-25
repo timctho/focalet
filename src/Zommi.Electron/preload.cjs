@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+const { contextBridge, ipcRenderer } = require('electron');
 
 const subscribe = (channel, callback) => {
   const listener = (_event, payload) => callback(payload);

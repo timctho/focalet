@@ -22,7 +22,13 @@ if (!hasSingleInstanceLock) {
   app.quit();
 } else {
   app.on('second-instance', () => showWindow());
-  await startApplication();
+  // Do not top-level await a function that waits for app readiness. Electron
+  // waits for the ESM entry point to finish evaluating before it emits ready,
+  // so awaiting app.whenReady() here would deadlock packaged startup.
+  void startApplication().catch((error) => {
+    console.error('Zommi failed to start.', error);
+    app.quit();
+  });
 }
 
 async function startApplication() {
@@ -73,7 +79,7 @@ function createWindow() {
     vibrancy: process.platform === 'darwin' ? 'under-window' : undefined,
     visualEffectState: process.platform === 'darwin' ? 'active' : undefined,
     webPreferences: {
-      preload: join(moduleDirectory, 'preload.mjs'),
+      preload: join(moduleDirectory, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,

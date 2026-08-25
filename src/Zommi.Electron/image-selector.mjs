@@ -35,7 +35,7 @@ export async function selectImageRegion() {
     movable: false,
     fullscreenable: false,
     webPreferences: {
-      preload: join(moduleDirectory, 'selection', 'preload.mjs'),
+      preload: join(moduleDirectory, 'selection', 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,

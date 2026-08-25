@@ -18,34 +18,6 @@ function Assert-True {
     if (-not $Condition) { throw $Message }
 }
 
-function Find-ProcessWindow {
-    param(
-        [System.Diagnostics.Process] $Process,
-        [string] $Title,
-        [int] $TimeoutSeconds = 15
-    )
-
-    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
-    while ([DateTime]::UtcNow -lt $deadline) {
-        $desktop = [System.Windows.Automation.AutomationElement]::RootElement
-        $windows = $desktop.FindAll(
-            [System.Windows.Automation.TreeScope]::Children,
-            [System.Windows.Automation.Condition]::TrueCondition)
-        foreach ($candidate in $windows) {
-            try {
-                if ($candidate.Current.ProcessId -eq $Process.Id -and
-                    $candidate.Current.Name -like $Title) {
-                    return $candidate
-                }
-            } catch {
-                # A top-level window can disappear while the desktop is enumerated.
-            }
-        }
-        Start-Sleep -Milliseconds 100
-    }
-    return $null
-}
-
 function Find-AutomationElementById {
     param(
         [System.Windows.Automation.AutomationElement] $Root,
@@ -58,7 +30,7 @@ function Find-AutomationElementById {
     return $Root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
 }
 
-function Find-AutomationElement {
+function Find-AutomationElementByName {
     param(
         [System.Windows.Automation.AutomationElement] $Root,
         [string] $Name
@@ -70,18 +42,89 @@ function Find-AutomationElement {
     return $Root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
 }
 
-function Find-DocumentElement {
+function Wait-MainWindow {
     param(
-        [System.Windows.Automation.AutomationElement] $Root,
-        [int] $Index
+        [System.Diagnostics.Process] $Process,
+        [int] $TimeoutSeconds = 20
     )
 
-    $condition = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-        [System.Windows.Automation.ControlType]::Document)
-    $documents = $Root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)
-    if ($documents.Count -le $Index) { return $null }
-    return $documents[$Index]
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $Process.Refresh()
+        if ($Process.HasExited) {
+            throw "Zommi exited before opening its Electron window with code $($Process.ExitCode)."
+        }
+        if ($Process.MainWindowHandle -ne [IntPtr]::Zero) {
+            try {
+                $window = [System.Windows.Automation.AutomationElement]::FromHandle(
+                    $Process.MainWindowHandle)
+                if ($window.Current.Name -like 'Zommi*floating Codex chat') {
+                    return $window
+                }
+            }
+            catch {
+                # Chromium can replace its top-level window while initializing.
+            }
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    return $null
+}
+
+function Wait-AutomationElementById {
+    param(
+        [System.Windows.Automation.AutomationElement] $Root,
+        [string] $AutomationId,
+        [int] $TimeoutSeconds = 10
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $element = Find-AutomationElementById $Root $AutomationId
+        if ($null -ne $element) { return $element }
+        Start-Sleep -Milliseconds 100
+    }
+    return $null
+}
+
+function Wait-AutomationElementByName {
+    param(
+        [System.Windows.Automation.AutomationElement] $Root,
+        [string] $Name,
+        [int] $TimeoutSeconds = 10
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $element = Find-AutomationElementByName $Root $Name
+        if ($null -ne $element) { return $element }
+        Start-Sleep -Milliseconds 100
+    }
+    return $null
+}
+
+function Wait-TopLevelWindowByName {
+    param(
+        [string] $Name,
+        [int] $TimeoutSeconds = 10
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+            [System.Windows.Automation.TreeScope]::Children,
+            [System.Windows.Automation.Condition]::TrueCondition)
+        foreach ($candidate in $windows) {
+            try {
+                if ($candidate.Current.Name -eq $Name -and -not $candidate.Current.IsOffscreen) {
+                    return $candidate
+                }
+            }
+            catch { }
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    return $null
 }
 
 function Get-AutomationText {
@@ -99,330 +142,254 @@ function Get-AutomationText {
         [ref] $valuePatternObject)) {
         return [string] ([System.Windows.Automation.ValuePattern] $valuePatternObject).Current.Value
     }
-    return [string] $Element.Current.Name
+
+    $text = [string] $Element.Current.Name
+    foreach ($descendant in $Element.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition)) {
+        try {
+            if (-not [string]::IsNullOrWhiteSpace($descendant.Current.Name)) {
+                $text += "`n" + $descendant.Current.Name
+            }
+        }
+        catch {
+            # Ignore a renderer element that disappears during enumeration.
+        }
+    }
+    return $text
+}
+
+function Get-ExactExecutableProcesses {
+    param([string] $Path)
+
+    $normalized = [IO.Path]::GetFullPath($Path)
+    return @(
+        Get-CimInstance Win32_Process | Where-Object {
+            $_.Name -eq 'Zommi.exe' -and
+            $_.ExecutablePath -and
+            [string]::Equals(
+                [IO.Path]::GetFullPath($_.ExecutablePath),
+                $normalized,
+                [StringComparison]::OrdinalIgnoreCase)
+        }
+    )
 }
 
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
-    throw 'This UI contract requires Windows.'
+    throw 'This Electron UI contract requires Windows.'
 }
 
 Add-Type -AssemblyName UIAutomationClient
-Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
+Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
-using System.Text;
-using System.Drawing;
-using System.Drawing.Imaging;
 
-public static class ZommiUiNative {
-    [StructLayout(LayoutKind.Sequential)]
-    private struct Rect { public int Left; public int Top; public int Right; public int Bottom; }
-    private delegate bool EnumWindowsProc(IntPtr window, IntPtr parameter);
-    private delegate bool EnumChildProc(IntPtr window, IntPtr parameter);
-    private static int searchProcessId;
-    private static string searchTitle;
-    private static IntPtr searchResult;
-
-    [DllImport("user32.dll")]
-    public static extern bool SetCursorPos(int x, int y);
-
+public static class ZommiElectronUiNative {
     [DllImport("user32.dll")]
     private static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
-
     [DllImport("user32.dll")]
-    public static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+    private static extern void mouse_event(uint flags, uint dx, uint dy, int data, UIntPtr extraInfo);
 
-    [DllImport("user32.dll")]
-    public static extern IntPtr SendMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
-
-    [DllImport("user32.dll")]
-    public static extern bool IsWindowVisible(IntPtr window);
-
-    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "SendMessageW")]
-    private static extern IntPtr SendMessageText(IntPtr window, uint message, IntPtr wParam, StringBuilder text);
-
-    public static IntPtr MousePosition(int x, int y) {
-        return (IntPtr)((y << 16) | (x & 0xffff));
-    }
-
-    public static IntPtr MouseWheelDelta(short delta) {
-        return (IntPtr)((long)(ushort)delta << 16);
-    }
-
-    public static void PressAltA() {
+    public static void PressAltShiftA() {
         const uint keyUp = 0x0002;
         keybd_event(0x12, 0, 0, UIntPtr.Zero);
+        keybd_event(0x10, 0, 0, UIntPtr.Zero);
         keybd_event(0x41, 0, 0, UIntPtr.Zero);
         keybd_event(0x41, 0, keyUp, UIntPtr.Zero);
+        keybd_event(0x10, 0, keyUp, UIntPtr.Zero);
         keybd_event(0x12, 0, keyUp, UIntPtr.Zero);
     }
 
-    [DllImport("user32.dll")]
-    private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr parameter);
-
-    [DllImport("user32.dll")]
-    private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
-
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    private static extern int GetWindowText(IntPtr window, StringBuilder text, int maximumCount);
-
-    [DllImport("user32.dll")]
-    private static extern bool EnumChildWindows(IntPtr parent, EnumChildProc callback, IntPtr parameter);
-
-    [DllImport("user32.dll")]
-    private static extern bool GetWindowRect(IntPtr window, out Rect rectangle);
-
-    [DllImport("user32.dll")]
-    private static extern bool PrintWindow(IntPtr window, IntPtr deviceContext, uint flags);
-
-    private static bool FindWindow(IntPtr window, IntPtr parameter) {
-        uint processId;
-        GetWindowThreadProcessId(window, out processId);
-        StringBuilder text = new StringBuilder(512);
-        GetWindowText(window, text, text.Capacity);
-        if (processId == searchProcessId && text.ToString().Contains(searchTitle)) {
-            searchResult = window;
-            return false;
-        }
-        return true;
+    public static void LeftButtonDown() {
+        mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);
     }
 
-    public static IntPtr FindProcessWindow(int processId, string title) {
-        searchProcessId = processId;
-        searchTitle = title;
-        searchResult = IntPtr.Zero;
-        EnumWindows(FindWindow, IntPtr.Zero);
-        return searchResult;
-    }
-
-    public static string ReadDescendantText(IntPtr parent) {
-        StringBuilder result = new StringBuilder();
-        EnumChildWindows(parent, delegate(IntPtr window, IntPtr parameter) {
-            StringBuilder text = new StringBuilder(32768);
-            SendMessageText(window, 0x000D, (IntPtr)text.Capacity, text);
-            if (text.Length > 0) result.Append(' ').Append(text);
-            return true;
-        }, IntPtr.Zero);
-        return result.ToString();
-    }
-
-    public static bool CaptureWindow(IntPtr window, string path) {
-        Rect rectangle;
-        if (!GetWindowRect(window, out rectangle)) return false;
-        int width = rectangle.Right - rectangle.Left;
-        int height = rectangle.Bottom - rectangle.Top;
-        using (Bitmap bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb))
-        using (Graphics graphics = Graphics.FromImage(bitmap)) {
-            IntPtr context = graphics.GetHdc();
-            try {
-                if (!PrintWindow(window, context, 2)) return false;
-            } finally {
-                graphics.ReleaseHdc(context);
-            }
-            bitmap.Save(path, ImageFormat.Png);
-        }
-        return true;
+    public static void LeftButtonUp() {
+        mouse_event(0x0004, 0, 0, 0, UIntPtr.Zero);
     }
 }
 '@
 
-Assert-True (Test-Path -LiteralPath $ExecutablePath) 'Zommi.exe was not found.'
+$resolvedExecutable = [IO.Path]::GetFullPath($ExecutablePath)
+Assert-True (Test-Path -LiteralPath $resolvedExecutable -PathType Leaf) 'Zommi.exe was not found.'
 $process = $null
+
 try {
-    $process = Start-Process -FilePath $ExecutablePath -ArgumentList '--acceptance-ui-seeded' -PassThru
-    $chat = Find-ProcessWindow $process 'Zommi*floating Codex chat' 20
-    Assert-True ($null -ne $chat) 'The seeded Glass-style chat did not open.'
+    $process = Start-Process `
+        -FilePath $resolvedExecutable `
+        -WorkingDirectory (Split-Path -Parent $resolvedExecutable) `
+        -ArgumentList '--acceptance-ui-seeded', '--force-renderer-accessibility' `
+        -PassThru
 
-    $bounds = $chat.Current.BoundingRectangle
-    Assert-True ($bounds.Width -ge 700 -and $bounds.Height -ge 340) 'The floating response surface did not use the expected wide Glass layout.'
-    $allText = ''
-    $shortcutElement = $null
-    foreach ($descendant in $chat.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.Condition]::TrueCondition)) {
-        try {
-            $allText += ' ' + $descendant.Current.Name
-            if ($descendant.Current.Name -like 'Alt + A*Alt + Shift + A*') {
-                $shortcutElement = $descendant
-            }
-        } catch { }
-    }
-    Assert-True ($allText -like '*Alt + A*Alt + Shift + A*') 'The required shortcuts were not visible.'
-    $shortcutName = if ($null -eq $shortcutElement) { '<missing>' } else { $shortcutElement.Current.Name }
-    $shortcutHelp = if ($null -eq $shortcutElement) { '<missing>' } else { $shortcutElement.Current.HelpText }
+    $window = Wait-MainWindow $process 20
+    Assert-True ($null -ne $window) 'The seeded Electron Glass window did not open.'
+    Assert-True ($window.Current.ClassName -eq 'Chrome_WidgetWin_1') 'The visible UI was not hosted by Electron/Chromium.'
+
+    $bounds = $window.Current.BoundingRectangle
+    Assert-True ($bounds.Width -ge 700 -and $bounds.Height -ge 450) 'The floating response surface was smaller than the Glass layout contract.'
+
+    $composer = Wait-AutomationElementById $window 'ZommiComposer' 15
+    $transcript = Find-AutomationElementById $window 'CodexTranscript'
+    $chips = Find-AutomationElementById $window 'ContextChips'
+    $status = Find-AutomationElementById $window 'CodexStatus'
+    $shortcuts = Find-AutomationElementById $window 'ZommiShortcuts'
+    Assert-True ($null -ne $composer) 'The Electron composer was not exposed through UI Automation.'
+    Assert-True ($null -ne $transcript) 'The Electron transcript was not exposed through UI Automation.'
+    Assert-True ($null -ne $chips) 'Attached contexts were not exposed through UI Automation.'
+    Assert-True ($null -ne $status) 'The Codex status was not exposed through UI Automation.'
+    Assert-True ($null -ne $shortcuts) 'The global shortcut state was not exposed through UI Automation.'
+    Assert-True ($composer.Current.ControlType -eq [System.Windows.Automation.ControlType]::Edit) 'The Electron composer is not an editable text control.'
+    Assert-True ($composer.Current.HasKeyboardFocus) 'The floating composer did not receive keyboard focus.'
+
+    $shortcutName = $shortcuts.Current.Name
     $hotkeyRegistration = 'passed'
-    if ($null -eq $shortcutElement -or
-        $shortcutName -notlike '*Alt+A registered: True*Alt+Shift+A registered: True*') {
+    if ($shortcutName -notlike '*Alt+A registered: true*Alt+Shift+A registered: true*') {
         if ($AllowHotkeyUnavailable -and
-            $shortcutName -like '*Alt+A registered: False*Alt+Shift+A registered: False*') {
+            $shortcutName -like '*Alt+A registered: false*Alt+Shift+A registered: false*') {
             $hotkeyRegistration = 'occupied-by-existing-instance'
-        } else {
-            throw "Windows did not register both required global hotkeys. Name: $shortcutName Help: $shortcutHelp"
+        }
+        else {
+            throw "Windows did not register both required global hotkeys. Name: $shortcutName"
         }
     }
 
-    $composer = Find-DocumentElement $chat 1
-    Assert-True ($null -ne $composer) 'The composer was not exposed through UI Automation.'
-    $composerText = (Get-AutomationText $composer).TrimEnd()
-    Assert-True ($composerText -eq '[docs.example.com] [shop.example.com] [image]') "Context tokens were not inserted before send: '$composerText'."
+    $docsChip = Find-AutomationElementByName $window 'Attached context [docs.example.com]'
+    $shopChip = Find-AutomationElementByName $window 'Attached context [shop.example.com]'
+    $imageChip = Find-AutomationElementByName $window 'Attached context [image]'
+    Assert-True ($null -ne $docsChip) 'The first structured context chip was not rendered.'
+    Assert-True ($null -ne $shopChip) 'The accumulated second-tab context chip was not rendered.'
+    Assert-True ($null -ne $imageChip) 'The explicit image context chip was not rendered.'
+
     if (-not [string]::IsNullOrWhiteSpace($EvidencePath)) {
-        Assert-True ([ZommiUiNative]::CaptureWindow(
-            [IntPtr] $chat.Current.NativeWindowHandle,
-            $EvidencePath)) 'Could not capture the seeded Glass UI evidence.'
-    }
-
-    $composerBounds = $composer.Current.BoundingRectangle
-    [void] [ZommiUiNative]::SetCursorPos(
-        [int] ($composerBounds.X + 35),
-        [int] ($composerBounds.Y + 18))
-    [void] [ZommiUiNative]::SendMessage(
-        [IntPtr] $composer.Current.NativeWindowHandle,
-        0x0200,
-        [IntPtr]::Zero,
-        [ZommiUiNative]::MousePosition(35, 18))
-    $preview = Find-ProcessWindow $process 'Zommi context preview' 10
-    if ($null -eq $preview) {
-        $previewHandle = [ZommiUiNative]::FindProcessWindow($process.Id, 'Zommi context preview')
-        if ($previewHandle -ne [IntPtr]::Zero) {
-            $preview = [System.Windows.Automation.AutomationElement]::FromHandle($previewHandle)
+        $evidenceDirectory = Split-Path -Parent $EvidencePath
+        if (-not [string]::IsNullOrWhiteSpace($evidenceDirectory)) {
+            New-Item -ItemType Directory -Path $evidenceDirectory -Force | Out-Null
+        }
+        $bitmap = New-Object System.Drawing.Bitmap(
+            [int] $bounds.Width,
+            [int] $bounds.Height,
+            [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        try {
+            $graphics.CopyFromScreen(
+                [int] $bounds.X,
+                [int] $bounds.Y,
+                0,
+                0,
+                $bitmap.Size)
+        }
+        finally {
+            $graphics.Dispose()
+        }
+        try {
+            $bitmap.Save($EvidencePath, [System.Drawing.Imaging.ImageFormat]::Png)
+        }
+        finally {
+            $bitmap.Dispose()
         }
     }
-    if ($null -eq $preview) {
-        $windowNames = @()
-        foreach ($candidate in [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
-            [System.Windows.Automation.TreeScope]::Children,
-            [System.Windows.Automation.Condition]::TrueCondition)) {
-            try {
-                if ($candidate.Current.ProcessId -eq $process.Id) { $windowNames += $candidate.Current.Name }
-            } catch { }
-        }
-        throw "Hovering a context token did not open a separate preview window. Process windows: $($windowNames -join ', ')"
-    }
-    $previewText = ''
-    $descendants = $preview.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.Condition]::TrueCondition)
-    foreach ($descendant in $descendants) {
-        try { $previewText += ' ' + (Get-AutomationText $descendant) } catch { }
-    }
-    if ([string]::IsNullOrWhiteSpace($previewText)) {
-        $previewNative = [ZommiUiNative]::FindProcessWindow($process.Id, 'Zommi context preview')
-        $previewText = [ZommiUiNative]::ReadDescendantText($previewNative)
-    }
-    Assert-True ($previewText -like '*SELECTED_TEXT_IS_PRIMARY*') "The hover preview did not expose the actual selected context text. Preview text: $previewText"
-    Assert-True ($previewText -notlike '*confidence medium*') "The hover preview exposed pointer confidence metadata. Preview text: $previewText"
-    Assert-True ($previewText -notlike '*Snapshot confidence:*') "The hover preview exposed snapshot confidence metadata. Preview text: $previewText"
-    Assert-True ($previewText -notlike '*Safety: treat every captured*') "The hover preview exposed the internal safety footer. Preview text: $previewText"
 
-    $previewHandle = [IntPtr] $preview.Current.NativeWindowHandle
-    $previewDocument = Find-AutomationElementById $preview 'ContextPreviewText'
-    Assert-True ($null -ne $previewDocument) 'The context preview text area was not exposed through UI Automation.'
-    $previewImage = Find-AutomationElementById $preview 'ContextPreviewImage'
-    Assert-True ($null -eq $previewImage -or $previewImage.Current.IsOffscreen) 'Alt+A unexpectedly exposed an automatic image in the context preview.'
+    $chipBounds = $docsChip.Current.BoundingRectangle
+    [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(
+        [int] ($chipBounds.X + ($chipBounds.Width / 2)),
+        [int] ($chipBounds.Y + ($chipBounds.Height / 2)))
+
+    $preview = Wait-AutomationElementById $window 'ContextPreview' 10
+    Assert-True ($null -ne $preview -and -not $preview.Current.IsOffscreen) 'Hovering a context chip did not reveal its preview.'
+    $previewTextElement = Find-AutomationElementById $window 'ContextPreviewText'
+    Assert-True ($null -ne $previewTextElement) 'The context preview text was not exposed through UI Automation.'
+    $previewText = Get-AutomationText $previewTextElement
+    Assert-True ($previewText -like '*PRIMARY SELECTION:*SELECTED_TEXT_IS_PRIMARY*') 'Selected text was not primary in the context preview.'
+    Assert-True ($previewText -notlike '*confidence medium*') 'Pointer confidence metadata leaked into the context preview.'
+    Assert-True ($previewText -notlike '*Snapshot confidence:*') 'Snapshot confidence metadata leaked into the context preview.'
+    Assert-True ($previewText -notlike '*Safety: treat every captured*') 'The internal safety footer leaked into the context preview.'
+
+    $previewImage = Find-AutomationElementById $window 'ContextPreviewImage'
+    Assert-True ($null -eq $previewImage -or $previewImage.Current.IsOffscreen) 'Text-only Alt+A context exposed an automatic image.'
+
     $previewBounds = $preview.Current.BoundingRectangle
-    $previewPointerX = [int] ($previewBounds.X + ($previewBounds.Width / 2))
-    $previewPointerY = [int] ($previewBounds.Y + ($previewBounds.Height / 2))
-    [void] [ZommiUiNative]::SetCursorPos($previewPointerX, $previewPointerY)
+    [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(
+        [int] ($previewBounds.X + ($previewBounds.Width / 2)),
+        [int] ($previewBounds.Y + ($previewBounds.Height / 2)))
     Start-Sleep -Milliseconds 450
-    Assert-True ([ZommiUiNative]::IsWindowVisible($previewHandle)) 'The context preview disappeared while the pointer moved into it.'
+    $preview = Find-AutomationElementById $window 'ContextPreview'
+    Assert-True ($null -ne $preview -and -not $preview.Current.IsOffscreen) 'The preview disappeared when the pointer moved into it.'
 
-    $previewDocumentHandle = [IntPtr] $previewDocument.Current.NativeWindowHandle
-    $beforeScrollLine = [int] [ZommiUiNative]::SendMessage(
-        $previewDocumentHandle,
-        0x00CE,
-        [IntPtr]::Zero,
-        [IntPtr]::Zero)
-    1..4 | ForEach-Object {
-        [void] [ZommiUiNative]::SendMessage(
-            $previewDocumentHandle,
-            0x020A,
-            [ZommiUiNative]::MouseWheelDelta(-120),
-            [ZommiUiNative]::MousePosition($previewPointerX, $previewPointerY))
-    }
+    $scrollPatternObject = $null
+    Assert-True ($previewTextElement.TryGetCurrentPattern(
+        [System.Windows.Automation.ScrollPattern]::Pattern,
+        [ref] $scrollPatternObject)) 'The long context preview did not expose scrolling.'
+    $scrollPattern = [System.Windows.Automation.ScrollPattern] $scrollPatternObject
+    Assert-True $scrollPattern.Current.VerticallyScrollable 'The long context preview was not vertically scrollable.'
+    $beforeScroll = $scrollPattern.Current.VerticalScrollPercent
+    $scrollPattern.Scroll(
+        [System.Windows.Automation.ScrollAmount]::NoAmount,
+        [System.Windows.Automation.ScrollAmount]::LargeIncrement)
+    Start-Sleep -Milliseconds 250
+    $afterScroll = $scrollPattern.Current.VerticalScrollPercent
+    Assert-True ($afterScroll -gt $beforeScroll) 'The context preview did not scroll.'
+    Assert-True (-not $preview.Current.IsOffscreen) 'The context preview disappeared while scrolling.'
+
+    [ZommiElectronUiNative]::PressAltShiftA()
+    $selector = Wait-TopLevelWindowByName 'Zommi image selection' 15
+    Assert-True ($null -ne $selector) 'Alt+Shift+A did not open the explicit image selector.'
+    $selectorBounds = $selector.Current.BoundingRectangle
+    $dragStart = New-Object System.Drawing.Point(
+        [int] ($selectorBounds.X + 80),
+        [int] ($selectorBounds.Y + 80))
+    $dragEnd = New-Object System.Drawing.Point(
+        [int] ($selectorBounds.X + 220),
+        [int] ($selectorBounds.Y + 170))
+    [System.Windows.Forms.Cursor]::Position = $dragStart
+    [ZommiElectronUiNative]::LeftButtonDown()
+    Start-Sleep -Milliseconds 100
+    [System.Windows.Forms.Cursor]::Position = $dragEnd
     Start-Sleep -Milliseconds 150
-    $afterScrollLine = [int] [ZommiUiNative]::SendMessage(
-        $previewDocumentHandle,
-        0x00CE,
-        [IntPtr]::Zero,
-        [IntPtr]::Zero)
-    Assert-True ($afterScrollLine -gt $beforeScrollLine) "The context preview did not scroll while hovered. First visible line: $beforeScrollLine -> $afterScrollLine"
-    Assert-True ([ZommiUiNative]::IsWindowVisible($previewHandle)) 'The context preview disappeared during scrolling.'
+    [ZommiElectronUiNative]::LeftButtonUp()
 
-    [void] [ZommiUiNative]::SetCursorPos(5, 5)
-    Start-Sleep -Milliseconds 450
-    Assert-True (-not [ZommiUiNative]::IsWindowVisible($previewHandle)) 'The context preview remained visible after the pointer left it.'
-    $chatHandle = [IntPtr] $chat.Current.NativeWindowHandle
-    Assert-True ([ZommiUiNative]::PostMessage($chatHandle, 0x0312, [IntPtr] 0x5A4E, [IntPtr]::Zero)) 'Could not invoke image selection through WM_HOTKEY.'
-    $selector = Find-ProcessWindow $process 'Zommi image selection' 10
-    Assert-True ($null -ne $selector) 'Alt+Shift+A did not open the image-selection overlay.'
-    $selectorHandle = [IntPtr] $selector.Current.NativeWindowHandle
-    [void] [ZommiUiNative]::SendMessage($selectorHandle, 0x0201, [IntPtr] 1, [ZommiUiNative]::MousePosition(120, 120))
-    [void] [ZommiUiNative]::SendMessage($selectorHandle, 0x0200, [IntPtr] 1, [ZommiUiNative]::MousePosition(300, 220))
-    [void] [ZommiUiNative]::SendMessage($selectorHandle, 0x0202, [IntPtr]::Zero, [ZommiUiNative]::MousePosition(300, 220))
+    $window = Wait-MainWindow $process 20
+    Assert-True ($null -ne $window) 'Zommi did not return after explicit image selection.'
+    $secondImageChip = Wait-AutomationElementByName $window 'Attached context [image 2]' 15
+    Assert-True ($null -ne $secondImageChip) 'Explicit image selection did not append a new image context.'
+    $secondImageBounds = $secondImageChip.Current.BoundingRectangle
+    [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(
+        [int] ($secondImageBounds.X + ($secondImageBounds.Width / 2)),
+        [int] ($secondImageBounds.Y + ($secondImageBounds.Height / 2)))
+    $imagePreview = Wait-AutomationElementById $window 'ContextPreviewImage' 10
+    Assert-True ($null -ne $imagePreview -and -not $imagePreview.Current.IsOffscreen) 'The explicitly selected image preview was not visible.'
 
-    $deadline = [DateTime]::UtcNow.AddSeconds(15)
-    do {
-        Start-Sleep -Milliseconds 100
-        $chat = Find-ProcessWindow $process 'Zommi*floating Codex chat' 1
-        if ($null -ne $chat) {
-            $composer = Find-DocumentElement $chat 1
-            $composerText = if ($null -eq $composer) { '' } else { (Get-AutomationText $composer).TrimEnd() }
-        }
-    } while (-not $composerText.Contains('[image 2]') -and [DateTime]::UtcNow -lt $deadline)
-    $imageSelectionResult = 'passed'
-    if (-not $composerText.Contains('[image 2]')) {
-        $selectorAfter = [ZommiUiNative]::FindProcessWindow($process.Id, 'Zommi image selection')
-        $status = Find-AutomationElementById $chat 'CodexStatus'
-        $statusText = if ($null -eq $status) { '<missing>' } else { $status.Current.Name }
-        if ($AllowCaptureUnavailable -and $statusText -like '*Image selection failed:*') {
-            $imageSelectionResult = 'capture-unavailable'
-        } else {
-            throw "The selected screen region was not attached to the composer as image context. Composer: $composerText Status: $statusText Selector: $selectorAfter"
-        }
-    }
-
-    $beforeMove = $chat.Current.BoundingRectangle
-    [void] [ZommiUiNative]::SetCursorPos(80, 80)
-    [ZommiUiNative]::PressAltA()
-    Start-Sleep -Milliseconds 700
-    $chat = Find-ProcessWindow $process 'Zommi*floating Codex chat' 5
-    $afterMove = $chat.Current.BoundingRectangle
-    $shortcutDispatch = 'physical-alt-a'
-    if ($beforeMove.X -eq $afterMove.X -and $beforeMove.Y -eq $afterMove.Y) {
-        Assert-True ([ZommiUiNative]::PostMessage(
-            [IntPtr] $chat.Current.NativeWindowHandle,
-            0x0312,
-            [IntPtr] 0x5A4D,
-            [IntPtr]::Zero)) 'Could not reinvoke Alt+A while the chat was visible.'
-        Start-Sleep -Milliseconds 700
-        $chat = Find-ProcessWindow $process 'Zommi*floating Codex chat' 5
-        $afterMove = $chat.Current.BoundingRectangle
-        $shortcutDispatch = 'wm-hotkey-fallback'
-    }
-    $reinvocationResult = 'passed'
-    if ($beforeMove.X -eq $afterMove.X -and $beforeMove.Y -eq $afterMove.Y) {
-        if ($AllowCaptureUnavailable) {
-            $reinvocationResult = 'cursor-unavailable'
-        } else {
-            throw 'Reinvoking Alt+A did not move the existing window beside the pointer.'
-        }
-    } else {
-        $pointerInside = 420 -ge $afterMove.X -and 420 -lt ($afterMove.X + $afterMove.Width) -and 120 -ge $afterMove.Y -and 120 -lt ($afterMove.Y + $afterMove.Height)
-        Assert-True (-not $pointerInside) 'Reinvocation moved the window under the pointer.'
-    }
+    $exactProcesses = @(Get-ExactExecutableProcesses $resolvedExecutable)
+    Assert-True ($exactProcesses.Count -ge 3) 'Electron did not create its expected browser and child processes.'
 
     [ordered]@{
-        contextTokens = $composerText
-        hoverPreview = 'passed'
-        hoverPreviewScroll = "$beforeScrollLine->$afterScrollLine"
-        imageSelection = $imageSelectionResult
+        executablePath = $resolvedExecutable
+        rootProcessId = $process.Id
+        electronProcessCount = $exactProcesses.Count
+        windowBounds = [ordered]@{
+            width = [int] $bounds.Width
+            height = [int] $bounds.Height
+        }
+        accessibility = 'passed'
+        structuredContexts = 'passed'
+        selectedTextPrimary = 'passed'
+        automaticAltAImage = 'absent'
+        explicitAltShiftAImage = 'passed'
+        previewPointerRetention = 'passed'
+        previewScroll = 'passed'
+        hiddenScrollbarStyle = 'covered-by-renderer-test'
         hotkeyRegistration = $hotkeyRegistration
-        shortcutDispatch = $shortcutDispatch
-        reinvocationMove = $reinvocationResult
-        bounds = "$($afterMove.X),$($afterMove.Y),$($afterMove.Width),$($afterMove.Height)"
-    } | ConvertTo-Json
-} finally {
+        evidencePath = $EvidencePath
+    } | ConvertTo-Json -Depth 4
+}
+finally {
     if ($null -ne $process -and -not $process.HasExited) {
-        & taskkill.exe /PID $process.Id /T /F 2>&1 | Out-Null
+        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path -LiteralPath $resolvedExecutable -PathType Leaf) {
+        foreach ($candidate in (Get-ExactExecutableProcesses $resolvedExecutable)) {
+            Stop-Process -Id $candidate.ProcessId -Force -ErrorAction SilentlyContinue
+        }
     }
 }

@@ -12,6 +12,7 @@ const previewImage = document.querySelector('#ContextPreviewImage');
 const attachments = [];
 const activityElements = new Map();
 let assistantElement = null;
+let assistantTextNode = null;
 let turnActive = false;
 let previewTimer = null;
 
@@ -133,6 +134,7 @@ async function sendMessage() {
   removeWelcome();
   appendUserMessage(message, attachments.map((item) => item.token));
   assistantElement = null;
+  assistantTextNode = null;
   activityElements.clear();
   try {
     await window.zommi.send({
@@ -158,9 +160,11 @@ function renderStreamUpdate(update) {
       assistantElement = document.createElement('div');
       assistantElement.className = 'message assistant';
       assistantElement.setAttribute('aria-label', 'Codex response');
+      assistantTextNode = document.createTextNode('');
+      assistantElement.append(assistantTextNode);
       transcript.append(assistantElement);
     }
-    if (update.text) assistantElement.append(document.createTextNode(update.text));
+    if (update.text) assistantTextNode.data += update.text;
     scrollTranscript();
     return;
   }
