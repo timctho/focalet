@@ -11,6 +11,7 @@ internal sealed class MainForm : Form
     private const uint ModAlt = 0x0001;
     private const uint ModShift = 0x0004;
     private const uint VkA = 0x41;
+    private const int ContextPreviewHideDelayMilliseconds = 250;
 
     private static readonly Color Background = Color.FromArgb(47, 47, 48);
     private static readonly Color Panel = Color.FromArgb(57, 57, 58);
@@ -36,6 +37,10 @@ internal sealed class MainForm : Form
     private readonly Button closeButton = new();
     private readonly NotifyIcon trayIcon = new();
     private readonly ContextPreviewForm contextPreview = new();
+    private readonly System.Windows.Forms.Timer contextPreviewHideTimer = new()
+    {
+        Interval = ContextPreviewHideDelayMilliseconds,
+    };
     private readonly List<ContextAttachment> attachments = [];
     private readonly HashSet<string> activityHeaders = new(StringComparer.Ordinal);
     private readonly HashSet<string> activityWithDelta = new(StringComparer.Ordinal);
@@ -84,7 +89,11 @@ internal sealed class MainForm : Form
         input.KeyDown += InputKeyDown;
         input.TextChanged += (_, _) => StyleContextTokens();
         input.MouseMove += InputMouseMove;
-        input.MouseLeave += (_, _) => HideContextPreview();
+        input.MouseEnter += (_, _) => CancelContextPreviewHide();
+        input.MouseLeave += (_, _) => ScheduleContextPreviewHide();
+        contextPreview.PointerEntered += (_, _) => MonitorContextPreviewPointer();
+        contextPreview.PointerExited += (_, _) => ScheduleContextPreviewHide();
+        contextPreviewHideTimer.Tick += (_, _) => FinishScheduledContextPreviewHide();
         KeyDown += (_, eventArgs) =>
         {
             if (eventArgs.KeyCode == Keys.Escape)
@@ -453,7 +462,9 @@ internal sealed class MainForm : Form
             WindowTitle = "Seeded documentation tab",
             Locator = new LocatorInfo { Kind = "URL", Value = "https://docs.example.com/guide" },
             Selection = ["SELECTED_TEXT_IS_PRIMARY"],
-            VisibleText = ["Surrounding documentation text"],
+            VisibleText = Enumerable.Range(1, 80)
+                .Select(index => $"Scrollable surrounding documentation line {index}")
+                .ToArray(),
             Confidence = "high",
         };
         var second = first with
@@ -604,11 +615,12 @@ internal sealed class MainForm : Form
         var attachment = FindAttachmentAt(input.GetCharIndexFromPosition(eventArgs.Location));
         if (attachment is null)
         {
-            HideContextPreview();
+            ScheduleContextPreviewHide();
             input.Cursor = Cursors.IBeam;
             return;
         }
 
+        CancelContextPreviewHide();
         input.Cursor = Cursors.Hand;
         if (!ReferenceEquals(previewedAttachment, attachment) || !contextPreview.Visible)
         {
@@ -638,8 +650,46 @@ internal sealed class MainForm : Form
 
     private void HideContextPreview()
     {
+        CancelContextPreviewHide();
         previewedAttachment = null;
         contextPreview.Hide();
+    }
+
+    private void ScheduleContextPreviewHide()
+    {
+        if (!contextPreview.Visible)
+        {
+            return;
+        }
+
+        contextPreviewHideTimer.Stop();
+        contextPreviewHideTimer.Start();
+    }
+
+    private void CancelContextPreviewHide()
+    {
+        contextPreviewHideTimer.Stop();
+    }
+
+    private void MonitorContextPreviewPointer()
+    {
+        contextPreviewHideTimer.Stop();
+        if (contextPreview.Visible)
+        {
+            contextPreviewHideTimer.Start();
+        }
+    }
+
+    private void FinishScheduledContextPreviewHide()
+    {
+        contextPreviewHideTimer.Stop();
+        if (contextPreview.Visible && contextPreview.Bounds.Contains(Cursor.Position))
+        {
+            contextPreviewHideTimer.Start();
+            return;
+        }
+
+        HideContextPreview();
     }
 
     private async Task SendCurrentMessageAsync()
@@ -903,6 +953,7 @@ internal sealed class MainForm : Form
 
         trayIcon.Visible = false;
         trayIcon.Dispose();
+        contextPreviewHideTimer.Dispose();
         contextPreview.Dispose();
         codex.Dispose();
     }

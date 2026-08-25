@@ -5,6 +5,8 @@ param(
 
     [switch] $AllowCaptureUnavailable,
 
+    [switch] $AllowHotkeyUnavailable,
+
     [string] $EvidencePath
 )
 
@@ -133,11 +135,18 @@ public static class ZommiUiNative {
     [DllImport("user32.dll")]
     public static extern IntPtr SendMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
 
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr window);
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "SendMessageW")]
     private static extern IntPtr SendMessageText(IntPtr window, uint message, IntPtr wParam, StringBuilder text);
 
     public static IntPtr MousePosition(int x, int y) {
         return (IntPtr)((y << 16) | (x & 0xffff));
+    }
+
+    public static IntPtr MouseWheelDelta(short delta) {
+        return (IntPtr)((long)(ushort)delta << 16);
     }
 
     public static void PressAltA() {
@@ -241,8 +250,16 @@ try {
     Assert-True ($allText -like '*Alt + A*Alt + Shift + A*') 'The required shortcuts were not visible.'
     $shortcutName = if ($null -eq $shortcutElement) { '<missing>' } else { $shortcutElement.Current.Name }
     $shortcutHelp = if ($null -eq $shortcutElement) { '<missing>' } else { $shortcutElement.Current.HelpText }
-    Assert-True ($null -ne $shortcutElement -and
-        $shortcutName -like '*Alt+A registered: True*Alt+Shift+A registered: True*') "Windows did not register both required global hotkeys. Name: $shortcutName Help: $shortcutHelp"
+    $hotkeyRegistration = 'passed'
+    if ($null -eq $shortcutElement -or
+        $shortcutName -notlike '*Alt+A registered: True*Alt+Shift+A registered: True*') {
+        if ($AllowHotkeyUnavailable -and
+            $shortcutName -like '*Alt+A registered: False*Alt+Shift+A registered: False*') {
+            $hotkeyRegistration = 'occupied-by-existing-instance'
+        } else {
+            throw "Windows did not register both required global hotkeys. Name: $shortcutName Help: $shortcutHelp"
+        }
+    }
 
     $composer = Find-DocumentElement $chat 1
     Assert-True ($null -ne $composer) 'The composer was not exposed through UI Automation.'
@@ -294,8 +311,41 @@ try {
     }
     Assert-True ($previewText -like '*SELECTED_TEXT_IS_PRIMARY*') "The hover preview did not expose the actual selected context text. Preview text: $previewText"
 
+    $previewHandle = [IntPtr] $preview.Current.NativeWindowHandle
+    $previewDocument = Find-AutomationElementById $preview 'ContextPreviewText'
+    Assert-True ($null -ne $previewDocument) 'The context preview text area was not exposed through UI Automation.'
+    $previewBounds = $preview.Current.BoundingRectangle
+    $previewPointerX = [int] ($previewBounds.X + ($previewBounds.Width / 2))
+    $previewPointerY = [int] ($previewBounds.Y + ($previewBounds.Height / 2))
+    [void] [ZommiUiNative]::SetCursorPos($previewPointerX, $previewPointerY)
+    Start-Sleep -Milliseconds 450
+    Assert-True ([ZommiUiNative]::IsWindowVisible($previewHandle)) 'The context preview disappeared while the pointer moved into it.'
+
+    $previewDocumentHandle = [IntPtr] $previewDocument.Current.NativeWindowHandle
+    $beforeScrollLine = [int] [ZommiUiNative]::SendMessage(
+        $previewDocumentHandle,
+        0x00CE,
+        [IntPtr]::Zero,
+        [IntPtr]::Zero)
+    1..4 | ForEach-Object {
+        [void] [ZommiUiNative]::SendMessage(
+            $previewDocumentHandle,
+            0x020A,
+            [ZommiUiNative]::MouseWheelDelta(-120),
+            [ZommiUiNative]::MousePosition($previewPointerX, $previewPointerY))
+    }
+    Start-Sleep -Milliseconds 150
+    $afterScrollLine = [int] [ZommiUiNative]::SendMessage(
+        $previewDocumentHandle,
+        0x00CE,
+        [IntPtr]::Zero,
+        [IntPtr]::Zero)
+    Assert-True ($afterScrollLine -gt $beforeScrollLine) "The context preview did not scroll while hovered. First visible line: $beforeScrollLine -> $afterScrollLine"
+    Assert-True ([ZommiUiNative]::IsWindowVisible($previewHandle)) 'The context preview disappeared during scrolling.'
+
     [void] [ZommiUiNative]::SetCursorPos(5, 5)
-    Start-Sleep -Milliseconds 200
+    Start-Sleep -Milliseconds 450
+    Assert-True (-not [ZommiUiNative]::IsWindowVisible($previewHandle)) 'The context preview remained visible after the pointer left it.'
     $chatHandle = [IntPtr] $chat.Current.NativeWindowHandle
     Assert-True ([ZommiUiNative]::PostMessage($chatHandle, 0x0312, [IntPtr] 0x5A4E, [IntPtr]::Zero)) 'Could not invoke image selection through WM_HOTKEY.'
     $selector = Find-ProcessWindow $process 'Zommi image selection' 10
@@ -359,7 +409,9 @@ try {
     [ordered]@{
         contextTokens = $composerText
         hoverPreview = 'passed'
+        hoverPreviewScroll = "$beforeScrollLine->$afterScrollLine"
         imageSelection = $imageSelectionResult
+        hotkeyRegistration = $hotkeyRegistration
         shortcutDispatch = $shortcutDispatch
         reinvocationMove = $reinvocationResult
         bounds = "$($afterMove.X),$($afterMove.Y),$($afterMove.Width),$($afterMove.Height)"

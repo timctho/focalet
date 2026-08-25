@@ -28,6 +28,8 @@ internal sealed class ContextPreviewForm : Form
         text.ForeColor = Color.FromArgb(240, 240, 240);
         text.Font = new Font("Segoe UI", 9.5f);
         text.ScrollBars = RichTextBoxScrollBars.Vertical;
+        text.Name = "ContextPreviewText";
+        text.AccessibleName = "Attached context preview";
 
         image.Dock = DockStyle.Top;
         image.Height = 150;
@@ -37,9 +39,14 @@ internal sealed class ContextPreviewForm : Form
 
         Controls.Add(text);
         Controls.Add(image);
+        TrackPointer(this);
         Resize += (_, _) => ApplyRoundedRegion();
         HandleCreated += (_, _) => ApplyRoundedRegion();
     }
+
+    public event EventHandler? PointerEntered;
+
+    public event EventHandler? PointerExited;
 
     protected override bool ShowWithoutActivation => true;
 
@@ -122,6 +129,32 @@ internal sealed class ContextPreviewForm : Form
         var previous = Region;
         Region = replacement;
         previous?.Dispose();
+    }
+
+    private void TrackPointer(Control control)
+    {
+        control.MouseEnter += (_, eventArgs) => PointerEntered?.Invoke(this, eventArgs);
+        control.MouseLeave += (_, _) => ReportPointerExitIfOutside();
+        foreach (Control child in control.Controls)
+        {
+            TrackPointer(child);
+        }
+    }
+
+    private void ReportPointerExitIfOutside()
+    {
+        if (IsDisposed || !IsHandleCreated)
+        {
+            return;
+        }
+
+        BeginInvoke(() =>
+        {
+            if (!IsDisposed && Visible && !Bounds.Contains(Cursor.Position))
+            {
+                PointerExited?.Invoke(this, EventArgs.Empty);
+            }
+        });
     }
 
     private static class NativeMethods
