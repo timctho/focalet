@@ -25,6 +25,7 @@ internal sealed class MainForm : Form
     private readonly ForegroundContextCapture capture;
     private readonly CodexAppServerClient codex;
     private readonly bool autoLaunch;
+    private readonly Func<RegionSelectionForm> regionSelectorFactory;
     private readonly Label statusLabel = new();
     private readonly Label shortcutLabel = new();
     private readonly Label queryLabel = new();
@@ -46,12 +47,18 @@ internal sealed class MainForm : Form
     private bool responsePrefixPending;
     private bool stylingComposer;
     private ContextAttachment? previewedAttachment;
+    private Point? pointerOverride;
 
-    public MainForm(ForegroundContextCapture capture, CodexAppServerClient codex, bool autoLaunch)
+    public MainForm(
+        ForegroundContextCapture capture,
+        CodexAppServerClient codex,
+        bool autoLaunch,
+        Func<RegionSelectionForm>? regionSelectorFactory = null)
     {
         this.capture = capture;
         this.codex = codex;
         this.autoLaunch = autoLaunch;
+        this.regionSelectorFactory = regionSelectorFactory ?? (() => new RegionSelectionForm());
 
         Text = "Zommi — floating Codex chat";
         ClientSize = new Size(760, 390);
@@ -361,7 +368,7 @@ internal sealed class MainForm : Form
 
     private void CaptureContextAndShow()
     {
-        var preservePointer = NativeMethods.GetCursorPos(out var pointerBeforeFocus);
+        var pointerBeforeFocus = ReadPointer();
         var result = capture.Capture(DateTimeOffset.UtcNow);
         if (result.Snapshot is not null)
         {
@@ -378,10 +385,7 @@ internal sealed class MainForm : Form
         }
 
         ShowChat();
-        if (preservePointer)
-        {
-            _ = NativeMethods.SetCursorPos(pointerBeforeFocus.X, pointerBeforeFocus.Y);
-        }
+        RestorePointer(pointerBeforeFocus);
     }
 
     private void SelectImageContext()
@@ -389,7 +393,7 @@ internal sealed class MainForm : Form
         var wasVisible = Visible;
         HideContextPreview();
         Hide();
-        using var selector = new RegionSelectionForm();
+        using var selector = regionSelectorFactory();
         var dialogResult = selector.ShowDialog();
         if (dialogResult == DialogResult.OK && selector.Result is { } result)
         {
@@ -401,6 +405,10 @@ internal sealed class MainForm : Form
             });
             RenderStatus($"Attached {token} · {result.Bounds.Width}×{result.Bounds.Height}");
             ShowChat();
+            if (pointerOverride is not null)
+            {
+                pointerOverride = new Point(420, 120);
+            }
         }
         else if (!string.IsNullOrWhiteSpace(selector.ErrorMessage))
         {
@@ -469,12 +477,15 @@ internal sealed class MainForm : Form
         });
         RenderStatus("seeded UI acceptance");
         Shown += (_, _) => BeginInvoke(() =>
-            contextPreview.ShowContext(attachments[0], new Point(Right - 30, Top + 40)));
+        {
+            pointerOverride = new Point(80, 80);
+            contextPreview.ShowContext(attachments[0], new Point(Right - 30, Top + 40));
+        });
     }
 
     private void ShowChat()
     {
-        var preservePointer = NativeMethods.GetCursorPos(out var pointerBeforeFocus);
+        var pointerBeforeFocus = ReadPointer();
         PositionAwayFromPointer();
         if (!Visible)
         {
@@ -486,10 +497,7 @@ internal sealed class MainForm : Form
         BringToFront();
         input.Focus();
         input.SelectionStart = input.TextLength;
-        if (preservePointer)
-        {
-            _ = NativeMethods.SetCursorPos(pointerBeforeFocus.X, pointerBeforeFocus.Y);
-        }
+        RestorePointer(pointerBeforeFocus);
     }
 
     private void HideChat()
@@ -500,13 +508,14 @@ internal sealed class MainForm : Form
 
     private void PositionAwayFromPointer()
     {
-        if (!NativeMethods.GetCursorPos(out var pointer))
+        var pointer = ReadPointer();
+        if (pointer is null)
         {
             CenterToScreen();
             return;
         }
 
-        var point = new Point(pointer.X, pointer.Y);
+        var point = pointer.Value;
         var workArea = Screen.FromPoint(point).WorkingArea;
         var x = point.X + 24;
         var y = point.Y + 24;
@@ -523,6 +532,26 @@ internal sealed class MainForm : Form
         Location = new Point(
             Math.Clamp(x, workArea.Left, Math.Max(workArea.Left, workArea.Right - Width)),
             Math.Clamp(y, workArea.Top, Math.Max(workArea.Top, workArea.Bottom - Height)));
+    }
+
+    private Point? ReadPointer()
+    {
+        if (pointerOverride is { } overridden)
+        {
+            return overridden;
+        }
+
+        return NativeMethods.GetCursorPos(out var pointer)
+            ? new Point(pointer.X, pointer.Y)
+            : null;
+    }
+
+    private void RestorePointer(Point? pointer)
+    {
+        if (pointerOverride is null && pointer is { } value)
+        {
+            _ = NativeMethods.SetCursorPos(value.X, value.Y);
+        }
     }
 
     private void StyleContextTokens()

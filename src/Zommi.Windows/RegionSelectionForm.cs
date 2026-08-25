@@ -10,11 +10,13 @@ internal sealed record RegionSelectionResult(Rectangle Bounds, byte[] Png);
 
 internal sealed class RegionSelectionForm : Form
 {
+    private readonly Func<Rectangle, byte[]> captureRegion;
     private Point? anchor;
     private Rectangle selectedArea;
 
-    public RegionSelectionForm()
+    public RegionSelectionForm(Func<Rectangle, byte[]>? captureRegion = null)
     {
+        this.captureRegion = captureRegion ?? CaptureRegion;
         Text = "Zommi image selection";
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
@@ -96,15 +98,7 @@ internal sealed class RegionSelectionForm : Form
 
         try
         {
-            using var bitmap = new Bitmap(screenArea.Width, screenArea.Height, PixelFormat.Format32bppArgb);
-            using (var graphics = Graphics.FromImage(bitmap))
-            {
-                graphics.CopyFromScreen(screenArea.Location, Point.Empty, screenArea.Size, CopyPixelOperation.SourceCopy);
-            }
-
-            using var stream = new MemoryStream();
-            bitmap.Save(stream, ImageFormat.Png);
-            Result = new RegionSelectionResult(screenArea, stream.ToArray());
+            Result = new RegionSelectionResult(screenArea, captureRegion(screenArea));
             DialogResult = DialogResult.OK;
         }
         catch (Exception exception) when (exception is ExternalException or ArgumentException or Win32Exception)
@@ -149,4 +143,17 @@ internal sealed class RegionSelectionForm : Form
         Math.Min(first.Y, second.Y),
         Math.Max(first.X, second.X),
         Math.Max(first.Y, second.Y));
+
+    private static byte[] CaptureRegion(Rectangle screenArea)
+    {
+        using var bitmap = new Bitmap(screenArea.Width, screenArea.Height, PixelFormat.Format32bppArgb);
+        using (var graphics = Graphics.FromImage(bitmap))
+        {
+            graphics.CopyFromScreen(screenArea.Location, Point.Empty, screenArea.Size, CopyPixelOperation.SourceCopy);
+        }
+
+        using var stream = new MemoryStream();
+        bitmap.Save(stream, ImageFormat.Png);
+        return stream.ToArray();
+    }
 }

@@ -57,7 +57,15 @@ internal static class Program
         ApplicationConfiguration.Initialize();
         var seededUi = args.Contains("--acceptance-ui-seeded", StringComparer.OrdinalIgnoreCase);
         var autoLaunch = !seededUi && !args.Contains("--no-auto-launch", StringComparer.OrdinalIgnoreCase);
-        var form = new MainForm(new ForegroundContextCapture(), new CodexAppServerClient(), autoLaunch);
+        Func<RegionSelectionForm>? selectorFactory = seededUi
+            ? () => new RegionSelectionForm(_ => Convert.FromBase64String(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="))
+            : null;
+        var form = new MainForm(
+            new ForegroundContextCapture(),
+            new CodexAppServerClient(),
+            autoLaunch,
+            selectorFactory);
         if (seededUi)
         {
             form.SeedAcceptanceContexts();

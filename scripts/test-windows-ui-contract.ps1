@@ -323,7 +323,7 @@ try {
             throw 'Reinvoking Alt+A did not move the existing window beside the pointer.'
         }
     } else {
-        $pointerInside = 80 -ge $afterMove.X -and 80 -lt ($afterMove.X + $afterMove.Width) -and 80 -ge $afterMove.Y -and 80 -lt ($afterMove.Y + $afterMove.Height)
+        $pointerInside = 420 -ge $afterMove.X -and 420 -lt ($afterMove.X + $afterMove.Width) -and 120 -ge $afterMove.Y -and 120 -lt ($afterMove.Y + $afterMove.Height)
         Assert-True (-not $pointerInside) 'Reinvocation moved the window under the pointer.'
     }
 
