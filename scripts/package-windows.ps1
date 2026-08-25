@@ -18,6 +18,9 @@ if (-not $SkipPublish) {
         -p:PublishSingleFile=true `
         -p:IncludeNativeLibrariesForSelfExtract=true `
         --output $outputDirectory
+    if ($LASTEXITCODE -ne 0) {
+        throw "Zommi Windows publish failed with exit code $LASTEXITCODE."
+    }
 
     dotnet publish (Join-Path $repositoryRoot 'src/Zommi.Hook/Zommi.Hook.csproj') `
         --configuration Release `
@@ -26,6 +29,9 @@ if (-not $SkipPublish) {
         -p:PublishSingleFile=true `
         -p:IncludeNativeLibrariesForSelfExtract=true `
         --output $outputDirectory
+    if ($LASTEXITCODE -ne 0) {
+        throw "Zommi Hook publish failed with exit code $LASTEXITCODE."
+    }
 }
 
 Copy-Item (Join-Path $repositoryRoot 'docs/windows-prototype.md') $outputDirectory
@@ -37,16 +43,23 @@ $executablePath = Join-Path $outputDirectory 'Zommi.exe'
 $hookExecutablePath = Join-Path $outputDirectory 'Zommi.Hook.exe'
 $wslHookPath = Join-Path $outputDirectory 'Zommi.WslHook.ps1'
 $hashPath = Join-Path $outputDirectory 'SHA256SUMS.txt'
+if (-not (Test-Path -LiteralPath $executablePath) -or
+    -not (Test-Path -LiteralPath $hookExecutablePath) -or
+    -not (Test-Path -LiteralPath $wslHookPath)) {
+    throw "The package is incomplete; required runtime files are missing from $outputDirectory."
+}
 $hash = (Get-FileHash -Algorithm SHA256 $executablePath).Hash.ToLowerInvariant()
 $hookHash = (Get-FileHash -Algorithm SHA256 $hookExecutablePath).Hash.ToLowerInvariant()
 $wslHookHash = (Get-FileHash -Algorithm SHA256 $wslHookPath).Hash.ToLowerInvariant()
 Set-Content -Path $hashPath -Encoding ascii -Value "$hash  Zommi.exe", "$hookHash  Zommi.Hook.exe", "$wslHookHash  Zommi.WslHook.ps1"
 
 $archivePath = "$outputDirectory.zip"
-if (Test-Path $archivePath) {
-    Remove-Item -Force $archivePath
+$pendingArchivePath = "$outputDirectory.pending.zip"
+if (Test-Path $pendingArchivePath) {
+    Remove-Item -Force $pendingArchivePath
 }
 
-Compress-Archive -Path (Join-Path $outputDirectory '*') -DestinationPath $archivePath
+Compress-Archive -Path (Join-Path $outputDirectory '*') -DestinationPath $pendingArchivePath
+Move-Item -LiteralPath $pendingArchivePath -Destination $archivePath -Force
 Write-Host "Windows prototype published to $outputDirectory"
 Write-Host "Portable archive: $archivePath"
