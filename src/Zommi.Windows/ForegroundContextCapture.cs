@@ -9,6 +9,11 @@ namespace Zommi.Windows;
 
 internal sealed class ForegroundContextCapture
 {
+    private const int MaximumVisibleTextItems = 128;
+    private const int MaximumVisibleTextCharacters = 30_000;
+    private const int MaximumVisibleTextItemCharacters = 2_000;
+    private const int MaximumDocumentTextCharacters = 30_000;
+
     internal sealed record CaptureResult(ContextSnapshot? Snapshot, bool PreservePrevious);
 
     private static readonly HashSet<string> BrowserProcesses = new(StringComparer.OrdinalIgnoreCase)
@@ -333,7 +338,10 @@ internal sealed class ForegroundContextCapture
     {
         try
         {
-            var collector = new VisibleTextCollector(maximumItems: 32, maximumCharacters: 6000);
+            var collector = new VisibleTextCollector(
+                MaximumVisibleTextItems,
+                MaximumVisibleTextCharacters,
+                MaximumVisibleTextItemCharacters);
             var root = AutomationElement.FromHandle(windowHandle);
 
             var hovered = AutomationElement.FromPoint(new System.Windows.Point(point.X, point.Y));
@@ -352,9 +360,27 @@ internal sealed class ForegroundContextCapture
                 }
             }
 
+            if (!collector.IsFull)
+            {
+                var documentCondition = new PropertyCondition(
+                    AutomationElement.ControlTypeProperty,
+                    ControlType.Document);
+                foreach (AutomationElement document in root
+                    .FindAll(TreeScope.Descendants, documentCondition)
+                    .Cast<AutomationElement>()
+                    .Take(8))
+                {
+                    CollectElementText(document, collector, includeDocumentText: true);
+                    if (collector.IsFull)
+                    {
+                        break;
+                    }
+                }
+            }
+
             var queue = new Queue<AutomationElement>();
             queue.Enqueue(root);
-            for (var visited = 0; queue.Count > 0 && visited < 240 && !collector.IsFull; visited++)
+            for (var visited = 0; queue.Count > 0 && visited < 800 && !collector.IsFull; visited++)
             {
                 var element = queue.Dequeue();
                 CollectElementText(
@@ -426,7 +452,7 @@ internal sealed class ForegroundContextCapture
 
             if (includeDocumentText && element.TryGetCurrentPattern(TextPattern.Pattern, out var textPattern))
             {
-                collector.Add(((TextPattern)textPattern).DocumentRange.GetText(4000));
+                collector.Add(((TextPattern)textPattern).DocumentRange.GetText(MaximumDocumentTextCharacters));
             }
         }
         catch (Exception exception) when (exception is ElementNotAvailableException or InvalidOperationException or COMException)
@@ -478,7 +504,10 @@ internal sealed class ForegroundContextCapture
         }
     }
 
-    private sealed class VisibleTextCollector(int maximumItems, int maximumCharacters)
+    private sealed class VisibleTextCollector(
+        int maximumItems,
+        int maximumCharacters,
+        int maximumItemCharacters = 400)
     {
         private readonly List<string> items = [];
         private readonly HashSet<string> seen = new(StringComparer.Ordinal);
@@ -517,7 +546,7 @@ internal sealed class ForegroundContextCapture
                     return;
                 }
 
-                var allowed = Math.Min(400, remaining);
+                var allowed = Math.Min(maximumItemCharacters, remaining);
                 var bounded = cleaned.Length <= allowed
                     ? cleaned
                     : allowed == 1

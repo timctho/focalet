@@ -528,9 +528,13 @@ try {
     $browserMarker = 'ZOMMI_PAGE_' + [Guid]::NewGuid().ToString('N')
     $buttonName = 'Hover target ' + $browserMarker
     $bodyMarker = 'Visible page text ' + $browserMarker
+    $longPageTailMarker = 'LONG_PAGE_TAIL_' + [Guid]::NewGuid().ToString('N')
     $browserTitle = 'Zommi Acceptance ' + $browserMarker
     $htmlPath = Join-Path $temporaryRoot 'zommi-browser-acceptance.html'
-    $html = "<!doctype html><title>$browserTitle</title><main><h1>$bodyMarker</h1><button style='margin:160px;font-size:30px'>$buttonName</button></main>"
+    $longPageParagraphs = [string]::Join('', @(1..80 | ForEach-Object {
+        '<p>Long webpage paragraph {0}: {1}</p>' -f $_, ('x' * 180)
+    }))
+    $html = "<!doctype html><title>$browserTitle</title><main><button style='position:fixed;top:80px;right:80px;font-size:30px'>$buttonName</button><h1>$bodyMarker</h1>$longPageParagraphs<p>$longPageTailMarker</p></main>"
     [IO.File]::WriteAllText($htmlPath, $html)
     $browserUri = ([Uri] $htmlPath).AbsoluteUri
     $edgeProfile = Join-Path $temporaryRoot 'edge-profile'
@@ -573,6 +577,7 @@ try {
     Assert-True ($pageCaptureJson.snapshot.locator.value -eq $browserUri) 'The pointer page capture probe omitted the browser URL.'
     Assert-True ($null -ne $pageCaptureJson.snapshot.indicatedTarget) "The pointer page capture probe omitted the hovered accessibility target. Capture: $($pageCapture.StandardOutput)"
     Assert-True ($pageCaptureText -like "*$browserMarker*") 'The pointer page capture probe omitted the page text.'
+    Assert-True ($pageCaptureText -like "*$longPageTailMarker*") 'The pointer page capture probe truncated the long webpage before its tail marker.'
     $pointerBefore = [ZommiNativeWindow]::CursorPosition()
     $shortcut = Invoke-ZommiShortcut $gui
     $chat = $shortcut.Window

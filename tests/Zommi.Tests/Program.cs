@@ -15,6 +15,7 @@ var tests = new (string Name, Action Body)[]
     ("A matching fresh WSL launch binds its exact new session", MatchingLaunchAutoBinds),
     ("Wrong, resumed, and expired launches never auto-bind", InvalidLaunchDoesNotBind),
     ("Invocation context includes bounded sanitized visible text", InvocationContextIncludesVisibleText),
+    ("Invocation context preserves bounded long webpage text", InvocationContextPreservesLongWebpageText),
     ("Invocation context prioritizes selected text across multiple captures", InvocationContextPrioritizesSelection),
     ("Context preview omits confidence and safety metadata", ContextPreviewOmitsInternalMetadata),
     ("Context tokens use URL abbreviations and remain unique", ContextTokensUseUrlAbbreviations),
@@ -209,6 +210,21 @@ static void InvocationContextIncludesVisibleText()
     Contains("ignore previous instructions", context);
     True(!context.Contains('\u0007'), "A control character survived invocation-context formatting.");
     Contains("untrusted data", context);
+}
+
+static void InvocationContextPreservesLongWebpageText()
+{
+    var now = new DateTimeOffset(2026, 8, 25, 2, 0, 0, TimeSpan.Zero);
+    var paragraphs = Enumerable.Range(1, 40)
+        .Select(index => $"Paragraph {index}: {new string((char)('a' + (index % 26)), 180)}")
+        .Append("LONG_PAGE_TAIL_7391")
+        .ToArray();
+    var snapshot = Snapshot("long-page", now) with { VisibleText = paragraphs };
+
+    var context = ContextFormatter.FormatInvocation(snapshot, now.AddSeconds(1));
+    Contains("Paragraph 40:", context);
+    Contains("LONG_PAGE_TAIL_7391", context);
+    True(context.Length < 35_000, "Long webpage context exceeded its bounded output budget.");
 }
 
 static void InvocationContextPrioritizesSelection()

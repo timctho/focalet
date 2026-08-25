@@ -165,6 +165,10 @@ public sealed class HookProcessor(
 
 public static class ContextFormatter
 {
+    private const int MaximumVisibleTextItems = 128;
+    private const int MaximumVisibleTextCharacters = 30_000;
+    private const int MaximumVisibleTextItemCharacters = 2_000;
+
     public static string FormatInvocation(ContextSnapshot snapshot, DateTimeOffset nowUtc)
         => FormatInvocation([snapshot], nowUtc);
 
@@ -243,9 +247,18 @@ public static class ContextFormatter
         if (snapshot.VisibleText.Count > 0)
         {
             builder.AppendLine("Visible text:");
-            foreach (var text in snapshot.VisibleText.Take(24))
+            var visibleCharacters = 0;
+            foreach (var text in snapshot.VisibleText.Take(MaximumVisibleTextItems))
             {
-                builder.AppendLine($"- {Clean(text, 320)}");
+                var remaining = MaximumVisibleTextCharacters - visibleCharacters;
+                if (remaining <= 0)
+                {
+                    break;
+                }
+
+                var cleaned = Clean(text, Math.Min(MaximumVisibleTextItemCharacters, remaining));
+                builder.AppendLine($"- {cleaned}");
+                visibleCharacters += cleaned.Length;
             }
         }
 
