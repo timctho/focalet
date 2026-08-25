@@ -590,6 +590,9 @@ try {
     Assert-True ($pageCaptureJson.viewportImageBytes -gt 0) 'The deliberate browser capture did not include an automatic viewport PNG.'
     Assert-True ($pageCaptureText -like "*$browserMarker*") 'The pointer page capture probe omitted the page text.'
     Assert-True ($pageCaptureText -like "*$longPageTailMarker*") 'The pointer page capture probe truncated the long webpage before its tail marker.'
+    $results.browserAccessibilityTree = "passed ($($accessibilityTree.nodeCount) nodes; truncated=$($accessibilityTree.truncated))"
+    $results.browserViewportImageBytes = [int] $pageCaptureJson.viewportImageBytes
+    $results.longPageFlatCapture = "passed ($(@($pageCaptureJson.snapshot.visibleText).Count) items; $($pageCaptureText.Length) chars)"
     $pointerBefore = [ZommiNativeWindow]::CursorPosition()
     $shortcut = Invoke-ZommiShortcut $gui
     $chat = $shortcut.Window
