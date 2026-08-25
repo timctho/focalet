@@ -1,82 +1,82 @@
-using System.IO;
+using System.Runtime.InteropServices;
 using Zommi.Core;
 
 namespace Zommi.Windows;
 
 internal sealed class MainForm : Form
 {
-    private static readonly Color Background = Color.FromArgb(20, 23, 31);
-    private static readonly Color Card = Color.FromArgb(31, 36, 48);
+    private const int HotkeyId = 0x5A4D;
+    private const int WmHotkey = 0x0312;
+    private const uint ModControl = 0x0002;
+    private const uint ModShift = 0x0004;
+    private const uint VkReturn = 0x0D;
+    private const uint VkSpace = 0x20;
+
+    private static readonly Color Background = Color.FromArgb(24, 27, 36);
+    private static readonly Color Panel = Color.FromArgb(34, 39, 51);
     private static readonly Color Muted = Color.FromArgb(158, 166, 184);
     private static readonly Color TextColor = Color.FromArgb(240, 242, 247);
     private static readonly Color Accent = Color.FromArgb(111, 220, 181);
     private static readonly Color Warning = Color.FromArgb(255, 193, 92);
 
-    private readonly StateStore stateStore;
-    private readonly SharedSnapshotStore snapshots;
     private readonly ForegroundContextCapture capture;
+    private readonly CodexAppServerClient codex;
     private readonly bool autoLaunch;
-    private readonly System.Windows.Forms.Timer timer = new() { Interval = 700 };
-    private readonly Label modeLabel = new() { AutoSize = true };
-    private readonly Label hookLabel = new() { AutoSize = true };
-    private readonly Label sessionDetailLabel = new() { AutoSize = true, MaximumSize = new Size(430, 0) };
-    private readonly Label surfaceValue = CreateReadout();
-    private readonly Label windowValue = CreateReadout();
-    private readonly Label locatorValue = CreateReadout();
-    private readonly Label targetValue = CreateReadout();
-    private readonly Label selectionValue = CreateReadout();
-    private readonly Label deliveryValue = CreateReadout();
-    private readonly Button pauseButton = CreateButton("Pause");
-    private readonly Button freezeButton = CreateButton("Freeze");
-    private readonly Button newCodexButton = CreateButton("New Codex in WSL");
+    private readonly Label contextLabel = new();
+    private readonly Label statusLabel = new();
+    private readonly Label shortcutLabel = new();
+    private readonly RichTextBox transcript = new();
+    private readonly TextBox input = new();
+    private readonly Button sendButton = new();
+    private readonly Button closeButton = new();
+    private readonly NotifyIcon trayIcon = new();
 
-    private string integrationStatus = "Preparing WSL";
-    private bool launchInProgress;
-    private bool closing;
+    private ContextSnapshot? invocationContext;
+    private bool turnActive;
+    private bool closeRequested;
+    private bool hotkeyRegistered;
+    private bool responsePrefixPending;
 
-    public MainForm(
-        StateStore stateStore,
-        SharedSnapshotStore snapshots,
-        ForegroundContextCapture capture,
-        bool autoLaunch)
+    public MainForm(ForegroundContextCapture capture, CodexAppServerClient codex, bool autoLaunch)
     {
-        this.stateStore = stateStore;
-        this.snapshots = snapshots;
         this.capture = capture;
+        this.codex = codex;
         this.autoLaunch = autoLaunch;
 
-        Text = "Zommi — live context for Codex";
+        Text = "Zommi — floating Codex chat";
+        ClientSize = new Size(560, 450);
+        MinimumSize = new Size(460, 360);
+        FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
-        Location = new Point(Math.Max(24, Screen.PrimaryScreen?.WorkingArea.Right - 500 ?? 24), 48);
-        ClientSize = new Size(456, 720);
-        MinimumSize = new Size(430, 620);
+        ShowInTaskbar = false;
+        TopMost = true;
+        KeyPreview = true;
         BackColor = Background;
         ForeColor = TextColor;
         Font = new Font("Segoe UI", 9.5f);
-        TopMost = true;
+        Padding = new Padding(1);
 
         Controls.Add(BuildLayout());
+        ConfigureTrayIcon();
 
-        pauseButton.Click += (_, _) => TogglePause();
-        freezeButton.Click += (_, _) => ToggleFreeze();
-        newCodexButton.Click += async (_, _) => await LaunchNewWslCodexAsync();
-        timer.Tick += (_, _) => OnTick();
-        FormClosing += (_, _) => StopCaptureOnExit();
-        Shown += async (_, _) =>
+        sendButton.Click += async (_, _) => await SendCurrentMessageAsync();
+        closeButton.Click += (_, _) => HideChat();
+        input.KeyDown += InputKeyDown;
+        KeyDown += (_, eventArgs) =>
         {
-            if (this.autoLaunch)
+            if (eventArgs.KeyCode == Keys.Escape)
             {
-                await LaunchNewWslCodexAsync();
-            }
-            else
-            {
-                integrationStatus = "Automatic launch disabled";
-                RenderState();
+                HideChat();
             }
         };
+        HandleCreated += (_, _) => RegisterInvocationHotkey();
+        HandleDestroyed += (_, _) => UnregisterInvocationHotkey();
+        FormClosing += OnFormClosing;
+        Shown += OnShown;
 
-        RenderState();
-        timer.Start();
+        codex.StatusChanged += status => PostToUi(() => RenderStatus(status));
+        codex.AgentMessageDelta += delta => PostToUi(() => AppendAgentDelta(delta));
+        codex.TurnCompleted += status => PostToUi(() => CompleteTurn(status));
     }
 
     private Control BuildLayout()
@@ -84,422 +84,470 @@ internal sealed class MainForm : Form
         var root = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            Padding = new Padding(16),
+            BackColor = Background,
+            Padding = new Padding(14),
             ColumnCount = 1,
-            RowCount = 8,
-            AutoScroll = true,
+            RowCount = 5,
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
+        var header = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            ColumnCount = 3,
+        };
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         var title = new Label
         {
             Text = "Zommi",
             AutoSize = true,
-            Font = new Font("Segoe UI Semibold", 22f),
+            Font = new Font("Segoe UI Semibold", 15f),
             ForeColor = TextColor,
+            Margin = new Padding(0, 2, 10, 3),
         };
-        var subtitle = new Label
+        shortcutLabel.AutoSize = true;
+        shortcutLabel.ForeColor = Muted;
+        shortcutLabel.Anchor = AnchorStyles.Left;
+        shortcutLabel.Margin = new Padding(0, 8, 0, 0);
+        StyleButton(closeButton, "×");
+        closeButton.Font = new Font("Segoe UI", 13f);
+        closeButton.Padding = new Padding(2, 0, 2, 0);
+        closeButton.Margin = new Padding(8, 0, 0, 0);
+        header.Controls.Add(title, 0, 0);
+        header.Controls.Add(shortcutLabel, 1, 0);
+        header.Controls.Add(closeButton, 2, 0);
+        root.Controls.Add(header, 0, 0);
+
+        contextLabel.AutoEllipsis = true;
+        contextLabel.AccessibleName = "Invocation context";
+        contextLabel.AutoSize = false;
+        contextLabel.Height = 58;
+        contextLabel.Dock = DockStyle.Fill;
+        contextLabel.BackColor = Panel;
+        contextLabel.ForeColor = Muted;
+        contextLabel.Padding = new Padding(10, 8, 10, 8);
+        contextLabel.Margin = new Padding(0, 8, 0, 10);
+        contextLabel.Text = "Press the shortcut while hovering over a page, window, or folder.";
+        root.Controls.Add(contextLabel, 0, 1);
+
+        transcript.Dock = DockStyle.Fill;
+        transcript.AccessibleName = "Codex conversation";
+        transcript.ReadOnly = true;
+        transcript.BorderStyle = BorderStyle.None;
+        transcript.BackColor = Background;
+        transcript.ForeColor = TextColor;
+        transcript.Font = new Font("Segoe UI", 10f);
+        transcript.DetectUrls = true;
+        transcript.Margin = new Padding(0, 0, 0, 10);
+        root.Controls.Add(transcript, 0, 2);
+
+        var composer = new TableLayoutPanel
         {
-            Text = "Live desktop context for a fresh Codex session in WSL",
+            Dock = DockStyle.Fill,
             AutoSize = true,
-            ForeColor = Muted,
-            Margin = new Padding(2, 0, 0, 10),
+            BackColor = Panel,
+            Padding = new Padding(8),
+            ColumnCount = 2,
         };
-        var header = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Dock = DockStyle.Fill };
-        header.Controls.Add(title);
-        header.Controls.Add(subtitle);
-        root.Controls.Add(header);
+        composer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        composer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        input.Multiline = true;
+        input.AccessibleName = "Zommi message";
+        input.AcceptsReturn = true;
+        input.BorderStyle = BorderStyle.None;
+        input.BackColor = Panel;
+        input.ForeColor = TextColor;
+        input.Font = new Font("Segoe UI", 10.5f);
+        input.PlaceholderText = "Ask about what you are hovering…";
+        input.MinimumSize = new Size(0, 58);
+        input.Dock = DockStyle.Fill;
+        input.ScrollBars = ScrollBars.Vertical;
+        StyleButton(sendButton, "Send");
+        sendButton.AccessibleName = "Send message";
+        sendButton.BackColor = Color.FromArgb(55, 92, 81);
+        sendButton.Anchor = AnchorStyles.Bottom;
+        sendButton.Margin = new Padding(8, 4, 0, 0);
+        composer.Controls.Add(input, 0, 0);
+        composer.Controls.Add(sendButton, 1, 0);
+        root.Controls.Add(composer, 0, 3);
 
-        var statusRow = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill };
-        StylePill(modeLabel);
-        StylePill(hookLabel);
-        statusRow.Controls.Add(modeLabel);
-        statusRow.Controls.Add(hookLabel);
-        root.Controls.Add(statusRow);
-
-        var sessionCard = CreateCard("CODEX SESSION");
-        var sessionGrid = sessionCard.Controls.OfType<TableLayoutPanel>().Single();
-        sessionGrid.SetColumnSpan(sessionDetailLabel, 3);
-        sessionGrid.Controls.Add(sessionDetailLabel, 0, 0);
-        var detachButton = CreateButton("Detach");
-        detachButton.Click += (_, _) => Detach();
-        sessionGrid.Controls.Add(detachButton, 0, 1);
-        sessionGrid.Controls.Add(pauseButton, 1, 1);
-        sessionGrid.Controls.Add(freezeButton, 2, 1);
-        root.Controls.Add(sessionCard);
-
-        var snapshotCard = CreateCard("LATEST EPHEMERAL SNAPSHOT");
-        var snapshotGrid = snapshotCard.Controls.OfType<TableLayoutPanel>().Single();
-        AddReadout(snapshotGrid, "Surface", surfaceValue, 0);
-        AddReadout(snapshotGrid, "Window", windowValue, 1);
-        AddReadout(snapshotGrid, "Locator", locatorValue, 2);
-        AddReadout(snapshotGrid, "Pointer target", targetValue, 3);
-        AddReadout(snapshotGrid, "Selection", selectionValue, 4);
-        AddReadout(snapshotGrid, "Last handoff", deliveryValue, 5);
-        root.Controls.Add(snapshotCard);
-
-        var launchCard = CreateCard("CODEX CLI IN WSL");
-        var launchGrid = launchCard.Controls.OfType<TableLayoutPanel>().Single();
-        var launchDescription = new Label
-        {
-            Text = "Zommi installs its local hook, opens the default WSL distribution, starts a new Codex CLI chat, and binds it automatically.",
-            AutoSize = true,
-            MaximumSize = new Size(400, 0),
-            ForeColor = Muted,
-        };
-        launchGrid.SetColumnSpan(launchDescription, 3);
-        launchGrid.Controls.Add(launchDescription, 0, 0);
-        launchGrid.SetColumnSpan(newCodexButton, 3);
-        launchGrid.Controls.Add(newCodexButton, 0, 1);
-        root.Controls.Add(launchCard);
-
-        var privacy = new Label
-        {
-            Text = "No screenshots. One expiring snapshot is overwritten locally. Terminal focus never replaces your last browser or Explorer context.",
-            AutoSize = true,
-            MaximumSize = new Size(420, 0),
-            ForeColor = Muted,
-            Padding = new Padding(3, 8, 3, 3),
-        };
-        root.Controls.Add(privacy);
+        statusLabel.AutoSize = true;
+        statusLabel.AccessibleName = "Codex status";
+        statusLabel.ForeColor = Muted;
+        statusLabel.Margin = new Padding(2, 8, 0, 0);
+        statusLabel.Text = "Starting…";
+        root.Controls.Add(statusLabel, 0, 4);
         return root;
     }
 
-    private static TableLayoutPanel CreateCard(string heading)
+    private static void StyleButton(Button button, string text)
     {
-        var panel = new TableLayoutPanel
-        {
-            AutoSize = true,
-            Dock = DockStyle.Top,
-            BackColor = Card,
-            Padding = new Padding(12),
-            Margin = new Padding(0, 8, 0, 0),
-            ColumnCount = 1,
-            RowCount = 2,
-        };
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        var layout = new TableLayoutPanel
-        {
-            AutoSize = true,
-            Dock = DockStyle.Top,
-            ColumnCount = 3,
-            RowCount = 1,
-        };
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        var title = new Label
-        {
-            Text = heading,
-            AutoSize = true,
-            ForeColor = Muted,
-            Font = new Font("Segoe UI Semibold", 8.5f),
-            Dock = DockStyle.Top,
-            Padding = new Padding(0, 0, 0, 7),
-        };
-        panel.Controls.Add(title, 0, 0);
-        panel.Controls.Add(layout, 0, 1);
-        return panel;
+        button.Text = text;
+        button.AutoSize = true;
+        button.FlatStyle = FlatStyle.Flat;
+        button.FlatAppearance.BorderSize = 0;
+        button.BackColor = Color.FromArgb(46, 53, 70);
+        button.ForeColor = TextColor;
+        button.Padding = new Padding(8, 3, 8, 3);
+        button.Cursor = Cursors.Hand;
     }
 
-    private static void AddReadout(TableLayoutPanel grid, string label, Label value, int row)
+    private void ConfigureTrayIcon()
     {
-        while (grid.RowCount <= row)
-        {
-            grid.RowCount++;
-        }
-
-        var name = new Label
-        {
-            Text = label,
-            AutoSize = true,
-            ForeColor = Muted,
-            Margin = new Padding(0, row == 0 ? 0 : 7, 10, 0),
-        };
-        grid.Controls.Add(name, 0, row);
-        grid.SetColumnSpan(value, 2);
-        grid.Controls.Add(value, 1, row);
+        var menu = new ContextMenuStrip();
+        menu.Items.Add("Open floating chat", null, (_, _) => ShowChat(captureUnderlyingContext: false));
+        menu.Items.Add("Exit Zommi", null, (_, _) => ExitApplication());
+        trayIcon.Icon = SystemIcons.Application;
+        trayIcon.Text = "Zommi floating Codex chat";
+        trayIcon.ContextMenuStrip = menu;
+        trayIcon.Visible = true;
+        trayIcon.DoubleClick += (_, _) => ShowChat(captureUnderlyingContext: false);
     }
 
-    private static Label CreateReadout() => new()
+    private async void OnShown(object? sender, EventArgs eventArgs)
     {
-        AutoSize = true,
-        ForeColor = TextColor,
-        MaximumSize = new Size(300, 0),
-        Text = "—",
-    };
-
-    private static Button CreateButton(string text) => new()
-    {
-        Text = text,
-        AutoSize = true,
-        FlatStyle = FlatStyle.Flat,
-        BackColor = Color.FromArgb(46, 53, 70),
-        ForeColor = TextColor,
-        Margin = new Padding(4),
-        Padding = new Padding(4, 1, 4, 1),
-    };
-
-    private static void StylePill(Label label)
-    {
-        label.BackColor = Card;
-        label.ForeColor = TextColor;
-        label.Padding = new Padding(9, 5, 9, 5);
-        label.Margin = new Padding(0, 0, 8, 4);
-    }
-
-    private void OnTick()
-    {
-        try
+        if (autoLaunch)
         {
-            var binding = stateStore.ReadBinding();
-            if (binding is { SessionId: not null, Mode: CaptureMode.Active })
+            Hide();
+            trayIcon.ShowBalloonTip(
+                2500,
+                "Zommi is ready",
+                $"Hover over anything and press {shortcutLabel.Text} to chat with Codex.",
+                ToolTipIcon.Info);
+            try
             {
-                var captureResult = capture.Capture(DateTimeOffset.UtcNow);
-                if (captureResult.Snapshot is not null)
-                {
-                    snapshots.WriteSnapshot(captureResult.Snapshot);
-                }
-                else if (!captureResult.PreservePrevious)
-                {
-                    snapshots.DeleteSnapshot();
-                }
+                await codex.EnsureStartedAsync();
             }
-
-            var currentSnapshot = snapshots.ReadSnapshot();
-            if (currentSnapshot is not null && currentSnapshot.ExpiresAtUtc < DateTimeOffset.UtcNow)
+            catch (Exception exception)
             {
-                snapshots.DeleteSnapshot();
+                RenderStatus($"Codex connection failed: {exception.Message}", warning: true);
             }
-
-            var launchIntent = stateStore.ReadLaunchIntent();
-            if (launchIntent is not null && launchIntent.ExpiresAtUtc < DateTimeOffset.UtcNow)
-            {
-                stateStore.DeleteLaunchIntent();
-                if (stateStore.ReadBinding()?.SessionId is null)
-                {
-                    integrationStatus = "Codex session was not detected";
-                }
-            }
-
-            RenderState();
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
-        {
-            modeLabel.Text = "Capture error";
-            modeLabel.ForeColor = Warning;
-        }
-    }
-
-    private void Detach()
-    {
-        stateStore.WriteBinding(new BindingState
-        {
-            SessionId = null,
-            Mode = CaptureMode.Detached,
-            UpdatedAtUtc = DateTimeOffset.UtcNow,
-        });
-        stateStore.DeleteLaunchIntent();
-        snapshots.DeleteSnapshot();
-        RenderState();
-    }
-
-    private void TogglePause()
-    {
-        var binding = stateStore.ReadBinding();
-        if (binding?.SessionId is null)
-        {
-            return;
-        }
-
-        var nextMode = binding.Mode == CaptureMode.Paused ? CaptureMode.Active : CaptureMode.Paused;
-        stateStore.WriteBinding(binding with { Mode = nextMode, UpdatedAtUtc = DateTimeOffset.UtcNow });
-        if (nextMode == CaptureMode.Paused)
-        {
-            snapshots.DeleteSnapshot();
-        }
-
-        RenderState();
-    }
-
-    private void ToggleFreeze()
-    {
-        var binding = stateStore.ReadBinding();
-        if (binding?.SessionId is null || binding.Mode == CaptureMode.Paused)
-        {
-            return;
-        }
-
-        if (binding.Mode == CaptureMode.Frozen)
-        {
-            stateStore.WriteBinding(binding with { Mode = CaptureMode.Active, UpdatedAtUtc = DateTimeOffset.UtcNow });
         }
         else
         {
-            var snapshot = snapshots.ReadSnapshot();
-            if (snapshot is null)
-            {
-                return;
-            }
-
-            snapshots.WriteSnapshot(snapshot with { ExpiresAtUtc = DateTimeOffset.UtcNow.AddMinutes(15) });
-            stateStore.WriteBinding(binding with { Mode = CaptureMode.Frozen, UpdatedAtUtc = DateTimeOffset.UtcNow });
+            ShowChat(captureUnderlyingContext: false);
+            RenderStatus("Acceptance mode · Codex relay disabled");
         }
-
-        RenderState();
     }
 
-    private void RenderState()
+    protected override void WndProc(ref Message message)
     {
-        var binding = stateStore.ReadBinding() ?? new BindingState { Mode = CaptureMode.Detached };
-        modeLabel.Text = binding.Mode switch
+        if (message.Msg == WmHotkey && message.WParam.ToInt32() == HotkeyId)
         {
-            CaptureMode.Active => "● Capturing",
-            CaptureMode.Frozen => "◆ Frozen",
-            CaptureMode.Paused => "Ⅱ Paused",
-            _ => "○ Detached",
-        };
-        modeLabel.ForeColor = binding.Mode == CaptureMode.Active ? Accent : binding.Mode == CaptureMode.Detached ? Muted : Warning;
-        hookLabel.Text = integrationStatus;
-        hookLabel.ForeColor = integrationStatus.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
-                              integrationStatus.Contains("not detected", StringComparison.OrdinalIgnoreCase)
-            ? Warning
-            : Accent;
-        pauseButton.Text = binding.Mode == CaptureMode.Paused ? "Resume" : "Pause";
-        freezeButton.Text = binding.Mode == CaptureMode.Frozen ? "Unfreeze" : "Freeze";
-        pauseButton.Enabled = binding.SessionId is not null;
-        freezeButton.Enabled = binding.SessionId is not null && binding.Mode != CaptureMode.Paused;
+            if (Visible)
+            {
+                if (!string.IsNullOrWhiteSpace(input.Text) && !turnActive)
+                {
+                    _ = SendCurrentMessageAsync();
+                }
+                else
+                {
+                    HideChat();
+                }
+            }
+            else
+            {
+                ShowChat(captureUnderlyingContext: true);
+            }
 
-        var boundSession = stateStore.ReadSessions().FirstOrDefault(session =>
-            string.Equals(session.SessionId, binding.SessionId, StringComparison.OrdinalIgnoreCase));
-        sessionDetailLabel.ForeColor = Muted;
-        var launchIntent = stateStore.ReadLaunchIntent();
-        sessionDetailLabel.Text = binding.SessionId is not null
-            ? $"Bound exactly to {binding.SessionId}\n{boundSession?.WorkingDirectory ?? "Working directory unavailable"}"
-            : launchIntent is not null && launchIntent.ExpiresAtUtc >= DateTimeOffset.UtcNow
-                ? "Starting a fresh Codex session in the default WSL distribution…"
-                : "No Codex session is bound.";
+            return;
+        }
 
-        var snapshot = snapshots.ReadSnapshot();
+        base.WndProc(ref message);
+    }
+
+    private void RegisterInvocationHotkey()
+    {
+        if (NativeMethods.RegisterHotKey(Handle, HotkeyId, ModControl, VkReturn))
+        {
+            hotkeyRegistered = true;
+            shortcutLabel.Text = "Ctrl + Enter";
+            return;
+        }
+
+        if (NativeMethods.RegisterHotKey(Handle, HotkeyId, ModControl | ModShift, VkSpace))
+        {
+            hotkeyRegistered = true;
+            shortcutLabel.Text = "Ctrl + Shift + Space";
+            RenderStatus("Ctrl + Enter was unavailable; using Ctrl + Shift + Space.", warning: true);
+            return;
+        }
+
+        shortcutLabel.Text = "Shortcut unavailable";
+        RenderStatus("Windows could not register a global Zommi shortcut.", warning: true);
+    }
+
+    private void UnregisterInvocationHotkey()
+    {
+        if (hotkeyRegistered)
+        {
+            _ = NativeMethods.UnregisterHotKey(Handle, HotkeyId);
+            hotkeyRegistered = false;
+        }
+    }
+
+    private void ShowChat(bool captureUnderlyingContext)
+    {
+        if (captureUnderlyingContext)
+        {
+            var result = capture.Capture(DateTimeOffset.UtcNow);
+            invocationContext = result.Snapshot;
+            RenderInvocationContext();
+        }
+
+        PositionAwayFromPointer();
+        if (!Visible)
+        {
+            Show();
+        }
+
+        WindowState = FormWindowState.Normal;
+        Activate();
+        BringToFront();
+        input.Focus();
+        input.SelectionStart = input.TextLength;
+    }
+
+    private void HideChat()
+    {
+        Hide();
+        invocationContext = null;
+        contextLabel.Text = "Press the shortcut while hovering over a page, window, or folder.";
+    }
+
+    private void PositionAwayFromPointer()
+    {
+        if (!NativeMethods.GetCursorPos(out var pointer))
+        {
+            CenterToScreen();
+            return;
+        }
+
+        var point = new Point(pointer.X, pointer.Y);
+        var workArea = Screen.FromPoint(point).WorkingArea;
+        var x = point.X + 24;
+        var y = point.Y + 24;
+        if (x + Width > workArea.Right)
+        {
+            x = point.X - Width - 24;
+        }
+
+        if (y + Height > workArea.Bottom)
+        {
+            y = point.Y - Height - 24;
+        }
+
+        Location = new Point(
+            Math.Clamp(x, workArea.Left, Math.Max(workArea.Left, workArea.Right - Width)),
+            Math.Clamp(y, workArea.Top, Math.Max(workArea.Top, workArea.Bottom - Height)));
+    }
+
+    private void RenderInvocationContext()
+    {
+        var snapshot = invocationContext;
         if (snapshot is null)
         {
-            surfaceValue.Text = "—";
-            windowValue.Text = "—";
-            locatorValue.Text = "—";
-            targetValue.Text = "—";
-            selectionValue.Text = "—";
-        }
-        else
-        {
-            surfaceValue.Text = $"{snapshot.Application} · {snapshot.SurfaceKind} · {Age(snapshot.ObservedAtUtc)}";
-            windowValue.Text = EmptyAsDash(snapshot.WindowTitle);
-            locatorValue.Text = snapshot.Locator is null ? "Unavailable (not inferred)" : $"{snapshot.Locator.Kind}: {snapshot.Locator.Value}";
-            targetValue.Text = snapshot.IndicatedTarget is null
-                ? "Unavailable"
-                : $"{snapshot.IndicatedTarget.ControlType ?? "control"}: {EmptyAsDash(snapshot.IndicatedTarget.Name)} ({snapshot.IndicatedTarget.Confidence})";
-            selectionValue.Text = snapshot.Selection.Count == 0 ? "None exposed" : string.Join(" · ", snapshot.Selection);
+            contextLabel.Text = "No accessible context was exposed under the pointer. Your typed message will still be sent.";
+            return;
         }
 
-        var delivery = stateStore.ReadDelivery();
-        deliveryValue.Text = delivery is null
-            ? "None yet"
-            : $"Snapshot {delivery.SnapshotId[..Math.Min(8, delivery.SnapshotId.Length)]} → {delivery.SessionId[..Math.Min(8, delivery.SessionId.Length)]} · {Age(delivery.DeliveredAtUtc)}";
+        var parts = new List<string> { snapshot.Application };
+        if (snapshot.Locator is not null)
+        {
+            parts.Add(snapshot.Locator.Value);
+        }
+
+        if (snapshot.IndicatedTarget is not null)
+        {
+            var target = snapshot.IndicatedTarget;
+            parts.Add($"{target.ControlType ?? "target"}: {target.Name ?? "unnamed"}");
+        }
+
+        if (snapshot.VisibleText.Count > 0)
+        {
+            parts.Add(string.Join(" · ", snapshot.VisibleText.Take(3)));
+        }
+
+        contextLabel.Text = string.Join(Environment.NewLine, parts);
     }
 
-    private async Task LaunchNewWslCodexAsync()
+    private async Task SendCurrentMessageAsync()
     {
-        if (launchInProgress)
+        if (turnActive)
         {
             return;
         }
 
-        launchInProgress = true;
-        newCodexButton.Enabled = false;
-        integrationStatus = "Preparing WSL";
-        RenderState();
+        var message = input.Text.Trim();
+        if (message.Length == 0)
+        {
+            return;
+        }
 
-        var previousBinding = stateStore.ReadBinding();
-        var launchToken = Guid.NewGuid().ToString("N");
+        turnActive = true;
+        responsePrefixPending = true;
+        sendButton.Enabled = false;
+        input.Enabled = false;
+        AppendTranscript("You", message, Accent);
+        input.Clear();
+        RenderStatus("Codex is working…");
         try
         {
-            var stateRoot = stateStore.RootDirectory;
-            var channel = Environment.GetEnvironmentVariable("ZOMMI_CHANNEL");
-            var installResult = await Task.Run(() => HookInstaller.InstallWsl(launchToken, stateRoot, channel));
-            if (closing)
-            {
-                return;
-            }
-
-            var now = DateTimeOffset.UtcNow;
-            stateStore.WriteLaunchIntent(new SessionLaunchIntent
-            {
-                Token = launchToken,
-                ExpectedWorkingDirectory = installResult.Environment.LinuxHome,
-                CreatedAtUtc = now,
-                ExpiresAtUtc = now.AddMinutes(2),
-            });
-            stateStore.WriteBinding(new BindingState
-            {
-                SessionId = null,
-                Mode = CaptureMode.Detached,
-                UpdatedAtUtc = now,
-            });
-            snapshots.DeleteSnapshot();
-
-            await Task.Run(() => WslCodexLauncher.Launch(installResult.Environment));
-            integrationStatus = $"WSL ready · {installResult.Environment.DistroName}";
+            await codex.StartTurnAsync(message, invocationContext);
         }
         catch (Exception exception)
         {
-            stateStore.DeleteLaunchIntent();
-            stateStore.WriteBinding(previousBinding ?? new BindingState
-            {
-                SessionId = null,
-                Mode = CaptureMode.Detached,
-                UpdatedAtUtc = DateTimeOffset.UtcNow,
-            });
-            if (!closing)
-            {
-                integrationStatus = "WSL launch failed";
-                MessageBox.Show(
-                    this,
-                    $"Could not start a fresh Codex session in WSL: {exception.Message}",
-                    "Launch failed",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
-            }
-        }
-        finally
-        {
-            launchInProgress = false;
-            if (!closing && !IsDisposed)
-            {
-                newCodexButton.Enabled = true;
-                RenderState();
-            }
+            AppendTranscript("Error", exception.Message, Warning);
+            CompleteTurn("failed");
         }
     }
 
-    private void StopCaptureOnExit()
+    private void InputKeyDown(object? sender, KeyEventArgs eventArgs)
     {
-        closing = true;
-        timer.Stop();
-        stateStore.DeleteLaunchIntent();
-        var binding = stateStore.ReadBinding();
-        if (binding?.SessionId is not null)
+        if (eventArgs.KeyCode == Keys.Escape)
         {
-            stateStore.WriteBinding(binding with { Mode = CaptureMode.Paused, UpdatedAtUtc = DateTimeOffset.UtcNow });
+            eventArgs.SuppressKeyPress = true;
+            HideChat();
+            return;
         }
 
-        snapshots.DeleteSnapshot();
+        if (eventArgs.KeyCode == Keys.Enter && !eventArgs.Shift)
+        {
+            eventArgs.SuppressKeyPress = true;
+            _ = SendCurrentMessageAsync();
+        }
     }
 
-    private static string EmptyAsDash(string? value) => string.IsNullOrWhiteSpace(value) ? "—" : value;
-
-    private static string Age(DateTimeOffset time)
+    private void AppendAgentDelta(string delta)
     {
-        var seconds = Math.Max(0, (int)(DateTimeOffset.UtcNow - time).TotalSeconds);
-        return seconds < 60 ? $"{seconds}s ago" : $"{seconds / 60}m ago";
+        if (delta.Length == 0)
+        {
+            return;
+        }
+
+        if (responsePrefixPending)
+        {
+            AppendTranscript("Codex", string.Empty, Color.FromArgb(142, 190, 255), appendTrailingNewline: false);
+            responsePrefixPending = false;
+        }
+
+        transcript.SelectionStart = transcript.TextLength;
+        transcript.SelectionColor = TextColor;
+        transcript.AppendText(delta);
+        transcript.SelectionStart = transcript.TextLength;
+        transcript.ScrollToCaret();
     }
 
+    private void CompleteTurn(string status)
+    {
+        if (!responsePrefixPending && transcript.TextLength > 0 && !transcript.Text.EndsWith(Environment.NewLine, StringComparison.Ordinal))
+        {
+            transcript.AppendText(Environment.NewLine + Environment.NewLine);
+        }
+
+        turnActive = false;
+        responsePrefixPending = false;
+        sendButton.Enabled = true;
+        input.Enabled = true;
+        RenderStatus(status.Equals("completed", StringComparison.OrdinalIgnoreCase)
+            ? "Codex ready"
+            : $"Codex turn: {status}",
+            warning: !status.Equals("completed", StringComparison.OrdinalIgnoreCase));
+        input.Focus();
+    }
+
+    private void AppendTranscript(
+        string role,
+        string text,
+        Color roleColor,
+        bool appendTrailingNewline = true)
+    {
+        transcript.SelectionStart = transcript.TextLength;
+        transcript.SelectionFont = new Font(transcript.Font, FontStyle.Bold);
+        transcript.SelectionColor = roleColor;
+        transcript.AppendText(role + Environment.NewLine);
+        transcript.SelectionFont = transcript.Font;
+        transcript.SelectionColor = TextColor;
+        transcript.AppendText(text);
+        if (appendTrailingNewline)
+        {
+            transcript.AppendText(Environment.NewLine + Environment.NewLine);
+        }
+
+        transcript.SelectionStart = transcript.TextLength;
+        transcript.ScrollToCaret();
+    }
+
+    private void RenderStatus(string status, bool warning = false)
+    {
+        statusLabel.Text = status;
+        statusLabel.ForeColor = warning ? Warning : Muted;
+    }
+
+    private void PostToUi(Action action)
+    {
+        if (IsDisposed || !IsHandleCreated)
+        {
+            return;
+        }
+
+        try
+        {
+            BeginInvoke(action);
+        }
+        catch (InvalidOperationException)
+        {
+            // Window teardown raced the background Codex stream.
+        }
+    }
+
+    private void OnFormClosing(object? sender, FormClosingEventArgs eventArgs)
+    {
+        if (!closeRequested)
+        {
+            eventArgs.Cancel = true;
+            HideChat();
+            return;
+        }
+
+        trayIcon.Visible = false;
+        trayIcon.Dispose();
+        codex.Dispose();
+    }
+
+    private void ExitApplication()
+    {
+        closeRequested = true;
+        Close();
+    }
+
+    private static class NativeMethods
+    {
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool RegisterHotKey(IntPtr windowHandle, int id, uint modifiers, uint virtualKey);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool UnregisterHotKey(IntPtr windowHandle, int id);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool GetCursorPos(out Point point);
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct Point
+        {
+            internal int X;
+            internal int Y;
+        }
+    }
 }

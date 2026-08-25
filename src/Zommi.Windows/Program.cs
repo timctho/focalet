@@ -34,11 +34,14 @@ internal static class Program
             return AcceptanceProbe.WslLaunchPlan();
         }
 
+        if (args.Contains("--acceptance-app-server-handshake", StringComparer.OrdinalIgnoreCase))
+        {
+            return AcceptanceProbe.AppServerHandshake();
+        }
+
         ApplicationConfiguration.Initialize();
-        var store = new StateStore(StateStore.GetDefaultRoot());
-        using var snapshots = SharedSnapshotStore.CreateOwner();
         var autoLaunch = !args.Contains("--no-auto-launch", StringComparer.OrdinalIgnoreCase);
-        Application.Run(new MainForm(store, snapshots, new ForegroundContextCapture(), autoLaunch));
+        Application.Run(new MainForm(new ForegroundContextCapture(), new CodexAppServerClient(), autoLaunch));
         return 0;
     }
 

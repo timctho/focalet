@@ -71,6 +71,8 @@ public sealed record ContextSnapshot
 
     public IReadOnlyList<string> Selection { get; init; } = [];
 
+    public IReadOnlyList<string> VisibleText { get; init; } = [];
+
     public IndicatedTargetInfo? IndicatedTarget { get; init; }
 
     public required string Confidence { get; init; }

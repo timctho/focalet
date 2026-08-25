@@ -80,7 +80,9 @@ internal sealed class ForegroundContextCapture
             }
             else
             {
-                return new CaptureResult(null, PreservePrevious: false);
+                surfaceKind = "Window";
+                application = CultureInfo.InvariantCulture.TextInfo.ToTitleCase(processName);
+                limitation = null;
             }
 
             if (surfaceKind == "File Explorer" && locator is null && string.IsNullOrWhiteSpace(title))
@@ -89,6 +91,7 @@ internal sealed class ForegroundContextCapture
             }
 
             var indicatedTarget = TryReadPointerTarget(processId);
+            var visibleText = TryReadVisibleText(windowHandle, processId);
             return new CaptureResult(new ContextSnapshot
             {
                 SnapshotId = Guid.NewGuid().ToString("D"),
@@ -100,8 +103,9 @@ internal sealed class ForegroundContextCapture
                 WindowTitle = title,
                 Locator = locator,
                 Selection = selection,
+                VisibleText = visibleText,
                 IndicatedTarget = indicatedTarget,
-                Confidence = locator is null ? "limited" : "high",
+                Confidence = locator is not null || visibleText.Count > 0 ? "high" : indicatedTarget is not null ? "medium" : "limited",
                 Limitation = limitation,
             }, PreservePrevious: false);
         }
@@ -236,6 +240,88 @@ internal sealed class ForegroundContextCapture
         }
     }
 
+    private static IReadOnlyList<string> TryReadVisibleText(IntPtr windowHandle, uint foregroundProcessId)
+    {
+        try
+        {
+            var collector = new VisibleTextCollector(maximumItems: 32, maximumCharacters: 6000);
+            var root = AutomationElement.FromHandle(windowHandle);
+
+            if (NativeMethods.GetCursorPos(out var point))
+            {
+                var hovered = AutomationElement.FromPoint(new System.Windows.Point(point.X, point.Y));
+                if (hovered.Current.ProcessId == foregroundProcessId && !hovered.Current.IsPassword)
+                {
+                    var current = hovered;
+                    for (var depth = 0; depth < 10 && current is not null; depth++)
+                    {
+                        CollectElementText(current, collector, includeDocumentText: true);
+                        if (current.Equals(root))
+                        {
+                            break;
+                        }
+
+                        current = TreeWalker.ControlViewWalker.GetParent(current);
+                    }
+                }
+            }
+
+            var queue = new Queue<AutomationElement>();
+            queue.Enqueue(root);
+            for (var visited = 0; queue.Count > 0 && visited < 240 && !collector.IsFull; visited++)
+            {
+                var element = queue.Dequeue();
+                CollectElementText(
+                    element,
+                    collector,
+                    includeDocumentText: element.Current.ControlType == ControlType.Document);
+
+                var child = TreeWalker.ControlViewWalker.GetFirstChild(element);
+                for (var siblings = 0; child is not null && siblings < 80; siblings++)
+                {
+                    queue.Enqueue(child);
+                    child = TreeWalker.ControlViewWalker.GetNextSibling(child);
+                }
+            }
+
+            return collector.Items;
+        }
+        catch (Exception exception) when (exception is ElementNotAvailableException or InvalidOperationException or COMException)
+        {
+            return [];
+        }
+    }
+
+    private static void CollectElementText(
+        AutomationElement element,
+        VisibleTextCollector collector,
+        bool includeDocumentText)
+    {
+        try
+        {
+            if (element.Current.IsPassword)
+            {
+                return;
+            }
+
+            collector.Add(element.Current.Name);
+            if (element.TryGetCurrentPattern(ValuePattern.Pattern, out var valuePattern))
+            {
+                collector.Add(((ValuePattern)valuePattern).Current.Value);
+            }
+
+            if (includeDocumentText && element.TryGetCurrentPattern(TextPattern.Pattern, out var textPattern))
+            {
+                collector.Add(((TextPattern)textPattern).DocumentRange.GetText(4000));
+            }
+        }
+        catch (Exception exception) when (exception is ElementNotAvailableException or InvalidOperationException or COMException)
+        {
+            // Accessibility trees change while pages render. Keep the text that
+            // was already captured instead of failing the invocation.
+        }
+    }
+
     private static string ReadWindowText(IntPtr windowHandle)
     {
         var length = NativeMethods.GetWindowTextLength(windowHandle);
@@ -275,6 +361,61 @@ internal sealed class ForegroundContextCapture
         if (value is not null && Marshal.IsComObject(value))
         {
             _ = Marshal.FinalReleaseComObject(value);
+        }
+    }
+
+    private sealed class VisibleTextCollector(int maximumItems, int maximumCharacters)
+    {
+        private readonly List<string> items = [];
+        private readonly HashSet<string> seen = new(StringComparer.Ordinal);
+        private int characters;
+
+        public IReadOnlyList<string> Items => items;
+
+        public bool IsFull => items.Count >= maximumItems || characters >= maximumCharacters;
+
+        public void Add(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value) || IsFull)
+            {
+                return;
+            }
+
+            foreach (var line in value.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                var cleaned = new string(line
+                    .Select(character => char.IsControl(character) ? ' ' : character)
+                    .ToArray());
+                while (cleaned.Contains("  ", StringComparison.Ordinal))
+                {
+                    cleaned = cleaned.Replace("  ", " ", StringComparison.Ordinal);
+                }
+
+                cleaned = cleaned.Trim();
+                if (cleaned.Length == 0 || !seen.Add(cleaned))
+                {
+                    continue;
+                }
+
+                var remaining = maximumCharacters - characters;
+                if (remaining <= 0)
+                {
+                    return;
+                }
+
+                var allowed = Math.Min(400, remaining);
+                var bounded = cleaned.Length <= allowed
+                    ? cleaned
+                    : allowed == 1
+                        ? "…"
+                        : string.Concat(cleaned.AsSpan(0, allowed - 1), "…");
+                items.Add(bounded);
+                characters += bounded.Length;
+                if (IsFull)
+                {
+                    return;
+                }
+            }
         }
     }
 

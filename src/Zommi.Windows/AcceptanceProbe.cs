@@ -146,4 +146,27 @@ internal static class AcceptanceProbe
             }
         }
     }
+
+    public static int AppServerHandshake()
+    {
+        try
+        {
+            using var client = new CodexAppServerClient();
+            var statuses = new List<string>();
+            client.StatusChanged += status => statuses.Add(status);
+            client.EnsureStartedAsync().WaitAsync(TimeSpan.FromSeconds(45)).GetAwaiter().GetResult();
+            Console.Out.Write(JsonSerializer.Serialize(new
+            {
+                ready = client.IsReady,
+                threadId = client.ThreadId,
+                statuses,
+            }));
+            return client.IsReady ? 0 : 3;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.Write(exception);
+            return 1;
+        }
+    }
 }
