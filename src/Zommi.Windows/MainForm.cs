@@ -334,6 +334,8 @@ internal sealed class MainForm : Form
     {
         contextHotkeyRegistered = NativeMethods.RegisterHotKey(Handle, ContextHotkeyId, ModAlt, VkA);
         imageHotkeyRegistered = NativeMethods.RegisterHotKey(Handle, ImageHotkeyId, ModAlt | ModShift, VkA);
+        shortcutLabel.AccessibleName =
+            $"{shortcutLabel.Text}; Alt+A registered: {contextHotkeyRegistered}; Alt+Shift+A registered: {imageHotkeyRegistered}";
         shortcutLabel.AccessibleDescription =
             $"Alt+A registered: {contextHotkeyRegistered}; Alt+Shift+A registered: {imageHotkeyRegistered}";
 

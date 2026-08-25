@@ -233,14 +233,16 @@ try {
         [System.Windows.Automation.Condition]::TrueCondition)) {
         try {
             $allText += ' ' + $descendant.Current.Name
-            if ($descendant.Current.Name -like 'Alt + A*Alt + Shift + A') {
+            if ($descendant.Current.Name -like 'Alt + A*Alt + Shift + A*') {
                 $shortcutElement = $descendant
             }
         } catch { }
     }
     Assert-True ($allText -like '*Alt + A*Alt + Shift + A*') 'The required shortcuts were not visible.'
+    $shortcutName = if ($null -eq $shortcutElement) { '<missing>' } else { $shortcutElement.Current.Name }
+    $shortcutHelp = if ($null -eq $shortcutElement) { '<missing>' } else { $shortcutElement.Current.HelpText }
     Assert-True ($null -ne $shortcutElement -and
-        $shortcutElement.Current.HelpText -like '*Alt+A registered: True*Alt+Shift+A registered: True*') 'Windows did not register both required global hotkeys.'
+        $shortcutName -like '*Alt+A registered: True*Alt+Shift+A registered: True*') "Windows did not register both required global hotkeys. Name: $shortcutName Help: $shortcutHelp"
 
     $composer = Find-DocumentElement $chat 1
     Assert-True ($null -ne $composer) 'The composer was not exposed through UI Automation.'
