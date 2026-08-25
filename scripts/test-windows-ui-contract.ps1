@@ -125,6 +125,9 @@ public static class ZommiUiNative {
     public static extern bool SetCursorPos(int x, int y);
 
     [DllImport("user32.dll")]
+    private static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
+
+    [DllImport("user32.dll")]
     public static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll")]
@@ -135,6 +138,14 @@ public static class ZommiUiNative {
 
     public static IntPtr MousePosition(int x, int y) {
         return (IntPtr)((y << 16) | (x & 0xffff));
+    }
+
+    public static void PressAltA() {
+        const uint keyUp = 0x0002;
+        keybd_event(0x12, 0, 0, UIntPtr.Zero);
+        keybd_event(0x41, 0, 0, UIntPtr.Zero);
+        keybd_event(0x41, 0, keyUp, UIntPtr.Zero);
+        keybd_event(0x12, 0, keyUp, UIntPtr.Zero);
     }
 
     [DllImport("user32.dll")]
@@ -307,14 +318,22 @@ try {
 
     $beforeMove = $chat.Current.BoundingRectangle
     [void] [ZommiUiNative]::SetCursorPos(80, 80)
-    Assert-True ([ZommiUiNative]::PostMessage(
-        [IntPtr] $chat.Current.NativeWindowHandle,
-        0x0312,
-        [IntPtr] 0x5A4D,
-        [IntPtr]::Zero)) 'Could not reinvoke Alt+A while the chat was visible.'
+    [ZommiUiNative]::PressAltA()
     Start-Sleep -Milliseconds 700
     $chat = Find-ProcessWindow $process 'Zommi*floating Codex chat' 5
     $afterMove = $chat.Current.BoundingRectangle
+    $shortcutDispatch = 'physical-alt-a'
+    if ($beforeMove.X -eq $afterMove.X -and $beforeMove.Y -eq $afterMove.Y) {
+        Assert-True ([ZommiUiNative]::PostMessage(
+            [IntPtr] $chat.Current.NativeWindowHandle,
+            0x0312,
+            [IntPtr] 0x5A4D,
+            [IntPtr]::Zero)) 'Could not reinvoke Alt+A while the chat was visible.'
+        Start-Sleep -Milliseconds 700
+        $chat = Find-ProcessWindow $process 'Zommi*floating Codex chat' 5
+        $afterMove = $chat.Current.BoundingRectangle
+        $shortcutDispatch = 'wm-hotkey-fallback'
+    }
     $reinvocationResult = 'passed'
     if ($beforeMove.X -eq $afterMove.X -and $beforeMove.Y -eq $afterMove.Y) {
         if ($AllowCaptureUnavailable) {
@@ -331,6 +350,7 @@ try {
         contextTokens = $composerText
         hoverPreview = 'passed'
         imageSelection = $imageSelectionResult
+        shortcutDispatch = $shortcutDispatch
         reinvocationMove = $reinvocationResult
         bounds = "$($afterMove.X),$($afterMove.Y),$($afterMove.Width),$($afterMove.Height)"
     } | ConvertTo-Json
