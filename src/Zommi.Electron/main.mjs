@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { NativeHostClient } from './native-host.mjs';
 import { PortableCodexBridge } from './codex-bridge.mjs';
 import { capturePortableContext } from './platform-capture.mjs';
+import { selectImageRegion } from './image-selector.mjs';
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
 const seededAcceptance = process.argv.includes('--acceptance-ui-seeded');
@@ -177,10 +178,9 @@ async function selectImageContext() {
   const wasVisible = mainWindow?.isVisible();
   mainWindow?.hide();
   try {
-    if (process.platform !== 'win32') {
-      throw new Error('The Electron region selector is not installed for this platform yet.');
-    }
-    const result = await backend.request('selectImage');
+    const result = process.platform === 'win32'
+      ? await backend.request('selectImage')
+      : await selectImageRegion();
     if (!result?.cancelled && result?.dataUrl) {
       send('context:added', {
         id: randomUUID(),

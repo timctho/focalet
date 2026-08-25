@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src data:; style-src 'self'; script-src 'self'">
+  <title>Zommi image selection</title>
+  <link rel="stylesheet" href="selection.css">
+</head>
+<body>
+  <img id="screen" alt="Current screen">
+  <div class="veil"></div>
+  <div id="selection" hidden></div>
+  <div class="instruction">Drag to select image context · Esc to cancel</div>
+  <script type="module" src="selection.mjs"></script>
+</body>
+</html>
