@@ -26,14 +26,17 @@ dotnet publish (Join-Path $repositoryRoot 'src/Zommi.Hook/Zommi.Hook.csproj') `
 
 Copy-Item (Join-Path $repositoryRoot 'docs/windows-prototype.md') $outputDirectory
 Copy-Item (Join-Path $repositoryRoot 'docs/windows-acceptance.md') $outputDirectory
+Copy-Item (Join-Path $repositoryRoot 'docs/acceptance-report.md') $outputDirectory
 Copy-Item (Join-Path $repositoryRoot 'scripts/Zommi.WslHook.ps1') $outputDirectory
 
 $executablePath = Join-Path $outputDirectory 'Zommi.exe'
 $hookExecutablePath = Join-Path $outputDirectory 'Zommi.Hook.exe'
+$wslHookPath = Join-Path $outputDirectory 'Zommi.WslHook.ps1'
 $hashPath = Join-Path $outputDirectory 'SHA256SUMS.txt'
 $hash = (Get-FileHash -Algorithm SHA256 $executablePath).Hash.ToLowerInvariant()
 $hookHash = (Get-FileHash -Algorithm SHA256 $hookExecutablePath).Hash.ToLowerInvariant()
-Set-Content -Path $hashPath -Encoding ascii -Value "$hash  Zommi.exe", "$hookHash  Zommi.Hook.exe"
+$wslHookHash = (Get-FileHash -Algorithm SHA256 $wslHookPath).Hash.ToLowerInvariant()
+Set-Content -Path $hashPath -Encoding ascii -Value "$hash  Zommi.exe", "$hookHash  Zommi.Hook.exe", "$wslHookHash  Zommi.WslHook.ps1"
 
 $archivePath = "$outputDirectory.zip"
 if (Test-Path $archivePath) {
