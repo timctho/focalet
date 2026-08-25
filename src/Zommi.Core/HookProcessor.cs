@@ -168,6 +168,12 @@ public static class ContextFormatter
     private const int MaximumVisibleTextItems = 128;
     private const int MaximumVisibleTextCharacters = 30_000;
     private const int MaximumVisibleTextItemCharacters = 2_000;
+    private static readonly JsonSerializerOptions AccessibilityJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        WriteIndented = true,
+    };
 
     public static string FormatInvocation(ContextSnapshot snapshot, DateTimeOffset nowUtc)
         => FormatInvocation([snapshot], nowUtc);
@@ -244,9 +250,20 @@ public static class ContextFormatter
             builder.AppendLine($"{Clean(snapshot.Locator.Kind, 40)}: {Clean(snapshot.Locator.Value, 1000)}");
         }
 
-        if (snapshot.VisibleText.Count > 0)
+        var accessibilityTree = snapshot.AccessibilityTree;
+        var hasAccessibilityTree = accessibilityTree is { Roots.Count: > 0 };
+        if (hasAccessibilityTree)
         {
-            builder.AppendLine("Visible text:");
+            builder.AppendLine("Browser-provided accessibility tree (JSON; preserve only the relationships and grid coordinates explicitly present):");
+            builder.AppendLine(JsonSerializer.Serialize(accessibilityTree, AccessibilityJsonOptions));
+        }
+
+        if (snapshot.VisibleText.Count > 0 &&
+            (!hasAccessibilityTree || accessibilityTree!.Truncated))
+        {
+            builder.AppendLine(!hasAccessibilityTree
+                ? "Visible text:"
+                : "Flat visible-text fallback because the accessibility tree was truncated:");
             var visibleCharacters = 0;
             foreach (var text in snapshot.VisibleText.Take(MaximumVisibleTextItems))
             {

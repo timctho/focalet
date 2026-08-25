@@ -1,7 +1,5 @@
 using System.ComponentModel;
 using System.Drawing.Drawing2D;
-using System.Drawing.Imaging;
-using System.IO;
 using System.Runtime.InteropServices;
 
 namespace Zommi.Windows;
@@ -16,7 +14,7 @@ internal sealed class RegionSelectionForm : Form
 
     public RegionSelectionForm(Func<Rectangle, byte[]>? captureRegion = null)
     {
-        this.captureRegion = captureRegion ?? CaptureRegion;
+        this.captureRegion = captureRegion ?? (area => ScreenCapture.CapturePng(area));
         Text = "Zommi image selection";
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
@@ -144,16 +142,4 @@ internal sealed class RegionSelectionForm : Form
         Math.Max(first.X, second.X),
         Math.Max(first.Y, second.Y));
 
-    private static byte[] CaptureRegion(Rectangle screenArea)
-    {
-        using var bitmap = new Bitmap(screenArea.Width, screenArea.Height, PixelFormat.Format32bppArgb);
-        using (var graphics = Graphics.FromImage(bitmap))
-        {
-            graphics.CopyFromScreen(screenArea.Location, Point.Empty, screenArea.Size, CopyPixelOperation.SourceCopy);
-        }
-
-        using var stream = new MemoryStream();
-        bitmap.Save(stream, ImageFormat.Png);
-        return stream.ToArray();
-    }
 }

@@ -390,8 +390,11 @@ internal sealed class MainForm : Form
             {
                 Token = ContextTokens.Create(result.Snapshot, attachments.Select(item => item.Token)),
                 Snapshot = result.Snapshot,
+                ImagePng = result.ViewportPng,
             });
-            RenderStatus($"Attached {attachments[^1].Token}");
+            RenderStatus(result.ViewportPng is null
+                ? $"Attached {attachments[^1].Token}"
+                : $"Attached {attachments[^1].Token} · browser viewport");
         }
         else if (!result.PreservePrevious)
         {
@@ -479,6 +482,8 @@ internal sealed class MainForm : Form
         {
             Token = ContextTokens.Create(first, attachments.Select(item => item.Token)),
             Snapshot = first,
+            ImagePng = Convert.FromBase64String(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="),
         });
         AddAttachment(new ContextAttachment
         {

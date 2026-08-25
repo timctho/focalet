@@ -528,13 +528,15 @@ try {
     $browserMarker = 'ZOMMI_PAGE_' + [Guid]::NewGuid().ToString('N')
     $buttonName = 'Hover target ' + $browserMarker
     $bodyMarker = 'Visible page text ' + $browserMarker
+    $tableMarker = 'Account usage grid ' + $browserMarker
+    $tableCellMarker = 'Account row ' + $browserMarker
     $longPageTailMarker = 'LONG_PAGE_TAIL_' + [Guid]::NewGuid().ToString('N')
     $browserTitle = 'Zommi Acceptance ' + $browserMarker
     $htmlPath = Join-Path $temporaryRoot 'zommi-browser-acceptance.html'
     $longPageParagraphs = [string]::Join('', @(1..80 | ForEach-Object {
         '<p>Long webpage paragraph {0}: {1}</p>' -f $_, ('x' * 180)
     }))
-    $html = "<!doctype html><title>$browserTitle</title><main><button style='position:fixed;top:80px;right:80px;font-size:30px'>$buttonName</button><h1>$bodyMarker</h1>$longPageParagraphs<p>$longPageTailMarker</p></main>"
+    $html = "<!doctype html><title>$browserTitle</title><main><button style='position:fixed;top:80px;right:80px;font-size:30px'>$buttonName</button><h1>$bodyMarker</h1><table aria-label='$tableMarker'><thead><tr><th>Alias</th><th>Ecosystem</th></tr></thead><tbody><tr><td>$tableCellMarker</td><td>github</td></tr></tbody></table>$longPageParagraphs<p>$longPageTailMarker</p></main>"
     [IO.File]::WriteAllText($htmlPath, $html)
     $browserUri = ([Uri] $htmlPath).AbsoluteUri
     $edgeProfile = Join-Path $temporaryRoot 'edge-profile'
@@ -576,6 +578,16 @@ try {
     $pageCaptureText = [string]::Join(' ', @($pageCaptureJson.snapshot.visibleText))
     Assert-True ($pageCaptureJson.snapshot.locator.value -eq $browserUri) 'The pointer page capture probe omitted the browser URL.'
     Assert-True ($null -ne $pageCaptureJson.snapshot.indicatedTarget) "The pointer page capture probe omitted the hovered accessibility target. Capture: $($pageCapture.StandardOutput)"
+    $accessibilityTree = $pageCaptureJson.snapshot.accessibilityTree
+    Assert-True ($null -ne $accessibilityTree) 'The pointer page capture probe omitted the post-render browser accessibility tree.'
+    Assert-True ($accessibilityTree.source -eq 'windows-uia-control-view') "The accessibility tree reported an unexpected source: $($accessibilityTree.source)"
+    Assert-True ($accessibilityTree.nodeCount -gt 0) 'The browser accessibility tree did not contain any nodes.'
+    Assert-True (@($accessibilityTree.roots).Count -gt 0) 'The browser accessibility tree did not contain a root.'
+    Assert-True (@($accessibilityTree.roots[0].children).Count -gt 0) 'The browser accessibility tree did not preserve nested provider relationships.'
+    $accessibilityTreeJson = $accessibilityTree | ConvertTo-Json -Depth 100 -Compress
+    Assert-True ($accessibilityTreeJson -like "*$bodyMarker*") 'The browser accessibility tree omitted rendered page content.'
+    Assert-True ($accessibilityTreeJson -like "*$tableMarker*" -or $accessibilityTreeJson -like "*$tableCellMarker*") 'The browser accessibility tree omitted the semantic table fixture.'
+    Assert-True ($pageCaptureJson.viewportImageBytes -gt 0) 'The deliberate browser capture did not include an automatic viewport PNG.'
     Assert-True ($pageCaptureText -like "*$browserMarker*") 'The pointer page capture probe omitted the page text.'
     Assert-True ($pageCaptureText -like "*$longPageTailMarker*") 'The pointer page capture probe truncated the long webpage before its tail marker.'
     $pointerBefore = [ZommiNativeWindow]::CursorPosition()

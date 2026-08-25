@@ -1,7 +1,9 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json.Serialization;
 using System.Windows.Automation;
 using Zommi.Core;
 
@@ -13,8 +15,22 @@ internal sealed class ForegroundContextCapture
     private const int MaximumVisibleTextCharacters = 30_000;
     private const int MaximumVisibleTextItemCharacters = 2_000;
     private const int MaximumDocumentTextCharacters = 30_000;
+    private const int MaximumAccessibilityNodes = 256;
+    private const int MaximumAccessibilityCharacters = 20_000;
+    private const int MaximumAccessibilityDepth = 24;
+    private const int MaximumViewportImageDimension = 1_600;
 
-    internal sealed record CaptureResult(ContextSnapshot? Snapshot, bool PreservePrevious);
+    internal sealed record CaptureResult(
+        ContextSnapshot? Snapshot,
+        bool PreservePrevious,
+        [property: JsonIgnore] byte[]? ViewportPng = null)
+    {
+        public int ViewportImageBytes => ViewportPng?.Length ?? 0;
+    }
+
+    private sealed record BrowserAccessibilityCapture(
+        AccessibilityTreeInfo? Tree,
+        Rectangle? ViewportBounds);
 
     private static readonly HashSet<string> BrowserProcesses = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -104,9 +120,12 @@ internal sealed class ForegroundContextCapture
                 return new CaptureResult(null, PreservePrevious: false);
             }
 
+            var browserAccessibility = surfaceKind == "Browser"
+                ? TryReadBrowserAccessibility(windowHandle, pointer)
+                : null;
             var indicatedTarget = TryReadPointerTarget(windowHandle, pointer);
             var visibleText = TryReadVisibleText(windowHandle, pointer);
-            return new CaptureResult(new ContextSnapshot
+            var snapshot = new ContextSnapshot
             {
                 SnapshotId = Guid.NewGuid().ToString("D"),
                 ObservedAtUtc = nowUtc,
@@ -118,10 +137,16 @@ internal sealed class ForegroundContextCapture
                 Locator = locator,
                 Selection = selection,
                 VisibleText = visibleText,
+                AccessibilityTree = browserAccessibility?.Tree,
                 IndicatedTarget = indicatedTarget,
                 Confidence = locator is not null || visibleText.Count > 0 ? "high" : indicatedTarget is not null ? "medium" : "limited",
                 Limitation = limitation,
-            }, PreservePrevious: false);
+            };
+            var viewportPng = surfaceKind == "Browser"
+                ? TryCaptureBrowserViewport(
+                    browserAccessibility?.ViewportBounds ?? TryReadClientBounds(windowHandle))
+                : null;
+            return new CaptureResult(snapshot, PreservePrevious: false, viewportPng);
         }
     }
 
@@ -404,6 +429,257 @@ internal sealed class ForegroundContextCapture
         }
     }
 
+    private static BrowserAccessibilityCapture? TryReadBrowserAccessibility(
+        IntPtr windowHandle,
+        NativeMethods.Point point)
+    {
+        try
+        {
+            var root = AutomationElement.FromHandle(windowHandle);
+            var document = FindDocumentUnderPointer(root, point) ?? FindFirstDocument(root);
+            if (document is null)
+            {
+                return null;
+            }
+
+            var budget = new AccessibilityCaptureBudget(
+                MaximumAccessibilityNodes,
+                MaximumAccessibilityCharacters,
+                MaximumAccessibilityDepth);
+            var capturedRoot = CaptureAccessibilityNode(document, budget, depth: 0);
+            var viewportBounds = ToScreenRectangle(document.Current.BoundingRectangle);
+            return new BrowserAccessibilityCapture(
+                capturedRoot is null
+                    ? null
+                    : new AccessibilityTreeInfo
+                    {
+                        Source = "windows-uia-control-view",
+                        NodeCount = budget.NodeCount,
+                        Truncated = budget.Truncated,
+                        Roots = [capturedRoot],
+                    },
+                viewportBounds);
+        }
+        catch (Exception exception) when (exception is ElementNotAvailableException or InvalidOperationException or COMException)
+        {
+            return null;
+        }
+    }
+
+    private static AutomationElement? FindDocumentUnderPointer(
+        AutomationElement root,
+        NativeMethods.Point point)
+    {
+        var current = AutomationElement.FromPoint(new System.Windows.Point(point.X, point.Y));
+        for (var depth = 0; current is not null && depth < 48; depth++)
+        {
+            if (current.Current.ControlType == ControlType.Document && IsWithinWindow(current, root))
+            {
+                return current;
+            }
+
+            current = TreeWalker.ControlViewWalker.GetParent(current);
+        }
+
+        return null;
+    }
+
+    private static AutomationElement? FindFirstDocument(AutomationElement root)
+    {
+        var documentCondition = new PropertyCondition(
+            AutomationElement.ControlTypeProperty,
+            ControlType.Document);
+        return root.FindFirst(TreeScope.Descendants, documentCondition);
+    }
+
+    private static AccessibilityNodeInfo? CaptureAccessibilityNode(
+        AutomationElement element,
+        AccessibilityCaptureBudget budget,
+        int depth)
+    {
+        if (!budget.TryTakeNode(depth))
+        {
+            return null;
+        }
+
+        try
+        {
+            var current = element.Current;
+            if (current.IsPassword)
+            {
+                return new AccessibilityNodeInfo { Role = "Password" };
+            }
+
+            int? rowCount = null;
+            int? columnCount = null;
+            int? row = null;
+            int? column = null;
+            int? rowSpan = null;
+            int? columnSpan = null;
+            IReadOnlyList<string>? rowHeaders = null;
+            IReadOnlyList<string>? columnHeaders = null;
+            if (element.TryGetCurrentPattern(GridPattern.Pattern, out var gridPatternObject))
+            {
+                var grid = ((GridPattern)gridPatternObject).Current;
+                rowCount = grid.RowCount;
+                columnCount = grid.ColumnCount;
+            }
+
+            if (element.TryGetCurrentPattern(GridItemPattern.Pattern, out var gridItemPatternObject))
+            {
+                var gridItem = ((GridItemPattern)gridItemPatternObject).Current;
+                row = gridItem.Row;
+                column = gridItem.Column;
+                rowSpan = gridItem.RowSpan;
+                columnSpan = gridItem.ColumnSpan;
+            }
+
+            if (element.TryGetCurrentPattern(TableItemPattern.Pattern, out var tableItemPatternObject))
+            {
+                var tableItem = (TableItemPattern)tableItemPatternObject;
+                rowHeaders = ReadHeaderNames(tableItem.Current.GetRowHeaderItems(), budget);
+                columnHeaders = ReadHeaderNames(tableItem.Current.GetColumnHeaderItems(), budget);
+            }
+
+            string? value = null;
+            if (element.TryGetCurrentPattern(ValuePattern.Pattern, out var valuePatternObject))
+            {
+                value = budget.TakeText(((ValuePattern)valuePatternObject).Current.Value, 2_000);
+            }
+
+            var children = new List<AccessibilityNodeInfo>();
+            if (depth < MaximumAccessibilityDepth && !budget.IsFull)
+            {
+                var child = TreeWalker.ControlViewWalker.GetFirstChild(element);
+                for (var sibling = 0; child is not null && sibling < 120 && !budget.IsFull; sibling++)
+                {
+                    var capturedChild = CaptureAccessibilityNode(child, budget, depth + 1);
+                    if (capturedChild is not null)
+                    {
+                        children.Add(capturedChild);
+                    }
+
+                    child = TreeWalker.ControlViewWalker.GetNextSibling(child);
+                }
+
+                if (child is not null)
+                {
+                    budget.MarkTruncated();
+                }
+            }
+            else if (budget.IsFull || TreeWalker.ControlViewWalker.GetFirstChild(element) is not null)
+            {
+                budget.MarkTruncated();
+            }
+
+            return new AccessibilityNodeInfo
+            {
+                Role = current.ControlType?.ProgrammaticName?.Replace("ControlType.", string.Empty, StringComparison.Ordinal)
+                    ?? "Unknown",
+                Name = budget.TakeText(current.Name, 1_000),
+                Value = value,
+                AutomationId = budget.TakeText(current.AutomationId, 240),
+                Bounds = FormatBounds(current.BoundingRectangle),
+                IsOffscreen = current.IsOffscreen,
+                RowCount = rowCount,
+                ColumnCount = columnCount,
+                Row = row,
+                Column = column,
+                RowSpan = rowSpan,
+                ColumnSpan = columnSpan,
+                RowHeaders = rowHeaders,
+                ColumnHeaders = columnHeaders,
+                Children = children.Count == 0 ? null : children,
+            };
+        }
+        catch (Exception exception) when (exception is ElementNotAvailableException or InvalidOperationException or COMException)
+        {
+            budget.MarkTruncated();
+            return null;
+        }
+    }
+
+    private static IReadOnlyList<string>? ReadHeaderNames(
+        IReadOnlyList<AutomationElement> headers,
+        AccessibilityCaptureBudget budget)
+    {
+        var names = headers
+            .Take(32)
+            .Select(header => budget.TakeText(header.Current.Name, 500))
+            .Where(name => name is not null)
+            .Cast<string>()
+            .ToArray();
+        return names.Length == 0 ? null : names;
+    }
+
+    private static byte[]? TryCaptureBrowserViewport(Rectangle? requestedBounds)
+    {
+        if (requestedBounds is not { Width: > 0, Height: > 0 } bounds)
+        {
+            return null;
+        }
+
+        var visibleBounds = Rectangle.Intersect(bounds, SystemInformation.VirtualScreen);
+        if (visibleBounds.Width <= 0 || visibleBounds.Height <= 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            return ScreenCapture.CapturePng(visibleBounds, MaximumViewportImageDimension);
+        }
+        catch (Exception exception) when (exception is ExternalException or ArgumentException or Win32Exception)
+        {
+            return null;
+        }
+    }
+
+    private static Rectangle? TryReadClientBounds(IntPtr windowHandle)
+    {
+        if (!NativeMethods.GetClientRect(windowHandle, out var rectangle))
+        {
+            return null;
+        }
+
+        var origin = new NativeMethods.Point();
+        if (!NativeMethods.ClientToScreen(windowHandle, ref origin))
+        {
+            return null;
+        }
+
+        return new Rectangle(
+            origin.X,
+            origin.Y,
+            rectangle.Right - rectangle.Left,
+            rectangle.Bottom - rectangle.Top);
+    }
+
+    private static Rectangle? ToScreenRectangle(System.Windows.Rect bounds)
+    {
+        if (bounds.IsEmpty || bounds.Width <= 0 || bounds.Height <= 0 ||
+            double.IsNaN(bounds.X) || double.IsNaN(bounds.Y))
+        {
+            return null;
+        }
+
+        return Rectangle.FromLTRB(
+            (int)Math.Floor(bounds.Left),
+            (int)Math.Floor(bounds.Top),
+            (int)Math.Ceiling(bounds.Right),
+            (int)Math.Ceiling(bounds.Bottom));
+    }
+
+    private static string? FormatBounds(System.Windows.Rect bounds)
+    {
+        var rectangle = ToScreenRectangle(bounds);
+        return rectangle is null
+            ? null
+            : string.Create(
+                CultureInfo.InvariantCulture,
+                $"{rectangle.Value.X},{rectangle.Value.Y},{rectangle.Value.Width},{rectangle.Value.Height}");
+    }
+
     private static bool IsWithinWindow(AutomationElement element, AutomationElement root)
     {
         try
@@ -562,6 +838,71 @@ internal sealed class ForegroundContextCapture
         }
     }
 
+    private sealed class AccessibilityCaptureBudget(
+        int maximumNodes,
+        int maximumCharacters,
+        int maximumDepth)
+    {
+        private int characters;
+
+        public int NodeCount { get; private set; }
+
+        public bool Truncated { get; private set; }
+
+        public bool IsFull => NodeCount >= maximumNodes || characters >= maximumCharacters;
+
+        public bool TryTakeNode(int depth)
+        {
+            if (depth > maximumDepth || IsFull)
+            {
+                Truncated = true;
+                return false;
+            }
+
+            NodeCount++;
+            return true;
+        }
+
+        public string? TakeText(string? value, int maximumLength)
+        {
+            if (string.IsNullOrWhiteSpace(value) || characters >= maximumCharacters)
+            {
+                return null;
+            }
+
+            var cleaned = new string(value
+                .Select(character => char.IsControl(character) || IsBidirectionalControl(character) ? ' ' : character)
+                .ToArray());
+            while (cleaned.Contains("  ", StringComparison.Ordinal))
+            {
+                cleaned = cleaned.Replace("  ", " ", StringComparison.Ordinal);
+            }
+
+            cleaned = cleaned.Trim();
+            if (cleaned.Length == 0)
+            {
+                return null;
+            }
+
+            var allowed = Math.Min(maximumLength, maximumCharacters - characters);
+            if (cleaned.Length > allowed)
+            {
+                cleaned = allowed == 1
+                    ? "…"
+                    : string.Concat(cleaned.AsSpan(0, allowed - 1), "…");
+                Truncated = true;
+            }
+
+            characters += cleaned.Length;
+            return cleaned;
+        }
+
+        public void MarkTruncated() => Truncated = true;
+
+        private static bool IsBidirectionalControl(char character) =>
+            character is >= '\u202A' and <= '\u202E' or >= '\u2066' and <= '\u2069';
+    }
+
     private static class NativeMethods
     {
         internal const uint GetRoot = 2;
@@ -584,6 +925,23 @@ internal sealed class ForegroundContextCapture
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool GetCursorPos(out Point point);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool GetClientRect(IntPtr windowHandle, out Rect rectangle);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool ClientToScreen(IntPtr windowHandle, ref Point point);
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct Rect
+        {
+            internal int Left;
+            internal int Top;
+            internal int Right;
+            internal int Bottom;
+        }
 
         [StructLayout(LayoutKind.Sequential)]
         internal struct Point

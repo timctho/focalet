@@ -317,6 +317,9 @@ try {
     $previewHandle = [IntPtr] $preview.Current.NativeWindowHandle
     $previewDocument = Find-AutomationElementById $preview 'ContextPreviewText'
     Assert-True ($null -ne $previewDocument) 'The context preview text area was not exposed through UI Automation.'
+    $previewImage = Find-AutomationElementById $preview 'ContextPreviewImage'
+    Assert-True ($null -ne $previewImage) 'The automatic browser viewport was not exposed in the hybrid context preview.'
+    Assert-True (-not $previewImage.Current.IsOffscreen) 'The automatic browser viewport was not visible in the hybrid context preview.'
     $previewBounds = $preview.Current.BoundingRectangle
     $previewPointerX = [int] ($previewBounds.X + ($previewBounds.Width / 2))
     $previewPointerY = [int] ($previewBounds.Y + ($previewBounds.Height / 2))
@@ -412,6 +415,7 @@ try {
     [ordered]@{
         contextTokens = $composerText
         hoverPreview = 'passed'
+        hybridContextPreview = 'passed'
         hoverPreviewScroll = "$beforeScrollLine->$afterScrollLine"
         imageSelection = $imageSelectionResult
         hotkeyRegistration = $hotkeyRegistration

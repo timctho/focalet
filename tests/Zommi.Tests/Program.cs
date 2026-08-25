@@ -18,6 +18,7 @@ var tests = new (string Name, Action Body)[]
     ("Invocation context preserves bounded long webpage text", InvocationContextPreservesLongWebpageText),
     ("Invocation context prioritizes selected text across multiple captures", InvocationContextPrioritizesSelection),
     ("Context preview omits confidence and safety metadata", ContextPreviewOmitsInternalMetadata),
+    ("Accessibility tree preserves provider structure without inferred Markdown", AccessibilityTreePreservesProviderStructure),
     ("Context tokens use URL abbreviations and remain unique", ContextTokensUseUrlAbbreviations),
     ("Codex reasoning deltas are preserved as thinking output", ReasoningDeltaIsPreserved),
     ("Codex commentary is preserved as thinking output", CommentaryIsPreservedAsThinking),
@@ -263,6 +264,59 @@ static void ContextPreviewOmitsInternalMetadata()
     Contains("confidence medium", invocation);
     Contains("Snapshot confidence: high", invocation);
     Contains("Safety:", invocation);
+}
+
+static void AccessibilityTreePreservesProviderStructure()
+{
+    var now = new DateTimeOffset(2026, 8, 25, 2, 0, 0, TimeSpan.Zero);
+    var snapshot = Snapshot("structured-page", now) with
+    {
+        VisibleText = ["flat fallback that should not be duplicated"],
+        AccessibilityTree = new AccessibilityTreeInfo
+        {
+            Source = "windows-uia-control-view",
+            NodeCount = 3,
+            Truncated = false,
+            Roots =
+            [
+                new AccessibilityNodeInfo
+                {
+                    Role = "Table",
+                    Name = "My Accounts",
+                    Bounds = "10,20,600,240",
+                    RowCount = 2,
+                    ColumnCount = 3,
+                    Children =
+                    [
+                        new AccessibilityNodeInfo
+                        {
+                            Role = "Custom",
+                            Name = "example",
+                            Row = 1,
+                            Column = 0,
+                        },
+                    ],
+                },
+            ],
+        },
+    };
+
+    var context = ContextFormatter.FormatInvocation(snapshot, now.AddSeconds(1));
+    Contains("Browser-provided accessibility tree", context);
+    Contains("\"role\": \"Table\"", context);
+    Contains("\"row\": 1", context);
+    Contains("\"column\": 0", context);
+    True(!context.Contains("flat fallback that should not be duplicated", StringComparison.Ordinal), "A complete accessibility tree duplicated flat visible text.");
+    True(!context.Contains("| My Accounts |", StringComparison.Ordinal), "The formatter inferred a Markdown table.");
+
+    var truncatedContext = ContextFormatter.FormatInvocation(
+        snapshot with
+        {
+            AccessibilityTree = snapshot.AccessibilityTree with { Truncated = true },
+        },
+        now.AddSeconds(1));
+    Contains("Flat visible-text fallback because the accessibility tree was truncated", truncatedContext);
+    Contains("flat fallback that should not be duplicated", truncatedContext);
 }
 
 static void ContextTokensUseUrlAbbreviations()

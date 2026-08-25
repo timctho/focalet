@@ -35,6 +35,8 @@ internal sealed class ContextPreviewForm : Form
         image.Height = 150;
         image.SizeMode = PictureBoxSizeMode.Zoom;
         image.BackColor = Color.FromArgb(28, 28, 29);
+        image.Name = "ContextPreviewImage";
+        image.AccessibleName = "Attached visual context preview";
         image.Visible = false;
 
         Controls.Add(text);
