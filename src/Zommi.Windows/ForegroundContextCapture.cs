@@ -1,0 +1,306 @@
+using System.Diagnostics;
+using System.Globalization;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Windows.Automation;
+using Zommi.Core;
+
+namespace Zommi.Windows;
+
+internal sealed class ForegroundContextCapture
+{
+    internal sealed record CaptureResult(ContextSnapshot? Snapshot, bool PreservePrevious);
+
+    private static readonly HashSet<string> BrowserProcesses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "brave", "chrome", "firefox", "msedge", "opera",
+    };
+
+    private static readonly HashSet<string> IgnoredProcesses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "cmd", "code", "conhost", "cursor", "devenv", "idea64", "openconsole", "powershell", "pwsh", "rider64", "windowsterminal", "wt", "zommi",
+    };
+
+    public CaptureResult Capture(DateTimeOffset nowUtc)
+    {
+        var windowHandle = NativeMethods.GetForegroundWindow();
+        if (windowHandle == IntPtr.Zero)
+        {
+            return new CaptureResult(null, PreservePrevious: true);
+        }
+
+        _ = NativeMethods.GetWindowThreadProcessId(windowHandle, out var processId);
+        if (processId == 0 || processId == Environment.ProcessId)
+        {
+            return new CaptureResult(null, PreservePrevious: true);
+        }
+
+        Process process;
+        try
+        {
+            process = Process.GetProcessById(unchecked((int)processId));
+        }
+        catch (ArgumentException)
+        {
+            return new CaptureResult(null, PreservePrevious: true);
+        }
+
+        using (process)
+        {
+            var processName = process.ProcessName;
+            if (IgnoredProcesses.Contains(processName))
+            {
+                return new CaptureResult(null, PreservePrevious: true);
+            }
+
+            var title = ReadWindowText(windowHandle);
+            string surfaceKind;
+            LocatorInfo? locator = null;
+            IReadOnlyList<string> selection = [];
+            string? limitation;
+            string application;
+
+            if (BrowserProcesses.Contains(processName))
+            {
+                surfaceKind = "Browser";
+                application = FriendlyBrowserName(processName);
+                locator = TryReadBrowserUrl(windowHandle);
+                limitation = locator is null
+                    ? "The browser address bar was not exposed through Windows UI Automation. No URL was inferred."
+                    : null;
+            }
+            else if (processName.Equals("explorer", StringComparison.OrdinalIgnoreCase))
+            {
+                surfaceKind = "File Explorer";
+                application = "File Explorer";
+                (locator, selection) = TryReadExplorer(windowHandle);
+                limitation = locator is null
+                    ? "Explorer did not expose a filesystem path for this window."
+                    : null;
+            }
+            else
+            {
+                return new CaptureResult(null, PreservePrevious: false);
+            }
+
+            if (surfaceKind == "File Explorer" && locator is null && string.IsNullOrWhiteSpace(title))
+            {
+                return new CaptureResult(null, PreservePrevious: false);
+            }
+
+            var indicatedTarget = TryReadPointerTarget(processId);
+            return new CaptureResult(new ContextSnapshot
+            {
+                SnapshotId = Guid.NewGuid().ToString("D"),
+                ObservedAtUtc = nowUtc,
+                ExpiresAtUtc = nowUtc.AddSeconds(30),
+                SurfaceKind = surfaceKind,
+                Application = application,
+                ProcessName = processName,
+                WindowTitle = title,
+                Locator = locator,
+                Selection = selection,
+                IndicatedTarget = indicatedTarget,
+                Confidence = locator is null ? "limited" : "high",
+                Limitation = limitation,
+            }, PreservePrevious: false);
+        }
+    }
+
+    private static LocatorInfo? TryReadBrowserUrl(IntPtr windowHandle)
+    {
+        try
+        {
+            var root = AutomationElement.FromHandle(windowHandle);
+            var editCondition = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit);
+            var edits = root.FindAll(TreeScope.Descendants, editCondition);
+            foreach (AutomationElement edit in edits.Cast<AutomationElement>().Take(80))
+            {
+                if (edit.Current.IsPassword || !edit.TryGetCurrentPattern(ValuePattern.Pattern, out var patternObject))
+                {
+                    continue;
+                }
+
+                var value = ((ValuePattern)patternObject).Current.Value?.Trim();
+                if (Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
+                    (uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+                     uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+                     uri.Scheme.Equals(Uri.UriSchemeFile, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return new LocatorInfo { Kind = "URL", Value = uri.AbsoluteUri };
+                }
+            }
+        }
+        catch (Exception exception) when (exception is ElementNotAvailableException or InvalidOperationException or COMException)
+        {
+            return null;
+        }
+
+        return null;
+    }
+
+    private static (LocatorInfo? Locator, IReadOnlyList<string> Selection) TryReadExplorer(IntPtr windowHandle)
+    {
+        object? shell = null;
+        object? shellWindows = null;
+        try
+        {
+            var shellType = Type.GetTypeFromProgID("Shell.Application");
+            if (shellType is null)
+            {
+                return (null, []);
+            }
+
+            shell = Activator.CreateInstance(shellType);
+            if (shell is null)
+            {
+                return (null, []);
+            }
+
+            dynamic dynamicShell = shell;
+            shellWindows = dynamicShell.Windows();
+            dynamic windows = shellWindows;
+            var count = Convert.ToInt32(windows.Count, CultureInfo.InvariantCulture);
+            for (var index = 0; index < count; index++)
+            {
+                dynamic candidate = windows.Item(index);
+                if (new IntPtr(Convert.ToInt64(candidate.HWND, CultureInfo.InvariantCulture)) != windowHandle)
+                {
+                    Marshal.FinalReleaseComObject(candidate);
+                    continue;
+                }
+
+                var path = Convert.ToString(candidate.Document.Folder.Self.Path, CultureInfo.InvariantCulture);
+                var selectedNames = new List<string>();
+                dynamic selectedItems = candidate.Document.SelectedItems();
+                var selectedCount = Math.Min(8, Convert.ToInt32(selectedItems.Count, CultureInfo.InvariantCulture));
+                for (var selectedIndex = 0; selectedIndex < selectedCount; selectedIndex++)
+                {
+                    dynamic selected = selectedItems.Item(selectedIndex);
+                    var selectedPath = Convert.ToString(selected.Path, CultureInfo.InvariantCulture);
+                    if (!string.IsNullOrWhiteSpace(selectedPath))
+                    {
+                        selectedNames.Add(selectedPath);
+                    }
+
+                    Marshal.FinalReleaseComObject(selected);
+                }
+
+                Marshal.FinalReleaseComObject(selectedItems);
+                Marshal.FinalReleaseComObject(candidate);
+                var locator = string.IsNullOrWhiteSpace(path) ? null : new LocatorInfo { Kind = "Folder path", Value = path };
+                return (locator, selectedNames);
+            }
+        }
+        catch (Exception exception) when (exception is COMException or InvalidCastException or InvalidOperationException)
+        {
+            return (null, []);
+        }
+        finally
+        {
+            ReleaseComObject(shellWindows);
+            ReleaseComObject(shell);
+        }
+
+        return (null, []);
+    }
+
+    private static IndicatedTargetInfo? TryReadPointerTarget(uint foregroundProcessId)
+    {
+        if (!NativeMethods.GetCursorPos(out var point))
+        {
+            return null;
+        }
+
+        try
+        {
+            var element = AutomationElement.FromPoint(new System.Windows.Point(point.X, point.Y));
+            if (element.Current.ProcessId != foregroundProcessId || element.Current.IsPassword)
+            {
+                return null;
+            }
+
+            var bounds = element.Current.BoundingRectangle;
+            return new IndicatedTargetInfo
+            {
+                Name = Limit(element.Current.Name, 240),
+                ControlType = element.Current.ControlType?.ProgrammaticName?.Replace("ControlType.", string.Empty, StringComparison.Ordinal),
+                AutomationId = Limit(element.Current.AutomationId, 120),
+                Bounds = string.Create(CultureInfo.InvariantCulture, $"{bounds.X:0},{bounds.Y:0},{bounds.Width:0},{bounds.Height:0}"),
+                Confidence = string.IsNullOrWhiteSpace(element.Current.Name) ? "limited" : "medium",
+            };
+        }
+        catch (Exception exception) when (exception is ElementNotAvailableException or InvalidOperationException or COMException)
+        {
+            return null;
+        }
+    }
+
+    private static string ReadWindowText(IntPtr windowHandle)
+    {
+        var length = NativeMethods.GetWindowTextLength(windowHandle);
+        if (length <= 0)
+        {
+            return string.Empty;
+        }
+
+        var buffer = new StringBuilder(Math.Min(length + 1, 2048));
+        _ = NativeMethods.GetWindowText(windowHandle, buffer, buffer.Capacity);
+        return Limit(buffer.ToString(), 1000) ?? string.Empty;
+    }
+
+    private static string FriendlyBrowserName(string processName) => processName.ToLowerInvariant() switch
+    {
+        "brave" => "Brave",
+        "chrome" => "Google Chrome",
+        "firefox" => "Mozilla Firefox",
+        "msedge" => "Microsoft Edge",
+        "opera" => "Opera",
+        _ => processName,
+    };
+
+    private static string? Limit(string? value, int maximumLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        value = value.Trim();
+        return value.Length <= maximumLength ? value : string.Concat(value.AsSpan(0, maximumLength - 1), "…");
+    }
+
+    private static void ReleaseComObject(object? value)
+    {
+        if (value is not null && Marshal.IsComObject(value))
+        {
+            _ = Marshal.FinalReleaseComObject(value);
+        }
+    }
+
+    private static class NativeMethods
+    {
+        [DllImport("user32.dll")]
+        internal static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll", EntryPoint = "GetWindowTextLengthW", CharSet = CharSet.Unicode)]
+        internal static extern int GetWindowTextLength(IntPtr windowHandle);
+
+        [DllImport("user32.dll", EntryPoint = "GetWindowTextW", CharSet = CharSet.Unicode)]
+        internal static extern int GetWindowText(IntPtr windowHandle, StringBuilder text, int maximumCount);
+
+        [DllImport("user32.dll")]
+        internal static extern uint GetWindowThreadProcessId(IntPtr windowHandle, out uint processId);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool GetCursorPos(out Point point);
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct Point
+        {
+            internal int X;
+            internal int Y;
+        }
+    }
+}

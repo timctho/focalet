@@ -1,0 +1,34 @@
+[CmdletBinding()]
+param(
+    [ValidateSet('win-x64', 'win-arm64')]
+    [string] $Runtime = 'win-x64'
+)
+
+$ErrorActionPreference = 'Stop'
+$repositoryRoot = Split-Path -Parent $PSScriptRoot
+$outputDirectory = Join-Path $repositoryRoot "artifacts/zommi-$Runtime"
+
+dotnet publish (Join-Path $repositoryRoot 'src/Zommi.Windows/Zommi.Windows.csproj') `
+    --configuration Release `
+    --runtime $Runtime `
+    --self-contained true `
+    -p:PublishSingleFile=true `
+    -p:IncludeNativeLibrariesForSelfExtract=true `
+    --output $outputDirectory
+
+Copy-Item (Join-Path $repositoryRoot 'docs/windows-prototype.md') $outputDirectory
+Copy-Item (Join-Path $repositoryRoot 'docs/windows-acceptance.md') $outputDirectory
+
+$executablePath = Join-Path $outputDirectory 'Zommi.exe'
+$hashPath = Join-Path $outputDirectory 'SHA256SUMS.txt'
+$hash = (Get-FileHash -Algorithm SHA256 $executablePath).Hash.ToLowerInvariant()
+Set-Content -Path $hashPath -Encoding ascii -Value "$hash  Zommi.exe"
+
+$archivePath = "$outputDirectory.zip"
+if (Test-Path $archivePath) {
+    Remove-Item -Force $archivePath
+}
+
+Compress-Archive -Path (Join-Path $outputDirectory '*') -DestinationPath $archivePath
+Write-Host "Windows prototype published to $outputDirectory"
+Write-Host "Portable archive: $archivePath"

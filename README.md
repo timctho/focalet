@@ -14,7 +14,22 @@ defined in [CONTEXT.md](CONTEXT.md).
 
 ## Status
 
-Intent checkpoint only. No implementation or runtime integration exists yet.
+Windows prototype implemented. It provides:
+
+- an always-on-top WinForms companion;
+- exact Codex session discovery and explicit binding through lifecycle hooks;
+- browser URL, Explorer path/selection, and pointer accessibility capture;
+- an expiring, single-snapshot local store with pause, freeze, and detach; and
+- a fail-open `UserPromptSubmit` handoff to the bound Codex CLI session.
+
+Build and walkthrough instructions are in
+[docs/windows-prototype.md](docs/windows-prototype.md).
+
+Run the cross-platform contract checks with:
+
+```sh
+dotnet run --project tests/Zommi.Tests/Zommi.Tests.csproj
+```
 
 ## Core boundary
 
