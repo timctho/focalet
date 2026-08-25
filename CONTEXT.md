@@ -6,10 +6,16 @@ understand what its user is currently viewing or indicating.
 ## Language
 
 **Zommi**:
-The local, user-facing companion that observes deliberately available desktop
-context and offers it to an existing Agent Session. It is not an agent or model
-runtime.
-_Avoid_: Chatbot, model host, screen recorder
+The local floating chat client that captures deliberately invoked desktop
+context and relays the user's message to a bound Agent Session. It is not an
+agent, model runtime, or conversation authority.
+_Avoid_: Model host, inference provider, separate chatbot
+
+**Floating Chat**:
+The temporary keyboard-focused Zommi surface invoked by a global shortcut. It
+lets the user type and read a streamed reply without moving the pointer away
+from the item they were indicating.
+_Avoid_: Dashboard, context monitor, separate conversation
 
 **Live Context**:
 The currently observable, user-side state that may help an agent understand a
@@ -23,6 +29,12 @@ handoff to an Agent Session. It expires or is replaced unless the user
 deliberately pins it.
 _Avoid_: Screenshot, transcript, durable record
 
+**Invocation Context**:
+The Context Snapshot captured when the user invokes Floating Chat, before
+Zommi takes keyboard focus. It preserves the window, locator, visible text,
+selection, and Indicated Target that made the user's request meaningful.
+_Avoid_: Latest background state, post-focus capture
+
 **Indicated Target**:
 The item the user is presently pointing at, selecting, or otherwise identifying
 within the active surface. It may be unknown even when other Live Context is
@@ -31,7 +43,8 @@ _Avoid_: Click target, verified element
 
 **Agent Session**:
 An existing conversation or work session owned by Codex, Hermes, or another
-agent runtime. Zommi supplies context to it without becoming its model provider.
+agent runtime. Zommi may act as a client of the session, but does not own its
+model, tools, authentication, or canonical history.
 _Avoid_: Zommi chat, Zommi agent
 
 **Session Binding**:
@@ -42,9 +55,9 @@ ambiguous, merely recent, or merely foreground session is not a binding.
 _Avoid_: Active window guess, last session
 
 **Context Handoff**:
-Delivery of a Context Snapshot to its bound Agent Session at an input boundary
-supported by that runtime. A handoff does not imply interruption of work already
-in progress.
+Delivery of Invocation Context together with the user's typed message as one
+turn in the bound Agent Session. A handoff does not imply that captured text is
+trusted instruction.
 _Avoid_: Prompt injection, live model mutation
 
 **Pin**:
