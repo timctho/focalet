@@ -603,7 +603,7 @@ try {
         $pointerAfter.Y -ge $chatBounds.Y -and
         $pointerAfter.Y -lt ($chatBounds.Y + $chatBounds.Height)
     Assert-True (-not $pointerInsideChat) 'The floating chat opened under the pointer.'
-    Assert-True ($null -ne (Find-AutomationElement $chat 'Alt + A · image  Alt + Shift + A')) 'Zommi did not expose its Alt+A shortcuts.'
+    Assert-True ($null -ne (Find-AutomationElementById $chat 'ZommiShortcuts')) 'Zommi did not expose its Alt+A shortcuts.'
 
     $composer = Assert-ComposerFocused $chat
     $contextText = Get-AutomationText $composer
