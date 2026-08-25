@@ -71,6 +71,17 @@ function Invoke-Hook {
     return Invoke-CapturedProcess $Executable "--zommi-hook $GlobalArguments" $hookEvent
 }
 
+function Invoke-UiButton {
+    param([IntPtr] $WindowHandle, [string] $Name)
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($WindowHandle)
+    $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $Name)
+    $button = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
+    Assert-True ($null -ne $button) "The '$Name' button was not exposed through UI Automation."
+    $pattern = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+    $pattern.Invoke()
+    Start-Sleep -Milliseconds 350
+}
+
 if (-not [Environment]::Is64BitOperatingSystem -or [Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
     throw 'This acceptance script requires 64-bit Windows.'
 }
@@ -84,6 +95,7 @@ $sessionA = '11111111-1111-1111-1111-111111111111'
 $sessionB = '22222222-2222-2222-2222-222222222222'
 $globalArguments = '--state-root {0} --channel {1}' -f (Quote-Argument $stateRoot), (Quote-Argument $channel)
 $owner = $null
+$controlProbe = $null
 $explorerWindow = $null
 $edgeWindow = $null
 $edgeProfile = $null
@@ -132,6 +144,14 @@ public static class ZommiNativeWindow {
     }
 }
 '@
+    Add-Type -AssemblyName UIAutomationClient
+
+    $initialBinding = [ordered]@{
+        sessionId = $sessionA
+        mode = 'active'
+        updatedAtUtc = [DateTimeOffset]::UtcNow.ToString('o')
+    } | ConvertTo-Json
+    [IO.File]::WriteAllText((Join-Path $stateRoot 'binding.json'), $initialBinding)
 
     $gui = Start-Process -FilePath $executable -ArgumentList $globalArguments -PassThru
     $guiReady = $false
@@ -145,6 +165,38 @@ public static class ZommiNativeWindow {
     }
     Assert-True $guiReady 'Zommi did not open a native Windows GUI window.'
     $results.gui = 'passed'
+
+    $controlProbeArguments = "--acceptance-probe --session $sessionA --seconds 30 $globalArguments"
+    $controlProbe = Start-Process -FilePath $executable -ArgumentList $controlProbeArguments -PassThru
+    Start-Sleep -Seconds 1
+    Invoke-UiButton ([IntPtr] $gui.MainWindowHandle) 'Freeze'
+    $binding = Get-Content -Raw (Join-Path $stateRoot 'binding.json') | ConvertFrom-Json
+    Assert-True ($binding.mode -eq 'frozen') 'Freeze did not persist the frozen capture mode.'
+    $frozenHook = Invoke-Hook $hookExecutable $globalArguments $sessionA
+    Assert-True ($frozenHook.StandardOutput -like '*https://windows-runtime-probe.example/zommi*') 'Frozen context was not handed off.'
+
+    Invoke-UiButton ([IntPtr] $gui.MainWindowHandle) 'Unfreeze'
+    $binding = Get-Content -Raw (Join-Path $stateRoot 'binding.json') | ConvertFrom-Json
+    Assert-True ($binding.mode -eq 'active') 'Unfreeze did not restore active capture.'
+    Invoke-UiButton ([IntPtr] $gui.MainWindowHandle) 'Pause'
+    $binding = Get-Content -Raw (Join-Path $stateRoot 'binding.json') | ConvertFrom-Json
+    Assert-True ($binding.mode -eq 'paused') 'Pause did not persist the paused capture mode.'
+    $pausedHook = Invoke-Hook $hookExecutable $globalArguments $sessionA
+    Assert-True ([string]::IsNullOrWhiteSpace($pausedHook.StandardOutput)) 'Paused capture emitted hook context.'
+
+    Invoke-UiButton ([IntPtr] $gui.MainWindowHandle) 'Resume'
+    $binding = Get-Content -Raw (Join-Path $stateRoot 'binding.json') | ConvertFrom-Json
+    Assert-True ($binding.mode -eq 'active') 'Resume did not restore active capture.'
+    Invoke-UiButton ([IntPtr] $gui.MainWindowHandle) 'Detach'
+    $binding = Get-Content -Raw (Join-Path $stateRoot 'binding.json') | ConvertFrom-Json
+    Assert-True ($binding.mode -eq 'detached' -and $null -eq $binding.sessionId) 'Detach did not remove the exact session binding.'
+    $detachedHook = Invoke-Hook $hookExecutable $globalArguments $sessionA
+    Assert-True ([string]::IsNullOrWhiteSpace($detachedHook.StandardOutput)) 'Detached capture emitted hook context.'
+    $results.captureControls = 'passed'
+    Stop-Process -Id $controlProbe.Id -Force
+    $controlProbe.WaitForExit()
+    $controlProbe = $null
+
     [void] $gui.CloseMainWindow()
     Assert-True ($gui.WaitForExit(5000)) 'Zommi GUI did not close cleanly.'
 
@@ -271,7 +323,6 @@ public static class ZommiNativeWindow {
         [void] [ZommiNativeWindow]::Activate([IntPtr] $edgeWindow.MainWindowHandle)
         Start-Sleep -Milliseconds 750
 
-        Add-Type -AssemblyName UIAutomationClient
         $automationRoot = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr] $edgeWindow.MainWindowHandle)
         $nameCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $buttonName)
         $button = $automationRoot.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $nameCondition)
@@ -305,6 +356,9 @@ public static class ZommiNativeWindow {
 } finally {
     if ($null -ne $owner -and -not $owner.HasExited) {
         Stop-Process -Id $owner.Id -Force -ErrorAction SilentlyContinue
+    }
+    if ($null -ne $controlProbe -and -not $controlProbe.HasExited) {
+        Stop-Process -Id $controlProbe.Id -Force -ErrorAction SilentlyContinue
     }
     if ($null -ne $explorerWindow) {
         try { $explorerWindow.Quit() } catch { }
