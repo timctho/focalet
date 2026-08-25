@@ -103,13 +103,13 @@ try {
     }
 
     $targetExecutable = Join-Path $targetDirectory 'Zommi.exe'
-    $targetProcesses = Get-ExactTargetProcesses $targetExecutable
+    $targetProcesses = @(Get-ExactTargetProcesses $targetExecutable)
     $stoppedProcessCount = $targetProcesses.Count
     foreach ($process in $targetProcesses) {
         Stop-Process -Id $process.ProcessId -Force
     }
     Start-Sleep -Milliseconds 500
-    if ((Get-ExactTargetProcesses $targetExecutable).Count -ne 0) {
+    if (@(Get-ExactTargetProcesses $targetExecutable).Count -ne 0) {
         throw 'An exact-path deployed Zommi process remained running.'
     }
 
@@ -145,7 +145,20 @@ try {
             throw "The deployed Zommi process exited with code $($startedProcess.ExitCode)."
         }
 
-        $runningTargets = Get-ExactTargetProcesses (Join-Path $targetDirectory 'Zommi.exe')
+        $runningTargets = @()
+        $processDeadline = [DateTime]::UtcNow.AddSeconds(10)
+        do {
+            $startedProcess.Refresh()
+            if ($startedProcess.HasExited) {
+                throw "The deployed Zommi process exited with code $($startedProcess.ExitCode)."
+            }
+            $runningTargets = @(Get-ExactTargetProcesses (Join-Path $targetDirectory 'Zommi.exe'))
+            if ($runningTargets.Count -eq 1 -and $runningTargets[0].ProcessId -eq $startedProcess.Id) {
+                break
+            }
+            Start-Sleep -Milliseconds 250
+        } while ([DateTime]::UtcNow -lt $processDeadline)
+
         if ($runningTargets.Count -ne 1 -or $runningTargets[0].ProcessId -ne $startedProcess.Id) {
             throw "Expected exactly one deployed Zommi process; found $($runningTargets.Count)."
         }
