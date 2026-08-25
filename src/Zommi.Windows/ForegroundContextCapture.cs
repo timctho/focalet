@@ -139,10 +139,8 @@ internal sealed class ForegroundContextCapture
                 }
 
                 var value = ((ValuePattern)patternObject).Current.Value?.Trim();
-                if (Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
-                    (uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
-                     uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
-                     uri.Scheme.Equals(Uri.UriSchemeFile, StringComparison.OrdinalIgnoreCase)))
+                var uri = ParseBrowserUrl(value);
+                if (uri is not null)
                 {
                     return new LocatorInfo { Kind = "URL", Value = uri.AbsoluteUri };
                 }
@@ -155,6 +153,34 @@ internal sealed class ForegroundContextCapture
 
         return null;
     }
+
+    private static Uri? ParseBrowserUrl(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        if (Uri.TryCreate(value, UriKind.Absolute, out var absolute) && IsSupportedBrowserUri(absolute))
+        {
+            return absolute;
+        }
+
+        if (!value.Contains(' ') &&
+            value.Contains('.') &&
+            Uri.TryCreate($"https://{value}", UriKind.Absolute, out var normalized) &&
+            IsSupportedBrowserUri(normalized))
+        {
+            return normalized;
+        }
+
+        return null;
+    }
+
+    private static bool IsSupportedBrowserUri(Uri uri) =>
+        uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+        uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+        uri.Scheme.Equals(Uri.UriSchemeFile, StringComparison.OrdinalIgnoreCase);
 
     private static (LocatorInfo? Locator, IReadOnlyList<string> Selection) TryReadExplorer(IntPtr windowHandle)
     {
