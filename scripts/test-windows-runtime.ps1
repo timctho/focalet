@@ -500,6 +500,12 @@ try {
     Assert-True ($imageJson.response -like '*ZOMMI_IMAGE_4827*') 'Codex did not receive the selected-image input.'
     $results.appServerImage = 'passed'
 
+    $selection = Invoke-CapturedProcess $executable '--acceptance-selected-text' 30
+    Assert-True ($selection.ExitCode -eq 0) "Selected-text capture probe failed: $($selection.StandardError) $($selection.StandardOutput)"
+    $selectionJson = $selection.StandardOutput | ConvertFrom-Json
+    Assert-True (@($selectionJson.selection) -contains 'SELECTED_TEXT_CAPTURE_7391') 'Windows UI Automation did not return the selected text.'
+    $results.selectedTextCapture = 'passed'
+
     $gui = Start-Process -FilePath $executable -PassThru
     Start-Sleep -Milliseconds 1500
     $gui.Refresh()

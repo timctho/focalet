@@ -150,7 +150,7 @@ internal sealed class ForegroundContextCapture
         return null;
     }
 
-    private static IReadOnlyList<string> TryReadSelectedText(IntPtr windowHandle)
+    internal static IReadOnlyList<string> TryReadSelectedText(IntPtr windowHandle)
     {
         try
         {

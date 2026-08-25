@@ -54,6 +54,11 @@ internal static class Program
             return AcceptanceProbe.AppServerImage();
         }
 
+        if (args.Contains("--acceptance-selected-text", StringComparer.OrdinalIgnoreCase))
+        {
+            return AcceptanceProbe.SelectedTextCapture();
+        }
+
         ApplicationConfiguration.Initialize();
         var seededUi = args.Contains("--acceptance-ui-seeded", StringComparer.OrdinalIgnoreCase);
         var autoLaunch = !seededUi && !args.Contains("--no-auto-launch", StringComparer.OrdinalIgnoreCase);
