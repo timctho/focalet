@@ -3,7 +3,9 @@ param(
     [ValidateSet('win-x64', 'win-arm64')]
     [string] $Runtime = 'win-x64',
 
-    [switch] $SkipPublish
+    [switch] $SkipPublish,
+
+    [switch] $DeployToDownloads
 )
 
 $ErrorActionPreference = 'Stop'
@@ -63,3 +65,7 @@ Compress-Archive -Path (Join-Path $outputDirectory '*') -DestinationPath $pendin
 Move-Item -LiteralPath $pendingArchivePath -Destination $archivePath -Force
 Write-Host "Windows prototype published to $outputDirectory"
 Write-Host "Portable archive: $archivePath"
+
+if ($DeployToDownloads) {
+    & (Join-Path $PSScriptRoot 'deploy-windows-downloads.ps1') -Runtime $Runtime
+}
