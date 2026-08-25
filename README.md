@@ -19,8 +19,13 @@ Windows prototype implemented. It provides:
 - an always-on-top WinForms companion;
 - exact Codex session discovery and explicit binding through lifecycle hooks;
 - browser URL, Explorer path/selection, and pointer accessibility capture;
-- an expiring, single-snapshot local store with pause, freeze, and detach; and
-- a fail-open `UserPromptSubmit` handoff to the bound Codex CLI session.
+- an expiring, shared-memory snapshot with pause, freeze, and detach; and
+- fail-open `UserPromptSubmit` handoff to native Windows or WSL Codex CLI
+  sessions.
+
+The packaged candidate has passed native Windows 11 capture checks and a real
+Codex CLI 0.149 create/resume flow from WSL. The exact evidence boundary is in
+[docs/acceptance-report.md](docs/acceptance-report.md).
 
 Build and walkthrough instructions are in
 [docs/windows-prototype.md](docs/windows-prototype.md).
@@ -30,6 +35,9 @@ Run the cross-platform contract checks with:
 ```sh
 dotnet run --project tests/Zommi.Tests/Zommi.Tests.csproj
 ```
+
+The Windows runtime suite is `scripts/test-windows-runtime.ps1`; package first,
+then run it from Windows PowerShell as described in the acceptance report.
 
 ## Core boundary
 

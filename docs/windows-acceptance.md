@@ -50,3 +50,15 @@ version, and the two Codex session UUIDs with the observations below.
 Acceptance requires all checks above. Record any browser accessibility failure,
 elevation mismatch, stale context, wrong-session delivery, or Codex hook error
 as a failed check rather than inferring success from the overlay alone.
+
+For repeatable implementation checks, build the package and run:
+
+```powershell
+.\scripts\test-windows-runtime.ps1 `
+  -ExecutablePath .\artifacts\zommi-win-x64\Zommi.exe
+```
+
+This automates native GUI startup, WSL hook discovery, exact-session routing,
+shared-memory cleanup, Explorer path/selection capture, and isolated Edge
+URL/pointer capture. It complements rather than replaces the visible control
+walkthrough above.

@@ -7,9 +7,26 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        RuntimeOptions.Apply(args);
+
         if (args.Contains("--zommi-hook", StringComparer.OrdinalIgnoreCase))
         {
             return RunHook();
+        }
+
+        if (args.Contains("--acceptance-probe", StringComparer.OrdinalIgnoreCase))
+        {
+            return AcceptanceProbe.RunSharedMemoryProbe(args);
+        }
+
+        if (args.Contains("--acceptance-capture-once", StringComparer.OrdinalIgnoreCase))
+        {
+            return AcceptanceProbe.CaptureOnce();
+        }
+
+        if (args.Contains("--acceptance-discover-wsl", StringComparer.OrdinalIgnoreCase))
+        {
+            return AcceptanceProbe.DiscoverWsl();
         }
 
         ApplicationConfiguration.Initialize();

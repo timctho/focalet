@@ -450,12 +450,15 @@ internal sealed class MainForm : Form
     {
         try
         {
-            var backup = HookInstaller.Install();
-            var backupMessage = backup is null ? string.Empty : $"\n\nBackup: {backup}";
+            var result = HookInstaller.Install();
+            var nativeBackupMessage = result.NativeBackupPath is null ? string.Empty : $"\nNative backup: {result.NativeBackupPath}";
+            var wslMessage = result.WslHooksPath is not null
+                ? $"\nWSL hook: {result.WslHooksPath}" + (result.WslBackupPath is null ? string.Empty : $"\nWSL backup: {result.WslBackupPath}")
+                : $"\nWSL hook was not installed: {result.WslError}";
             MessageBox.Show(
                 this,
-                $"Zommi was added to {HookInstaller.HooksPath}.\n\nIn Codex, run /hooks and trust the Zommi definitions. If the running CLI does not list them, exit and run codex resume --last.{backupMessage}",
-                "Codex hook installed",
+                $"Native hook: {result.NativeHooksPath}{nativeBackupMessage}{wslMessage}\n\nIn each Codex environment, run /hooks and trust the Zommi definitions. If a running CLI does not list them, exit and run codex resume --last.",
+                "Codex hooks installed",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
             RenderState();

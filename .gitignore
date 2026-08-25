@@ -4,3 +4,5 @@ obj/
 TestResults/
 *.user
 *.suo
+__pycache__/
+*.pyc

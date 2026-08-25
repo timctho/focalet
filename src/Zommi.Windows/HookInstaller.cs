@@ -6,6 +6,13 @@ namespace Zommi.Windows;
 
 internal static class HookInstaller
 {
+    internal sealed record InstallResult(
+        string NativeHooksPath,
+        string? NativeBackupPath,
+        string? WslHooksPath,
+        string? WslBackupPath,
+        string? WslError);
+
     public static string HooksPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         ".codex",
@@ -13,9 +20,19 @@ internal static class HookInstaller
 
     public static bool IsInstalled() => CodexHookConfiguration.IsInstalled(HooksPath);
 
-    public static string? Install()
+    public static InstallResult Install()
     {
-        return CodexHookConfiguration.Install(HooksPath, BuildHookCommand());
+        var nativeBackup = CodexHookConfiguration.Install(HooksPath, BuildHookCommand());
+        try
+        {
+            var (wslHooksPath, wslCommand) = ResolveWslHook();
+            var wslBackup = CodexHookConfiguration.Install(wslHooksPath, wslCommand);
+            return new InstallResult(HooksPath, nativeBackup, wslHooksPath, wslBackup, null);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return new InstallResult(HooksPath, nativeBackup, null, null, exception.Message);
+        }
     }
 
     public static void Uninstall()
@@ -25,6 +42,12 @@ internal static class HookInstaller
 
     private static string BuildHookCommand()
     {
+        var hookExecutable = Path.Combine(AppContext.BaseDirectory, "Zommi.Hook.exe");
+        if (File.Exists(hookExecutable))
+        {
+            return $"{Quote(hookExecutable)} {CodexHookConfiguration.CommandMarker}";
+        }
+
         var processPath = Environment.ProcessPath
             ?? Process.GetCurrentProcess().MainModule?.FileName
             ?? throw new InvalidOperationException("Zommi cannot determine its executable path.");
@@ -37,6 +60,58 @@ internal static class HookInstaller
 
         return $"{Quote(processPath)} {CodexHookConfiguration.CommandMarker}";
     }
+
+    internal static (string HooksPath, string Command) ResolveWslHook()
+    {
+        var wrapperPath = Path.Combine(AppContext.BaseDirectory, "Zommi.WslHook.ps1");
+        var hookExecutable = Path.Combine(AppContext.BaseDirectory, "Zommi.Hook.exe");
+        if (!File.Exists(wrapperPath) || !File.Exists(hookExecutable))
+        {
+            throw new InvalidOperationException("The packaged WSL hook files are missing.");
+        }
+
+        if (wrapperPath.StartsWith(@"\\", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Extract Zommi to a local Windows folder before installing the WSL hook.");
+        }
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "wsl.exe",
+            Arguments = "-e sh -lc \"printf '%s\\n%s\\n' \\\"$WSL_DISTRO_NAME\\\" \\\"$HOME\\\"\"",
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start the default WSL distribution.");
+        var standardOutput = process.StandardOutput.ReadToEnd();
+        var standardError = process.StandardError.ReadToEnd();
+        if (!process.WaitForExit(5000))
+        {
+            process.Kill(entireProcessTree: true);
+            throw new InvalidOperationException("The default WSL distribution did not respond.");
+        }
+
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"WSL discovery failed: {standardError.Trim()}");
+        }
+
+        var lines = standardOutput.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (lines.Length < 2 || !lines[1].StartsWith("/", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("WSL did not return its distribution name and Linux home directory.");
+        }
+
+        var distroName = lines[0];
+        var linuxHome = lines[1].TrimStart('/').Replace('/', '\\');
+        var wslHooksPath = $@"\\wsl.localhost\{distroName}\{linuxHome}\.codex\hooks.json";
+        var command = $"/init /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -ExecutionPolicy Bypass -File {QuoteForPosixShell(wrapperPath)}";
+        return (wslHooksPath, command);
+    }
+
+    private static string QuoteForPosixShell(string value) => $"'{value.Replace("'", "'\"'\"'", StringComparison.Ordinal)}'";
 
     private static string Quote(string value) => $"\"{value.Replace("\"", "\\\"", StringComparison.Ordinal)}\"";
 }

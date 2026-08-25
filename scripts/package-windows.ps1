@@ -16,13 +16,24 @@ dotnet publish (Join-Path $repositoryRoot 'src/Zommi.Windows/Zommi.Windows.cspro
     -p:IncludeNativeLibrariesForSelfExtract=true `
     --output $outputDirectory
 
+dotnet publish (Join-Path $repositoryRoot 'src/Zommi.Hook/Zommi.Hook.csproj') `
+    --configuration Release `
+    --runtime $Runtime `
+    --self-contained true `
+    -p:PublishSingleFile=true `
+    -p:IncludeNativeLibrariesForSelfExtract=true `
+    --output $outputDirectory
+
 Copy-Item (Join-Path $repositoryRoot 'docs/windows-prototype.md') $outputDirectory
 Copy-Item (Join-Path $repositoryRoot 'docs/windows-acceptance.md') $outputDirectory
+Copy-Item (Join-Path $repositoryRoot 'scripts/Zommi.WslHook.ps1') $outputDirectory
 
 $executablePath = Join-Path $outputDirectory 'Zommi.exe'
+$hookExecutablePath = Join-Path $outputDirectory 'Zommi.Hook.exe'
 $hashPath = Join-Path $outputDirectory 'SHA256SUMS.txt'
 $hash = (Get-FileHash -Algorithm SHA256 $executablePath).Hash.ToLowerInvariant()
-Set-Content -Path $hashPath -Encoding ascii -Value "$hash  Zommi.exe"
+$hookHash = (Get-FileHash -Algorithm SHA256 $hookExecutablePath).Hash.ToLowerInvariant()
+Set-Content -Path $hashPath -Encoding ascii -Value "$hash  Zommi.exe", "$hookHash  Zommi.Hook.exe"
 
 $archivePath = "$outputDirectory.zip"
 if (Test-Path $archivePath) {

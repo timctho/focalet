@@ -33,6 +33,12 @@ public sealed class StateStore : IContextSnapshotReader
 
     public static string GetDefaultRoot()
     {
+        var overrideRoot = Environment.GetEnvironmentVariable("ZOMMI_STATE_ROOT");
+        if (!string.IsNullOrWhiteSpace(overrideRoot))
+        {
+            return Path.GetFullPath(overrideRoot);
+        }
+
         var localData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (string.IsNullOrWhiteSpace(localData))
         {

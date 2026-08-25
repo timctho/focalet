@@ -1,22 +1,22 @@
 using System.IO;
 using System.IO.MemoryMappedFiles;
+using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
 using Zommi.Core;
 
-namespace Zommi.Windows;
+namespace Zommi.Core;
 
-internal sealed class SharedSnapshotStore : IContextSnapshotReader, IDisposable
+[SupportedOSPlatform("windows")]
+public sealed class SharedSnapshotStore : IContextSnapshotReader, IDisposable
 {
-    private const string MapName = @"Local\Zommi.LiveContext.v1";
-    private const string MutexName = @"Local\Zommi.LiveContext.Lock.v1";
     private const int Capacity = 64 * 1024;
     private readonly MemoryMappedFile memoryMap;
-    private readonly Mutex mutex = new(initiallyOwned: false, MutexName);
+    private readonly Mutex mutex = new(initiallyOwned: false, SnapshotChannel.MutexName);
 
     private SharedSnapshotStore()
     {
-        memoryMap = MemoryMappedFile.CreateOrOpen(MapName, Capacity, MemoryMappedFileAccess.ReadWrite);
+        memoryMap = MemoryMappedFile.CreateOrOpen(SnapshotChannel.MapName, Capacity, MemoryMappedFileAccess.ReadWrite);
         DeleteSnapshot();
     }
 
@@ -133,14 +133,15 @@ internal sealed class SharedSnapshotStore : IContextSnapshotReader, IDisposable
     }
 }
 
-internal sealed class SharedSnapshotReader : IContextSnapshotReader
+[SupportedOSPlatform("windows")]
+public sealed class SharedSnapshotReader : IContextSnapshotReader
 {
     public ContextSnapshot? ReadSnapshot()
     {
         try
         {
-            using var map = MemoryMappedFile.OpenExisting(MapName, MemoryMappedFileRights.Read);
-            using var mutex = Mutex.OpenExisting(MutexName);
+            using var map = MemoryMappedFile.OpenExisting(SnapshotChannel.MapName, MemoryMappedFileRights.Read);
+            using var mutex = Mutex.OpenExisting(SnapshotChannel.MutexName);
             var lockTaken = false;
             try
             {
@@ -175,8 +176,6 @@ internal sealed class SharedSnapshotReader : IContextSnapshotReader
         }
     }
 
-    private const string MapName = @"Local\Zommi.LiveContext.v1";
-    private const string MutexName = @"Local\Zommi.LiveContext.Lock.v1";
     private const int Capacity = 64 * 1024;
 
     private static bool WaitForLock(Mutex value)
