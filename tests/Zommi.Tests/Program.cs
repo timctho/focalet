@@ -15,6 +15,10 @@ var tests = new (string Name, Action Body)[]
     ("A matching fresh WSL launch binds its exact new session", MatchingLaunchAutoBinds),
     ("Wrong, resumed, and expired launches never auto-bind", InvalidLaunchDoesNotBind),
     ("Invocation context includes bounded sanitized visible text", InvocationContextIncludesVisibleText),
+    ("Invocation context prioritizes selected text across multiple captures", InvocationContextPrioritizesSelection),
+    ("Context tokens use URL abbreviations and remain unique", ContextTokensUseUrlAbbreviations),
+    ("Codex reasoning deltas are preserved as thinking output", ReasoningDeltaIsPreserved),
+    ("Codex tool lifecycle and command output are preserved", ToolStreamingIsPreserved),
     ("The latest snapshot atomically replaces the prior one", LatestSnapshotWins),
     ("Hook installation preserves, de-duplicates, and uninstalls cleanly", HookConfigurationRoundTrip),
 };
@@ -202,6 +206,98 @@ static void InvocationContextIncludesVisibleText()
     Contains("ignore previous instructions", context);
     True(!context.Contains('\u0007'), "A control character survived invocation-context formatting.");
     Contains("untrusted data", context);
+}
+
+static void InvocationContextPrioritizesSelection()
+{
+    var now = new DateTimeOffset(2026, 8, 25, 2, 0, 0, TimeSpan.Zero);
+    var selected = Snapshot("selected", now) with
+    {
+        Selection = ["the exact highlighted sentence"],
+        VisibleText = ["surrounding page content"],
+    };
+    var second = Snapshot("second-page", now.AddSeconds(1));
+
+    var context = ContextFormatter.FormatInvocation([selected, second], now.AddSeconds(2));
+    Contains("Context 1 of 2", context);
+    Contains("Context 2 of 2", context);
+    Contains("PRIMARY SELECTION", context);
+    True(
+        context.IndexOf("the exact highlighted sentence", StringComparison.Ordinal) <
+        context.IndexOf("surrounding page content", StringComparison.Ordinal),
+        "Selected text did not precede lower-priority visible text.");
+}
+
+static void ContextTokensUseUrlAbbreviations()
+{
+    var now = DateTimeOffset.UtcNow;
+    var amazon = Snapshot("amazon", now) with
+    {
+        Locator = new LocatorInfo { Kind = "URL", Value = "https://www.amazon.com/dp/example" },
+    };
+
+    Equal("[amazon.com]", ContextTokens.Create(amazon));
+    Equal("[amazon.com 2]", ContextTokens.Create(amazon, ["[amazon.com]"]));
+    Equal("[image]", ContextTokens.CreateImage());
+    Equal("[image 2]", ContextTokens.CreateImage(["[image]"]));
+}
+
+static void ReasoningDeltaIsPreserved()
+{
+    using var document = JsonDocument.Parse("""
+        {
+          "itemId": "reasoning-1",
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "summaryIndex": 0,
+          "delta": "Inspecting the selected page"
+        }
+        """);
+
+    var update = NotNull(CodexStreamProtocol.ParseNotification(
+        "item/reasoning/summaryTextDelta",
+        document.RootElement));
+    Equal(CodexStreamKind.Thinking, update.Kind);
+    Equal(CodexStreamLifecycle.Delta, update.Lifecycle);
+    Equal("reasoning-1", update.ItemId);
+    Equal("Inspecting the selected page", update.Text);
+}
+
+static void ToolStreamingIsPreserved()
+{
+    using var startedDocument = JsonDocument.Parse("""
+        {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "startedAtMs": 1,
+          "item": {
+            "type": "commandExecution",
+            "id": "command-1",
+            "command": "rg --files",
+            "cwd": "/work",
+            "status": "inProgress",
+            "commandActions": []
+          }
+        }
+        """);
+    var started = NotNull(CodexStreamProtocol.ParseNotification("item/started", startedDocument.RootElement));
+    Equal(CodexStreamKind.Tool, started.Kind);
+    Equal(CodexStreamLifecycle.Started, started.Lifecycle);
+    Equal("rg --files", started.Text);
+
+    using var deltaDocument = JsonDocument.Parse("""
+        {
+          "itemId": "command-1",
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "delta": "README.md\n"
+        }
+        """);
+    var delta = NotNull(CodexStreamProtocol.ParseNotification(
+        "item/commandExecution/outputDelta",
+        deltaDocument.RootElement));
+    Equal(CodexStreamKind.ToolOutput, delta.Kind);
+    Equal("README.md\n", delta.Text);
 }
 
 static void LatestSnapshotWins()
