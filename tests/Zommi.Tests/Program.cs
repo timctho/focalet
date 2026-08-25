@@ -18,6 +18,7 @@ var tests = new (string Name, Action Body)[]
     ("Invocation context prioritizes selected text across multiple captures", InvocationContextPrioritizesSelection),
     ("Context tokens use URL abbreviations and remain unique", ContextTokensUseUrlAbbreviations),
     ("Codex reasoning deltas are preserved as thinking output", ReasoningDeltaIsPreserved),
+    ("Codex commentary is preserved as thinking output", CommentaryIsPreservedAsThinking),
     ("Codex tool lifecycle and command output are preserved", ToolStreamingIsPreserved),
     ("Every current Codex tool item type is surfaced", EveryToolItemTypeIsSurfaced),
     ("The latest snapshot atomically replaces the prior one", LatestSnapshotWins),
@@ -264,6 +265,27 @@ static void ReasoningDeltaIsPreserved()
     Equal("Inspecting the selected page", update.Text);
 }
 
+static void CommentaryIsPreservedAsThinking()
+{
+    using var document = JsonDocument.Parse("""
+        {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "startedAtMs": 1,
+          "item": {
+            "type": "agentMessage",
+            "id": "commentary-1",
+            "phase": "commentary",
+            "text": ""
+          }
+        }
+        """);
+
+    var update = NotNull(CodexStreamProtocol.ParseNotification("item/started", document.RootElement));
+    Equal(CodexStreamKind.Thinking, update.Kind);
+    Equal("commentary-1", update.ItemId);
+}
+
 static void ToolStreamingIsPreserved()
 {
     using var startedDocument = JsonDocument.Parse("""
@@ -299,6 +321,27 @@ static void ToolStreamingIsPreserved()
         deltaDocument.RootElement));
     Equal(CodexStreamKind.ToolOutput, delta.Kind);
     Equal("README.md\n", delta.Text);
+
+    using var completedDocument = JsonDocument.Parse("""
+        {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "completedAtMs": 2,
+          "item": {
+            "type": "commandExecution",
+            "id": "command-1",
+            "command": "rg --files",
+            "cwd": "/work",
+            "status": "completed",
+            "commandActions": [],
+            "aggregatedOutput": "README.md\n",
+            "exitCode": 0
+          }
+        }
+        """);
+    var completed = NotNull(CodexStreamProtocol.ParseNotification("item/completed", completedDocument.RootElement));
+    Equal(CodexStreamLifecycle.Completed, completed.Lifecycle);
+    Equal("README.md\n", completed.Text);
 }
 
 static void EveryToolItemTypeIsSurfaced()

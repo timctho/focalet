@@ -120,7 +120,24 @@ public static class CodexStreamProtocol
                 ItemId = itemId,
                 Status = status,
             },
-            "commandExecution" => Tool(lifecycle, itemId, status, "Command", ReadString(item, "command")),
+            "agentMessage" when ReadString(item, "phase") == "commentary" &&
+                                lifecycle == CodexStreamLifecycle.Started => new CodexStreamUpdate
+            {
+                Kind = CodexStreamKind.Thinking,
+                Lifecycle = lifecycle,
+                Title = "Thinking",
+                Text = string.Empty,
+                ItemId = itemId,
+                Status = status,
+            },
+            "commandExecution" => Tool(
+                lifecycle,
+                itemId,
+                status,
+                "Command",
+                lifecycle == CodexStreamLifecycle.Started
+                    ? ReadString(item, "command")
+                    : ReadString(item, "aggregatedOutput")),
             "fileChange" => Tool(lifecycle, itemId, status, "File change", FormatFileChanges(item)),
             "mcpToolCall" => Tool(
                 lifecycle,

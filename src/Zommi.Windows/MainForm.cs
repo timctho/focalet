@@ -402,6 +402,11 @@ internal sealed class MainForm : Form
             RenderStatus($"Attached {token} · {result.Bounds.Width}×{result.Bounds.Height}");
             ShowChat();
         }
+        else if (!string.IsNullOrWhiteSpace(selector.ErrorMessage))
+        {
+            RenderStatus($"Image selection failed: {selector.ErrorMessage}", warning: true);
+            ShowChat();
+        }
         else if (wasVisible)
         {
             ShowChat();
@@ -419,6 +424,52 @@ internal sealed class MainForm : Form
         input.AppendText(attachment.Token + " ");
         input.SelectionStart = input.TextLength;
         StyleContextTokens();
+    }
+
+    internal void SeedAcceptanceContexts()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var first = new ContextSnapshot
+        {
+            SnapshotId = "seeded-docs-context",
+            ObservedAtUtc = now,
+            ExpiresAtUtc = now.AddMinutes(5),
+            SurfaceKind = "Browser",
+            Application = "Acceptance Browser",
+            ProcessName = "acceptance-browser",
+            WindowTitle = "Seeded documentation tab",
+            Locator = new LocatorInfo { Kind = "URL", Value = "https://docs.example.com/guide" },
+            Selection = ["SELECTED_TEXT_IS_PRIMARY"],
+            VisibleText = ["Surrounding documentation text"],
+            Confidence = "high",
+        };
+        var second = first with
+        {
+            SnapshotId = "seeded-shop-context",
+            WindowTitle = "Seeded shopping tab",
+            Locator = new LocatorInfo { Kind = "URL", Value = "https://shop.example.com/item" },
+            Selection = [],
+            VisibleText = ["Second tab text"],
+        };
+        AddAttachment(new ContextAttachment
+        {
+            Token = ContextTokens.Create(first, attachments.Select(item => item.Token)),
+            Snapshot = first,
+        });
+        AddAttachment(new ContextAttachment
+        {
+            Token = ContextTokens.Create(second, attachments.Select(item => item.Token)),
+            Snapshot = second,
+        });
+        AddAttachment(new ContextAttachment
+        {
+            Token = ContextTokens.CreateImage(attachments.Select(item => item.Token)),
+            ImagePng = Convert.FromBase64String(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="),
+        });
+        RenderStatus("seeded UI acceptance");
+        Shown += (_, _) => BeginInvoke(() =>
+            contextPreview.ShowContext(attachments[0], new Point(Right - 30, Top + 40)));
     }
 
     private void ShowChat()

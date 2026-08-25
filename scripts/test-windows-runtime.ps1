@@ -89,6 +89,34 @@ function Find-ControlTypeElement {
     return $Root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
 }
 
+function Find-ZommiDocument {
+    param(
+        [System.Windows.Automation.AutomationElement] $Root,
+        [int] $Index
+    )
+
+    $condition = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Document)
+    $documents = $Root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)
+    if ($documents.Count -le $Index) { return $null }
+    return $documents[$Index]
+}
+
+function Find-ZommiTranscript {
+    param([System.Windows.Automation.AutomationElement] $Root)
+    $element = Find-AutomationElementById $Root 'CodexTranscript'
+    if ($null -ne $element) { return $element }
+    return Find-ZommiDocument $Root 0
+}
+
+function Find-ZommiComposer {
+    param([System.Windows.Automation.AutomationElement] $Root)
+    $element = Find-AutomationElementById $Root 'ZommiComposer'
+    if ($null -ne $element) { return $element }
+    return Find-ZommiDocument $Root 1
+}
+
 function Find-ZommiWindow {
     param([System.Diagnostics.Process] $Process)
 
@@ -99,7 +127,7 @@ function Find-ZommiWindow {
     foreach ($candidate in $windows) {
         try {
             if ($candidate.Current.ProcessId -eq $Process.Id -and
-                $candidate.Current.Name -like 'Zommi*' -and
+                $candidate.Current.Name -like 'Zommi*floating Codex chat' -and
                 -not $candidate.Current.IsOffscreen) {
                 return $candidate
             }
@@ -154,8 +182,16 @@ function Set-AutomationValue {
         [string] $Value
     )
 
-    $pattern = $Element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-    ([System.Windows.Automation.ValuePattern] $pattern).SetValue($Value)
+    $pattern = $null
+    if ($Element.TryGetCurrentPattern(
+        [System.Windows.Automation.ValuePattern]::Pattern,
+        [ref] $pattern)) {
+        ([System.Windows.Automation.ValuePattern] $pattern).SetValue($Value)
+        return
+    }
+    Assert-True ([ZommiNativeWindow]::SetControlText(
+        [IntPtr] $Element.Current.NativeWindowHandle,
+        $Value)) 'Could not write the RichEdit composer text.'
 }
 
 function Invoke-AutomationElement {
@@ -175,7 +211,7 @@ function Wait-TranscriptText {
     while ([DateTime]::UtcNow -lt $deadline) {
         $window = Find-ZommiWindow $Process
         if ($null -ne $window) {
-            $transcript = Find-AutomationElementById $window 'CodexTranscript'
+            $transcript = Find-ZommiTranscript $window
             if ($null -ne $transcript) {
                 $text = Get-AutomationText $transcript
                 if ($text -like "*$Expected*") {
@@ -213,7 +249,7 @@ function Wait-ThreadId {
 
 function Assert-ComposerFocused {
     param([System.Windows.Automation.AutomationElement] $Window)
-    $composer = Find-AutomationElementById $Window 'ZommiComposer'
+    $composer = Find-ZommiComposer $Window
     Assert-True ($null -ne $composer) 'The floating composer was not exposed through UI Automation.'
     Assert-True $composer.Current.HasKeyboardFocus 'The floating composer did not receive keyboard focus.'
     return $composer
@@ -285,9 +321,9 @@ function Send-ChatTurn {
     $transcript = Wait-TranscriptText $Process $Expected
     if ($null -eq $transcript) {
         $latestWindow = Find-ZommiWindow $Process
-        $latestTranscript = Find-AutomationElementById $latestWindow 'CodexTranscript'
+        $latestTranscript = Find-ZommiTranscript $latestWindow
         $latestStatus = Find-AutomationElementById $latestWindow 'CodexStatus'
-        $latestComposer = Find-AutomationElementById $latestWindow 'ZommiComposer'
+        $latestComposer = Find-ZommiComposer $latestWindow
         $transcriptText = if ($null -eq $latestTranscript) { '<missing>' } else { Get-AutomationText $latestTranscript }
         $statusText = if ($null -eq $latestStatus) { '<missing>' } else { [string] $latestStatus.Current.Name }
         $composerText = if ($null -eq $latestComposer) { '<missing>' } else { Get-AutomationText $latestComposer }
@@ -342,6 +378,8 @@ public static class ZommiNativeWindow {
     private static extern void SwitchToThisWindow(IntPtr hWnd, bool altTab);
     [DllImport("user32.dll")]
     private static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "SendMessageW")]
+    private static extern IntPtr SendMessageText(IntPtr window, uint message, IntPtr wParam, string text);
 
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr parameter);
     private static uint searchProcessId;
@@ -384,6 +422,10 @@ public static class ZommiNativeWindow {
         return searchResult != IntPtr.Zero && PostMessage(searchResult, 0x0312, (IntPtr)0x5A4D, IntPtr.Zero);
     }
 
+    public static bool SetControlText(IntPtr window, string text) {
+        return window != IntPtr.Zero && SendMessageText(window, 0x000C, IntPtr.Zero, text) != IntPtr.Zero;
+    }
+
     public static int GetWindowProcessId(IntPtr window) {
         uint processId;
         GetWindowThreadProcessId(window, out processId);
@@ -418,9 +460,6 @@ public static class ZommiNativeWindow {
 }
 '@
 
-$existingZommi = @(Get-Process -Name Zommi -ErrorAction SilentlyContinue)
-Assert-True ($existingZommi.Count -eq 0) 'Close every running Zommi instance before running acceptance so Alt+A can be verified.'
-
 $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ('zommi-floating-chat-' + [Guid]::NewGuid().ToString('N'))
 $executable = Join-Path $temporaryRoot 'Zommi.exe'
 $gui = $null
@@ -446,6 +485,20 @@ try {
     Assert-True ($relayJson.status -eq 'completed') "The relay turn ended as '$($relayJson.status)'."
     Assert-True ($relayJson.response -eq 'ZOMMI_RELAY_READY') "Unexpected relay response: '$($relayJson.response)'."
     $results.appServerTurn = 'passed'
+
+    $activity = Invoke-CapturedProcess $executable '--acceptance-app-server-activity' 180
+    Assert-True ($activity.ExitCode -eq 0) "Codex activity streaming probe failed: $($activity.StandardError) $($activity.StandardOutput)"
+    $activityJson = $activity.StandardOutput | ConvertFrom-Json
+    Assert-True ($activityJson.sawThinking) 'Codex thinking/commentary was not streamed through Zommi.'
+    Assert-True ($activityJson.sawTool) 'Codex tool lifecycle was not streamed through Zommi.'
+    Assert-True ($activityJson.sawToolOutput) 'Codex tool output was not streamed through Zommi.'
+    $results.appServerActivity = 'passed'
+
+    $image = Invoke-CapturedProcess $executable '--acceptance-app-server-image' 180
+    Assert-True ($image.ExitCode -eq 0) "Codex image-context probe failed: $($image.StandardError) $($image.StandardOutput)"
+    $imageJson = $image.StandardOutput | ConvertFrom-Json
+    Assert-True ($imageJson.response -like '*ZOMMI_IMAGE_4827*') 'Codex did not receive the selected-image input.'
+    $results.appServerImage = 'passed'
 
     $gui = Start-Process -FilePath $executable -PassThru
     Start-Sleep -Milliseconds 1500

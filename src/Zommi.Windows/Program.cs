@@ -44,9 +44,26 @@ internal static class Program
             return AcceptanceProbe.AppServerTurn();
         }
 
+        if (args.Contains("--acceptance-app-server-activity", StringComparer.OrdinalIgnoreCase))
+        {
+            return AcceptanceProbe.AppServerActivity();
+        }
+
+        if (args.Contains("--acceptance-app-server-image", StringComparer.OrdinalIgnoreCase))
+        {
+            return AcceptanceProbe.AppServerImage();
+        }
+
         ApplicationConfiguration.Initialize();
-        var autoLaunch = !args.Contains("--no-auto-launch", StringComparer.OrdinalIgnoreCase);
-        Application.Run(new MainForm(new ForegroundContextCapture(), new CodexAppServerClient(), autoLaunch));
+        var seededUi = args.Contains("--acceptance-ui-seeded", StringComparer.OrdinalIgnoreCase);
+        var autoLaunch = !seededUi && !args.Contains("--no-auto-launch", StringComparer.OrdinalIgnoreCase);
+        var form = new MainForm(new ForegroundContextCapture(), new CodexAppServerClient(), autoLaunch);
+        if (seededUi)
+        {
+            form.SeedAcceptanceContexts();
+        }
+
+        Application.Run(form);
         return 0;
     }
 

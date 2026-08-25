@@ -11,6 +11,7 @@ internal sealed class CodexAppServerClient : IDisposable
 {
     private readonly CancellationTokenSource lifetime = new();
     private readonly ConcurrentDictionary<long, TaskCompletionSource<JsonElement>> pending = new();
+    private readonly ConcurrentDictionary<string, CodexStreamKind> streamItemKinds = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim writer = new(1, 1);
     private readonly object startLock = new();
     private readonly StringBuilder recentStandardError = new();
@@ -275,10 +276,28 @@ internal sealed class CodexAppServerClient : IDisposable
                 return;
             }
 
+            TrackStreamItemKind(method, parameters);
             var streamUpdate = CodexStreamProtocol.ParseNotification(method, parameters);
+            if (streamUpdate is { Kind: CodexStreamKind.Assistant, ItemId: not null } &&
+                streamItemKinds.TryGetValue(streamUpdate.ItemId, out var mappedKind))
+            {
+                streamUpdate = streamUpdate with
+                {
+                    Kind = mappedKind,
+                    Title = mappedKind == CodexStreamKind.Thinking ? "Thinking" : streamUpdate.Title,
+                };
+            }
+
             if (streamUpdate is not null)
             {
                 StreamUpdate?.Invoke(streamUpdate);
+            }
+
+            if (method.Equals("item/completed", StringComparison.Ordinal) &&
+                parameters.TryGetProperty("item", out var completedItem) &&
+                completedItem.TryGetProperty("id", out var completedItemId))
+            {
+                _ = streamItemKinds.TryRemove(completedItemId.GetString() ?? string.Empty, out _);
             }
 
             switch (method)
@@ -309,6 +328,7 @@ internal sealed class CodexAppServerClient : IDisposable
                     {
                         StatusChanged?.Invoke($"Codex turn {status}: {turnDetail}");
                     }
+                    streamItemKinds.Clear();
                     TurnCompleted?.Invoke(status);
                     break;
                 case "error":
@@ -359,6 +379,29 @@ internal sealed class CodexAppServerClient : IDisposable
         {
             // The server request cannot be answered after transport shutdown.
         }
+    }
+
+    private void TrackStreamItemKind(string method, JsonElement parameters)
+    {
+        if (!method.Equals("item/started", StringComparison.Ordinal) ||
+            !parameters.TryGetProperty("item", out var item) ||
+            !item.TryGetProperty("id", out var itemIdElement) ||
+            !item.TryGetProperty("type", out var itemTypeElement))
+        {
+            return;
+        }
+
+        var itemId = itemIdElement.GetString();
+        var itemType = itemTypeElement.GetString();
+        if (string.IsNullOrWhiteSpace(itemId) || !string.Equals(itemType, "agentMessage", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var phase = item.TryGetProperty("phase", out var phaseElement) ? phaseElement.GetString() : null;
+        streamItemKinds[itemId] = string.Equals(phase, "commentary", StringComparison.Ordinal)
+            ? CodexStreamKind.Thinking
+            : CodexStreamKind.Assistant;
     }
 
     private static string BuildTurnText(

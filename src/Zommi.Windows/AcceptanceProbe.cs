@@ -1,4 +1,5 @@
 using System.IO;
+using System.Drawing.Imaging;
 using System.Text.Json;
 using Zommi.Core;
 
@@ -223,6 +224,138 @@ internal static class AcceptanceProbe
             }));
             return status.Equals("completed", StringComparison.OrdinalIgnoreCase) &&
                    responseText.Contains("ZOMMI_RELAY_READY", StringComparison.Ordinal)
+                ? 0
+                : 3;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.Write(exception);
+            return 1;
+        }
+    }
+
+    public static int AppServerActivity()
+    {
+        try
+        {
+            using var client = new CodexAppServerClient();
+            var response = new System.Text.StringBuilder();
+            var updates = new List<CodexStreamUpdate>();
+            var completed = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            client.AgentMessageDelta += delta => response.Append(delta);
+            client.StreamUpdate += update =>
+            {
+                lock (updates)
+                {
+                    updates.Add(update);
+                }
+            };
+            client.StatusChanged += statusMessage =>
+            {
+                Console.Error.WriteLine(statusMessage);
+                Console.Error.Flush();
+            };
+            client.TurnCompleted += status => completed.TrySetResult(status);
+            client.EnsureStartedAsync().WaitAsync(TimeSpan.FromSeconds(45)).GetAwaiter().GetResult();
+            client.StartTurnAsync(
+                    "Use the shell to run `printf ZOMMI_TOOL_STREAM_READY`. After the command completes, reply with exactly ZOMMI_ACTIVITY_READY and nothing else.",
+                    invocationContext: null)
+                .WaitAsync(TimeSpan.FromSeconds(45))
+                .GetAwaiter()
+                .GetResult();
+            var status = completed.Task.WaitAsync(TimeSpan.FromSeconds(120)).GetAwaiter().GetResult();
+            CodexStreamUpdate[] captured;
+            lock (updates)
+            {
+                captured = [.. updates];
+            }
+
+            var sawThinking = captured.Any(update => update.Kind == CodexStreamKind.Thinking);
+            var sawTool = captured.Any(update => update.Kind == CodexStreamKind.Tool);
+            var sawToolOutput = captured.Any(update =>
+                update.Kind is CodexStreamKind.Tool or CodexStreamKind.ToolOutput &&
+                update.Text.Contains("ZOMMI_TOOL_STREAM_READY", StringComparison.Ordinal));
+            var responseText = response.ToString();
+            Console.Out.Write(JsonSerializer.Serialize(new
+            {
+                threadId = client.ThreadId,
+                status,
+                response = responseText,
+                sawThinking,
+                sawTool,
+                sawToolOutput,
+                updates = captured.Select(update => new
+                {
+                    kind = update.Kind.ToString(),
+                    lifecycle = update.Lifecycle.ToString(),
+                    update.Title,
+                    text = update.Text.Length <= 500 ? update.Text : update.Text[..500],
+                    update.ItemId,
+                    update.Status,
+                }),
+            }));
+            return status.Equals("completed", StringComparison.OrdinalIgnoreCase) &&
+                   responseText.Contains("ZOMMI_ACTIVITY_READY", StringComparison.Ordinal) &&
+                   sawThinking &&
+                   sawTool &&
+                   sawToolOutput
+                ? 0
+                : 3;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.Write(exception);
+            return 1;
+        }
+    }
+
+    public static int AppServerImage()
+    {
+        const string marker = "ZOMMI_IMAGE_4827";
+        try
+        {
+            using var bitmap = new Bitmap(720, 220, PixelFormat.Format32bppArgb);
+            using (var graphics = Graphics.FromImage(bitmap))
+            using (var font = new Font("Segoe UI", 48f, FontStyle.Bold))
+            {
+                graphics.Clear(Color.White);
+                graphics.DrawString(marker, font, Brushes.Black, new PointF(35, 65));
+            }
+
+            using var imageStream = new MemoryStream();
+            bitmap.Save(imageStream, ImageFormat.Png);
+            var imageDataUrl = $"data:image/png;base64,{Convert.ToBase64String(imageStream.ToArray())}";
+
+            using var client = new CodexAppServerClient();
+            var response = new System.Text.StringBuilder();
+            var completed = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            client.AgentMessageDelta += delta => response.Append(delta);
+            client.StatusChanged += statusMessage =>
+            {
+                Console.Error.WriteLine(statusMessage);
+                Console.Error.Flush();
+            };
+            client.TurnCompleted += status => completed.TrySetResult(status);
+            client.EnsureStartedAsync().WaitAsync(TimeSpan.FromSeconds(45)).GetAwaiter().GetResult();
+            client.StartTurnAsync(
+                    "Read the single uppercase token in the attached image and reply with exactly that token.",
+                    [],
+                    [imageDataUrl])
+                .WaitAsync(TimeSpan.FromSeconds(45))
+                .GetAwaiter()
+                .GetResult();
+            var status = completed.Task.WaitAsync(TimeSpan.FromSeconds(120)).GetAwaiter().GetResult();
+            var responseText = response.ToString();
+            Console.Out.Write(JsonSerializer.Serialize(new
+            {
+                threadId = client.ThreadId,
+                status,
+                response = responseText,
+                marker,
+                imageBytes = imageStream.Length,
+            }));
+            return status.Equals("completed", StringComparison.OrdinalIgnoreCase) &&
+                   responseText.Contains(marker, StringComparison.Ordinal)
                 ? 0
                 : 3;
         }

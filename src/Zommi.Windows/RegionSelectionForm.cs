@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
@@ -37,6 +38,8 @@ internal sealed class RegionSelectionForm : Form
     }
 
     public RegionSelectionResult? Result { get; private set; }
+
+    public string? ErrorMessage { get; private set; }
 
     protected override void OnMouseDown(MouseEventArgs eventArgs)
     {
@@ -104,13 +107,9 @@ internal sealed class RegionSelectionForm : Form
             Result = new RegionSelectionResult(screenArea, stream.ToArray());
             DialogResult = DialogResult.OK;
         }
-        catch (Exception exception) when (exception is ExternalException or ArgumentException)
+        catch (Exception exception) when (exception is ExternalException or ArgumentException or Win32Exception)
         {
-            MessageBox.Show(
-                $"Zommi could not capture that region: {exception.Message}",
-                "Image selection failed",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning);
+            ErrorMessage = exception.Message;
             DialogResult = DialogResult.Abort;
         }
 

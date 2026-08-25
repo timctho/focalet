@@ -89,6 +89,34 @@ function Find-ControlTypeElement {
     return $Root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
 }
 
+function Find-ZommiDocument {
+    param(
+        [System.Windows.Automation.AutomationElement] $Root,
+        [int] $Index
+    )
+
+    $condition = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Document)
+    $documents = $Root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)
+    if ($documents.Count -le $Index) { return $null }
+    return $documents[$Index]
+}
+
+function Find-ZommiTranscript {
+    param([System.Windows.Automation.AutomationElement] $Root)
+    $element = Find-AutomationElementById $Root 'CodexTranscript'
+    if ($null -ne $element) { return $element }
+    return Find-ZommiDocument $Root 0
+}
+
+function Find-ZommiComposer {
+    param([System.Windows.Automation.AutomationElement] $Root)
+    $element = Find-AutomationElementById $Root 'ZommiComposer'
+    if ($null -ne $element) { return $element }
+    return Find-ZommiDocument $Root 1
+}
+
 function Get-AutomationText {
     param([System.Windows.Automation.AutomationElement] $Element)
 
@@ -113,8 +141,16 @@ function Set-AutomationValue {
         [string] $Value
     )
 
-    $pattern = $Element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-    ([System.Windows.Automation.ValuePattern] $pattern).SetValue($Value)
+    $pattern = $null
+    if ($Element.TryGetCurrentPattern(
+        [System.Windows.Automation.ValuePattern]::Pattern,
+        [ref] $pattern)) {
+        ([System.Windows.Automation.ValuePattern] $pattern).SetValue($Value)
+        return
+    }
+    Assert-True ([ZommiAmazonNative]::SetControlText(
+        [IntPtr] $Element.Current.NativeWindowHandle,
+        $Value)) 'Could not write the RichEdit composer text.'
 }
 
 function Invoke-AutomationElement {
@@ -133,7 +169,7 @@ function Find-ZommiWindow {
     foreach ($candidate in $windows) {
         try {
             if ($candidate.Current.ProcessId -eq $Process.Id -and
-                $candidate.Current.Name -like 'Zommi*' -and
+                $candidate.Current.Name -like 'Zommi*floating Codex chat' -and
                 -not $candidate.Current.IsOffscreen) {
                 return $candidate
             }
@@ -286,6 +322,8 @@ public static class ZommiAmazonNative {
     private static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extraInfo);
     [DllImport("user32.dll")]
     private static extern bool PostMessage(IntPtr hWnd, uint message, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "SendMessageW")]
+    private static extern IntPtr SendMessageText(IntPtr window, uint message, IntPtr wParam, string text);
 
     public static bool Activate(IntPtr target) {
         const uint KeyUp = 0x0002;
@@ -314,6 +352,10 @@ public static class ZommiAmazonNative {
         keybd_event(0x12, 0, KeyUp, UIntPtr.Zero);
     }
 
+    public static bool SetControlText(IntPtr window, string text) {
+        return window != IntPtr.Zero && SendMessageText(window, 0x000C, IntPtr.Zero, text) != IntPtr.Zero;
+    }
+
     public static void ClickAt(int x, int y) {
         SetCursorPos(x, y);
         mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);
@@ -338,8 +380,6 @@ $product = if ([string]::IsNullOrWhiteSpace($ProductAsin)) {
 }
 Assert-True ($null -ne $product) "Unknown product ASIN '$ProductAsin'."
 Assert-True (Test-Path -LiteralPath $ExecutablePath) 'Zommi.exe was not found.'
-Assert-True (@(Get-Process -Name Zommi -ErrorAction SilentlyContinue).Count -eq 0) 'Close every running Zommi instance before live acceptance.'
-
 $chromeExecutable = 'C:\Program Files\Google\Chrome\Application\chrome.exe'
 Assert-True (Test-Path -LiteralPath $chromeExecutable) 'Google Chrome is not installed.'
 New-Item -ItemType Directory -Force -Path $EvidenceDirectory | Out-Null
@@ -417,7 +457,7 @@ try {
     $chatBounds = $chat.Current.BoundingRectangle
     $pointerInside = $pointerX -ge $chatBounds.X -and $pointerX -lt ($chatBounds.X + $chatBounds.Width) -and $pointerY -ge $chatBounds.Y -and $pointerY -lt ($chatBounds.Y + $chatBounds.Height)
     Assert-True (-not $pointerInside) 'The floating chat covered the indicated point.'
-    $composer = Find-AutomationElementById $chat 'ZommiComposer'
+    $composer = Find-ZommiComposer $chat
     Assert-True ($null -ne $composer -and $composer.Current.HasKeyboardFocus) 'The floating composer was not focused.'
     $contextToken = Get-AutomationText $composer
     Assert-True ($contextToken -eq '[amazon.com] ') 'The Amazon URL abbreviation was not inserted in the composer.'
@@ -446,7 +486,7 @@ try {
     while ([DateTime]::UtcNow -lt $deadline) {
         $latestChat = Find-ZommiWindow $zommi
         if ($null -ne $latestChat) {
-            $transcript = Find-AutomationElementById $latestChat 'CodexTranscript'
+            $transcript = Find-ZommiTranscript $latestChat
             $status = Find-AutomationElementById $latestChat 'CodexStatus'
             if ($null -ne $transcript -and $null -ne $status) {
                 $transcriptText = Get-AutomationText $transcript
