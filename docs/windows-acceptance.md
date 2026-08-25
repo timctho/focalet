@@ -11,11 +11,13 @@ version, and the two Codex session UUIDs with the observations below.
 
 1. Extract `zommi-win-x64.zip` and verify `Zommi.exe` against
    `SHA256SUMS.txt`.
-2. Start Zommi, install its hook, and trust all three definitions with `/hooks`
-   in Codex.
-3. Start two Codex CLIs in different working directories. Call them session A
-   and session B. Confirm both exact UUIDs and directories appear in Zommi.
-4. Bind Zommi explicitly to session A. Keep session B running.
+2. Start Zommi. Verify it opens a fresh Codex CLI in the default WSL
+   distribution and automatically displays that exact session UUID and WSL home
+   directory. Call it session A.
+3. Separately start session B with
+   `codex --dangerously-bypass-hook-trust` and keep it running. Do not use
+   **New Codex in WSL**, because that action deliberately creates and binds a
+   replacement session.
 
 ## Browser handoff
 
@@ -42,8 +44,9 @@ version, and the two Codex session UUIDs with the observations below.
    less than 15 minutes, and prompt session A. Verify the frozen snapshot is
    handed off.
 3. Choose **Detach** and prompt both sessions. Verify neither receives context.
-4. Bind again, obtain a snapshot, then terminate Zommi. Verify Codex continues
-   normally and receives no Zommi context.
+4. Choose **New Codex in WSL**, verify the newly launched session becomes the
+   exact binding, obtain a snapshot, then terminate Zommi. Verify Codex
+   continues normally and receives no Zommi context.
 5. Inspect `%LOCALAPPDATA%\Zommi`. Verify it contains no snapshot, prompt,
    transcript, screenshot, URL, path, selection, or pointer-target history.
 

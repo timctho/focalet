@@ -168,10 +168,22 @@ public static class ZommiNativeWindow {
 
     $controlProbeArguments = "--acceptance-probe --session $sessionA --seconds 30 $globalArguments"
     $controlProbe = Start-Process -FilePath $executable -ArgumentList $controlProbeArguments -PassThru
-    Start-Sleep -Seconds 1
+    $controlProbeReady = $false
+    for ($attempt = 0; $attempt -lt 100; $attempt++) {
+        Start-Sleep -Milliseconds 100
+        $readyHook = Invoke-Hook $hookExecutable $globalArguments $sessionA
+        if ($readyHook.StandardOutput -like '*https://windows-runtime-probe.example/zommi*') {
+            $controlProbeReady = $true
+            break
+        }
+        if ($controlProbe.HasExited) {
+            break
+        }
+    }
+    Assert-True $controlProbeReady 'The capture-control shared-memory probe did not become ready.'
     Invoke-UiButton ([IntPtr] $gui.MainWindowHandle) 'Freeze'
     $binding = Get-Content -Raw (Join-Path $stateRoot 'binding.json') | ConvertFrom-Json
-    Assert-True ($binding.mode -eq 'frozen') 'Freeze did not persist the frozen capture mode.'
+    Assert-True ($binding.mode -eq 'frozen') "Freeze did not persist the frozen capture mode. Actual binding: $($binding | ConvertTo-Json -Compress)"
     $frozenHook = Invoke-Hook $hookExecutable $globalArguments $sessionA
     Assert-True ($frozenHook.StandardOutput -like '*https://windows-runtime-probe.example/zommi*') 'Frozen context was not handed off.'
 

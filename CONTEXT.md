@@ -36,7 +36,9 @@ _Avoid_: Zommi chat, Zommi agent
 
 **Session Binding**:
 The visible association between Zommi and the particular Agent Session intended
-to receive context. An ambiguous set of sessions is not a binding.
+to receive context. It may be established by deliberately selecting an existing
+session or by Zommi deliberately launching a fresh session for that purpose. An
+ambiguous, merely recent, or merely foreground session is not a binding.
 _Avoid_: Active window guess, last session
 
 **Context Handoff**:

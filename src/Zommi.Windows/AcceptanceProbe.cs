@@ -28,7 +28,7 @@ internal static class AcceptanceProbe
             });
 
             using var snapshots = SharedSnapshotStore.CreateOwner();
-            snapshots.WriteSnapshot(new ContextSnapshot
+            var snapshot = new ContextSnapshot
             {
                 SnapshotId = "windows-shared-memory-probe",
                 ObservedAtUtc = now,
@@ -50,11 +50,17 @@ internal static class AcceptanceProbe
                     Confidence = "high",
                 },
                 Confidence = "high",
-            });
+            };
+            snapshots.WriteSnapshot(snapshot);
 
             Console.Out.WriteLine($"READY {sessionId}");
             Console.Out.Flush();
-            Thread.Sleep(TimeSpan.FromSeconds(seconds));
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(seconds);
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                snapshots.WriteSnapshot(snapshot);
+                Thread.Sleep(TimeSpan.FromMilliseconds(100));
+            }
             return 0;
         }
         catch (Exception exception)
