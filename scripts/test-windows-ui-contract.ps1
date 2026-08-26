@@ -7,6 +7,8 @@ param(
 
     [switch] $AllowHotkeyUnavailable,
 
+    [switch] $GeometryOnly,
+
     [string] $EvidencePath
 )
 
@@ -188,9 +190,27 @@ using System.Runtime.InteropServices;
 
 public static class ZommiElectronUiNative {
     [DllImport("user32.dll")]
+    private static extern int GetWindowRgn(IntPtr window, IntPtr region);
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr window);
+    [DllImport("user32.dll")]
     private static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
     [DllImport("user32.dll")]
     private static extern void mouse_event(uint flags, uint dx, uint dy, int data, UIntPtr extraInfo);
+    [DllImport("gdi32.dll")]
+    private static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
+    [DllImport("gdi32.dll")]
+    private static extern bool DeleteObject(IntPtr value);
+
+    public static int GetWindowRegionType(IntPtr window) {
+        IntPtr region = CreateRectRgn(0, 0, 0, 0);
+        try { return GetWindowRgn(window, region); }
+        finally { DeleteObject(region); }
+    }
+
+    public static uint ReadWindowDpi(IntPtr window) {
+        return GetDpiForWindow(window);
+    }
 
     public static void PressAltShiftA() {
         const uint keyUp = 0x0002;
@@ -235,6 +255,26 @@ try {
 
     $bounds = $window.Current.BoundingRectangle
     Assert-True ($bounds.Width -ge 700 -and $bounds.Height -ge 450) 'The floating response surface was smaller than the Glass layout contract.'
+    $nativeWindowHandle = [IntPtr] $window.Current.NativeWindowHandle
+    Assert-True ([ZommiElectronUiNative]::GetWindowRegionType($nativeWindowHandle) -eq 3) 'Windows did not expose a complex rounded window region; square compositor corners remain possible.'
+    $windowDpi = [ZommiElectronUiNative]::ReadWindowDpi($nativeWindowHandle)
+    $displayScale = $windowDpi / 96.0
+    $windowRectangle = New-Object System.Drawing.Rectangle(
+        [int] $bounds.X,
+        [int] $bounds.Y,
+        [int] $bounds.Width,
+        [int] $bounds.Height)
+    $workingArea = [System.Windows.Forms.Screen]::FromRectangle($windowRectangle).WorkingArea
+    $workingWidthDip = $workingArea.Width / $displayScale
+    $workingHeightDip = $workingArea.Height / $displayScale
+    $expectedWidthDip = [Math]::Min(
+        [Math]::Max(640, [Math]::Floor($workingWidthDip - 32)),
+        [Math]::Max(840, [Math]::Min([Math]::Round($workingWidthDip * 0.56), 1120)))
+    $expectedHeightDip = [Math]::Min(
+        [Math]::Max(500, [Math]::Floor($workingHeightDip - 32)),
+        [Math]::Max(600, [Math]::Min([Math]::Round($workingHeightDip * 0.72), 840)))
+    Assert-True ([Math]::Abs($bounds.Width - ($expectedWidthDip * $displayScale)) -le (4 * $displayScale)) 'The window width did not adapt to the current display work area and DPI.'
+    Assert-True ([Math]::Abs($bounds.Height - ($expectedHeightDip * $displayScale)) -le (4 * $displayScale)) 'The window height did not adapt to the current display work area and DPI.'
 
     $composer = Wait-AutomationElementById $window 'ZommiComposer' 15
     $transcript = Find-AutomationElementById $window 'CodexTranscript'
@@ -273,7 +313,7 @@ try {
     $firstAssistantMessage = Wait-AutomationElementByName $window 'Codex response turn 1' 10
     $secondAssistantMessage = Wait-AutomationElementByName $window 'Codex response turn 2' 10
     $thinkingActivity = Wait-AutomationElementByName $window 'Thinking activity' 10
-    $toolActivity = Wait-AutomationElementByName $window 'MCP tool activity' 10
+    $toolActivity = Wait-AutomationElementByName $window 'Tool activity' 10
     Assert-True ($null -ne $firstUserMessage -and $null -ne $secondUserMessage) 'The seeded UI did not retain both user messages.'
     Assert-True ($null -ne $firstAssistantMessage -and $null -ne $secondAssistantMessage) 'The seeded UI did not retain both Codex responses.'
     Assert-True ($null -ne $thinkingActivity -and $null -ne $toolActivity) 'Thinking and tool activity were not exposed as distinct cards.'
@@ -294,7 +334,7 @@ try {
         Assert-True (Test-Path -LiteralPath $resolvedEvidencePath -PathType Leaf) 'Electron did not write its renderer evidence image.'
         $bitmap = [System.Drawing.Bitmap]::FromFile($resolvedEvidencePath)
         try {
-            Assert-True ($bitmap.Width -ge 760 -and $bitmap.Height -ge 540) 'The captured renderer surface was below the native content-size contract.'
+            Assert-True ($bitmap.Width -ge ($bounds.Width - 2) -and $bitmap.Height -ge ($bounds.Height - 2)) 'The captured renderer surface did not preserve the adaptive native pixel dimensions.'
             $edgePixels = @(
                 $bitmap.GetPixel([int] ($bitmap.Width / 2), 1),
                 $bitmap.GetPixel([int] ($bitmap.Width / 2), $bitmap.Height - 2),
@@ -311,13 +351,34 @@ try {
         }
     }
 
+    if ($GeometryOnly) {
+        [ordered]@{
+            executablePath = $resolvedExecutable
+            rootProcessId = $process.Id
+            windowBounds = [ordered]@{
+                width = [int] $bounds.Width
+                height = [int] $bounds.Height
+                dpi = [int] $windowDpi
+            }
+            adaptiveDisplaySizing = 'passed'
+            nativeRoundedRegion = 'passed'
+            fullResolutionRenderer = 'passed'
+            retainedConversationTurns = 'passed'
+            nonOverlappingMessages = 'passed'
+            thinkingAndToolCards = 'passed'
+            evidencePath = $EvidencePath
+        } | ConvertTo-Json -Depth 4
+        return
+    }
+
     $chipBounds = $docsChip.Current.BoundingRectangle
     [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(
         [int] ($chipBounds.X + ($chipBounds.Width / 2)),
         [int] ($chipBounds.Y + ($chipBounds.Height / 2)))
 
     $preview = Wait-AutomationElementById $window 'ContextPreview' 10
-    Assert-True ($null -ne $preview -and -not $preview.Current.IsOffscreen) 'Hovering a context chip did not reveal its preview.'
+    $cursorAfterHover = [System.Windows.Forms.Cursor]::Position
+    Assert-True ($null -ne $preview -and -not $preview.Current.IsOffscreen) "Hovering a context chip did not reveal its preview. Chip=$chipBounds Cursor=$cursorAfterHover Window=$bounds"
     $previewTextElement = Find-AutomationElementById $window 'ContextPreviewText'
     Assert-True ($null -ne $previewTextElement) 'The context preview text was not exposed through UI Automation.'
     $previewText = Get-AutomationText $previewTextElement
@@ -394,7 +455,10 @@ try {
         windowBounds = [ordered]@{
             width = [int] $bounds.Width
             height = [int] $bounds.Height
+            dpi = [int] $windowDpi
         }
+        adaptiveDisplaySizing = 'passed'
+        nativeRoundedRegion = 'passed'
         accessibility = 'passed'
         structuredContexts = 'passed'
         retainedConversationTurns = 'passed'

@@ -60,12 +60,19 @@ test('Codex startup timeouts reset the connection and preserve actionable errors
   assert.match(renderer, /!status\.classList\.contains\('warning'\)/);
 });
 
-test('light liquid glass uses the full native surface at device resolution', async () => {
+test('light liquid glass adapts to each display and clips the native window corners', async () => {
   const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
   const styles = await readFile(join(appDirectory, 'renderer', 'styles.css'), 'utf8');
   assert.match(main, /nativeTheme\.themeSource\s*=\s*'light'/);
   assert.match(main, /useContentSize:\s*true/);
   assert.match(main, /zoomFactor:\s*1/);
+  assert.match(main, /calculateAdaptiveWindowSize\(display\.workArea, expanded\)/);
+  assert.match(main, /screen\.on\('display-metrics-changed'/);
+  assert.match(main, /setContentSize\(size\.width, size\.height/);
+  assert.match(main, /roundedCorners:\s*false/);
+  assert.match(main, /hasShadow:\s*false/);
+  assert.match(main, /mainWindow\.setShape\(rectangles\)/);
+  assert.doesNotMatch(main, /setBackgroundMaterial\('acrylic'\)/);
   assert.match(styles, /color-scheme:\s*light/);
   assert.match(styles, /\.glass\s*\{[\s\S]*width:\s*100%[\s\S]*height:\s*100%/);
   assert.doesNotMatch(styles, /\.glass\s*\{[\s\S]{0,200}margin:\s*12px/);

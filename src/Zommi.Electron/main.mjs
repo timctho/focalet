@@ -14,11 +14,13 @@ const acceptanceEvidencePath = process.argv
   .find((argument) => argument.startsWith('--acceptance-evidence='))
   ?.slice('--acceptance-evidence='.length);
 const noAutoLaunch = process.argv.includes('--no-auto-launch');
+const windowCornerRadius = 30;
 let mainWindow = null;
 let tray = null;
 let backend = null;
 let quitting = false;
 let expanded = false;
+let displaySignature = null;
 let shortcuts = { context: false, image: false };
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -81,17 +83,21 @@ async function captureAcceptanceEvidence(path) {
 }
 
 function createWindow() {
+  const initialDisplay = screen.getPrimaryDisplay();
+  const initialSize = calculateAdaptiveWindowSize(initialDisplay.workArea, false);
+  displaySignature = signatureForDisplay(initialDisplay);
   mainWindow = new BrowserWindow({
     title: 'Zommi — floating Codex chat',
-    width: 760,
-    height: 540,
-    minWidth: 560,
-    minHeight: 380,
+    width: initialSize.width,
+    height: initialSize.height,
+    minWidth: 640,
+    minHeight: 500,
     useContentSize: true,
     transparent: true,
     backgroundColor: '#00FFFFFF',
     frame: false,
-    roundedCorners: true,
+    roundedCorners: false,
+    hasShadow: false,
     resizable: true,
     show: false,
     alwaysOnTop: true,
@@ -106,18 +112,69 @@ function createWindow() {
       zoomFactor: 1,
     },
   });
-  if (process.platform === 'win32' && typeof mainWindow.setBackgroundMaterial === 'function') {
-    mainWindow.setBackgroundMaterial('acrylic');
-  }
   mainWindow.setMenuBarVisibility(false);
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
   mainWindow.loadFile(join(moduleDirectory, 'renderer', 'index.html'));
+  mainWindow.on('resize', applyRoundedWindowShape);
+  applyRoundedWindowShape();
   mainWindow.on('close', (event) => {
     if (quitting) return;
     event.preventDefault();
     mainWindow.hide();
   });
+  screen.on('display-metrics-changed', (_event, display, changedMetrics) => {
+    if (!mainWindow || mainWindow.isDestroyed() || !changedMetrics.some((metric) => ['bounds', 'workArea', 'scaleFactor'].includes(metric))) return;
+    const currentDisplay = screen.getDisplayMatching(mainWindow.getBounds());
+    if (currentDisplay.id === display.id) applyAdaptiveWindowSize(currentDisplay, true);
+  });
+}
+
+function calculateAdaptiveWindowSize(workArea, isExpanded) {
+  const horizontalScale = isExpanded ? 0.72 : 0.56;
+  const verticalScale = isExpanded ? 0.84 : 0.72;
+  const minimumWidth = isExpanded ? 980 : 840;
+  const maximumWidth = isExpanded ? 1360 : 1120;
+  const minimumHeight = isExpanded ? 720 : 600;
+  const maximumHeight = isExpanded ? 940 : 840;
+  const availableWidth = Math.max(640, Math.floor(workArea.width - 32));
+  const availableHeight = Math.max(500, Math.floor(workArea.height - 32));
+  return {
+    width: Math.min(availableWidth, clamp(Math.round(workArea.width * horizontalScale), minimumWidth, maximumWidth)),
+    height: Math.min(availableHeight, clamp(Math.round(workArea.height * verticalScale), minimumHeight, maximumHeight)),
+  };
+}
+
+function applyAdaptiveWindowSize(display, force = false) {
+  const nextSignature = signatureForDisplay(display);
+  if (!force && nextSignature === displaySignature) return;
+  displaySignature = nextSignature;
+  const size = calculateAdaptiveWindowSize(display.workArea, expanded);
+  mainWindow.setContentSize(size.width, size.height, false);
+  applyRoundedWindowShape();
+}
+
+function signatureForDisplay(display) {
+  return `${display.id}:${display.workArea.width}x${display.workArea.height}@${display.scaleFactor}:${expanded}`;
+}
+
+function applyRoundedWindowShape() {
+  if (!mainWindow || mainWindow.isDestroyed() || process.platform === 'darwin' || typeof mainWindow.setShape !== 'function') return;
+  const [width, height] = mainWindow.getSize();
+  const radius = Math.min(windowCornerRadius, Math.floor(width / 2), Math.floor(height / 2));
+  const rectangles = [{ x: 0, y: radius, width, height: Math.max(1, height - (radius * 2)) }];
+  for (let y = 0; y < radius; y += 1) {
+    const distance = radius - y - 0.5;
+    const inset = Math.ceil(radius - Math.sqrt((radius * radius) - (distance * distance)));
+    const rowWidth = Math.max(1, width - (inset * 2));
+    rectangles.push({ x: inset, y, width: rowWidth, height: 1 });
+    rectangles.push({ x: inset, y: height - y - 1, width: rowWidth, height: 1 });
+  }
+  mainWindow.setShape(rectangles);
+}
+
+function clamp(value, minimum, maximum) {
+  return Math.max(minimum, Math.min(value, maximum));
 }
 
 function createTray() {
@@ -243,7 +300,9 @@ async function selectImageContext({ includePointerContext = false } = {}) {
 function showWindow(pointerOverride = null) {
   if (!mainWindow) return;
   const pointer = pointerOverride || screen.getCursorScreenPoint();
-  const workArea = screen.getDisplayNearestPoint(pointer).workArea;
+  const display = screen.getDisplayNearestPoint(pointer);
+  applyAdaptiveWindowSize(display);
+  const workArea = display.workArea;
   const [width, height] = mainWindow.getSize();
   let x = pointer.x + 24;
   let y = pointer.y + 24;
@@ -260,7 +319,8 @@ function showWindow(pointerOverride = null) {
 function toggleExpanded() {
   if (!mainWindow) return;
   expanded = !expanded;
-  mainWindow.setSize(expanded ? 920 : 720, expanded ? 680 : 500, true);
+  const display = screen.getDisplayMatching(mainWindow.getBounds());
+  applyAdaptiveWindowSize(display, true);
   send('window:expanded', expanded);
 }
 
