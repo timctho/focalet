@@ -147,7 +147,10 @@ else {
     $prompt = "Reply with exactly $expectedToken and nothing else."
 }
 
-Start-Process -FilePath $resolvedExecutable -WorkingDirectory (Split-Path -Parent $resolvedExecutable) | Out-Null
+Start-Process `
+    -FilePath $resolvedExecutable `
+    -WorkingDirectory (Split-Path -Parent $resolvedExecutable) `
+    -ArgumentList '--no-auto-launch' | Out-Null
 $deadline = [DateTime]::UtcNow.AddSeconds(15)
 $window = $null
 while ($null -eq $window -and [DateTime]::UtcNow -lt $deadline) {
