@@ -93,7 +93,7 @@ function installBrowserMcpRuntime() {
 async function copyBrowserMcp(destination) {
   await cp(browserMcpDirectory, destination, {
     recursive: true,
-    filter: (source) => basename(source) !== '.package-lock.json',
+    filter: (source) => !['.bin', '.package-lock.json'].includes(basename(source)),
   });
 }
 

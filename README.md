@@ -33,7 +33,9 @@ product provides:
 - browser URL, post-render accessibility hierarchy, Explorer path/selection,
   bounded accessibility text, and pointer target capture;
 - a fresh WSL Codex app-server thread with streamed thinking/commentary, plans,
-  tool lifecycle/output, and final replies; and
+  tool lifecycle/output, and final replies;
+- the user's existing Codex permissions and configured tools, plus a required
+  bundled Chrome DevTools MCP backed by an isolated headless browser; and
 - conversation continuity across invocations.
 
 The Electron candidate has passing JS/.NET contracts, a native seeded UI
@@ -60,6 +62,10 @@ and press Alt+A again to accumulate more tokens. Hover a token to inspect the
 captured text. Press **Alt+Shift+A** only when you want to attach image context.
 Type the question and press Enter; Codex thinking, tool activity, and the answer
 stream into the same surface.
+
+The bundled Chrome tool uses a separate ephemeral browser profile. It can
+navigate and interact with pages the agent opens there, but it does not inherit
+the user's browser login or silently control the tab under the pointer.
 
 Codex CLI must already be installed, signed in, and available on the WSL shell
 `PATH`. The prototype is unsigned, so Windows SmartScreen may require **More

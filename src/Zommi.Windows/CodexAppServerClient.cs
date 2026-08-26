@@ -17,6 +17,7 @@ internal sealed class CodexAppServerClient : IDisposable
     private readonly StringBuilder recentStandardError = new();
 
     private Process? process;
+    private ChromeDevToolsBrowser? chromeBrowser;
     private Task? startTask;
     private long nextRequestId;
     private bool disposed;
@@ -110,10 +111,12 @@ internal sealed class CodexAppServerClient : IDisposable
         var browserMcpWrapper = TryFindBrowserMcpWrapperWslPath();
         if (browserMcpWrapper is not null)
         {
+            StatusChanged?.Invoke("Starting isolated Chrome tool…");
+            chromeBrowser = await ChromeDevToolsBrowser.StartAsync(cancellationToken).ConfigureAwait(false);
             AppendConfig(appServerCommand, "mcp_servers.zommiChrome.command=\"sh\"");
             AppendConfig(
                 appServerCommand,
-                $"mcp_servers.zommiChrome.args=[{JsonSerializer.Serialize(browserMcpWrapper)}]");
+                $"mcp_servers.zommiChrome.args=[{JsonSerializer.Serialize(browserMcpWrapper)},{JsonSerializer.Serialize(chromeBrowser.Port.ToString())}]");
             AppendConfig(appServerCommand, "mcp_servers.zommiChrome.required=true");
             AppendConfig(appServerCommand, "mcp_servers.zommiChrome.startup_timeout_sec=30");
             AppendConfig(appServerCommand, "mcp_servers.zommiChrome.tool_timeout_sec=120");
@@ -513,6 +516,9 @@ internal sealed class CodexAppServerClient : IDisposable
 
             activeProcess.Dispose();
         }
+
+        chromeBrowser?.Dispose();
+        chromeBrowser = null;
 
         lifetime.Dispose();
         writer.Dispose();

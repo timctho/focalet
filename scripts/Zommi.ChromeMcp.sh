@@ -2,12 +2,22 @@
 set -eu
 
 script_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-electron_executable=$(wslpath -w "$script_directory/Zommi.exe")
-mcp_entrypoint=$(wslpath -w "$script_directory/resources/browser-mcp/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js")
+if [ "$#" -ne 1 ]; then
+  echo "Usage: Zommi.ChromeMcp.sh <cdp-port>" >&2
+  exit 64
+fi
 
-export ELECTRON_RUN_AS_NODE=1
-exec /init "$electron_executable" "$mcp_entrypoint" \
-  --isolated \
+cdp_port=$1
+case "$cdp_port" in
+  ''|*[!0-9]*)
+    echo "Invalid Chrome CDP port: $cdp_port" >&2
+    exit 64
+    ;;
+esac
+
+mcp_entrypoint="$script_directory/resources/browser-mcp/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
+exec node "$mcp_entrypoint" \
+  --browser-url="http://127.0.0.1:$cdp_port" \
   --no-usage-statistics \
   --no-performance-crux \
   --screenshot-format=jpeg \

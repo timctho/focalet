@@ -31,6 +31,19 @@ test('Zommi does not override the configured Codex agent permissions or tools', 
   }
 });
 
+test('Windows Chrome MCP keeps stdio inside WSL Node and connects over loopback CDP', async () => {
+  const wrapper = await readFile(join(appDirectory, '..', '..', 'scripts', 'Zommi.ChromeMcp.sh'), 'utf8');
+  const windowsBridge = await readFile(join(appDirectory, '..', 'Zommi.Windows', 'CodexAppServerClient.cs'), 'utf8');
+  const chromeHost = await readFile(join(appDirectory, '..', 'Zommi.Windows', 'ChromeDevToolsBrowser.cs'), 'utf8');
+  assert.match(wrapper, /exec node/);
+  assert.match(wrapper, /--browser-url="http:\/\/127\.0\.0\.1:\$cdp_port"/);
+  assert.doesNotMatch(wrapper, /\/init|ELECTRON_RUN_AS_NODE|wslpath/);
+  assert.match(windowsBridge, /ChromeDevToolsBrowser\.StartAsync/);
+  assert.match(windowsBridge, /mcp_servers\.zommiChrome\.required=true/);
+  assert.match(chromeHost, /--headless=new/);
+  assert.match(chromeHost, /--remote-debugging-address=127\.0\.0\.1/);
+});
+
 test('glass surfaces hide transcript, preview, composer, and chip scrollbars', async () => {
   const styles = await readFile(join(appDirectory, 'renderer', 'styles.css'), 'utf8');
   assert.match(styles, /scrollbar-width:\s*none/);
