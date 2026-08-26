@@ -138,6 +138,9 @@ try {
     $startedProcessId = $null
     $electronProcessCount = 0
     if (-not $NoStart) {
+        # Electron-hosted terminals (including parent application) may export this for their
+        # own children; a deployed desktop app must launch as Electron.
+        Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
         $startedProcess = Start-Process `
             -FilePath (Join-Path $targetDirectory 'Zommi.exe') `
             -WorkingDirectory $targetDirectory `

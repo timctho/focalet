@@ -20,6 +20,15 @@ test('packaged acceptance scripts separate Electron options from application fla
   assert.match(sendAcceptance, /'--',\s*'--no-auto-launch'/);
 });
 
+test('Windows verification and deployment do not inherit Electron host node mode', async () => {
+  const repositoryRoot = join(appDirectory, '..', '..');
+  const uiContract = await readFile(join(repositoryRoot, 'scripts', 'test-windows-ui-contract.ps1'), 'utf8');
+  const deploy = await readFile(join(repositoryRoot, 'scripts', 'deploy-windows-downloads.ps1'), 'utf8');
+  for (const source of [uiContract, deploy]) {
+    assert.match(source, /Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue/);
+  }
+});
+
 test('sandboxed windows use packaged CommonJS preload bridges', async () => {
   const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
   const selector = await readFile(join(appDirectory, 'image-selector.mjs'), 'utf8');
