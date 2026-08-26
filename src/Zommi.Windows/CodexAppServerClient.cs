@@ -118,7 +118,8 @@ internal sealed class CodexAppServerClient : IDisposable
         startInfo.ArgumentList.Add("-e");
         startInfo.ArgumentList.Add("sh");
         startInfo.ArgumentList.Add("-lc");
-        startInfo.ArgumentList.Add("cd \"$HOME\" && exec codex app-server");
+        startInfo.ArgumentList.Add(
+            "cd \"$HOME\" && CODEX_INTERNAL_ORIGINATOR_OVERRIDE=codex_cli_rs exec codex app-server");
 
         var startedProcess = new Process
         {

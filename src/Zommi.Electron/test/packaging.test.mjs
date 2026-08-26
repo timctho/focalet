@@ -30,7 +30,8 @@ test('Zommi launches Codex without overriding agent tools, providers, or permiss
     assert.doesNotMatch(source, /mcp_servers\.|model_providers\.|zommiChrome|ChromeDevToolsBrowser/);
   }
   assert.match(portableBridge, /spawnProcess\(command, \['app-server'\]/);
-  assert.match(windowsBridge, /ArgumentList\.Add\("cd \\"\$HOME\\" && exec codex app-server"\)/);
+  assert.match(windowsBridge, /CODEX_INTERNAL_ORIGINATOR_OVERRIDE=codex_cli_rs exec codex app-server/);
+  assert.match(portableBridge, /CODEX_INTERNAL_ORIGINATOR_OVERRIDE:[\s\S]*codex_cli_rs/);
 });
 
 test('Zommi source and packager do not contain a product-owned browser tool runtime', async () => {

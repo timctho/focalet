@@ -43,7 +43,11 @@ export class PortableCodexBridge extends EventEmitter {
     const command = process.env.ZOMMI_CODEX_COMMAND || 'codex';
     const child = this.spawnProcess(command, ['app-server'], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: process.env,
+      env: {
+        ...process.env,
+        CODEX_INTERNAL_ORIGINATOR_OVERRIDE:
+          process.env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE || 'codex_cli_rs',
+      },
     });
     this.process = child;
     createInterface({ input: child.stdout }).on('line', (line) => this.#handleLine(line));
