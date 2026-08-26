@@ -70,12 +70,16 @@ $executablePath = Join-Path $outputDirectory 'Zommi.exe'
 $nativeHostPath = Join-Path $outputDirectory 'resources/native/Zommi.exe'
 $hookExecutablePath = Join-Path $outputDirectory 'resources/native/Zommi.Hook.exe'
 $codexBridgePath = Join-Path $outputDirectory 'resources/app/codex-bridge.mjs'
+$electronMainPath = Join-Path $outputDirectory 'resources/app/main.mjs'
+$rendererPath = Join-Path $outputDirectory 'resources/app/renderer/renderer.mjs'
 $wslHookPath = Join-Path $outputDirectory 'Zommi.WslHook.ps1'
 $hashPath = Join-Path $outputDirectory 'SHA256SUMS.txt'
 if (-not (Test-Path -LiteralPath $executablePath) -or
     -not (Test-Path -LiteralPath $nativeHostPath) -or
     -not (Test-Path -LiteralPath $hookExecutablePath) -or
     -not (Test-Path -LiteralPath $codexBridgePath) -or
+    -not (Test-Path -LiteralPath $electronMainPath) -or
+    -not (Test-Path -LiteralPath $rendererPath) -or
     -not (Test-Path -LiteralPath $wslHookPath)) {
     throw "The package is incomplete; required runtime files are missing from $outputDirectory."
 }
@@ -83,12 +87,16 @@ $hash = (Get-FileHash -Algorithm SHA256 $executablePath).Hash.ToLowerInvariant()
 $nativeHostHash = (Get-FileHash -Algorithm SHA256 $nativeHostPath).Hash.ToLowerInvariant()
 $hookHash = (Get-FileHash -Algorithm SHA256 $hookExecutablePath).Hash.ToLowerInvariant()
 $codexBridgeHash = (Get-FileHash -Algorithm SHA256 $codexBridgePath).Hash.ToLowerInvariant()
+$electronMainHash = (Get-FileHash -Algorithm SHA256 $electronMainPath).Hash.ToLowerInvariant()
+$rendererHash = (Get-FileHash -Algorithm SHA256 $rendererPath).Hash.ToLowerInvariant()
 $wslHookHash = (Get-FileHash -Algorithm SHA256 $wslHookPath).Hash.ToLowerInvariant()
 Set-Content -Path $hashPath -Encoding ascii -Value `
     "$hash  Zommi.exe", `
     "$nativeHostHash  resources/native/Zommi.exe", `
     "$hookHash  resources/native/Zommi.Hook.exe", `
     "$codexBridgeHash  resources/app/codex-bridge.mjs", `
+    "$electronMainHash  resources/app/main.mjs", `
+    "$rendererHash  resources/app/renderer/renderer.mjs", `
     "$wslHookHash  Zommi.WslHook.ps1"
 
 $archivePath = "$outputDirectory.zip"
