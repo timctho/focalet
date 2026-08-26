@@ -42,6 +42,8 @@ test('Zommi source and packager do not contain a product-owned browser tool runt
   assert.doesNotMatch(windowsPackager, /browser-mcp|chrome-devtools-mcp|Zommi\.ChromeMcp/i);
   assert.match(windowsPackager, /resources\/app\/main\.mjs/);
   assert.match(windowsPackager, /resources\/app\/renderer\/renderer\.mjs/);
+  assert.match(windowsPackager, /--artifacts-path \$dotnetArtifactsDirectory/);
+  assert.match(windowsPackager, /wsl\.exe -d \$wslDistro -e sh -lc/);
   await assert.rejects(access(join(appDirectory, 'browser-mcp', 'package.json')));
   await assert.rejects(access(join(repositoryRoot, 'scripts', 'Zommi.ChromeMcp.sh')));
   await assert.rejects(access(join(appDirectory, '..', 'Zommi.Windows', 'ChromeDevToolsBrowser.cs')));

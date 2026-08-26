@@ -3,7 +3,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $ExecutablePath,
 
-    [int] $TimeoutSeconds = 45
+    [int] $TimeoutSeconds = 180
 )
 
 Set-StrictMode -Version Latest
@@ -23,6 +23,18 @@ function Find-ElementById {
     $condition = New-Object System.Windows.Automation.PropertyCondition(
         [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
         $AutomationId)
+    return $Root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
+}
+
+function Find-ElementByName {
+    param(
+        [System.Windows.Automation.AutomationElement] $Root,
+        [string] $Name
+    )
+
+    $condition = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::NameProperty,
+        $Name)
     return $Root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
 }
 
@@ -112,43 +124,61 @@ Assert-True ($null -ne $composer) 'The composer was not exposed through UI Autom
 Assert-True ($null -ne $send) 'The Send button was not exposed through UI Automation.'
 
 $valuePattern = $composer.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-$prompt = 'Reply with exactly ZOMMI_SEND_ACCEPTED_' + [Guid]::NewGuid().ToString('N')
+$expectedToken = 'ZOMMI_SEND_COMPLETED_' + [Guid]::NewGuid().ToString('N')
+$prompt = "Reply with exactly $expectedToken and nothing else."
 ([System.Windows.Automation.ValuePattern] $valuePattern).SetValue($prompt)
 $invokePattern = $send.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
 $stopwatch = [Diagnostics.Stopwatch]::StartNew()
 ([System.Windows.Automation.InvokePattern] $invokePattern).Invoke()
 
 $accepted = $false
+$completed = $false
+$acceptedMilliseconds = $null
 $statusText = ''
 $transcriptText = ''
+$responseText = ''
 $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
 while ([DateTime]::UtcNow -lt $deadline) {
     Start-Sleep -Milliseconds 100
     $window = Find-ZommiWindow $resolvedExecutable
     if ($null -eq $window) { continue }
     $composer = Find-ElementById $window 'ZommiComposer'
+    $send = Find-ElementById $window 'SendMessage'
     $status = Find-ElementById $window 'CodexStatus'
     $transcript = Find-ElementById $window 'CodexTranscript'
+    $response = Find-ElementByName $window $expectedToken
     if ($null -ne $status) { $statusText = [string] $status.Current.Name }
     if ($null -ne $transcript) { $transcriptText = Get-ElementText $transcript }
-    if ($transcriptText -match 'Error invoking remote method|operation has timed out') { break }
+    if ($null -ne $response) { $responseText = Get-ElementText $response }
+    if ($transcriptText -match 'Error invoking remote method|operation has timed out' -or
+        $statusText -match 'turn failed|Codex error') { break }
     if ($null -ne $composer) {
         $currentValuePattern = $composer.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-        if ([string]::IsNullOrEmpty(([System.Windows.Automation.ValuePattern] $currentValuePattern).Current.Value)) {
+        if (-not $accepted -and
+            [string]::IsNullOrEmpty(([System.Windows.Automation.ValuePattern] $currentValuePattern).Current.Value)) {
             $accepted = $true
-            break
+            $acceptedMilliseconds = $stopwatch.ElapsedMilliseconds
         }
+    }
+    if ($null -ne $response -and $null -ne $send -and $send.Current.IsEnabled) {
+        $completed = $true
+        break
     }
 }
 $stopwatch.Stop()
 
 Assert-True ($transcriptText -notmatch 'Error invoking remote method|operation has timed out') "The UI surfaced the old IPC timeout. Transcript: $transcriptText"
 Assert-True $accepted "chat:send was not accepted within $TimeoutSeconds seconds. Status: $statusText Transcript: $transcriptText"
+Assert-True ($statusText -notmatch 'turn failed|Codex error') "The Codex turn failed. Status: $statusText Transcript: $transcriptText"
+Assert-True $completed "Codex did not complete with the expected response within $TimeoutSeconds seconds. Expected: $expectedToken Status: $statusText Response: $responseText"
 
 [ordered]@{
     executablePath = $resolvedExecutable
     sendAccepted = 'passed'
-    acceptedMilliseconds = $stopwatch.ElapsedMilliseconds
+    acceptedMilliseconds = $acceptedMilliseconds
+    turnCompleted = 'passed'
+    completedMilliseconds = $stopwatch.ElapsedMilliseconds
+    response = $responseText
     remoteTimeout = 'absent'
     status = $statusText
 } | ConvertTo-Json

@@ -13,51 +13,98 @@ $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $outputDirectory = Join-Path $repositoryRoot "artifacts/zommi-$Runtime"
 $nativeOutputDirectory = Join-Path $repositoryRoot "artifacts/zommi-native-$Runtime"
 $electronDirectory = Join-Path $repositoryRoot 'src/Zommi.Electron'
+$dotnetArtifactsDirectory = Join-Path `
+    ([IO.Path]::GetTempPath()) `
+    "zommi-dotnet-publish-$([Guid]::NewGuid().ToString('N'))"
 
 if (-not $SkipPublish) {
-    if (Test-Path -LiteralPath $nativeOutputDirectory) {
-        Remove-Item -LiteralPath $nativeOutputDirectory -Recurse -Force
-    }
-    dotnet publish (Join-Path $repositoryRoot 'src/Zommi.Windows/Zommi.Windows.csproj') `
-        --configuration Release `
-        --runtime $Runtime `
-        --self-contained true `
-        -p:PublishSingleFile=true `
-        -p:IncludeNativeLibrariesForSelfExtract=true `
-        --output $nativeOutputDirectory
-    if ($LASTEXITCODE -ne 0) {
-        throw "Zommi Windows publish failed with exit code $LASTEXITCODE."
-    }
-
-    dotnet publish (Join-Path $repositoryRoot 'src/Zommi.Hook/Zommi.Hook.csproj') `
-        --configuration Release `
-        --runtime $Runtime `
-        --self-contained true `
-        -p:PublishSingleFile=true `
-        -p:IncludeNativeLibrariesForSelfExtract=true `
-        --output $nativeOutputDirectory
-    if ($LASTEXITCODE -ne 0) {
-        throw "Zommi Hook publish failed with exit code $LASTEXITCODE."
-    }
-
-    Push-Location $electronDirectory
     try {
-        npm ci
-        if ($LASTEXITCODE -ne 0) {
-            throw "Electron dependency restore failed with exit code $LASTEXITCODE."
+        if (Test-Path -LiteralPath $nativeOutputDirectory) {
+            Remove-Item -LiteralPath $nativeOutputDirectory -Recurse -Force
         }
-        $architecture = if ($Runtime -eq 'win-arm64') { 'arm64' } else { 'x64' }
-        node (Join-Path $electronDirectory 'scripts/package-electron.mjs') `
-            --platform win32 `
-            --arch $architecture `
-            --output $outputDirectory `
-            --native-dir $nativeOutputDirectory
+        dotnet publish (Join-Path $repositoryRoot 'src/Zommi.Windows/Zommi.Windows.csproj') `
+            --configuration Release `
+            --runtime $Runtime `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            --artifacts-path $dotnetArtifactsDirectory `
+            --output $nativeOutputDirectory
         if ($LASTEXITCODE -ne 0) {
-            throw "Electron Windows packaging failed with exit code $LASTEXITCODE."
+            throw "Zommi Windows publish failed with exit code $LASTEXITCODE."
+        }
+
+        dotnet publish (Join-Path $repositoryRoot 'src/Zommi.Hook/Zommi.Hook.csproj') `
+            --configuration Release `
+            --runtime $Runtime `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            --artifacts-path $dotnetArtifactsDirectory `
+            --output $nativeOutputDirectory
+        if ($LASTEXITCODE -ne 0) {
+            throw "Zommi Hook publish failed with exit code $LASTEXITCODE."
         }
     }
     finally {
-        Pop-Location
+        Remove-Item -LiteralPath $dotnetArtifactsDirectory -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    $wslPrefix = if ($repositoryRoot.StartsWith('\\wsl.localhost\', [StringComparison]::OrdinalIgnoreCase)) {
+        '\\wsl.localhost\'
+    }
+    elseif ($repositoryRoot.StartsWith('\\wsl$\', [StringComparison]::OrdinalIgnoreCase)) {
+        '\\wsl$\'
+    }
+    else {
+        $null
+    }
+    if ($null -ne $wslPrefix) {
+        $wslRelativeRoot = $repositoryRoot.Substring($wslPrefix.Length)
+        $distroSeparator = $wslRelativeRoot.IndexOf('\')
+        if ($distroSeparator -le 0) {
+            throw "Could not resolve the WSL distribution from $repositoryRoot."
+        }
+        $wslDistro = $wslRelativeRoot.Substring(0, $distroSeparator)
+        $linuxRepositoryRoot = $wslRelativeRoot.Substring($distroSeparator).Replace('\', '/')
+        $linuxElectronDirectory = "$linuxRepositoryRoot/src/Zommi.Electron"
+        $linuxPackager = "$linuxElectronDirectory/scripts/package-electron.mjs"
+        $linuxOutputDirectory = "$linuxRepositoryRoot/artifacts/zommi-$Runtime"
+        $linuxNativeDirectory = "$linuxRepositoryRoot/artifacts/zommi-native-$Runtime"
+        $packageCommand = 'cd "$1" && npm ci && node "$2" --platform "$3" --arch "$4" --output "$5" --native-dir "$6"'
+        $architecture = if ($Runtime -eq 'win-arm64') { 'arm64' } else { 'x64' }
+        & wsl.exe -d $wslDistro -e sh -lc $packageCommand `
+            zommi-package `
+            $linuxElectronDirectory `
+            $linuxPackager `
+            win32 `
+            $architecture `
+            $linuxOutputDirectory `
+            $linuxNativeDirectory
+        if ($LASTEXITCODE -ne 0) {
+            throw "Electron Windows packaging in WSL failed with exit code $LASTEXITCODE."
+        }
+    }
+    else {
+        Push-Location $electronDirectory
+        try {
+            npm ci
+            if ($LASTEXITCODE -ne 0) {
+                throw "Electron dependency restore failed with exit code $LASTEXITCODE."
+            }
+            $architecture = if ($Runtime -eq 'win-arm64') { 'arm64' } else { 'x64' }
+            node (Join-Path $electronDirectory 'scripts/package-electron.mjs') `
+                --platform win32 `
+                --arch $architecture `
+                --output $outputDirectory `
+                --native-dir $nativeOutputDirectory
+            if ($LASTEXITCODE -ne 0) {
+                throw "Electron Windows packaging failed with exit code $LASTEXITCODE."
+            }
+        }
+        finally {
+            Pop-Location
+        }
     }
 }
 
