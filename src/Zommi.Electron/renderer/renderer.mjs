@@ -670,4 +670,6 @@ function seedAcceptanceConversation() {
   beginTurn('Now compare it with the second tab.', ['[shop.example.com]']);
   renderStreamUpdate({ kind: 'assistant', lifecycle: 'delta', title: 'Codex', text: 'I’ll keep both contexts separate and compare only the facts each tab exposes.' });
   renderStatus('ready');
+  if (!sessionSidebar.classList.contains('open')) toggleSessions.click();
+  if (modelPanel.hidden) modelSummary.click();
 }

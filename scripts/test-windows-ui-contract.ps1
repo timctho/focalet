@@ -197,6 +197,8 @@ public static class ZommiElectronUiNative {
     private static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
     [DllImport("user32.dll")]
     private static extern void mouse_event(uint flags, uint dx, uint dy, int data, UIntPtr extraInfo);
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
     [DllImport("gdi32.dll")]
     private static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
     [DllImport("gdi32.dll")]
@@ -228,6 +230,11 @@ public static class ZommiElectronUiNative {
 
     public static void LeftButtonUp() {
         mouse_event(0x0004, 0, 0, 0, UIntPtr.Zero);
+    }
+
+    public static int HitTest(IntPtr window, int screenX, int screenY) {
+        long packed = ((long)(screenY & 0xffff) << 16) | (uint)(screenX & 0xffff);
+        return SendMessage(window, 0x0084, IntPtr.Zero, new IntPtr(packed)).ToInt32();
     }
 }
 '@
@@ -281,13 +288,39 @@ try {
     $chips = Find-AutomationElementById $window 'ContextChips'
     $status = Find-AutomationElementById $window 'CodexStatus'
     $shortcuts = Find-AutomationElementById $window 'ZommiShortcuts'
+    $toggleSessions = Wait-AutomationElementById $window 'ToggleSessions' 10
+    $modelSummary = Wait-AutomationElementById $window 'ModelSummary' 10
     Assert-True ($null -ne $composer) 'The Electron composer was not exposed through UI Automation.'
     Assert-True ($null -ne $transcript) 'The Electron transcript was not exposed through UI Automation.'
     Assert-True ($null -ne $chips) 'Attached contexts were not exposed through UI Automation.'
     Assert-True ($null -ne $status) 'The Codex status was not exposed through UI Automation.'
     Assert-True ($null -ne $shortcuts) 'The global shortcut state was not exposed through UI Automation.'
+    Assert-True ($null -ne $toggleSessions) 'The chat-session sidebar control was not exposed.'
+    Assert-True ($null -ne $modelSummary) 'The model/reasoning control was not exposed.'
     Assert-True ($composer.Current.ControlType -eq [System.Windows.Automation.ControlType]::Edit) 'The Electron composer is not an editable text control.'
     Assert-True ($composer.Current.HasKeyboardFocus) 'The floating composer did not receive keyboard focus.'
+
+    $sessionSidebar = Wait-AutomationElementById $window 'SessionSidebar' 10
+    $seededSession = Wait-AutomationElementByName $window 'Structured context' 10
+    $toggleAfterClick = Find-AutomationElementById $window 'ToggleSessions'
+    $sidebarState = if ($null -eq $sessionSidebar) { '<missing>' } else { "offscreen=$($sessionSidebar.Current.IsOffscreen) bounds=$($sessionSidebar.Current.BoundingRectangle)" }
+    $toggleState = if ($null -eq $toggleAfterClick) { '<missing>' } else { "name=$($toggleAfterClick.Current.Name) bounds=$($toggleAfterClick.Current.BoundingRectangle)" }
+    Assert-True ($null -ne $sessionSidebar -and -not $sessionSidebar.Current.IsOffscreen) "The session sidebar did not open. Sidebar: $sidebarState Toggle: $toggleState"
+    Assert-True ($null -ne $seededSession -and -not $seededSession.Current.IsOffscreen) 'The active seeded chat was not listed in the sidebar.'
+    $modelPanel = Wait-AutomationElementById $window 'ModelPanel' 10
+    $modelSelect = Wait-AutomationElementById $window 'ModelSelect' 10
+    $effortSelect = Wait-AutomationElementById $window 'EffortSelect' 10
+    Assert-True ($null -ne $modelPanel -and -not $modelPanel.Current.IsOffscreen) 'The model settings sub-panel did not open.'
+    Assert-True ($null -ne $modelSelect -and -not $modelSelect.Current.IsOffscreen) 'The model selector was not visible.'
+    Assert-True ($null -ne $effortSelect -and -not $effortSelect.Current.IsOffscreen) 'The reasoning selector was not visible.'
+    $dragStart = New-Object System.Drawing.Point(
+        [int] ($bounds.X + $bounds.Width - 24),
+        [int] ($bounds.Y + ($bounds.Height / 2)))
+    $blankRegionHitTest = [ZommiElectronUiNative]::HitTest(
+        $nativeWindowHandle,
+        $dragStart.X,
+        $dragStart.Y)
+    Assert-True ($blankRegionHitTest -eq 2) "The blank white gutter was not exposed as native HTCAPTION. Hit test: $blankRegionHitTest"
 
     $shortcutName = $shortcuts.Current.Name
     $hotkeyRegistration = 'passed'
@@ -366,6 +399,9 @@ try {
             retainedConversationTurns = 'passed'
             nonOverlappingMessages = 'passed'
             thinkingAndToolCards = 'passed'
+            modelReasoningPanel = 'passed'
+            sessionSidebar = 'passed'
+            backgroundDrag = 'passed'
             evidencePath = $EvidencePath
         } | ConvertTo-Json -Depth 4
         return
@@ -464,6 +500,9 @@ try {
         retainedConversationTurns = 'passed'
         nonOverlappingMessages = 'passed'
         thinkingAndToolCards = 'passed'
+        modelReasoningPanel = 'passed'
+        sessionSidebar = 'passed'
+        backgroundDrag = 'passed'
         selectedTextPrimary = 'passed'
         automaticAltAImage = 'absent'
         explicitAltShiftAImage = 'passed'

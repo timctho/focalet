@@ -3,7 +3,11 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $ExecutablePath,
 
-    [switch] $SkipBrowser
+    [switch] $SkipBrowser,
+
+    [switch] $SkipHoverPreview,
+
+    [switch] $SkipSessionUi
 )
 
 Set-StrictMode -Version Latest
@@ -82,6 +86,22 @@ function Wait-AutomationElementByName {
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     while ([DateTime]::UtcNow -lt $deadline) {
         $element = Find-AutomationElementByName $Root $Name
+        if ($null -ne $element) { return $element }
+        Start-Sleep -Milliseconds 100
+    }
+    return $null
+}
+
+function Wait-AutomationElementById {
+    param(
+        [System.Windows.Automation.AutomationElement] $Root,
+        [string] $AutomationId,
+        [int] $TimeoutSeconds = 20
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $element = Find-AutomationElementById $Root $AutomationId
         if ($null -ne $element) { return $element }
         Start-Sleep -Milliseconds 100
     }
@@ -180,6 +200,8 @@ public static class ZommiElectronAcceptanceNative {
     private static extern bool SetForegroundWindow(IntPtr window);
     [DllImport("user32.dll")]
     private static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
+    [DllImport("user32.dll")]
+    private static extern bool SetCursorPos(int x, int y);
 
     public static bool Activate(IntPtr target) {
         IntPtr foreground = GetForegroundWindow();
@@ -201,6 +223,10 @@ public static class ZommiElectronAcceptanceNative {
         keybd_event(0x41, 0, 0, UIntPtr.Zero);
         keybd_event(0x41, 0, keyUp, UIntPtr.Zero);
         keybd_event(0x12, 0, keyUp, UIntPtr.Zero);
+    }
+
+    public static bool MovePointer(int x, int y) {
+        return SetCursorPos(x, y);
     }
 }
 '@
@@ -298,26 +324,30 @@ try {
     Assert-True ($null -ne $composer -and $composer.Current.HasKeyboardFocus) 'Alt+A did not focus the Electron composer.'
     Assert-True ((Get-AutomationText $composer) -notlike "*$browserMarker*") 'Raw page context leaked into the composer.'
 
-    $chipBounds = $contextChip.Current.BoundingRectangle
-    [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(
-        [int] ($chipBounds.X + ($chipBounds.Width / 2)),
-        [int] ($chipBounds.Y + ($chipBounds.Height / 2)))
-    $preview = $null
-    for ($attempt = 0; $attempt -lt 100 -and $null -eq $preview; $attempt++) {
-        Start-Sleep -Milliseconds 100
-        $preview = Find-AutomationElementById $window 'ContextPreviewText'
+    $previewContract = 'skipped'
+    if (-not $SkipHoverPreview) {
+        $chipBounds = $contextChip.Current.BoundingRectangle
+        Assert-True ([ZommiElectronAcceptanceNative]::MovePointer(
+            [int] ($chipBounds.X + ($chipBounds.Width / 2)),
+            [int] ($chipBounds.Y + ($chipBounds.Height / 2)))) 'Could not move the pointer onto the context chip.'
+        $preview = $null
+        for ($attempt = 0; $attempt -lt 100 -and $null -eq $preview; $attempt++) {
+            Start-Sleep -Milliseconds 100
+            $preview = Find-AutomationElementById $window 'ContextPreviewText'
+        }
+        Assert-True ($null -ne $preview -and -not $preview.Current.IsOffscreen) 'The real Alt+A context did not expose its hover preview.'
+        $previewText = Get-AutomationText $preview
+        Assert-True ($previewText -like "*$browserMarker*") 'The Alt+A preview omitted the controlled page text.'
+        Assert-True ($previewText -like "*$tableName*") 'The Alt+A preview omitted the semantic table hierarchy.'
+        Assert-True ($previewText -like "*Mouse pointer:*$buttonName*") 'The hover target was not labeled as Mouse pointer.'
+        Assert-True ($previewText -notlike '*"source":*') 'Accessibility capture-source metadata leaked into the compact structure.'
+        Assert-True ($previewText -notlike '*"nodeCount":*') 'Accessibility node-count metadata leaked into the compact structure.'
+        Assert-True ($previewText -notlike '*"automationId":*') 'Accessibility automation-id metadata leaked into the compact structure.'
+        Assert-True ($previewText -notlike '*"bounds":*') 'Accessibility pixel bounds leaked into the compact structure.'
+        $previewImage = Find-AutomationElementById $window 'ContextPreviewImage'
+        Assert-True ($null -eq $previewImage -or $previewImage.Current.IsOffscreen) 'Alt+A attached an automatic image.'
+        $previewContract = 'passed'
     }
-    Assert-True ($null -ne $preview -and -not $preview.Current.IsOffscreen) 'The real Alt+A context did not expose its hover preview.'
-    $previewText = Get-AutomationText $preview
-    Assert-True ($previewText -like "*$browserMarker*") 'The Alt+A preview omitted the controlled page text.'
-    Assert-True ($previewText -like "*$tableName*") 'The Alt+A preview omitted the semantic table hierarchy.'
-    Assert-True ($previewText -like "*Mouse pointer:*$buttonName*") 'The hover target was not labeled as Mouse pointer.'
-    Assert-True ($previewText -notlike '*"source":*') 'Accessibility capture-source metadata leaked into the compact structure.'
-    Assert-True ($previewText -notlike '*"nodeCount":*') 'Accessibility node-count metadata leaked into the compact structure.'
-    Assert-True ($previewText -notlike '*"automationId":*') 'Accessibility automation-id metadata leaked into the compact structure.'
-    Assert-True ($previewText -notlike '*"bounds":*') 'Accessibility pixel bounds leaked into the compact structure.'
-    $previewImage = Find-AutomationElementById $window 'ContextPreviewImage'
-    Assert-True ($null -eq $previewImage -or $previewImage.Current.IsOffscreen) 'Alt+A attached an automatic image.'
 
     $prompt = 'Reply with the exact token beginning ZOMMI_ELECTRON_ from the attached context and nothing else.'
     Set-AutomationValue $composer $prompt
@@ -367,6 +397,53 @@ try {
         throw "Codex did not stream the exact context token through Electron. Status: $statusText Transcript: $transcriptTail"
     }
 
+    $sessionUiContract = 'skipped'
+    if (-not $SkipSessionUi) {
+        $window = Wait-ZommiWindow $electron 10
+        $modelSummary = Wait-AutomationElementById $window 'ModelSummary' 10
+        Assert-True ($null -ne $modelSummary) 'The live Codex model/reasoning control did not reach the renderer.'
+        Invoke-AutomationElement $modelSummary
+        $modelSelect = Wait-AutomationElementById $window 'ModelSelect' 10
+        $effortSelect = Wait-AutomationElementById $window 'EffortSelect' 10
+        Assert-True ($null -ne $modelSelect -and -not $modelSelect.Current.IsOffscreen) 'The live model catalog selector did not open.'
+        Assert-True ($null -ne $effortSelect -and -not $effortSelect.Current.IsOffscreen) 'The live reasoning-level selector did not open.'
+        Invoke-AutomationElement $modelSummary
+
+        $toggleSessions = Wait-AutomationElementById $window 'ToggleSessions' 10
+        Assert-True ($null -ne $toggleSessions) 'The live session sidebar control was not exposed.'
+        Invoke-AutomationElement $toggleSessions
+        $newSession = Wait-AutomationElementById $window 'NewSession' 10
+        Assert-True ($null -ne $newSession -and -not $newSession.Current.IsOffscreen) 'The new-chat control was not visible in the session sidebar.'
+        Invoke-AutomationElement $newSession
+
+        $expectedSessionTitle = if ($prompt.Length -le 42) {
+            $prompt
+        }
+        else {
+            $prompt.Substring(0, 41) + '…'
+        }
+        $oldSession = Wait-AutomationElementByName $window $expectedSessionTitle 20
+        Assert-True ($null -ne $oldSession -and -not $oldSession.Current.IsOffscreen) 'The completed chat disappeared after creating a new session.'
+        Invoke-AutomationElement $oldSession
+
+        $resumedHistory = $null
+        $resumeDeadline = [DateTime]::UtcNow.AddSeconds(30)
+        while ([DateTime]::UtcNow -lt $resumeDeadline) {
+            Start-Sleep -Milliseconds 200
+            $window = Wait-ZommiWindow $electron 2
+            $resumedTranscript = Find-AutomationElementById $window 'CodexTranscript'
+            if ($null -ne $resumedTranscript) {
+                $candidateHistory = Get-AutomationText $resumedTranscript
+                if ($candidateHistory -like "*$browserMarker*") {
+                    $resumedHistory = $candidateHistory
+                    break
+                }
+            }
+        }
+        Assert-True ($null -ne $resumedHistory) 'Switching back to the completed chat did not restore its persisted history.'
+        $sessionUiContract = 'passed'
+    }
+
     [ordered]@{
         executablePath = $resolvedExecutable
         executableSha256 = (Get-FileHash -LiteralPath $resolvedExecutable -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -375,11 +452,13 @@ try {
         globalAltA = 'passed'
         pointerAdjacent = 'passed'
         structuredBrowserContext = 'passed'
-        semanticTableHierarchy = 'passed'
-        compactAccessibilityStructure = 'passed'
-        pointerLabel = 'Mouse pointer'
+        semanticTableHierarchy = $previewContract
+        compactAccessibilityStructure = $previewContract
+        pointerLabel = $previewContract
         automaticAltAImage = 'absent'
         codexStreaming = 'passed'
+        modelReasoningCatalog = $sessionUiContract
+        createAndSwitchSession = $sessionUiContract
         responseToken = $browserMarker
     } | ConvertTo-Json
 }
