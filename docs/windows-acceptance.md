@@ -72,6 +72,9 @@ Build the package, then run from Windows PowerShell:
 
 .\scripts\test-windows-runtime.ps1 `
   -ExecutablePath .\artifacts\zommi-win-x64\Zommi.exe
+
+.\scripts\test-windows-chrome-mcp.ps1 `
+  -ExecutablePath .\artifacts\zommi-win-x64\Zommi.exe
 ```
 
 The UI contract uses seeded contexts plus the real packaged image selector. The
@@ -80,3 +83,6 @@ checks its accessibility hierarchy and pointer label, and requires Codex to
 use Chrome MCP against a second, unattached local fixture before streaming its
 random exact token. Neither check proves arbitrary protected, canvas-only,
 elevated, or secure-desktop surfaces, nor control of the user's signed-in tab.
+The dedicated Chrome MCP contract exercises the same tool path directly through
+the packaged native-host protocol so RDP pointer automation cannot mask a tool
+regression, and also verifies isolated-profile cleanup after graceful shutdown.
