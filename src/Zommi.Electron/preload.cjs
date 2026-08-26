@@ -18,4 +18,5 @@ contextBridge.exposeInMainWorld('zommi', {
   onTurnCompleted: (callback) => subscribe('turn:completed', callback),
   onFocusComposer: (callback) => subscribe('composer:focus', callback),
   onShortcuts: (callback) => subscribe('shortcuts:state', callback),
+  onAcceptanceConversation: (callback) => subscribe('acceptance:conversation', callback),
 });

@@ -4,7 +4,6 @@ const chips = document.querySelector('#ContextChips');
 const sendButton = document.querySelector('#SendMessage');
 const status = document.querySelector('#CodexStatus');
 const shortcuts = document.querySelector('#ZommiShortcuts');
-const queryBubble = document.querySelector('#QueryBubble');
 const preview = document.querySelector('#ContextPreview');
 const previewTitle = document.querySelector('#PreviewTitle');
 const previewText = document.querySelector('#ContextPreviewText');
@@ -13,8 +12,10 @@ const attachments = [];
 const activityElements = new Map();
 let assistantElement = null;
 let assistantTextNode = null;
+let currentTurnBody = null;
 let turnActive = false;
 let previewTimer = null;
+let turnNumber = 0;
 
 document.querySelector('#HideZommi').addEventListener('click', () => window.zommi.hide());
 document.querySelector('#ExpandZommi').addEventListener('click', () => window.zommi.toggleExpanded());
@@ -37,6 +38,7 @@ window.zommi.onStatus(({ message, warning }) => renderStatus(message, warning));
 window.zommi.onStream(renderStreamUpdate);
 window.zommi.onTurnCompleted(completeTurn);
 window.zommi.onFocusComposer(() => focusComposer());
+window.zommi.onAcceptanceConversation?.(seedAcceptanceConversation);
 window.zommi.onShortcuts((state) => {
   shortcuts.textContent = 'Alt+A context · Alt+Shift+A image';
   shortcuts.setAttribute('aria-label', `Alt+A registered: ${Boolean(state.context)}; Alt+Shift+A registered: ${Boolean(state.image)}`);
@@ -51,7 +53,7 @@ function addAttachment(attachment) {
 
 function createToken(attachment) {
   let label = 'image';
-  if (attachment.snapshot) {
+  if (attachment.snapshot && !attachment.imageDataUrl) {
     const locator = attachment.snapshot.locator;
     if (locator?.kind?.toLowerCase() === 'url') {
       try {
@@ -103,7 +105,7 @@ function showPreview(attachment) {
   clearTimeout(previewTimer);
   previewTitle.textContent = attachment.token;
   previewText.textContent = attachment.previewText || '';
-  previewText.hidden = Boolean(attachment.imageDataUrl);
+  previewText.hidden = !attachment.previewText;
   previewImage.hidden = !attachment.imageDataUrl;
   if (attachment.imageDataUrl) previewImage.src = attachment.imageDataUrl;
   else previewImage.removeAttribute('src');
@@ -129,10 +131,8 @@ async function sendMessage() {
   turnActive = true;
   sendButton.disabled = true;
   composer.disabled = true;
-  queryBubble.textContent = message;
-  queryBubble.classList.remove('empty');
   removeWelcome();
-  appendUserMessage(message, attachments.map((item) => item.token));
+  beginTurn(message, attachments.map((item) => item.token));
   assistantElement = null;
   assistantTextNode = null;
   activityElements.clear();
@@ -155,33 +155,89 @@ function renderStreamUpdate(update) {
   removeWelcome();
   const kind = normalizeKind(update.kind);
   const lifecycle = normalizeLifecycle(update.lifecycle);
+  ensureTurnBody();
   if (kind === 'assistant') {
     if (!assistantElement) {
+      const row = document.createElement('article');
+      row.className = 'message-row assistant';
+      row.setAttribute('aria-label', `Codex response turn ${turnNumber}`);
+      const avatar = document.createElement('span');
+      avatar.className = 'assistant-mark';
+      avatar.setAttribute('aria-hidden', 'true');
+      avatar.textContent = '✦';
       assistantElement = document.createElement('div');
       assistantElement.className = 'message assistant';
-      assistantElement.setAttribute('aria-label', 'Codex response');
       assistantTextNode = document.createTextNode('');
       assistantElement.append(assistantTextNode);
-      transcript.append(assistantElement);
+      row.append(avatar, assistantElement);
+      currentTurnBody.append(row);
     }
     if (update.text) assistantTextNode.data += update.text;
     scrollTranscript();
     return;
   }
   const key = update.itemId || `${kind}:${update.title}`;
-  let element = activityElements.get(key);
-  if (!element) {
-    element = document.createElement('div');
-    element.className = `activity ${kind}`;
-    const heading = document.createElement('strong');
-    heading.textContent = kind === 'thinking' ? 'Thinking…' : update.title || 'Activity';
-    element.append(heading, document.createTextNode('\n'));
-    activityElements.set(key, element);
-    transcript.append(element);
+  let activity = activityElements.get(key);
+  if (!activity) {
+    activity = createActivity(kind, update.title);
+    activityElements.set(key, activity);
+    currentTurnBody.append(activity.element);
   }
-  if (update.text) element.append(document.createTextNode(update.text));
-  if (lifecycle === 'completed' && update.status) element.append(document.createTextNode(`\n↳ ${update.status}`));
+  updateActivity(activity, update, lifecycle);
   scrollTranscript();
+}
+
+function createActivity(kind, title) {
+  const element = document.createElement('details');
+  element.className = `activity-card ${kind}`;
+  element.setAttribute('aria-label', `${kind === 'thinking' ? 'Thinking' : title || 'Activity'} activity`);
+  element.open = true;
+  const summary = document.createElement('summary');
+  const icon = document.createElement('span');
+  icon.className = 'activity-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  icon.textContent = kind === 'thinking' ? '✦' : kind === 'plan' ? '≡' : '⌘';
+  const heading = document.createElement('span');
+  heading.className = 'activity-title';
+  heading.textContent = kind === 'thinking' ? 'Thinking' : title || 'Activity';
+  const subtitle = document.createElement('span');
+  subtitle.className = 'activity-subtitle';
+  const state = document.createElement('span');
+  state.className = 'activity-state';
+  state.textContent = 'running';
+  summary.append(icon, heading, subtitle, state);
+  const content = document.createElement('pre');
+  content.className = 'activity-content';
+  element.append(summary, content);
+  return { element, subtitle, state, content, hasText: false };
+}
+
+function updateActivity(activity, update, lifecycle) {
+  const text = String(update.text || '');
+  const kind = normalizeKind(update.kind);
+  if (text) {
+    if (!activity.subtitle.textContent && (kind === 'tool' || kind === 'tooloutput' || kind === 'tool-output')) {
+      activity.subtitle.textContent = compactLabel(text);
+    }
+    const shouldUseAsSubtitleOnly = lifecycle === 'started' && kind === 'tool' && !activity.hasText;
+    if (!shouldUseAsSubtitleOnly) {
+      activity.content.append(document.createTextNode(text));
+      activity.hasText = true;
+    }
+  }
+  activity.content.hidden = !activity.hasText;
+  if (lifecycle === 'completed') {
+    activity.element.classList.add('completed');
+    activity.state.textContent = update.status || 'done';
+    activity.element.open = false;
+  } else {
+    activity.state.textContent = lifecycle === 'started' ? 'running' : 'live';
+  }
+}
+
+function compactLabel(value) {
+  const line = String(value).split(/\r?\n/, 1)[0].replace(/\s+/g, ' ').trim();
+  return line.length <= 70 ? line : `${line.slice(0, 69)}…`;
 }
 
 function normalizeKind(value) {
@@ -194,19 +250,46 @@ function normalizeLifecycle(value) {
   return String(value || 'delta').toLowerCase();
 }
 
-function appendUserMessage(message, tokens) {
-  const element = document.createElement('div');
-  element.className = 'activity user';
-  element.textContent = `${tokens.length ? `${tokens.join(' ')} ` : ''}${message}`;
-  transcript.append(element);
+function beginTurn(message, tokens) {
+  turnNumber += 1;
+  const turn = document.createElement('section');
+  turn.className = 'conversation-turn';
+  turn.setAttribute('aria-label', `Conversation turn ${turnNumber}`);
+
+  const row = document.createElement('article');
+  row.className = 'message-row user';
+  row.setAttribute('aria-label', `User message turn ${turnNumber}`);
+  const bubble = document.createElement('div');
+  bubble.className = 'message user';
+  if (tokens.length) {
+    const context = document.createElement('span');
+    context.className = 'message-context';
+    context.textContent = tokens.join(' ');
+    bubble.append(context);
+  }
+  const text = document.createElement('span');
+  text.className = 'message-text';
+  text.textContent = message;
+  bubble.append(text);
+  row.append(bubble);
+  currentTurnBody = document.createElement('div');
+  currentTurnBody.className = 'turn-body';
+  turn.append(row, currentTurnBody);
+  transcript.append(turn);
   scrollTranscript();
 }
 
+function ensureTurnBody() {
+  if (currentTurnBody) return;
+  beginTurn('Continue', []);
+}
+
 function appendError(message) {
+  ensureTurnBody();
   const element = document.createElement('div');
-  element.className = 'activity error';
+  element.className = 'error-card';
   element.textContent = `Error: ${message}`;
-  transcript.append(element);
+  currentTurnBody.append(element);
 }
 
 function completeTurn(turnStatus) {
@@ -239,4 +322,24 @@ function scrollTranscript() {
 
 function removeWelcome() {
   transcript.querySelector('.welcome')?.remove();
+}
+
+function seedAcceptanceConversation() {
+  if (transcript.querySelector('.conversation-turn')) return;
+  removeWelcome();
+  beginTurn('Summarize the selected section and keep the table structure.', ['[docs.example.com]']);
+  renderStreamUpdate({ kind: 'thinking', lifecycle: 'started', title: 'Thinking', text: '', itemId: 'seed-thinking-1' });
+  renderStreamUpdate({ kind: 'thinking', lifecycle: 'delta', title: 'Thinking', text: 'Reading the selected text and semantic table hierarchy.', itemId: 'seed-thinking-1' });
+  renderStreamUpdate({ kind: 'thinking', lifecycle: 'completed', title: 'Thinking', text: '', status: 'done', itemId: 'seed-thinking-1' });
+  renderStreamUpdate({ kind: 'tool', lifecycle: 'started', title: 'MCP tool', text: 'chrome · take_snapshot', itemId: 'seed-tool-1' });
+  renderStreamUpdate({ kind: 'toolOutput', lifecycle: 'delta', title: 'Tool progress', text: 'Captured the current document structure.', itemId: 'seed-tool-1' });
+  renderStreamUpdate({ kind: 'tool', lifecycle: 'completed', title: 'MCP tool', text: '', status: 'completed', itemId: 'seed-tool-1' });
+  renderStreamUpdate({ kind: 'assistant', lifecycle: 'delta', title: 'Codex', text: 'The selected section is preserved as structured context, including its table rows and headers.' });
+
+  assistantElement = null;
+  assistantTextNode = null;
+  activityElements.clear();
+  beginTurn('Now compare it with the second tab.', ['[shop.example.com]']);
+  renderStreamUpdate({ kind: 'assistant', lifecycle: 'delta', title: 'Codex', text: 'I’ll keep both contexts separate and compare only the facts each tab exposes.' });
+  renderStatus('ready');
 }

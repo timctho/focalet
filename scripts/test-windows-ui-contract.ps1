@@ -217,10 +217,16 @@ Assert-True (Test-Path -LiteralPath $resolvedExecutable -PathType Leaf) 'Zommi.e
 $process = $null
 
 try {
+    $argumentList = @('--acceptance-ui-seeded', '--force-renderer-accessibility')
+    if (-not [string]::IsNullOrWhiteSpace($EvidencePath)) {
+        $resolvedEvidencePath = [IO.Path]::GetFullPath($EvidencePath)
+        Remove-Item -LiteralPath $resolvedEvidencePath -Force -ErrorAction SilentlyContinue
+        $argumentList += "--acceptance-evidence=$resolvedEvidencePath"
+    }
     $process = Start-Process `
         -FilePath $resolvedExecutable `
         -WorkingDirectory (Split-Path -Parent $resolvedExecutable) `
-        -ArgumentList '--acceptance-ui-seeded', '--force-renderer-accessibility' `
+        -ArgumentList $argumentList `
         -PassThru
 
     $window = Wait-MainWindow $process 20
@@ -262,29 +268,43 @@ try {
     Assert-True ($null -ne $shopChip) 'The accumulated second-tab context chip was not rendered.'
     Assert-True ($null -ne $imageChip) 'The explicit image context chip was not rendered.'
 
+    $firstUserMessage = Wait-AutomationElementByName $window 'User message turn 1' 10
+    $secondUserMessage = Wait-AutomationElementByName $window 'User message turn 2' 10
+    $firstAssistantMessage = Wait-AutomationElementByName $window 'Codex response turn 1' 10
+    $secondAssistantMessage = Wait-AutomationElementByName $window 'Codex response turn 2' 10
+    $thinkingActivity = Wait-AutomationElementByName $window 'Thinking activity' 10
+    $toolActivity = Wait-AutomationElementByName $window 'MCP tool activity' 10
+    Assert-True ($null -ne $firstUserMessage -and $null -ne $secondUserMessage) 'The seeded UI did not retain both user messages.'
+    Assert-True ($null -ne $firstAssistantMessage -and $null -ne $secondAssistantMessage) 'The seeded UI did not retain both Codex responses.'
+    Assert-True ($null -ne $thinkingActivity -and $null -ne $toolActivity) 'Thinking and tool activity were not exposed as distinct cards.'
+    $firstUserBounds = $firstUserMessage.Current.BoundingRectangle
+    $secondUserBounds = $secondUserMessage.Current.BoundingRectangle
+    $userMessagesOverlap = $firstUserBounds.Top -lt $secondUserBounds.Bottom -and
+        $firstUserBounds.Bottom -gt $secondUserBounds.Top -and
+        $firstUserBounds.Left -lt $secondUserBounds.Right -and
+        $firstUserBounds.Right -gt $secondUserBounds.Left
+    Assert-True (-not $userMessagesOverlap) 'The retained user messages overlap.'
+
     if (-not [string]::IsNullOrWhiteSpace($EvidencePath)) {
-        $evidenceDirectory = Split-Path -Parent $EvidencePath
-        if (-not [string]::IsNullOrWhiteSpace($evidenceDirectory)) {
-            New-Item -ItemType Directory -Path $evidenceDirectory -Force | Out-Null
+        $evidenceDeadline = [DateTime]::UtcNow.AddSeconds(15)
+        while (-not (Test-Path -LiteralPath $resolvedEvidencePath -PathType Leaf) -and
+            [DateTime]::UtcNow -lt $evidenceDeadline) {
+            Start-Sleep -Milliseconds 100
         }
-        $bitmap = New-Object System.Drawing.Bitmap(
-            [int] $bounds.Width,
-            [int] $bounds.Height,
-            [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        Assert-True (Test-Path -LiteralPath $resolvedEvidencePath -PathType Leaf) 'Electron did not write its renderer evidence image.'
+        $bitmap = [System.Drawing.Bitmap]::FromFile($resolvedEvidencePath)
         try {
-            $graphics.CopyFromScreen(
-                [int] $bounds.X,
-                [int] $bounds.Y,
-                0,
-                0,
-                $bitmap.Size)
-        }
-        finally {
-            $graphics.Dispose()
-        }
-        try {
-            $bitmap.Save($EvidencePath, [System.Drawing.Imaging.ImageFormat]::Png)
+            Assert-True ($bitmap.Width -ge 760 -and $bitmap.Height -ge 540) 'The captured renderer surface was below the native content-size contract.'
+            $edgePixels = @(
+                $bitmap.GetPixel([int] ($bitmap.Width / 2), 1),
+                $bitmap.GetPixel([int] ($bitmap.Width / 2), $bitmap.Height - 2),
+                $bitmap.GetPixel(1, [int] ($bitmap.Height / 2)),
+                $bitmap.GetPixel($bitmap.Width - 2, [int] ($bitmap.Height / 2))
+            )
+            foreach ($pixel in $edgePixels) {
+                $brightness = ([int] $pixel.R + [int] $pixel.G + [int] $pixel.B) / 3
+                Assert-True ($pixel.A -ge 200 -and $brightness -ge 150) 'The renderer retained a dark or transparent border around the glass surface.'
+            }
         }
         finally {
             $bitmap.Dispose()
@@ -359,6 +379,10 @@ try {
         [int] ($secondImageBounds.Y + ($secondImageBounds.Height / 2)))
     $imagePreview = Wait-AutomationElementById $window 'ContextPreviewImage' 10
     Assert-True ($null -ne $imagePreview -and -not $imagePreview.Current.IsOffscreen) 'The explicitly selected image preview was not visible.'
+    $pairedPreviewTextElement = Find-AutomationElementById $window 'ContextPreviewText'
+    Assert-True ($null -ne $pairedPreviewTextElement -and -not $pairedPreviewTextElement.Current.IsOffscreen) 'Alt+Shift+A did not retain shortcut-time pointer context beside the image.'
+    $pairedPreviewText = Get-AutomationText $pairedPreviewTextElement
+    Assert-True ($pairedPreviewText -notlike '*User-selected screen region*') 'Alt+Shift+A attached an image-only placeholder instead of pointer context.'
 
     $exactProcesses = @(Get-ExactExecutableProcesses $resolvedExecutable)
     Assert-True ($exactProcesses.Count -ge 3) 'Electron did not create its expected browser and child processes.'
@@ -373,12 +397,16 @@ try {
         }
         accessibility = 'passed'
         structuredContexts = 'passed'
+        retainedConversationTurns = 'passed'
+        nonOverlappingMessages = 'passed'
+        thinkingAndToolCards = 'passed'
         selectedTextPrimary = 'passed'
         automaticAltAImage = 'absent'
         explicitAltShiftAImage = 'passed'
+        altShiftAPointerContext = 'passed'
         previewPointerRetention = 'passed'
         previewScroll = 'passed'
-        hiddenScrollbarStyle = 'covered-by-renderer-test'
+        hoverScrollbarStyle = 'covered-by-renderer-test'
         hotkeyRegistration = $hotkeyRegistration
         evidencePath = $EvidencePath
     } | ConvertTo-Json -Depth 4

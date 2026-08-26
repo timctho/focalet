@@ -312,6 +312,10 @@ try {
     Assert-True ($previewText -like "*$browserMarker*") 'The Alt+A preview omitted the controlled page text.'
     Assert-True ($previewText -like "*$tableName*") 'The Alt+A preview omitted the semantic table hierarchy.'
     Assert-True ($previewText -like "*Mouse pointer:*$buttonName*") 'The hover target was not labeled as Mouse pointer.'
+    Assert-True ($previewText -notlike '*"source":*') 'Accessibility capture-source metadata leaked into the compact structure.'
+    Assert-True ($previewText -notlike '*"nodeCount":*') 'Accessibility node-count metadata leaked into the compact structure.'
+    Assert-True ($previewText -notlike '*"automationId":*') 'Accessibility automation-id metadata leaked into the compact structure.'
+    Assert-True ($previewText -notlike '*"bounds":*') 'Accessibility pixel bounds leaked into the compact structure.'
     $previewImage = Find-AutomationElementById $window 'ContextPreviewImage'
     Assert-True ($null -eq $previewImage -or $previewImage.Current.IsOffscreen) 'Alt+A attached an automatic image.'
 
@@ -372,6 +376,7 @@ try {
         pointerAdjacent = 'passed'
         structuredBrowserContext = 'passed'
         semanticTableHierarchy = 'passed'
+        compactAccessibilityStructure = 'passed'
         pointerLabel = 'Mouse pointer'
         automaticAltAImage = 'absent'
         codexStreaming = 'passed'

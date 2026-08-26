@@ -302,10 +302,13 @@ static void AccessibilityTreePreservesProviderStructure()
     };
 
     var context = ContextFormatter.FormatInvocation(snapshot, now.AddSeconds(1));
-    Contains("Browser-provided accessibility tree", context);
+    Contains("Browser accessibility structure", context);
     Contains("\"role\": \"Table\"", context);
     Contains("\"row\": 1", context);
     Contains("\"column\": 0", context);
+    True(!context.Contains("windows-uia-control-view", StringComparison.Ordinal), "Capture-source metadata leaked into compact accessibility JSON.");
+    True(!context.Contains("\"nodeCount\"", StringComparison.Ordinal), "Node-count metadata leaked into compact accessibility JSON.");
+    True(!context.Contains("\"bounds\"", StringComparison.Ordinal), "Pixel-bound metadata leaked into compact accessibility JSON.");
     True(!context.Contains("flat fallback that should not be duplicated", StringComparison.Ordinal), "A complete accessibility tree duplicated flat visible text.");
     True(!context.Contains("| My Accounts |", StringComparison.Ordinal), "The formatter inferred a Markdown table.");
 
@@ -315,7 +318,7 @@ static void AccessibilityTreePreservesProviderStructure()
             AccessibilityTree = snapshot.AccessibilityTree with { Truncated = true },
         },
         now.AddSeconds(1));
-    Contains("Flat visible-text fallback because the accessibility tree was truncated", truncatedContext);
+    Contains("Additional visible text omitted by the truncated accessibility structure", truncatedContext);
     Contains("flat fallback that should not be duplicated", truncatedContext);
 }
 

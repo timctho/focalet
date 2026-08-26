@@ -143,12 +143,16 @@ export function buildTurnText(message, snapshots, imageCount = 0) {
     if (snapshot.locator) lines.push(`${clean(snapshot.locator.kind, 40)}: ${clean(snapshot.locator.value, 1000)}`);
     const treePresent = Boolean(snapshot.accessibilityTree?.roots?.length);
     if (treePresent) {
-      lines.push('Browser-provided accessibility tree (JSON; preserve only relationships and grid coordinates explicitly present):');
-      lines.push(JSON.stringify(snapshot.accessibilityTree, null, 2));
+      lines.push('Browser accessibility structure (compact JSON with semantic roles, necessary text, and provider grid coordinates only):');
+      lines.push(JSON.stringify(compactAccessibilityTree(snapshot.accessibilityTree), null, 2));
     }
     if (snapshot.visibleText?.length && (!treePresent || snapshot.accessibilityTree.truncated)) {
-      lines.push(treePresent ? 'Flat visible-text fallback because the accessibility tree was truncated:' : 'Visible text:');
-      for (const text of snapshot.visibleText.slice(0, 128)) lines.push(`- ${clean(text, 2000)}`);
+      const treeText = treePresent ? collectAccessibilityText(snapshot.accessibilityTree.roots) : new Set();
+      lines.push(treePresent ? 'Additional visible text omitted by the truncated accessibility structure:' : 'Visible text:');
+      for (const text of snapshot.visibleText.slice(0, 128)) {
+        const cleaned = clean(text, 2000);
+        if (!treeText.has(cleaned)) lines.push(`- ${cleaned}`);
+      }
     }
     if (snapshot.indicatedTarget) {
       const target = snapshot.indicatedTarget;
@@ -181,7 +185,7 @@ function parseStreamUpdate(method, params, itemKinds) {
       webSearch: ['tool', 'Web search'], imageView: ['tool', 'View image'], imageGeneration: ['tool', 'Image generation'],
     }[item.type];
     if (!mapping) return null;
-    return update(mapping[0], lifecycle, mapping[1], item.command || item.query || '', item.id, item.status);
+    return update(mapping[0], lifecycle, mapping[1], describeItem(item, lifecycle), item.id, item.status);
   }
   return null;
 }
@@ -193,4 +197,52 @@ function update(kind, lifecycle, title, text, itemId, status = null) {
 function clean(value, maximumLength) {
   const normalized = String(value ?? '').replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, ' ').replace(/\s+/g, ' ').trim();
   return normalized.length <= maximumLength ? normalized : `${normalized.slice(0, maximumLength - 1)}…`;
+}
+
+export function compactAccessibilityTree(tree) {
+  const compact = { roots: (tree?.roots || []).map(compactAccessibilityNode) };
+  if (tree?.truncated) compact.truncated = true;
+  return compact;
+}
+
+function compactAccessibilityNode(node) {
+  const compact = { role: clean(node?.role || 'Unknown', 80) };
+  const name = node?.name ? clean(node.name, 1000) : '';
+  const value = node?.value ? clean(node.value, 2000) : '';
+  if (name) compact.name = name;
+  if (value && value !== name) compact.value = value;
+  for (const property of ['rowCount', 'columnCount', 'row', 'column']) {
+    if (Number.isInteger(node?.[property])) compact[property] = node[property];
+  }
+  if (Number.isInteger(node?.rowSpan) && node.rowSpan > 1) compact.rowSpan = node.rowSpan;
+  if (Number.isInteger(node?.columnSpan) && node.columnSpan > 1) compact.columnSpan = node.columnSpan;
+  for (const property of ['rowHeaders', 'columnHeaders']) {
+    const headers = [...new Set((node?.[property] || []).map((header) => clean(header, 500)).filter(Boolean))];
+    if (headers.length) compact[property] = headers;
+  }
+  if (node?.children?.length) compact.children = node.children.map(compactAccessibilityNode);
+  return compact;
+}
+
+function collectAccessibilityText(roots) {
+  const values = new Set();
+  const pending = [...(roots || [])];
+  while (pending.length) {
+    const node = pending.pop();
+    for (const value of [node?.name, node?.value, ...(node?.rowHeaders || []), ...(node?.columnHeaders || [])]) {
+      if (value) values.add(clean(value, 2000));
+    }
+    if (node?.children) pending.push(...node.children);
+  }
+  return values;
+}
+
+function describeItem(item, lifecycle) {
+  if (item.type === 'mcpToolCall') return [item.server, item.tool].filter(Boolean).join(' · ');
+  if (item.type === 'dynamicToolCall') return item.tool || '';
+  if (item.type === 'commandExecution') return lifecycle === 'started' ? item.command || '' : item.aggregatedOutput || '';
+  if (item.type === 'fileChange') {
+    return (item.changes || []).map((change) => [change.kind, change.path].filter(Boolean).join(' · ')).join('\n');
+  }
+  return item.query || item.path || item.revisedPrompt || '';
 }

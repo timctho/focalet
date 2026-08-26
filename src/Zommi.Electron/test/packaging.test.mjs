@@ -60,10 +60,42 @@ test('Codex startup timeouts reset the connection and preserve actionable errors
   assert.match(renderer, /!status\.classList\.contains\('warning'\)/);
 });
 
-test('glass surfaces hide transcript, preview, composer, and chip scrollbars', async () => {
+test('light liquid glass uses the full native surface at device resolution', async () => {
+  const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
   const styles = await readFile(join(appDirectory, 'renderer', 'styles.css'), 'utf8');
-  assert.match(styles, /scrollbar-width:\s*none/);
+  assert.match(main, /nativeTheme\.themeSource\s*=\s*'light'/);
+  assert.match(main, /useContentSize:\s*true/);
+  assert.match(main, /zoomFactor:\s*1/);
+  assert.match(styles, /color-scheme:\s*light/);
+  assert.match(styles, /\.glass\s*\{[\s\S]*width:\s*100%[\s\S]*height:\s*100%/);
+  assert.doesNotMatch(styles, /\.glass\s*\{[\s\S]{0,200}margin:\s*12px/);
+});
+
+test('scrollbars stay quiet until their scrollable surface is hovered', async () => {
+  const styles = await readFile(join(appDirectory, 'renderer', 'styles.css'), 'utf8');
+  assert.match(styles, /scrollbar-color:\s*transparent transparent/);
   assert.match(styles, /\.transcript::\-webkit-scrollbar/);
-  assert.match(styles, /\.context-preview pre::\-webkit-scrollbar/);
-  assert.match(styles, /\.context-chips::\-webkit-scrollbar/);
+  assert.match(styles, /\.transcript:hover::\-webkit-scrollbar-thumb/);
+  assert.match(styles, /\.context-preview pre:hover::\-webkit-scrollbar-thumb/);
+  assert.match(styles, /\.context-chips:hover::\-webkit-scrollbar-thumb/);
+});
+
+test('conversation history renders every user turn without a singleton overlay', async () => {
+  const html = await readFile(join(appDirectory, 'renderer', 'index.html'), 'utf8');
+  const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
+  assert.doesNotMatch(html, /QueryBubble/);
+  assert.match(renderer, /turnNumber \+= 1/);
+  assert.match(renderer, /className = 'conversation-turn'/);
+  assert.match(renderer, /User message turn \$\{turnNumber\}/);
+  assert.match(renderer, /className = `activity-card \$\{kind\}`/);
+});
+
+test('Alt+Shift+A combines the selected image with shortcut-time pointer context', async () => {
+  const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
+  const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
+  assert.match(main, /Alt\+Shift\+A[\s\S]*includePointerContext:\s*true/);
+  assert.match(main, /pointerContext = await capturePointerContext\(\)/);
+  assert.match(main, /snapshot:\s*pointerContext\?\.snapshot \|\| null/);
+  assert.match(renderer, /attachment\.snapshot && !attachment\.imageDataUrl/);
+  assert.match(renderer, /previewText\.hidden = !attachment\.previewText/);
 });

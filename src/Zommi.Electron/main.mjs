@@ -1,5 +1,6 @@
-import { app, BrowserWindow, Menu, Tray, clipboard, globalShortcut, ipcMain, nativeImage, screen } from 'electron';
+import { app, BrowserWindow, Menu, Tray, clipboard, globalShortcut, ipcMain, nativeImage, nativeTheme, screen } from 'electron';
 import { randomUUID } from 'node:crypto';
+import { writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NativeHostClient } from './native-host.mjs';
@@ -9,6 +10,9 @@ import { selectImageRegion } from './image-selector.mjs';
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
 const seededAcceptance = process.argv.includes('--acceptance-ui-seeded');
+const acceptanceEvidencePath = process.argv
+  .find((argument) => argument.startsWith('--acceptance-evidence='))
+  ?.slice('--acceptance-evidence='.length);
 const noAutoLaunch = process.argv.includes('--no-auto-launch');
 let mainWindow = null;
 let tray = null;
@@ -33,6 +37,7 @@ if (!hasSingleInstanceLock) {
 
 async function startApplication() {
   await app.whenReady();
+  nativeTheme.themeSource = 'light';
   app.setAppUserModelId('com.zommi.desktop');
   if (process.platform === 'darwin') app.dock?.hide();
   createWindow();
@@ -44,9 +49,13 @@ async function startApplication() {
   if (seededAcceptance) {
     mainWindow.webContents.once('did-finish-load', () => {
       seedAcceptanceContexts();
+      send('acceptance:conversation', true);
       sendStatus('seeded Electron UI acceptance');
       sendShortcutState();
       showWindow({ x: 80, y: 80 });
+      if (acceptanceEvidencePath) {
+        setTimeout(() => captureAcceptanceEvidence(acceptanceEvidencePath), 700);
+      }
     });
   } else {
     mainWindow.webContents.once('did-finish-load', sendShortcutState);
@@ -61,15 +70,26 @@ async function startApplication() {
   });
 }
 
+async function captureAcceptanceEvidence(path) {
+  try {
+    const image = await mainWindow.webContents.capturePage();
+    await writeFile(path, image.toPNG());
+    sendStatus('seeded Electron UI evidence captured');
+  } catch (error) {
+    sendStatus(`UI evidence capture failed: ${error.message}`, true);
+  }
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     title: 'Zommi — floating Codex chat',
-    width: 720,
-    height: 500,
+    width: 760,
+    height: 540,
     minWidth: 560,
     minHeight: 380,
+    useContentSize: true,
     transparent: true,
-    backgroundColor: '#00000000',
+    backgroundColor: '#00FFFFFF',
     frame: false,
     roundedCorners: true,
     resizable: true,
@@ -83,6 +103,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      zoomFactor: 1,
     },
   });
   if (process.platform === 'win32' && typeof mainWindow.setBackgroundMaterial === 'function') {
@@ -106,7 +127,7 @@ function createTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open floating chat', click: () => showWindow() },
     { label: 'Capture context (Alt+A)', click: () => captureContext() },
-    { label: 'Select image context (Alt+Shift+A)', click: () => selectImageContext() },
+    { label: 'Select image + pointer context (Alt+Shift+A)', click: () => selectImageContext({ includePointerContext: true }) },
     { type: 'separator' },
     { label: 'Exit Zommi', click: () => { quitting = true; app.quit(); } },
   ]));
@@ -132,7 +153,7 @@ function createBackend() {
 
 function registerShortcuts() {
   shortcuts.context = globalShortcut.register('Alt+A', () => captureContext());
-  shortcuts.image = globalShortcut.register('Alt+Shift+A', () => selectImageContext());
+  shortcuts.image = globalShortcut.register('Alt+Shift+A', () => selectImageContext({ includePointerContext: true }));
   sendShortcutState();
 }
 
@@ -160,9 +181,7 @@ async function startBackend() {
 
 async function captureContext() {
   try {
-    const result = process.platform === 'win32'
-      ? await backend.request('capture')
-      : await capturePortableContext(process.platform);
+    const result = await capturePointerContext();
     if (result?.snapshot) {
       send('context:added', {
         id: randomUUID(),
@@ -180,8 +199,22 @@ async function captureContext() {
   showWindow();
 }
 
-async function selectImageContext() {
+async function capturePointerContext() {
+  return process.platform === 'win32'
+    ? backend.request('capture')
+    : capturePortableContext(process.platform);
+}
+
+async function selectImageContext({ includePointerContext = false } = {}) {
   const wasVisible = mainWindow?.isVisible();
+  let pointerContext = null;
+  if (includePointerContext) {
+    try {
+      pointerContext = await capturePointerContext();
+    } catch (error) {
+      sendStatus(`Pointer context capture failed; image selection remains available: ${error.message}`, true);
+    }
+  }
   mainWindow?.hide();
   try {
     const result = process.platform === 'win32'
@@ -190,12 +223,12 @@ async function selectImageContext() {
     if (!result?.cancelled && result?.dataUrl) {
       send('context:added', {
         id: randomUUID(),
-        snapshot: null,
-        previewText: 'User-selected screen region',
+        snapshot: pointerContext?.snapshot || null,
+        previewText: pointerContext?.previewText || 'User-selected screen region',
         imageDataUrl: result.dataUrl,
         bounds: result.bounds,
       });
-      sendStatus(`Image attached · ${result.bounds.width}×${result.bounds.height}`);
+      sendStatus(`${pointerContext?.snapshot ? 'Image + pointer context' : 'Image'} attached · ${result.bounds.width}×${result.bounds.height}`);
       showWindow();
       return result;
     }

@@ -254,16 +254,19 @@ public static class ContextFormatter
         var hasAccessibilityTree = accessibilityTree is { Roots.Count: > 0 };
         if (hasAccessibilityTree)
         {
-            builder.AppendLine("Browser-provided accessibility tree (JSON; preserve only the relationships and grid coordinates explicitly present):");
-            builder.AppendLine(JsonSerializer.Serialize(accessibilityTree, AccessibilityJsonOptions));
+            builder.AppendLine("Browser accessibility structure (compact JSON with semantic roles, necessary text, and provider grid coordinates only):");
+            builder.AppendLine(JsonSerializer.Serialize(CompactAccessibilityTree(accessibilityTree!), AccessibilityJsonOptions));
         }
 
         if (snapshot.VisibleText.Count > 0 &&
             (!hasAccessibilityTree || accessibilityTree!.Truncated))
         {
+            var treeText = hasAccessibilityTree
+                ? CollectAccessibilityText(accessibilityTree!.Roots)
+                : new HashSet<string>(StringComparer.Ordinal);
             builder.AppendLine(!hasAccessibilityTree
                 ? "Visible text:"
-                : "Flat visible-text fallback because the accessibility tree was truncated:");
+                : "Additional visible text omitted by the truncated accessibility structure:");
             var visibleCharacters = 0;
             foreach (var text in snapshot.VisibleText.Take(MaximumVisibleTextItems))
             {
@@ -274,6 +277,11 @@ public static class ContextFormatter
                 }
 
                 var cleaned = Clean(text, Math.Min(MaximumVisibleTextItemCharacters, remaining));
+                if (treeText.Contains(cleaned))
+                {
+                    continue;
+                }
+
                 builder.AppendLine($"- {cleaned}");
                 visibleCharacters += cleaned.Length;
             }
@@ -332,4 +340,116 @@ public static class ContextFormatter
 
     private static bool IsBidirectionalControl(char character) =>
         character is >= '\u202A' and <= '\u202E' or >= '\u2066' and <= '\u2069';
+
+    private static CompactAccessibilityTreeInfo CompactAccessibilityTree(AccessibilityTreeInfo tree) => new()
+    {
+        Truncated = tree.Truncated ? true : null,
+        Roots = tree.Roots.Select(CompactAccessibilityNode).ToArray(),
+    };
+
+    private static CompactAccessibilityNodeInfo CompactAccessibilityNode(AccessibilityNodeInfo node)
+    {
+        var name = string.IsNullOrWhiteSpace(node.Name) ? null : Clean(node.Name, 1000);
+        var value = string.IsNullOrWhiteSpace(node.Value) ? null : Clean(node.Value, 2000);
+        if (string.Equals(name, value, StringComparison.Ordinal))
+        {
+            value = null;
+        }
+
+        return new CompactAccessibilityNodeInfo
+        {
+            Role = Clean(node.Role, 80),
+            Name = name,
+            Value = value,
+            RowCount = node.RowCount,
+            ColumnCount = node.ColumnCount,
+            Row = node.Row,
+            Column = node.Column,
+            RowSpan = node.RowSpan is > 1 ? node.RowSpan : null,
+            ColumnSpan = node.ColumnSpan is > 1 ? node.ColumnSpan : null,
+            RowHeaders = CleanHeaders(node.RowHeaders),
+            ColumnHeaders = CleanHeaders(node.ColumnHeaders),
+            Children = node.Children is { Count: > 0 }
+                ? node.Children.Select(CompactAccessibilityNode).ToArray()
+                : null,
+        };
+    }
+
+    private static IReadOnlyList<string>? CleanHeaders(IReadOnlyList<string>? headers)
+    {
+        var cleaned = headers?
+            .Where(header => !string.IsNullOrWhiteSpace(header))
+            .Select(header => Clean(header, 500))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        return cleaned is { Length: > 0 } ? cleaned : null;
+    }
+
+    private static HashSet<string> CollectAccessibilityText(IReadOnlyList<AccessibilityNodeInfo> roots)
+    {
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        var pending = new Stack<AccessibilityNodeInfo>(roots.Reverse());
+        while (pending.Count > 0)
+        {
+            var node = pending.Pop();
+            AddAccessibilityText(result, node.Name);
+            AddAccessibilityText(result, node.Value);
+            if (node.RowHeaders is not null)
+            {
+                foreach (var header in node.RowHeaders) AddAccessibilityText(result, header);
+            }
+            if (node.ColumnHeaders is not null)
+            {
+                foreach (var header in node.ColumnHeaders) AddAccessibilityText(result, header);
+            }
+            if (node.Children is not null)
+            {
+                for (var index = node.Children.Count - 1; index >= 0; index--)
+                {
+                    pending.Push(node.Children[index]);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private static void AddAccessibilityText(HashSet<string> values, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value)) values.Add(Clean(value, 2000));
+    }
+
+    private sealed record CompactAccessibilityTreeInfo
+    {
+        public bool? Truncated { get; init; }
+
+        public required IReadOnlyList<CompactAccessibilityNodeInfo> Roots { get; init; }
+    }
+
+    private sealed record CompactAccessibilityNodeInfo
+    {
+        public required string Role { get; init; }
+
+        public string? Name { get; init; }
+
+        public string? Value { get; init; }
+
+        public int? RowCount { get; init; }
+
+        public int? ColumnCount { get; init; }
+
+        public int? Row { get; init; }
+
+        public int? Column { get; init; }
+
+        public int? RowSpan { get; init; }
+
+        public int? ColumnSpan { get; init; }
+
+        public IReadOnlyList<string>? RowHeaders { get; init; }
+
+        public IReadOnlyList<string>? ColumnHeaders { get; init; }
+
+        public IReadOnlyList<CompactAccessibilityNodeInfo>? Children { get; init; }
+    }
 }

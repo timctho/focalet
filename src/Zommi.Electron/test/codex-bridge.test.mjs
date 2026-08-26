@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildTurnText } from '../codex-bridge.mjs';
+import { buildTurnText, compactAccessibilityTree } from '../codex-bridge.mjs';
 
 test('structured browser context remains nested JSON without inferred markdown', () => {
   const context = buildTurnText('what is this?', [{
@@ -19,9 +19,29 @@ test('structured browser context remains nested JSON without inferred markdown',
   assert.match(context, /PRIMARY SELECTION/);
   assert.match(context, /"role": "Table"/);
   assert.match(context, /"row": 1/);
+  assert.doesNotMatch(context, /windows-uia-control-view/);
+  assert.doesNotMatch(context, /nodeCount/);
   assert.doesNotMatch(context, /flat fallback must not duplicate/);
   assert.doesNotMatch(context, /\|\s*Accounts\s*\|/);
   assert.doesNotMatch(context, /image regions attached/i);
+});
+
+test('accessibility payload keeps semantic structure while dropping capture metadata', () => {
+  const compact = compactAccessibilityTree({
+    source: 'windows-uia-control-view', nodeCount: 9, truncated: true,
+    roots: [{
+      role: 'Table', name: 'Accounts', value: 'Accounts', automationId: 'grid-42',
+      bounds: '1,2,300,400', isOffscreen: false, rowCount: 2, columnCount: 2,
+      children: [{ role: 'DataItem', name: 'example', row: 1, column: 0, rowSpan: 1 }],
+    }],
+  });
+  assert.deepEqual(compact, {
+    roots: [{
+      role: 'Table', name: 'Accounts', rowCount: 2, columnCount: 2,
+      children: [{ role: 'DataItem', name: 'example', row: 1, column: 0 }],
+    }],
+    truncated: true,
+  });
 });
 
 test('image note appears only for explicit selected images', () => {
