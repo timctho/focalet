@@ -21,6 +21,16 @@ test('sandboxed windows use packaged CommonJS preload bridges', async () => {
   assert.match(packager, /preload\.cjs/);
 });
 
+test('Zommi does not override the configured Codex agent permissions or tools', async () => {
+  const portableBridge = await readFile(join(appDirectory, 'codex-bridge.mjs'), 'utf8');
+  const windowsBridge = await readFile(join(appDirectory, '..', 'Zommi.Windows', 'CodexAppServerClient.cs'), 'utf8');
+  for (const source of [portableBridge, windowsBridge]) {
+    assert.doesNotMatch(source, /approvalPolicy\s*[:=]\s*['"]never/);
+    assert.doesNotMatch(source, /sandbox\s*[:=]\s*['"]read-only/);
+    assert.match(source, /configured tools, MCP servers, plugins, and permissions remain available/);
+  }
+});
+
 test('glass surfaces hide transcript, preview, composer, and chip scrollbars', async () => {
   const styles = await readFile(join(appDirectory, 'renderer', 'styles.css'), 'utf8');
   assert.match(styles, /scrollbar-width:\s*none/);

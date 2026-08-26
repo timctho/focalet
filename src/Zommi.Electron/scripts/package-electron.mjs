@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const appDirectory = resolve(scriptDirectory, '..');
+const browserMcpDirectory = join(appDirectory, 'browser-mcp');
 const repositoryRoot = resolve(appDirectory, '..', '..');
 const options = parseArguments(process.argv.slice(2));
 const packageJson = JSON.parse(await readFile(join(appDirectory, 'package.json'), 'utf8'));
@@ -29,6 +30,7 @@ const pending = `${outputDirectory}.pending-electron-${process.pid}`;
 const backup = `${outputDirectory}.backup-electron-${process.pid}`;
 
 try {
+  installBrowserMcpRuntime();
   await mkdir(extracted, { recursive: true });
   if (process.platform === 'win32') {
     execFileSync('tar', ['-xf', archivePath, '-C', extracted], { stdio: 'inherit' });
@@ -63,6 +65,7 @@ async function assemblePlatformPackage(extracted, output, targetPlatform, native
       .replaceAll('com.github.Electron', 'com.zommi.desktop');
     await writeFile(plistPath, plist);
     await copyApplication(join(targetApp, 'Contents', 'Resources', 'app'));
+    await copyBrowserMcp(join(targetApp, 'Contents', 'Resources', 'browser-mcp'));
     return;
   }
 
@@ -72,10 +75,26 @@ async function assemblePlatformPackage(extracted, output, targetPlatform, native
   await rename(electronExecutable, productExecutable);
   await rm(join(output, 'resources', 'default_app.asar'), { force: true });
   await copyApplication(join(output, 'resources', 'app'));
+  await copyBrowserMcp(join(output, 'resources', 'browser-mcp'));
   if (targetPlatform === 'win32') {
     if (!nativeDirectory || !existsSync(nativeDirectory)) throw new Error('Windows Electron packages require --native-dir.');
     await cp(resolve(nativeDirectory), join(output, 'resources', 'native'), { recursive: true });
   }
+}
+
+function installBrowserMcpRuntime() {
+  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  execFileSync(npm, ['ci', '--omit=dev', '--ignore-scripts'], {
+    cwd: browserMcpDirectory,
+    stdio: 'inherit',
+  });
+}
+
+async function copyBrowserMcp(destination) {
+  await cp(browserMcpDirectory, destination, {
+    recursive: true,
+    filter: (source) => basename(source) !== '.package-lock.json',
+  });
 }
 
 async function copyApplication(destination) {

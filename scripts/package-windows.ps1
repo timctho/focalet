@@ -65,27 +65,36 @@ Copy-Item (Join-Path $repositoryRoot 'docs/windows-prototype.md') $outputDirecto
 Copy-Item (Join-Path $repositoryRoot 'docs/windows-acceptance.md') $outputDirectory
 Copy-Item (Join-Path $repositoryRoot 'docs/acceptance-report.md') $outputDirectory
 Copy-Item (Join-Path $repositoryRoot 'scripts/Zommi.WslHook.ps1') $outputDirectory
+Copy-Item (Join-Path $repositoryRoot 'scripts/Zommi.ChromeMcp.sh') $outputDirectory
 
 $executablePath = Join-Path $outputDirectory 'Zommi.exe'
 $nativeHostPath = Join-Path $outputDirectory 'resources/native/Zommi.exe'
 $hookExecutablePath = Join-Path $outputDirectory 'resources/native/Zommi.Hook.exe'
 $wslHookPath = Join-Path $outputDirectory 'Zommi.WslHook.ps1'
+$chromeMcpWrapperPath = Join-Path $outputDirectory 'Zommi.ChromeMcp.sh'
+$chromeMcpEntrypointPath = Join-Path $outputDirectory 'resources/browser-mcp/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js'
 $hashPath = Join-Path $outputDirectory 'SHA256SUMS.txt'
 if (-not (Test-Path -LiteralPath $executablePath) -or
     -not (Test-Path -LiteralPath $nativeHostPath) -or
     -not (Test-Path -LiteralPath $hookExecutablePath) -or
-    -not (Test-Path -LiteralPath $wslHookPath)) {
+    -not (Test-Path -LiteralPath $wslHookPath) -or
+    -not (Test-Path -LiteralPath $chromeMcpWrapperPath) -or
+    -not (Test-Path -LiteralPath $chromeMcpEntrypointPath)) {
     throw "The package is incomplete; required runtime files are missing from $outputDirectory."
 }
 $hash = (Get-FileHash -Algorithm SHA256 $executablePath).Hash.ToLowerInvariant()
 $nativeHostHash = (Get-FileHash -Algorithm SHA256 $nativeHostPath).Hash.ToLowerInvariant()
 $hookHash = (Get-FileHash -Algorithm SHA256 $hookExecutablePath).Hash.ToLowerInvariant()
 $wslHookHash = (Get-FileHash -Algorithm SHA256 $wslHookPath).Hash.ToLowerInvariant()
+$chromeMcpWrapperHash = (Get-FileHash -Algorithm SHA256 $chromeMcpWrapperPath).Hash.ToLowerInvariant()
+$chromeMcpEntrypointHash = (Get-FileHash -Algorithm SHA256 $chromeMcpEntrypointPath).Hash.ToLowerInvariant()
 Set-Content -Path $hashPath -Encoding ascii -Value `
     "$hash  Zommi.exe", `
     "$nativeHostHash  resources/native/Zommi.exe", `
     "$hookHash  resources/native/Zommi.Hook.exe", `
-    "$wslHookHash  Zommi.WslHook.ps1"
+    "$wslHookHash  Zommi.WslHook.ps1", `
+    "$chromeMcpWrapperHash  Zommi.ChromeMcp.sh", `
+    "$chromeMcpEntrypointHash  resources/browser-mcp/node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js"
 
 $archivePath = "$outputDirectory.zip"
 $pendingArchivePath = "$outputDirectory.pending.zip"

@@ -1,0 +1,9 @@
+{
+  "name": "zommi-browser-mcp-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pinned Chrome DevTools MCP runtime bundled with Zommi",
+  "dependencies": {
+    "chrome-devtools-mcp": "1.8.0"
+  }
+}
