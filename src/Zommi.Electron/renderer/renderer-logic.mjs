@@ -4,8 +4,8 @@ export function mergeActivityText(currentValue, incomingValue, kind, lifecycle) 
   if (!incoming) return current;
 
   if (lifecycle === 'completed' && (kind === 'thinking' || kind === 'plan')) {
-    if (incoming === current || current.startsWith(incoming)) return current;
-    if (incoming.startsWith(current)) return incoming;
+    if (incoming === current || current.includes(incoming)) return current;
+    if (incoming.includes(current)) return incoming;
     return incoming;
   }
 
@@ -49,4 +49,10 @@ export function effortsForModel(model) {
   return options
     .map((option) => typeof option === 'string' ? option : option?.reasoningEffort)
     .filter(Boolean);
+}
+
+export function activityKey(kind, itemId, title) {
+  return String(kind || '').toLowerCase() === 'thinking'
+    ? 'turn-thinking'
+    : itemId || `${kind}:${title}`;
 }

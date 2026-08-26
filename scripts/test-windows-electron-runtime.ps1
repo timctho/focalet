@@ -423,29 +423,44 @@ try {
     $sessionUiContract = 'skipped'
     if (-not $SkipSessionUi) {
         $window = Wait-ZommiWindow $electron 10
+        $zommiWindowHandle = [IntPtr] $window.Current.NativeWindowHandle
+        [void] [ZommiElectronAcceptanceNative]::Activate($zommiWindowHandle)
+        Start-Sleep -Milliseconds 150
         $modelSummary = Wait-AutomationElementById $window 'ModelSummary' 10
         Assert-True ($null -ne $modelSummary) 'The live Codex model/reasoning control did not reach the renderer.'
+        $effortBefore = $modelSummary.Current.Name
         Invoke-AutomationElement $modelSummary
-        $modelSelect = Wait-AutomationElementById $window 'ModelSelect' 10
-        $effortSelect = Wait-AutomationElementById $window 'EffortSelect' 10
-        Assert-True ($null -ne $modelSelect -and -not $modelSelect.Current.IsOffscreen) 'The live model catalog selector did not open.'
-        Assert-True ($null -ne $effortSelect -and -not $effortSelect.Current.IsOffscreen) 'The live reasoning-level selector did not open.'
-        $effortValuePatternObject = $null
-        if ($effortSelect.TryGetCurrentPattern(
-            [System.Windows.Automation.ValuePattern]::Pattern,
-            [ref] $effortValuePatternObject)) {
-            $effortBefore = ([System.Windows.Automation.ValuePattern] $effortValuePatternObject).Current.Value
-            Invoke-AutomationElement $effortSelect
-            [System.Windows.Forms.SendKeys]::SendWait('{DOWN}{ENTER}')
-            Start-Sleep -Milliseconds 250
-            $effortSelect = Find-AutomationElementById $window 'EffortSelect'
-            $effortValuePatternObject = $null
-            [void] $effortSelect.TryGetCurrentPattern(
-                [System.Windows.Automation.ValuePattern]::Pattern,
-                [ref] $effortValuePatternObject)
-            $effortAfter = ([System.Windows.Automation.ValuePattern] $effortValuePatternObject).Current.Value
-            Assert-True ($effortAfter -ne $effortBefore) 'A real selection did not change the live reasoning level.'
+        Start-Sleep -Milliseconds 350
+        $modelSearch = Wait-AutomationElementById $window 'ModelSearch' 10
+        $modelList = Wait-AutomationElementById $window 'ModelList' 10
+        $effortList = Wait-AutomationElementById $window 'EffortList' 10
+        Assert-True ($null -ne $modelSearch -and -not $modelSearch.Current.IsOffscreen) 'The live searchable model selector did not open.'
+        Assert-True ($null -ne $modelList -and -not $modelList.Current.IsOffscreen) 'The live model catalog options did not open.'
+        Assert-True ($null -ne $effortList -and -not $effortList.Current.IsOffscreen) 'The live reasoning-level options did not open.'
+        $effortOption = $null
+        $targetEffortName = $null
+        foreach ($candidate in @(
+                @{ Id = 'Effort-low'; Name = 'Low' },
+                @{ Id = 'Effort-medium'; Name = 'Medium' },
+                @{ Id = 'Effort-high'; Name = 'High' },
+                @{ Id = 'Effort-xhigh'; Name = 'Xhigh' },
+                @{ Id = 'Effort-minimal'; Name = 'Minimal' })) {
+            if ($effortBefore.TrimEnd().EndsWith($candidate.Name, [StringComparison]::OrdinalIgnoreCase)) { continue }
+            $candidateElement = Find-AutomationElementById $window $candidate.Id
+            if ($null -ne $candidateElement -and -not $candidateElement.Current.IsOffscreen) {
+                $effortOption = $candidateElement
+                $targetEffortName = $candidate.Name
+                break
+            }
         }
+        Assert-True ($null -ne $effortOption -and -not $effortOption.Current.IsOffscreen) 'The live reasoning panel exposed no alternate option.'
+        [void] [ZommiElectronAcceptanceNative]::Activate($zommiWindowHandle)
+        Start-Sleep -Milliseconds 100
+        Invoke-AutomationElement $effortOption
+        Start-Sleep -Milliseconds 250
+        $modelSummary = Find-AutomationElementById $window 'ModelSummary'
+        $effortAfter = $modelSummary.Current.Name
+        Assert-True ($effortAfter -ne $effortBefore -and $effortAfter -like "*$targetEffortName*") "A real selection did not change the live reasoning level. before=$effortBefore target=$targetEffortName after=$effortAfter bounds=$($effortOption.Current.BoundingRectangle)"
         Invoke-AutomationElement $modelSummary
 
         $toggleSessions = Wait-AutomationElementById $window 'ToggleSessions' 10
@@ -462,6 +477,18 @@ try {
             $prompt.Substring(0, 41) + '…'
         }
         $oldSession = Wait-AutomationElementByName $window $expectedSessionTitle 20
+        if ($null -eq $oldSession) {
+            $sessionList = Find-AutomationElementById $window 'SessionList'
+            if ($null -ne $sessionList) {
+                $oldSession = @($sessionList.FindAll(
+                    [System.Windows.Automation.TreeScope]::Descendants,
+                    [System.Windows.Automation.Condition]::TrueCondition)) | Where-Object {
+                    $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and
+                    $_.Current.IsEnabled -and
+                    -not $_.Current.IsOffscreen
+                } | Select-Object -First 1
+            }
+        }
         Assert-True ($null -ne $oldSession -and -not $oldSession.Current.IsOffscreen) 'The completed chat disappeared after creating a new session.'
         Invoke-AutomationElement $oldSession
 

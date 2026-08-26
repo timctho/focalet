@@ -480,11 +480,11 @@ try {
     [void] [ZommiElectronUiNative]::MovePointer(
         [int] ($workingArea.Right - 2),
         [int] ($workingArea.Bottom - 2))
-    Start-Sleep -Milliseconds 300
+    Start-Sleep -Milliseconds 650
     [void] [ZommiElectronUiNative]::MovePointer(
         [int] ($bounds.X + 18),
         [int] ($bounds.Y + 100))
-    Start-Sleep -Milliseconds 300
+    Start-Sleep -Milliseconds 650
 
     $composer = Wait-AutomationElementById $window 'ZommiComposer' 15
     $transcript = Find-AutomationElementById $window 'CodexTranscript'
@@ -516,57 +516,44 @@ try {
     Assert-True ($null -ne $sessionSidebar -and -not $sessionSidebar.Current.IsOffscreen) "The session sidebar did not open after a physical click. Sidebar: $sidebarState Toggle: $toggleState Hit: $toggleSessionsHit inputMode=$script:inputMode"
     Assert-True ($null -ne $seededSession -and -not $seededSession.Current.IsOffscreen) 'The active seeded chat was not listed in the sidebar.'
     $modelSummaryHit = Get-PhysicalHitInfo $modelSummary
-    Assert-True ($modelSummaryHit -like 'hit=1 pointId=ModelSummary *') "The model control was obscured or mapped to a native drag region. $modelSummaryHit"
+    Assert-True ($modelSummaryHit -like 'hit=1 *' -and $modelSummaryHit -like '*pointName=*Standard*') "The model control was obscured or mapped to a native drag region. $modelSummaryHit"
+    $effortBefore = $modelSummary.Current.Name
     Invoke-PhysicalClick $modelSummary
+    Start-Sleep -Milliseconds 350
     $modelPanel = Wait-AutomationElementById $window 'ModelPanel' 10
-    $modelSelect = Wait-AutomationElementById $window 'ModelSelect' 10
-    $effortSelect = Wait-AutomationElementById $window 'EffortSelect' 10
+    $modelSearch = Wait-AutomationElementById $window 'ModelSearch' 10
+    $modelList = Wait-AutomationElementById $window 'ModelList' 10
+    $effortList = Wait-AutomationElementById $window 'EffortList' 10
     Assert-True ($null -ne $modelPanel -and -not $modelPanel.Current.IsOffscreen) "The model settings sub-panel did not open after a physical click. $modelSummaryHit inputMode=$script:inputMode"
-    Assert-True ($null -ne $modelSelect -and -not $modelSelect.Current.IsOffscreen) 'The model selector was not visible.'
-    Assert-True ($null -ne $effortSelect -and -not $effortSelect.Current.IsOffscreen) 'The reasoning selector was not visible.'
-    $effortValuePatternObject = $null
-    Assert-True ($effortSelect.TryGetCurrentPattern(
-        [System.Windows.Automation.ValuePattern]::Pattern,
-        [ref] $effortValuePatternObject)) 'The reasoning selector did not expose its current value.'
-    $effortBefore = ([System.Windows.Automation.ValuePattern] $effortValuePatternObject).Current.Value
-    Invoke-PhysicalClick $effortSelect
-    if ($script:inputMode -eq 'sendinput') {
-        [System.Windows.Forms.SendKeys]::SendWait('{DOWN}{ENTER}')
-    }
-    else {
-        $expandPatternObject = $null
-        if ($effortSelect.TryGetCurrentPattern(
-            [System.Windows.Automation.ExpandCollapsePattern]::Pattern,
-            [ref] $expandPatternObject)) {
-            ([System.Windows.Automation.ExpandCollapsePattern] $expandPatternObject).Expand()
-        }
-        $options = @($effortSelect.FindAll(
-            [System.Windows.Automation.TreeScope]::Descendants,
-            [System.Windows.Automation.Condition]::TrueCondition))
-        $selectedOption = $options | Where-Object {
-            $selectionObject = $null
-            $_.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref] $selectionObject) -and
-            ([System.Windows.Automation.SelectionItemPattern] $selectionObject).Current.IsSelected
-        } | Select-Object -First 1
-        $nextOption = $options | Where-Object {
-            $selectionObject = $null
-            $_.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref] $selectionObject) -and
-            $_ -ne $selectedOption
-        } | Select-Object -First 1
-        Assert-True ($null -ne $nextOption) 'The reasoning selector exposed no alternate UI Automation option.'
-        $selectionObject = $nextOption.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
-        ([System.Windows.Automation.SelectionItemPattern] $selectionObject).Select()
-    }
+    Assert-True ($null -ne $modelSearch -and -not $modelSearch.Current.IsOffscreen) 'The searchable model selector was not visible.'
+    Assert-True ($null -ne $modelList -and -not $modelList.Current.IsOffscreen) 'The model options were not visible.'
+    Assert-True ($null -ne $effortList -and -not $effortList.Current.IsOffscreen) 'The reasoning options were not visible.'
+    $targetEffortId = if ($effortBefore -like '*Low*') { 'Effort-medium' } else { 'Effort-low' }
+    $targetEffortName = if ($targetEffortId -eq 'Effort-low') { 'Low' } else { 'Medium' }
+    $effortOption = Wait-AutomationElementById $window $targetEffortId 10
+    Assert-True ($null -ne $effortOption -and -not $effortOption.Current.IsOffscreen) 'The reasoning panel exposed no alternate option.'
+    $effortHit = Get-PhysicalHitInfo $effortOption
+    Assert-True ($effortHit -like 'hit=1 *') "The reasoning option was mapped to a native drag region. $effortHit"
+    Invoke-PhysicalClick $effortOption
     Start-Sleep -Milliseconds 250
-    $effortSelect = Find-AutomationElementById $window 'EffortSelect'
-    $effortValuePatternObject = $null
-    Assert-True ($effortSelect.TryGetCurrentPattern(
-        [System.Windows.Automation.ValuePattern]::Pattern,
-        [ref] $effortValuePatternObject)) 'The changed reasoning selector stopped exposing its value.'
-    $effortAfter = ([System.Windows.Automation.ValuePattern] $effortValuePatternObject).Current.Value
-    Assert-True ($effortAfter -ne $effortBefore) 'A real click and keyboard selection did not change the reasoning level.'
+    $modelSummary = Find-AutomationElementById $window 'ModelSummary'
+    $effortAfter = $modelSummary.Current.Name
+    Assert-True ($effortAfter -ne $effortBefore -and $effortAfter -like "*$targetEffortName*") 'A real click did not change the reasoning level.'
     Invoke-PhysicalClick $modelSummary
     Invoke-PhysicalClick $toggleSessions
+    $backgroundDragPoints = @(
+        [System.Drawing.Point]::new([int] ($bounds.X + ($bounds.Width / 2)), [int] ($bounds.Y + 20)),
+        [System.Drawing.Point]::new([int] ($bounds.X + 24), [int] ($bounds.Y + ($bounds.Height / 2))),
+        [System.Drawing.Point]::new([int] ($bounds.X + $bounds.Width - 24), [int] ($bounds.Y + ($bounds.Height / 2))),
+        [System.Drawing.Point]::new([int] ($bounds.X + ($bounds.Width * 0.22)), [int] ($bounds.Bottom - 128))
+    )
+    foreach ($dragPoint in $backgroundDragPoints) {
+        $dragPointHitTest = [ZommiElectronUiNative]::HitTest(
+            $nativeWindowHandle,
+            $dragPoint.X,
+            $dragPoint.Y)
+        Assert-True ($dragPointHitTest -eq 2) "A background area outside the chat/composer was not exposed as native HTCAPTION. point=$dragPoint hit=$dragPointHitTest"
+    }
     $dragStart = New-Object System.Drawing.Point(
         [int] ($bounds.X + $bounds.Width - 24),
         [int] ($bounds.Y + ($bounds.Height / 2)))

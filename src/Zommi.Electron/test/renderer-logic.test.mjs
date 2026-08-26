@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  activityKey,
   effortsForModel,
   extractDisplayUserText,
   isNearBottom,
@@ -8,6 +9,12 @@ import {
   mergeDistinctTextSections,
   sessionTitle,
 } from '../renderer/renderer-logic.mjs';
+
+test('reasoning and commentary share one thinking card per turn', () => {
+  assert.equal(activityKey('thinking', 'reasoning-1', 'Thinking'), 'turn-thinking');
+  assert.equal(activityKey('thinking', 'commentary-2', 'Thinking'), 'turn-thinking');
+  assert.equal(activityKey('tool', 'command-1', 'Command'), 'command-1');
+});
 
 test('completed thinking replaces streamed text instead of duplicating it', () => {
   const live = mergeActivityText('', 'Inspecting the structure.', 'thinking', 'delta');

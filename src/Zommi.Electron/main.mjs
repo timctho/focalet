@@ -22,6 +22,9 @@ const acceptanceHoverActivePath = process.argv
 const acceptanceInputProbePath = process.argv
   .find((argument) => argument.startsWith('--acceptance-input-probe='))
   ?.slice('--acceptance-input-probe='.length);
+const acceptanceModelEvidencePath = process.argv
+  .find((argument) => argument.startsWith('--acceptance-model-evidence='))
+  ?.slice('--acceptance-model-evidence='.length);
 const noAutoLaunch = process.argv.includes('--no-auto-launch');
 let mainWindow = null;
 let tray = null;
@@ -92,18 +95,19 @@ async function runAcceptanceInputProbe(path) {
   try {
     await clickRendererElement('#ToggleSessions');
     result.sessionSidebar = await evaluateRenderer(`document.querySelector('#SessionSidebar')?.classList.contains('open') === true`);
-    await clickRendererElement('#OpenModelPanel');
+    await clickRendererElement('#ModelSummary');
+    await delay(260);
     result.modelPanel = await evaluateRenderer(`document.querySelector('#ModelPanel')?.hidden === false`);
-    const effortBefore = await evaluateRenderer(`document.querySelector('#EffortSelect')?.value || ''`);
-    await clickRendererElement('#EffortSelect');
-    for (const keyCode of ['Down', 'Enter']) {
-      mainWindow.webContents.sendInputEvent({ type: 'keyDown', keyCode });
-      mainWindow.webContents.sendInputEvent({ type: 'keyUp', keyCode });
-    }
+    result.modelPanelDiagnostics = await evaluateRenderer(`{ const e = document.querySelector('#ModelPanel'); const r = e?.getBoundingClientRect(); const s = e ? getComputedStyle(e) : null; return r && s ? { x: r.x, y: r.y, width: r.width, height: r.height, display: s.display, opacity: s.opacity, visibility: s.visibility } : null; }`);
+    result.modelPanelOpensUpward = await evaluateRenderer(`{ const p = document.querySelector('#ModelPanel')?.getBoundingClientRect(); const s = document.querySelector('#ModelSummary')?.getBoundingClientRect(); return Boolean(p && s && p.bottom < s.top); }`);
+    result.modelSwitchBottomRight = await evaluateRenderer(`{ const s = document.querySelector('#ModelSummary')?.getBoundingClientRect(); const c = document.querySelector('.composer-shell')?.getBoundingClientRect(); return Boolean(s && c && s.left > c.left + c.width / 2 && s.bottom > c.top + c.height / 2); }`);
+    if (acceptanceModelEvidencePath) await captureAcceptanceEvidence(acceptanceModelEvidencePath);
+    const effortBefore = await evaluateRenderer(`document.querySelector('#EffortList .effort-option.selected')?.dataset.effort || ''`);
+    await clickRendererElement('#EffortList .effort-option:not(.selected)');
     await delay(180);
-    const effortAfter = await evaluateRenderer(`document.querySelector('#EffortSelect')?.value || ''`);
+    const effortAfter = await evaluateRenderer(`document.querySelector('#EffortList .effort-option.selected')?.dataset.effort || ''`);
     result.reasoningChanged = Boolean(effortBefore && effortAfter && effortBefore !== effortAfter);
-    await clickRendererElement('#OpenModelPanel');
+    await clickRendererElement('#ModelSummary');
     await clickRendererElement('#ToggleSessions');
 
     await clickRendererElement('#ZommiComposer');
@@ -120,6 +124,7 @@ async function runAcceptanceInputProbe(path) {
     const manualScrollState = await evaluateRenderer(`{ const e = document.querySelector('#CodexTranscript'); return e ? { top: e.scrollTop, distance: e.scrollHeight - e.scrollTop - e.clientHeight } : null; }`);
     await delay(1000);
     const streamedScrollState = await evaluateRenderer(`{ const e = document.querySelector('#CodexTranscript'); return e ? { top: e.scrollTop, distance: e.scrollHeight - e.scrollTop - e.clientHeight } : null; }`);
+    result.manualScrollDiagnostics = { before: manualScrollState, after: streamedScrollState };
     result.manualScrollPreserved = Boolean(manualScrollState && streamedScrollState && manualScrollState.distance > 40 && Math.abs(streamedScrollState.top - manualScrollState.top) <= 2);
     result.latestButtonVisible = await evaluateRenderer(`document.querySelector('#ScrollToLatest')?.hidden === false`);
     await clickRendererElement('#ScrollToLatest');
@@ -129,7 +134,12 @@ async function runAcceptanceInputProbe(path) {
     await delay(250);
     result.stopCompleted = await evaluateRenderer(`document.querySelector('#CodexStatus')?.textContent === 'stopped' && document.querySelector('#SendMessage')?.getAttribute('aria-label') === 'Send message'`);
     result.thinkingDeduplicated = await evaluateRenderer(`(document.querySelector('#CodexTranscript')?.textContent.match(/Preparing a long streamed response\./g) || []).length === 1`);
-    result.passed = Object.entries(result).filter(([key]) => key !== 'inputPath').every(([, value]) => value === true);
+    result.thinkingCardsPerTurn = await evaluateRenderer(`[...document.querySelectorAll('#CodexTranscript .conversation-turn')].map((turn) => turn.querySelectorAll('.activity-card.thinking').length)`);
+    result.singleThinkingCard = result.thinkingCardsPerTurn.some((count) => count > 0) && result.thinkingCardsPerTurn.every((count) => count <= 1);
+    result.thinkingUsesStatusIcon = await evaluateRenderer(`Boolean(document.querySelector('#CodexTranscript .activity-card.thinking .activity-state[data-status="done"] .ui-icon'))`);
+    result.passed = Object.entries(result)
+      .filter(([key]) => !['inputPath', 'modelPanelDiagnostics', 'manualScrollDiagnostics', 'thinkingCardsPerTurn'].includes(key))
+      .every(([, value]) => value === true);
   } catch (error) {
     result.passed = false;
     result.error = error.message;
@@ -304,7 +314,7 @@ function registerIpc() {
   ipcMain.on('acceptance:hover-state', (_event, hovered) => {
     if (!seededAcceptance) return;
     const path = hovered ? acceptanceHoverActivePath : acceptanceHoverRestPath;
-    if (path) setTimeout(() => captureAcceptanceEvidence(path), 260);
+    if (path) setTimeout(() => captureAcceptanceEvidence(path), 560);
   });
   ipcMain.handle('clipboard:write', (_event, text) => clipboard.writeText(String(text || '')));
   ipcMain.handle('context:select-image', () => selectImageContext());

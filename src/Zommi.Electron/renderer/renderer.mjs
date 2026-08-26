@@ -1,4 +1,5 @@
 import {
+  activityKey,
   effortsForModel,
   extractDisplayUserText,
   isNearBottom,
@@ -24,15 +25,18 @@ const sessionList = document.querySelector('#SessionList');
 const toggleSessions = document.querySelector('#ToggleSessions');
 const newSession = document.querySelector('#NewSession');
 const modelPanel = document.querySelector('#ModelPanel');
-const modelSelect = document.querySelector('#ModelSelect');
-const effortSelect = document.querySelector('#EffortSelect');
+const modelSearch = document.querySelector('#ModelSearch');
+const modelList = document.querySelector('#ModelList');
+const effortList = document.querySelector('#EffortList');
 const modelSummary = document.querySelector('#ModelSummary');
-const openModelPanel = document.querySelector('#OpenModelPanel');
+const modelSummaryLabel = document.querySelector('#ModelSummaryLabel');
 const attachments = [];
 const activityElements = new Map();
+const pendingStreamUpdates = [];
 let assistantElement = null;
 let assistantTextNode = null;
 let currentTurnBody = null;
+let streamFrame = 0;
 let turnActive = false;
 let interruptRequested = false;
 let previewTimer = null;
@@ -52,12 +56,13 @@ document.querySelector('#SelectImage').addEventListener('click', () => window.zo
 document.querySelector('#ClosePreview').addEventListener('click', hidePreview);
 toggleSessions.addEventListener('click', toggleSessionSidebar);
 newSession.addEventListener('click', createSession);
-openModelPanel.addEventListener('click', toggleModelPanel);
 glass.addEventListener('mouseenter', () => setPointerOverGlass(true));
 glass.addEventListener('mouseleave', () => setPointerOverGlass(false));
 modelSummary.addEventListener('click', toggleModelPanel);
-modelSelect.addEventListener('change', selectModel);
-effortSelect.addEventListener('change', selectEffort);
+modelSearch.addEventListener('input', renderModelOptions);
+modelSearch.addEventListener('keydown', handleModelSearchKeydown);
+document.addEventListener('pointerdown', closeModelPanelFromOutside);
+document.addEventListener('keydown', handleGlobalKeydown);
 scrollToLatest.addEventListener('click', () => scrollTranscript({ force: true }));
 transcript.addEventListener('scroll', handleTranscriptScroll, { passive: true });
 transcript.addEventListener('wheel', handleTranscriptWheel, { passive: true });
@@ -75,7 +80,7 @@ preview.addEventListener('mouseleave', schedulePreviewHide);
 
 window.zommi.onContext(addAttachment);
 window.zommi.onStatus(({ message, warning }) => renderStatus(message, warning));
-window.zommi.onStream(renderStreamUpdate);
+window.zommi.onStream(queueStreamUpdate);
 window.zommi.onTurnCompleted(completeTurn);
 window.zommi.onFocusComposer(() => focusComposer());
 window.zommi.onAcceptanceConversation?.(seedAcceptanceConversation);
@@ -196,29 +201,13 @@ function applyChatState(state, { renderHistory = false } = {}) {
 }
 
 function renderModelControls() {
-  modelSelect.replaceChildren();
-  for (const model of models) {
-    const option = document.createElement('option');
-    option.value = model.model || model.id;
-    option.textContent = model.displayName || model.model || model.id;
-    option.selected = option.value === selectedModel;
-    modelSelect.append(option);
-  }
-  modelSelect.disabled = !models.length || turnActive || sessionBusy;
-
+  renderModelOptions();
+  renderEffortOptions();
   const model = findSelectedModel();
-  const efforts = effortsForModel(model);
-  effortSelect.replaceChildren();
-  for (const effort of efforts) {
-    const option = document.createElement('option');
-    option.value = effort;
-    option.textContent = formatEffort(effort);
-    option.selected = effort === selectedEffort;
-    effortSelect.append(option);
-  }
-  effortSelect.disabled = !efforts.length || turnActive || sessionBusy;
   const modelName = model?.displayName || selectedModel || 'Default model';
-  modelSummary.textContent = `${modelName}${selectedEffort ? ` · ${formatEffort(selectedEffort)}` : ''}`;
+  modelSummaryLabel.textContent = `${modelName}${selectedEffort ? ` · ${formatEffort(selectedEffort)}` : ''}`;
+  modelSummary.title = modelSummaryLabel.textContent;
+  modelSummary.setAttribute('aria-label', `Choose model and reasoning level, current ${modelSummaryLabel.textContent}`);
   modelSummary.disabled = sessionBusy;
 }
 
@@ -231,24 +220,117 @@ function formatEffort(value) {
   return text ? `${text[0].toUpperCase()}${text.slice(1)}` : '';
 }
 
-function selectModel() {
-  selectedModel = modelSelect.value;
+function renderModelOptions() {
+  const query = modelSearch.value.trim().toLowerCase();
+  const visibleModels = models.filter((model) => {
+    const haystack = `${model.displayName || ''} ${model.model || model.id || ''}`.toLowerCase();
+    return !query || haystack.includes(query);
+  });
+  modelList.replaceChildren();
+  for (const model of visibleModels) {
+    const value = model.model || model.id;
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.className = `model-option${value === selectedModel ? ' selected' : ''}`;
+    option.id = `Model-${domId(value)}`;
+    option.dataset.model = value;
+    option.setAttribute('role', 'option');
+    option.setAttribute('aria-selected', String(value === selectedModel));
+    option.disabled = turnActive || sessionBusy;
+    const text = document.createElement('span');
+    text.className = 'model-option-text';
+    const name = document.createElement('span');
+    name.className = 'model-option-name';
+    name.textContent = model.displayName || value;
+    const id = document.createElement('span');
+    id.className = 'model-option-id';
+    id.textContent = value;
+    text.append(name, id);
+    const check = document.createElement('span');
+    check.className = 'model-option-check';
+    check.setAttribute('aria-hidden', 'true');
+    check.append(createUiIcon('check'));
+    option.append(text, check);
+    option.addEventListener('click', () => selectModel(value));
+    modelList.append(option);
+  }
+  if (!visibleModels.length) {
+    const empty = document.createElement('div');
+    empty.className = 'model-empty';
+    empty.textContent = 'No matching models';
+    modelList.append(empty);
+  }
+}
+
+function renderEffortOptions() {
+  effortList.replaceChildren();
+  for (const effort of effortsForModel(findSelectedModel())) {
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.className = `effort-option${effort === selectedEffort ? ' selected' : ''}`;
+    option.id = `Effort-${domId(effort)}`;
+    option.dataset.effort = effort;
+    option.setAttribute('role', 'option');
+    option.setAttribute('aria-selected', String(effort === selectedEffort));
+    option.textContent = formatEffort(effort);
+    option.disabled = turnActive || sessionBusy;
+    option.addEventListener('click', () => selectEffort(effort));
+    effortList.append(option);
+  }
+}
+
+function domId(value) {
+  return String(value || '').replace(/[^a-z0-9_-]+/gi, '-');
+}
+
+function selectModel(value) {
+  selectedModel = value;
   const model = findSelectedModel();
   const efforts = effortsForModel(model);
   if (!efforts.includes(selectedEffort)) selectedEffort = model?.defaultReasoningEffort || efforts[0] || '';
   renderModelControls();
 }
 
-function selectEffort() {
-  selectedEffort = effortSelect.value;
+function selectEffort(value) {
+  selectedEffort = value;
   renderModelControls();
 }
 
 function toggleModelPanel() {
   const open = modelPanel.hidden;
   modelPanel.hidden = !open;
-  openModelPanel.setAttribute('aria-expanded', String(open));
   modelSummary.setAttribute('aria-expanded', String(open));
+  if (open) {
+    modelSearch.value = '';
+    renderModelOptions();
+    requestAnimationFrame(() => modelSearch.focus({ preventScroll: true }));
+  }
+}
+
+function closeModelPanel() {
+  if (modelPanel.hidden) return;
+  modelPanel.hidden = true;
+  modelSummary.setAttribute('aria-expanded', 'false');
+}
+
+function closeModelPanelFromOutside(event) {
+  if (modelPanel.hidden || modelPanel.contains(event.target) || modelSummary.contains(event.target)) return;
+  closeModelPanel();
+}
+
+function handleGlobalKeydown(event) {
+  if (event.key !== 'Escape' || modelPanel.hidden) return;
+  event.preventDefault();
+  closeModelPanel();
+  modelSummary.focus({ preventScroll: true });
+}
+
+function handleModelSearchKeydown(event) {
+  if (event.key !== 'ArrowDown') return;
+  const firstOption = modelList.querySelector('.model-option:not(:disabled)');
+  if (!firstOption) return;
+  event.preventDefault();
+  firstOption.focus({ preventScroll: true });
 }
 
 function toggleSessionSidebar() {
@@ -318,6 +400,7 @@ async function sendMessage() {
   if (turnActive || sessionBusy) return;
   const message = composer.value.trim();
   if (!message) return;
+  closeModelPanel();
   turnActive = true;
   interruptRequested = false;
   renderPrimaryAction();
@@ -388,7 +471,22 @@ function updateActiveSessionTitle(message) {
   renderSessions();
 }
 
-function renderStreamUpdate(update) {
+function queueStreamUpdate(update) {
+  pendingStreamUpdates.push(update);
+  if (streamFrame) return;
+  streamFrame = requestAnimationFrame(flushStreamUpdates);
+}
+
+function flushStreamUpdates() {
+  if (streamFrame) cancelAnimationFrame(streamFrame);
+  streamFrame = 0;
+  if (!pendingStreamUpdates.length) return;
+  const updates = pendingStreamUpdates.splice(0);
+  for (const update of updates) renderStreamUpdate(update, { deferScroll: true });
+  scrollTranscript();
+}
+
+function renderStreamUpdate(update, { deferScroll = false } = {}) {
   removeWelcome();
   const kind = normalizeKind(update.kind);
   const lifecycle = normalizeLifecycle(update.lifecycle);
@@ -410,10 +508,10 @@ function renderStreamUpdate(update) {
       currentTurnBody.append(row);
     }
     if (update.text) assistantTextNode.data += update.text;
-    scrollTranscript();
+    if (!deferScroll) scrollTranscript();
     return;
   }
-  const key = update.itemId || `${kind}:${update.title}`;
+  const key = activityKey(kind, update.itemId, update.title);
   let activity = activityElements.get(key);
   if (!activity) {
     activity = createActivity(kind, update.title);
@@ -421,7 +519,7 @@ function renderStreamUpdate(update) {
     currentTurnBody.append(activity.element);
   }
   updateActivity(activity, update, lifecycle);
-  scrollTranscript();
+  if (!deferScroll) scrollTranscript();
 }
 
 function createActivity(kind, title) {
@@ -441,24 +539,29 @@ function createActivity(kind, title) {
   subtitle.className = 'activity-subtitle';
   const state = document.createElement('span');
   state.className = 'activity-state';
-  state.textContent = 'running';
+  setActivityState(state, false);
   summary.append(icon, heading, subtitle, state);
   const content = document.createElement('pre');
   content.className = 'activity-content';
   element.append(summary, content);
-  return { element, subtitle, state, content, text: '', hasText: false };
+  return { element, subtitle, state, content, text: '', hasText: false, sourceTexts: new Map() };
 }
 
 function updateActivity(activity, update, lifecycle) {
   const text = String(update.text || '');
   const kind = normalizeKind(update.kind);
+  const sourceId = String(update.itemId || `${kind}:${update.title || ''}`);
   if (text) {
     if (!activity.subtitle.textContent && (kind === 'tool' || kind === 'tooloutput' || kind === 'tool-output')) {
       activity.subtitle.textContent = compactLabel(text);
     }
     const shouldUseAsSubtitleOnly = lifecycle === 'started' && kind === 'tool' && !activity.hasText;
     if (!shouldUseAsSubtitleOnly) {
-      const merged = mergeActivityText(activity.text, text, kind, lifecycle);
+      const sourceText = mergeActivityText(activity.sourceTexts.get(sourceId), text, kind, lifecycle);
+      activity.sourceTexts.set(sourceId, sourceText);
+      const merged = kind === 'thinking'
+        ? mergeDistinctTextSections(activity.sourceTexts.values())
+        : mergeActivityText(activity.text, text, kind, lifecycle);
       if (merged !== activity.text) {
         activity.text = merged;
         activity.content.textContent = merged;
@@ -469,11 +572,20 @@ function updateActivity(activity, update, lifecycle) {
   activity.content.hidden = !activity.hasText;
   if (lifecycle === 'completed') {
     activity.element.classList.add('completed');
-    activity.state.textContent = update.status || 'done';
+    setActivityState(activity.state, true);
     activity.element.open = false;
   } else {
-    activity.state.textContent = kind === 'thinking' ? 'thinking' : 'running';
+    activity.element.classList.remove('completed');
+    activity.element.open = true;
+    setActivityState(activity.state, false);
   }
+}
+
+function setActivityState(element, completed) {
+  element.replaceChildren(createUiIcon(completed ? 'check' : 'spinner'));
+  element.dataset.status = completed ? 'done' : 'live';
+  element.setAttribute('aria-label', completed ? 'Done' : 'Live');
+  element.title = completed ? 'Done' : 'Live';
 }
 
 function compactLabel(value) {
@@ -492,6 +604,8 @@ function createUiIcon(name) {
     sparkle: 'M10 3.5c.55 3.8 2.7 5.95 6.5 6.5-3.8.55-5.95 2.7-6.5 6.5-.55-3.8-2.7-5.95-6.5-6.5 3.8-.55 5.95-2.7 6.5-6.5Z',
     plan: 'M5 5.5h10M5 10h10M5 14.5h7',
     tool: 'M6.3 5.1a3.4 3.4 0 0 0 4.2 4.4l4.2 4.2-1.9 1.9-4.2-4.2a3.4 3.4 0 0 1-4.2-4.3l2 2 1.9-1.9-2-2.1Z',
+    check: 'm5.5 10 3 3 6-6',
+    spinner: 'M15.5 10a5.5 5.5 0 1 1-2.1-4.3',
   };
   path.setAttribute('d', paths[name] || paths.tool);
   svg.append(path);
@@ -551,12 +665,13 @@ function appendError(message) {
 }
 
 function completeTurn(turnStatus) {
+  flushStreamUpdates();
   turnActive = false;
   interruptRequested = false;
   for (const activity of activityElements.values()) {
     if (activity.element.classList.contains('completed')) continue;
     activity.element.classList.add('completed');
-    activity.state.textContent = 'done';
+    setActivityState(activity.state, true);
     activity.element.open = false;
   }
   renderPrimaryAction();
@@ -624,6 +739,9 @@ function removeWelcome() {
 }
 
 function renderThreadHistory(thread) {
+  pendingStreamUpdates.splice(0);
+  if (streamFrame) cancelAnimationFrame(streamFrame);
+  streamFrame = 0;
   transcript.replaceChildren();
   assistantElement = null;
   assistantTextNode = null;

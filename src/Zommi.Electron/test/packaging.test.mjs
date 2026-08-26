@@ -126,6 +126,10 @@ test('model and session controls use Codex app-server catalogs and resumable thr
   const windowsBridge = await readFile(join(appDirectory, '..', 'Zommi.Windows', 'CodexAppServerClient.cs'), 'utf8');
   assert.match(html, /id="SessionSidebar"/);
   assert.match(html, /id="ModelPanel"/);
+  assert.match(html, /id="ModelSearch"/);
+  assert.match(html, /id="ModelList"/);
+  assert.match(html, /id="EffortList"/);
+  assert.doesNotMatch(html, /id="ModelSelect"|id="EffortSelect"/);
   assert.match(renderer, /window\.zommi\.createSession/);
   assert.match(renderer, /window\.zommi\.switchSession/);
   assert.match(renderer, /model:\s*selectedModel/);
@@ -146,18 +150,41 @@ test('blank glass regions use native dragging and movement turns off expensive b
   assert.ok(glassRule, 'The root glass rule is missing.');
   assert.doesNotMatch(glassRule, /-webkit-app-region/);
   assert.match(styles, /\.titlebar\s*\{[\s\S]*?-webkit-app-region:\s*drag/);
-  assert.match(styles, /\.edge-drag\s*\{[\s\S]*?-webkit-app-region:\s*drag/);
+  assert.match(styles, /\.background-drag\s*\{[\s\S]*?inset:\s*0;[\s\S]*?-webkit-app-region:\s*drag/);
+  assert.doesNotMatch(styles, /\.edge-drag\s*\{/);
   assert.match(styles, /\.transcript::after\s*\{[\s\S]*-webkit-app-region:\s*drag/);
   for (const selector of ['.welcome', '.conversation-turn', '.turn-body', '.message-row']) {
     const escaped = selector.replace('.', '\\.');
     const rule = styles.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))?.[1] || '';
     assert.doesNotMatch(rule, /-webkit-app-region:\s*drag/, `${selector} must remain interactive.`);
   }
-  assert.match(styles, /\.glass:hover::after,\s*\.glass\.pointer-over::after\s*\{\s*opacity:\s*0\.72/);
+  assert.match(styles, /transition:\s*opacity 460ms cubic-bezier/);
+  assert.match(styles, /\.glass:hover::after,\s*\.glass\.pointer-over::after\s*\{\s*opacity:\s*0\.64/);
   assert.match(renderer, /glass\.classList\.toggle\('pointer-over', pointerOver\)/);
   assert.match(styles, /body\.window-moving[\s\S]*backdrop-filter:\s*none/);
   assert.doesNotMatch(renderer, /updateBackgroundDragSurface|drag-ready/);
   assert.match(main, /mainWindow\.on\('will-move'/);
+});
+
+test('stream updates are frame-batched and thinking changes one status icon in place', async () => {
+  const html = await readFile(join(appDirectory, 'renderer', 'index.html'), 'utf8');
+  const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
+  assert.match(html, /id="ModelSummary"[\s\S]*id="SendMessage"/);
+  assert.match(renderer, /window\.zommi\.onStream\(queueStreamUpdate\)/);
+  assert.match(renderer, /requestAnimationFrame\(flushStreamUpdates\)/);
+  assert.match(renderer, /activityKey\(kind, update\.itemId, update\.title\)/);
+  assert.match(renderer, /setActivityState\(activity\.state, true\)/);
+  assert.match(renderer, /replaceChildren\(createUiIcon\(completed \? 'check' : 'spinner'\)\)/);
+  assert.doesNotMatch(renderer, /activity\.state\.textContent\s*=/);
+});
+
+test('glass rendering avoids the former high-cost blur layers', async () => {
+  const styles = await readFile(join(appDirectory, 'renderer', 'styles.css'), 'utf8');
+  assert.match(styles, /backdrop-filter:\s*blur\(22px\)/);
+  assert.match(styles, /backdrop-filter:\s*blur\(14px\)/);
+  assert.doesNotMatch(styles, /blur\((?:3[0-9]|[4-9][0-9]|[1-9][0-9]{2,})px\)/);
+  assert.doesNotMatch(styles, /(?:^|\n)\s*filter:\s*blur\(/);
+  assert.match(styles, /overflow-anchor:\s*none/);
 });
 
 test('streaming send control becomes a stop control backed by Codex turn interruption', async () => {
