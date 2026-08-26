@@ -34,8 +34,8 @@ product provides:
   bounded accessibility text, and pointer target capture;
 - a fresh WSL Codex app-server thread with streamed thinking/commentary, plans,
   tool lifecycle/output, and final replies;
-- the user's existing Codex permissions and configured tools, plus a required
-  bundled Chrome DevTools MCP backed by an isolated headless browser; and
+- a plain user-resolved Codex app-server, without Zommi-owned model, provider,
+  authentication, permission, plugin, MCP, or tool configuration; and
 - conversation continuity across invocations.
 
 The Electron candidate has passing JS/.NET contracts, a native seeded UI
@@ -63,10 +63,6 @@ captured text. Press **Alt+Shift+A** only when you want to attach image context.
 Type the question and press Enter; Codex thinking, tool activity, and the answer
 stream into the same surface.
 
-The bundled Chrome tool uses a separate ephemeral browser profile. It can
-navigate and interact with pages the agent opens there, but it does not inherit
-the user's browser login or silently control the tab under the pointer.
-
 Codex CLI must already be installed, signed in, and available on the WSL shell
 `PATH`. The prototype is unsigned, so Windows SmartScreen may require **More
 info → Run anyway** on first launch.
@@ -91,4 +87,6 @@ then run it from Windows PowerShell as described in the acceptance report.
 - Attached to the exact app-server thread Zommi starts; it never guesses from
   recent or foreground sessions.
 - No bundled chatbot, inference provider, or credential store.
-- Runtime integration fails open and never restricts the agent's native tools.
+- Zommi neither adds nor restricts agent tools. Capabilities come from the
+  Codex app-server and its user-owned configuration; tools injected into a
+  different host or session do not transfer automatically.

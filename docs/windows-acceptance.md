@@ -50,17 +50,6 @@ SHA-256, browser version, and any failed check.
    surface, and that the answer contains the requested value.
 4. Hide and invoke Zommi again. Verify the existing conversation remains.
 
-## Chrome MCP tool
-
-1. Create a local HTML page containing a random value that was not attached by
-   Alt+A.
-2. Ask Codex to use `zommiChrome` to navigate its isolated browser to that file
-   URL and read the value.
-3. Verify the transcript shows an `MCP tool` lifecycle naming `zommiChrome` and
-   the final response contains the exact random value.
-4. Verify exiting Zommi stops the isolated headless browser and removes its
-   `zommi-chrome-tool-*` temporary profile.
-
 ## Automated controlled checks
 
 Build the package, then run from Windows PowerShell:
@@ -72,17 +61,11 @@ Build the package, then run from Windows PowerShell:
 
 .\scripts\test-windows-runtime.ps1 `
   -ExecutablePath .\artifacts\zommi-win-x64\Zommi.exe
-
-.\scripts\test-windows-chrome-mcp.ps1 `
-  -ExecutablePath .\artifacts\zommi-win-x64\Zommi.exe
 ```
 
 The UI contract uses seeded contexts plus the real packaged image selector. The
 runtime contract opens an isolated Edge fixture, invokes the real Alt+A path,
 checks its accessibility hierarchy and pointer label, and requires Codex to
-use Chrome MCP against a second, unattached local fixture before streaming its
-random exact token. Neither check proves arbitrary protected, canvas-only,
-elevated, or secure-desktop surfaces, nor control of the user's signed-in tab.
-The dedicated Chrome MCP contract exercises the same tool path directly through
-the packaged native-host protocol so RDP pointer automation cannot mask a tool
-regression, and also verifies isolated-profile cleanup after graceful shutdown.
+stream a random exact token from the attached context. It does not prove
+arbitrary protected, canvas-only, elevated, or secure-desktop surfaces, agent
+tool availability, or control of the user's signed-in tab.

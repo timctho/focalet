@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,27 +21,27 @@ test('sandboxed windows use packaged CommonJS preload bridges', async () => {
   assert.match(packager, /preload\.cjs/);
 });
 
-test('Zommi does not override the configured Codex agent permissions or tools', async () => {
+test('Zommi launches Codex without overriding agent tools, providers, or permissions', async () => {
   const portableBridge = await readFile(join(appDirectory, 'codex-bridge.mjs'), 'utf8');
   const windowsBridge = await readFile(join(appDirectory, '..', 'Zommi.Windows', 'CodexAppServerClient.cs'), 'utf8');
   for (const source of [portableBridge, windowsBridge]) {
     assert.doesNotMatch(source, /approvalPolicy\s*[:=]\s*['"]never/);
     assert.doesNotMatch(source, /sandbox\s*[:=]\s*['"]read-only/);
-    assert.match(source, /configured tools, MCP servers, plugins, and permissions remain available/);
+    assert.doesNotMatch(source, /mcp_servers\.|model_providers\.|zommiChrome|ChromeDevToolsBrowser/);
   }
+  assert.match(portableBridge, /spawnProcess\(command, \['app-server'\]/);
+  assert.match(windowsBridge, /ArgumentList\.Add\("cd \\"\$HOME\\" && exec codex app-server"\)/);
 });
 
-test('Windows Chrome MCP keeps stdio inside WSL Node and connects over loopback CDP', async () => {
-  const wrapper = await readFile(join(appDirectory, '..', '..', 'scripts', 'Zommi.ChromeMcp.sh'), 'utf8');
-  const windowsBridge = await readFile(join(appDirectory, '..', 'Zommi.Windows', 'CodexAppServerClient.cs'), 'utf8');
-  const chromeHost = await readFile(join(appDirectory, '..', 'Zommi.Windows', 'ChromeDevToolsBrowser.cs'), 'utf8');
-  assert.match(wrapper, /exec node/);
-  assert.match(wrapper, /--browser-url="http:\/\/127\.0\.0\.1:\$cdp_port"/);
-  assert.doesNotMatch(wrapper, /\/init|ELECTRON_RUN_AS_NODE|wslpath/);
-  assert.match(windowsBridge, /ChromeDevToolsBrowser\.StartAsync/);
-  assert.match(windowsBridge, /mcp_servers\.zommiChrome\.required=true/);
-  assert.match(chromeHost, /--headless=new/);
-  assert.match(chromeHost, /--remote-debugging-address=127\.0\.0\.1/);
+test('Zommi source and packager do not contain a product-owned browser tool runtime', async () => {
+  const repositoryRoot = join(appDirectory, '..', '..');
+  const packager = await readFile(join(appDirectory, 'scripts', 'package-electron.mjs'), 'utf8');
+  const windowsPackager = await readFile(join(repositoryRoot, 'scripts', 'package-windows.ps1'), 'utf8');
+  assert.doesNotMatch(packager, /browser-mcp|chrome-devtools-mcp/i);
+  assert.doesNotMatch(windowsPackager, /browser-mcp|chrome-devtools-mcp|Zommi\.ChromeMcp/i);
+  await assert.rejects(access(join(appDirectory, 'browser-mcp', 'package.json')));
+  await assert.rejects(access(join(repositoryRoot, 'scripts', 'Zommi.ChromeMcp.sh')));
+  await assert.rejects(access(join(appDirectory, '..', 'Zommi.Windows', 'ChromeDevToolsBrowser.cs')));
 });
 
 test('glass surfaces hide transcript, preview, composer, and chip scrollbars', async () => {

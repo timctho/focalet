@@ -251,18 +251,12 @@ try {
     $tableName = "Usage table $browserMarker"
     $browserTitle = "Zommi Electron Acceptance $browserMarker"
     $htmlPath = Join-Path $temporaryRoot 'electron-runtime.html'
-    $secretMarker = 'ZOMMI_CHROME_TOOL_' + [Guid]::NewGuid().ToString('N')
-    $secretHtmlPath = Join-Path $temporaryRoot 'chrome-tool-secret.html'
     $rows = [string]::Join('', @(1..30 | ForEach-Object {
         "<tr><td>account-$_</td><td>$($_ * 7)</td></tr>"
     }))
     $html = "<!doctype html><title>$browserTitle</title><main><button style='position:fixed;top:100px;right:100px;font-size:26px'>$buttonName</button><h1>Visible $browserMarker</h1><table aria-label='$tableName'><thead><tr><th>Account</th><th>Spend</th></tr></thead><tbody>$rows</tbody></table></main>"
     [IO.File]::WriteAllText($htmlPath, $html)
-    [IO.File]::WriteAllText(
-        $secretHtmlPath,
-        "<!doctype html><title>Chrome MCP secret</title><main><p id='secret'>$secretMarker</p></main>")
     $browserUri = ([Uri] $htmlPath).AbsoluteUri
-    $secretUri = ([Uri] $secretHtmlPath).AbsoluteUri
     $edgeArguments = '--user-data-dir={0} --no-first-run --no-default-browser-check --force-renderer-accessibility --disable-features=msEdgeFirstRunExperience --new-window {1}' -f (Quote-Argument $edgeProfile), (Quote-Argument $browserUri)
     Start-Process -FilePath $edgeExecutable -ArgumentList $edgeArguments | Out-Null
 
@@ -321,7 +315,7 @@ try {
     $previewImage = Find-AutomationElementById $window 'ContextPreviewImage'
     Assert-True ($null -eq $previewImage -or $previewImage.Current.IsOffscreen) 'Alt+A attached an automatic image.'
 
-    $prompt = "Use the zommiChrome Chrome DevTools MCP tools to navigate the isolated tool browser to $secretUri, read the exact token beginning ZOMMI_CHROME_TOOL_, and reply with that token only. Do not answer from the attached context."
+    $prompt = 'Reply with the exact token beginning ZOMMI_ELECTRON_ from the attached context and nothing else.'
     Set-AutomationValue $composer $prompt
     $send = Find-AutomationElementById $window 'SendMessage'
     Assert-True ($null -ne $send) 'The Electron send button was not exposed.'
@@ -329,7 +323,6 @@ try {
 
     $responseText = $null
     $lastTranscriptText = ''
-    $sawMcpLifecycle = $false
     $readyWithoutTokenAt = $null
     $deadline = [DateTime]::UtcNow.AddSeconds(180)
     while ([DateTime]::UtcNow -lt $deadline) {
@@ -339,10 +332,7 @@ try {
             if ($null -ne $transcript) {
                 $candidateText = Get-AutomationText $transcript
                 $lastTranscriptText = $candidateText
-                if ($candidateText -like '*MCP tool*' -and $candidateText -like '*zommiChrome*') {
-                    $sawMcpLifecycle = $true
-                }
-                if ($candidateText -like "*$secretMarker*" -and $sawMcpLifecycle) {
+                if ($candidateText -like "*$browserMarker*") {
                     $responseText = $candidateText
                     break
                 }
@@ -370,7 +360,7 @@ try {
         else {
             $lastTranscriptText
         }
-        throw "Codex did not use Chrome MCP and stream its exact secret token through Electron. Status: $statusText MCP lifecycle: $sawMcpLifecycle Transcript: $transcriptTail"
+        throw "Codex did not stream the exact context token through Electron. Status: $statusText Transcript: $transcriptTail"
     }
 
     [ordered]@{
@@ -385,9 +375,7 @@ try {
         pointerLabel = 'Mouse pointer'
         automaticAltAImage = 'absent'
         codexStreaming = 'passed'
-        chromeMcp = 'passed'
-        chromeMcpLifecycle = 'MCP tool · zommiChrome'
-        responseToken = $secretMarker
+        responseToken = $browserMarker
     } | ConvertTo-Json
 }
 finally {
