@@ -9,11 +9,19 @@ param(
 
     [switch] $GeometryOnly,
 
+    [switch] $ForceUiaFallback,
+
     [string] $EvidencePath
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$script:inputMode = 'sendinput'
+$hoverOpacityContract = 'passed'
+$dragGestureContract = 'passed'
+if ($ForceUiaFallback) {
+    $script:inputMode = 'uia-fallback-input-desktop-locked'
+}
 
 function Assert-True {
     param([bool] $Condition, [string] $Message)
@@ -177,6 +185,63 @@ function Get-ExactExecutableProcesses {
     )
 }
 
+function Get-AllZommiProcesses {
+    return @(Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'Zommi.exe' })
+}
+
+function Invoke-PhysicalClick {
+    param([System.Windows.Automation.AutomationElement] $Element)
+
+    if ($script:nativeWindowHandle -ne [IntPtr]::Zero) {
+        [void] [ZommiElectronUiNative]::Activate($script:nativeWindowHandle)
+        Start-Sleep -Milliseconds 100
+    }
+    $bounds = $Element.Current.BoundingRectangle
+    Assert-True ($bounds.Width -gt 0 -and $bounds.Height -gt 0) 'Cannot click an element without visible bounds.'
+    $moved = $script:inputMode -eq 'sendinput' -and [ZommiElectronUiNative]::MovePointer(
+        [int] ($bounds.X + ($bounds.Width / 2)),
+        [int] ($bounds.Y + ($bounds.Height / 2)))
+    if (-not $moved) {
+        $script:inputMode = 'uia-fallback-input-desktop-locked'
+        $invokePatternObject = $null
+        if ($Element.TryGetCurrentPattern(
+            [System.Windows.Automation.InvokePattern]::Pattern,
+            [ref] $invokePatternObject)) {
+            ([System.Windows.Automation.InvokePattern] $invokePatternObject).Invoke()
+            Start-Sleep -Milliseconds 180
+            return
+        }
+        $Element.SetFocus()
+        return
+    }
+    Start-Sleep -Milliseconds 120
+    [ZommiElectronUiNative]::LeftButtonDown()
+    Start-Sleep -Milliseconds 55
+    [ZommiElectronUiNative]::LeftButtonUp()
+    Start-Sleep -Milliseconds 180
+}
+
+function Get-BitmapBrightness {
+    param([string] $Path)
+
+    $bitmap = [System.Drawing.Bitmap]::FromFile($Path)
+    try {
+        $total = 0.0
+        $left = [int] ($bitmap.Width * 0.45)
+        $top = [Math]::Min($bitmap.Height - 13, [Math]::Max(1, [int] ($bitmap.Height * 0.04)))
+        for ($x = $left; $x -lt ($left + 12); $x++) {
+            for ($y = $top; $y -lt ($top + 12); $y++) {
+                $pixel = $bitmap.GetPixel($x, $y)
+                $total += ($pixel.R + $pixel.G + $pixel.B) / 3.0
+            }
+        }
+        return $total / ($bitmap.Width * $bitmap.Height)
+    }
+    finally {
+        $bitmap.Dispose()
+    }
+}
+
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
     throw 'This Electron UI contract requires Windows.'
 }
@@ -190,13 +255,43 @@ using System.Runtime.InteropServices;
 
 public static class ZommiElectronUiNative {
     [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr window, IntPtr processId);
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint attach, uint attachTo, bool value);
+    [DllImport("user32.dll")]
+    private static extern bool BringWindowToTop(IntPtr window);
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr window, int command);
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr window);
+    [DllImport("user32.dll")]
     private static extern int GetWindowRgn(IntPtr window, IntPtr region);
     [DllImport("user32.dll")]
     private static extern uint GetDpiForWindow(IntPtr window);
     [DllImport("user32.dll")]
     private static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
     [DllImport("user32.dll")]
-    private static extern void mouse_event(uint flags, uint dx, uint dy, int data, UIntPtr extraInfo);
+    private static extern uint SendInput(uint count, INPUT[] inputs, int size);
+    [DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int index);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct INPUT {
+        public uint type;
+        public MOUSEINPUT mouse;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MOUSEINPUT {
+        public int dx;
+        public int dy;
+        public uint mouseData;
+        public uint flags;
+        public uint time;
+        public UIntPtr extraInfo;
+    }
     [DllImport("user32.dll")]
     private static extern IntPtr SendMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
     [DllImport("gdi32.dll")]
@@ -225,16 +320,62 @@ public static class ZommiElectronUiNative {
     }
 
     public static void LeftButtonDown() {
-        mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);
+        SendMouse(0x0002, 0, 0, 0, false);
     }
 
     public static void LeftButtonUp() {
-        mouse_event(0x0004, 0, 0, 0, UIntPtr.Zero);
+        SendMouse(0x0004, 0, 0, 0, false);
+    }
+
+    public static void MouseWheel(int delta) {
+        SendMouse(0x0800, 0, 0, unchecked((uint)delta), false);
+    }
+
+    public static bool MovePointer(int x, int y) {
+        return SendMouse(0x0001, x, y, 0, true);
+    }
+
+    private static bool SendMouse(uint flags, int x, int y, uint data, bool absolute) {
+        if (absolute) {
+            int left = GetSystemMetrics(76);
+            int top = GetSystemMetrics(77);
+            int width = Math.Max(2, GetSystemMetrics(78));
+            int height = Math.Max(2, GetSystemMetrics(79));
+            x = (int)Math.Round((x - left) * 65535.0 / (width - 1));
+            y = (int)Math.Round((y - top) * 65535.0 / (height - 1));
+            flags |= 0x8000 | 0x4000;
+        }
+        var input = new INPUT {
+            type = 0,
+            mouse = new MOUSEINPUT {
+                dx = x,
+                dy = y,
+                mouseData = data,
+                flags = flags,
+                time = 0,
+                extraInfo = UIntPtr.Zero,
+            },
+        };
+        return SendInput(1, new[] { input }, Marshal.SizeOf(typeof(INPUT))) == 1;
     }
 
     public static int HitTest(IntPtr window, int screenX, int screenY) {
         long packed = ((long)(screenY & 0xffff) << 16) | (uint)(screenX & 0xffff);
         return SendMessage(window, 0x0084, IntPtr.Zero, new IntPtr(packed)).ToInt32();
+    }
+
+    public static bool Activate(IntPtr target) {
+        IntPtr foreground = GetForegroundWindow();
+        uint foregroundThread = GetWindowThreadProcessId(foreground, IntPtr.Zero);
+        uint targetThread = GetWindowThreadProcessId(target, IntPtr.Zero);
+        bool attached = foregroundThread != targetThread && AttachThreadInput(foregroundThread, targetThread, true);
+        try {
+            ShowWindow(target, 9);
+            BringWindowToTop(target);
+            return SetForegroundWindow(target);
+        } finally {
+            if (attached) AttachThreadInput(foregroundThread, targetThread, false);
+        }
     }
 }
 '@
@@ -244,11 +385,22 @@ Assert-True (Test-Path -LiteralPath $resolvedExecutable -PathType Leaf) 'Zommi.e
 $process = $null
 
 try {
-    $argumentList = @('--acceptance-ui-seeded', '--force-renderer-accessibility')
+    foreach ($existing in (Get-AllZommiProcesses)) {
+        Stop-Process -Id $existing.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Milliseconds 1500
+    Assert-True (@(Get-AllZommiProcesses).Count -eq 0) 'A pre-existing Zommi product process retained the single-instance lock.'
+    $argumentList = @('--force-renderer-accessibility', '--', '--acceptance-ui-seeded')
     if (-not [string]::IsNullOrWhiteSpace($EvidencePath)) {
         $resolvedEvidencePath = [IO.Path]::GetFullPath($EvidencePath)
+        $resolvedHoverRestPath = [IO.Path]::ChangeExtension($resolvedEvidencePath, '.rest.png')
+        $resolvedHoverActivePath = [IO.Path]::ChangeExtension($resolvedEvidencePath, '.hover.png')
         Remove-Item -LiteralPath $resolvedEvidencePath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $resolvedHoverRestPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $resolvedHoverActivePath -Force -ErrorAction SilentlyContinue
         $argumentList += "--acceptance-evidence=$resolvedEvidencePath"
+        $argumentList += "--acceptance-hover-rest=$resolvedHoverRestPath"
+        $argumentList += "--acceptance-hover-active=$resolvedHoverActivePath"
     }
     $process = Start-Process `
         -FilePath $resolvedExecutable `
@@ -263,7 +415,7 @@ try {
     $bounds = $window.Current.BoundingRectangle
     Assert-True ($bounds.Width -ge 700 -and $bounds.Height -ge 450) 'The floating response surface was smaller than the Glass layout contract.'
     $nativeWindowHandle = [IntPtr] $window.Current.NativeWindowHandle
-    Assert-True ([ZommiElectronUiNative]::GetWindowRegionType($nativeWindowHandle) -eq 3) 'Windows did not expose a complex rounded window region; square compositor corners remain possible.'
+    Assert-True ([ZommiElectronUiNative]::GetWindowRegionType($nativeWindowHandle) -eq 0) 'A hard-edged native window region is still clipping the antialiased CSS corners.'
     $windowDpi = [ZommiElectronUiNative]::ReadWindowDpi($nativeWindowHandle)
     $displayScale = $windowDpi / 96.0
     $windowRectangle = New-Object System.Drawing.Rectangle(
@@ -282,6 +434,14 @@ try {
         [Math]::Max(600, [Math]::Min([Math]::Round($workingHeightDip * 0.72), 840)))
     Assert-True ([Math]::Abs($bounds.Width - ($expectedWidthDip * $displayScale)) -le (4 * $displayScale)) 'The window width did not adapt to the current display work area and DPI.'
     Assert-True ([Math]::Abs($bounds.Height - ($expectedHeightDip * $displayScale)) -le (4 * $displayScale)) 'The window height did not adapt to the current display work area and DPI.'
+    [void] [ZommiElectronUiNative]::MovePointer(
+        [int] ($workingArea.Right - 2),
+        [int] ($workingArea.Bottom - 2))
+    Start-Sleep -Milliseconds 300
+    [void] [ZommiElectronUiNative]::MovePointer(
+        [int] ($bounds.X + 18),
+        [int] ($bounds.Y + 100))
+    Start-Sleep -Milliseconds 300
 
     $composer = Wait-AutomationElementById $window 'ZommiComposer' 15
     $transcript = Find-AutomationElementById $window 'CodexTranscript'
@@ -301,18 +461,65 @@ try {
     Assert-True ($composer.Current.HasKeyboardFocus) 'The floating composer did not receive keyboard focus.'
 
     $sessionSidebar = Wait-AutomationElementById $window 'SessionSidebar' 10
+    Assert-True ($null -eq $sessionSidebar -or $sessionSidebar.Current.IsOffscreen) 'The session sidebar should start hidden.'
+    Invoke-PhysicalClick $toggleSessions
+    $sessionSidebar = Wait-AutomationElementById $window 'SessionSidebar' 10
     $seededSession = Wait-AutomationElementByName $window 'Structured context' 10
     $toggleAfterClick = Find-AutomationElementById $window 'ToggleSessions'
     $sidebarState = if ($null -eq $sessionSidebar) { '<missing>' } else { "offscreen=$($sessionSidebar.Current.IsOffscreen) bounds=$($sessionSidebar.Current.BoundingRectangle)" }
     $toggleState = if ($null -eq $toggleAfterClick) { '<missing>' } else { "name=$($toggleAfterClick.Current.Name) bounds=$($toggleAfterClick.Current.BoundingRectangle)" }
     Assert-True ($null -ne $sessionSidebar -and -not $sessionSidebar.Current.IsOffscreen) "The session sidebar did not open. Sidebar: $sidebarState Toggle: $toggleState"
     Assert-True ($null -ne $seededSession -and -not $seededSession.Current.IsOffscreen) 'The active seeded chat was not listed in the sidebar.'
+    Invoke-PhysicalClick $modelSummary
     $modelPanel = Wait-AutomationElementById $window 'ModelPanel' 10
     $modelSelect = Wait-AutomationElementById $window 'ModelSelect' 10
     $effortSelect = Wait-AutomationElementById $window 'EffortSelect' 10
     Assert-True ($null -ne $modelPanel -and -not $modelPanel.Current.IsOffscreen) 'The model settings sub-panel did not open.'
     Assert-True ($null -ne $modelSelect -and -not $modelSelect.Current.IsOffscreen) 'The model selector was not visible.'
     Assert-True ($null -ne $effortSelect -and -not $effortSelect.Current.IsOffscreen) 'The reasoning selector was not visible.'
+    $effortValuePatternObject = $null
+    Assert-True ($effortSelect.TryGetCurrentPattern(
+        [System.Windows.Automation.ValuePattern]::Pattern,
+        [ref] $effortValuePatternObject)) 'The reasoning selector did not expose its current value.'
+    $effortBefore = ([System.Windows.Automation.ValuePattern] $effortValuePatternObject).Current.Value
+    Invoke-PhysicalClick $effortSelect
+    if ($script:inputMode -eq 'sendinput') {
+        [System.Windows.Forms.SendKeys]::SendWait('{DOWN}{ENTER}')
+    }
+    else {
+        $expandPatternObject = $null
+        if ($effortSelect.TryGetCurrentPattern(
+            [System.Windows.Automation.ExpandCollapsePattern]::Pattern,
+            [ref] $expandPatternObject)) {
+            ([System.Windows.Automation.ExpandCollapsePattern] $expandPatternObject).Expand()
+        }
+        $options = @($effortSelect.FindAll(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            [System.Windows.Automation.Condition]::TrueCondition))
+        $selectedOption = $options | Where-Object {
+            $selectionObject = $null
+            $_.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref] $selectionObject) -and
+            ([System.Windows.Automation.SelectionItemPattern] $selectionObject).Current.IsSelected
+        } | Select-Object -First 1
+        $nextOption = $options | Where-Object {
+            $selectionObject = $null
+            $_.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref] $selectionObject) -and
+            $_ -ne $selectedOption
+        } | Select-Object -First 1
+        Assert-True ($null -ne $nextOption) 'The reasoning selector exposed no alternate UI Automation option.'
+        $selectionObject = $nextOption.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+        ([System.Windows.Automation.SelectionItemPattern] $selectionObject).Select()
+    }
+    Start-Sleep -Milliseconds 250
+    $effortSelect = Find-AutomationElementById $window 'EffortSelect'
+    $effortValuePatternObject = $null
+    Assert-True ($effortSelect.TryGetCurrentPattern(
+        [System.Windows.Automation.ValuePattern]::Pattern,
+        [ref] $effortValuePatternObject)) 'The changed reasoning selector stopped exposing its value.'
+    $effortAfter = ([System.Windows.Automation.ValuePattern] $effortValuePatternObject).Current.Value
+    Assert-True ($effortAfter -ne $effortBefore) 'A real click and keyboard selection did not change the reasoning level.'
+    Invoke-PhysicalClick $modelSummary
+    Invoke-PhysicalClick $toggleSessions
     $dragStart = New-Object System.Drawing.Point(
         [int] ($bounds.X + $bounds.Width - 24),
         [int] ($bounds.Y + ($bounds.Height / 2)))
@@ -321,6 +528,28 @@ try {
         $dragStart.X,
         $dragStart.Y)
     Assert-True ($blankRegionHitTest -eq 2) "The blank white gutter was not exposed as native HTCAPTION. Hit test: $blankRegionHitTest"
+    if ($script:inputMode -eq 'sendinput') {
+        $dragEnd = New-Object System.Drawing.Point(($dragStart.X + 54), ($dragStart.Y + 26))
+        [void] [ZommiElectronUiNative]::MovePointer($dragStart.X, $dragStart.Y)
+        Start-Sleep -Milliseconds 100
+        [ZommiElectronUiNative]::LeftButtonDown()
+        for ($step = 1; $step -le 6; $step++) {
+            [void] [ZommiElectronUiNative]::MovePointer(
+                [int] ($dragStart.X + (($dragEnd.X - $dragStart.X) * $step / 6)),
+                [int] ($dragStart.Y + (($dragEnd.Y - $dragStart.Y) * $step / 6)))
+            Start-Sleep -Milliseconds 18
+        }
+        [ZommiElectronUiNative]::LeftButtonUp()
+        Start-Sleep -Milliseconds 300
+        $window = Wait-MainWindow $process 10
+        $movedBounds = $window.Current.BoundingRectangle
+        Assert-True ([Math]::Abs(($movedBounds.X - $bounds.X) - 54) -le 8 -and
+            [Math]::Abs(($movedBounds.Y - $bounds.Y) - 26) -le 8) 'A real drag gesture on blank glass did not move the window with the pointer.'
+        $bounds = $movedBounds
+    }
+    else {
+        $dragGestureContract = 'blocked-input-desktop-locked; native-hit-test-passed'
+    }
 
     $shortcutName = $shortcuts.Current.Name
     $hotkeyRegistration = 'passed'
@@ -358,6 +587,85 @@ try {
         $firstUserBounds.Right -gt $secondUserBounds.Left
     Assert-True (-not $userMessagesOverlap) 'The retained user messages overlap.'
 
+    Invoke-PhysicalClick $composer
+    if ($script:inputMode -eq 'sendinput') {
+        [System.Windows.Forms.SendKeys]::SendWait('seeded streaming acceptance')
+    }
+    else {
+        $composerValue = $composer.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+        ([System.Windows.Automation.ValuePattern] $composerValue).SetValue('seeded streaming acceptance')
+    }
+    Start-Sleep -Milliseconds 150
+    $sendButton = Find-AutomationElementById $window 'SendMessage'
+    Invoke-PhysicalClick $sendButton
+    $stopButton = Wait-AutomationElementByName $window 'Stop response' 10
+    Assert-True ($null -ne $stopButton -and $stopButton.Current.IsEnabled) 'The send button did not become an enabled stop button during streaming.'
+
+    $transcriptScrollObject = $null
+    $streamDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    while ([DateTime]::UtcNow -lt $streamDeadline) {
+        $transcript = Find-AutomationElementById $window 'CodexTranscript'
+        if ($transcript.TryGetCurrentPattern(
+            [System.Windows.Automation.ScrollPattern]::Pattern,
+            [ref] $transcriptScrollObject) -and
+            ([System.Windows.Automation.ScrollPattern] $transcriptScrollObject).Current.VerticallyScrollable) {
+            break
+        }
+        $transcriptScrollObject = $null
+        Start-Sleep -Milliseconds 100
+    }
+    Assert-True ($null -ne $transcriptScrollObject) 'The seeded streaming transcript never became scrollable.'
+    $transcriptBounds = $transcript.Current.BoundingRectangle
+    [void] [ZommiElectronUiNative]::MovePointer(
+        [int] ($transcriptBounds.X + ($transcriptBounds.Width / 2)),
+        [int] ($transcriptBounds.Y + ($transcriptBounds.Height / 2)))
+    if ($script:inputMode -eq 'sendinput') {
+        for ($wheel = 0; $wheel -lt 8; $wheel++) {
+            [ZommiElectronUiNative]::MouseWheel(120)
+            Start-Sleep -Milliseconds 35
+        }
+    }
+    else {
+        ([System.Windows.Automation.ScrollPattern] $transcriptScrollObject).Scroll(
+            [System.Windows.Automation.ScrollAmount]::NoAmount,
+            [System.Windows.Automation.ScrollAmount]::LargeDecrement)
+    }
+    Start-Sleep -Milliseconds 250
+    $transcript = Find-AutomationElementById $window 'CodexTranscript'
+    $transcriptScrollObject = $null
+    Assert-True ($transcript.TryGetCurrentPattern(
+        [System.Windows.Automation.ScrollPattern]::Pattern,
+        [ref] $transcriptScrollObject)) 'The transcript stopped exposing scroll state.'
+    $manualScrollPercent = ([System.Windows.Automation.ScrollPattern] $transcriptScrollObject).Current.VerticalScrollPercent
+    Assert-True ($manualScrollPercent -lt 95) 'A real mouse-wheel gesture did not move the streaming transcript away from the bottom.'
+    Start-Sleep -Milliseconds 1200
+    $transcript = Find-AutomationElementById $window 'CodexTranscript'
+    $transcriptScrollObject = $null
+    [void] $transcript.TryGetCurrentPattern(
+        [System.Windows.Automation.ScrollPattern]::Pattern,
+        [ref] $transcriptScrollObject)
+    $percentWhileStreaming = ([System.Windows.Automation.ScrollPattern] $transcriptScrollObject).Current.VerticalScrollPercent
+    Assert-True ($percentWhileStreaming -lt 98) 'Streaming forced a manually scrolled transcript back to the bottom.'
+    $latestButton = Wait-AutomationElementById $window 'ScrollToLatest' 5
+    Assert-True ($null -ne $latestButton -and -not $latestButton.Current.IsOffscreen) 'The latest-message arrow did not appear after scrolling up.'
+    Invoke-PhysicalClick $latestButton
+    Start-Sleep -Milliseconds 250
+    $transcript = Find-AutomationElementById $window 'CodexTranscript'
+    $transcriptScrollObject = $null
+    [void] $transcript.TryGetCurrentPattern(
+        [System.Windows.Automation.ScrollPattern]::Pattern,
+        [ref] $transcriptScrollObject)
+    Assert-True (([System.Windows.Automation.ScrollPattern] $transcriptScrollObject).Current.VerticalScrollPercent -ge 98) 'The latest-message arrow did not return to the streaming bottom.'
+
+    $stopButton = Wait-AutomationElementByName $window 'Stop response' 5
+    Invoke-PhysicalClick $stopButton
+    $sendButton = Wait-AutomationElementByName $window 'Send message' 10
+    $status = Find-AutomationElementById $window 'CodexStatus'
+    Assert-True ($null -ne $sendButton -and $sendButton.Current.IsEnabled) 'Stopping did not restore the enabled send button.'
+    Assert-True ($status.Current.Name -eq 'Codex status: stopped') "The stopped turn did not expose the interrupted state. Status: $($status.Current.Name)"
+    $streamedTranscriptText = Get-AutomationText (Find-AutomationElementById $window 'CodexTranscript')
+    Assert-True (([regex]::Matches($streamedTranscriptText, [regex]::Escape('Preparing a long streamed response.'))).Count -eq 1) 'Thinking live/completed content was duplicated.'
+
     if (-not [string]::IsNullOrWhiteSpace($EvidencePath)) {
         $evidenceDeadline = [DateTime]::UtcNow.AddSeconds(15)
         while (-not (Test-Path -LiteralPath $resolvedEvidencePath -PathType Leaf) -and
@@ -365,6 +673,22 @@ try {
             Start-Sleep -Milliseconds 100
         }
         Assert-True (Test-Path -LiteralPath $resolvedEvidencePath -PathType Leaf) 'Electron did not write its renderer evidence image.'
+        if ($script:inputMode -eq 'sendinput') {
+            $hoverEvidenceDeadline = [DateTime]::UtcNow.AddSeconds(15)
+            while ((-not (Test-Path -LiteralPath $resolvedHoverRestPath -PathType Leaf) -or
+                    -not (Test-Path -LiteralPath $resolvedHoverActivePath -PathType Leaf)) -and
+                [DateTime]::UtcNow -lt $hoverEvidenceDeadline) {
+                Start-Sleep -Milliseconds 100
+            }
+            Assert-True (Test-Path -LiteralPath $resolvedHoverRestPath -PathType Leaf) 'Electron did not capture the non-hovered compositor state.'
+            Assert-True (Test-Path -LiteralPath $resolvedHoverActivePath -PathType Leaf) 'Electron did not capture the hovered compositor state.'
+            $brightnessWithoutHover = Get-BitmapBrightness $resolvedHoverRestPath
+            $brightnessWithHover = Get-BitmapBrightness $resolvedHoverActivePath
+            Assert-True ($brightnessWithHover -ge ($brightnessWithoutHover + 1.0)) 'Moving the pointer over the chat did not make the glass measurably less transparent.'
+        }
+        else {
+            $hoverOpacityContract = 'blocked-input-desktop-locked; css-contract-passed'
+        }
         $bitmap = [System.Drawing.Bitmap]::FromFile($resolvedEvidencePath)
         try {
             Assert-True ($bitmap.Width -ge ($bounds.Width - 2) -and $bitmap.Height -ge ($bounds.Height - 2)) 'The captured renderer surface did not preserve the adaptive native pixel dimensions.'
@@ -378,6 +702,23 @@ try {
                 $brightness = ([int] $pixel.R + [int] $pixel.G + [int] $pixel.B) / 3
                 Assert-True ($pixel.A -ge 200 -and $brightness -ge 150) 'The renderer retained a dark or transparent border around the glass surface.'
             }
+            $cornerPixels = @(
+                $bitmap.GetPixel(0, 0),
+                $bitmap.GetPixel($bitmap.Width - 1, 0),
+                $bitmap.GetPixel(0, $bitmap.Height - 1),
+                $bitmap.GetPixel($bitmap.Width - 1, $bitmap.Height - 1)
+            )
+            foreach ($pixel in $cornerPixels) {
+                Assert-True ($pixel.A -le 16) 'A square opaque corner remains outside the rounded glass.'
+            }
+            $partialAlphaPixels = 0
+            for ($x = 0; $x -lt [Math]::Min(48, $bitmap.Width); $x++) {
+                for ($y = 0; $y -lt [Math]::Min(48, $bitmap.Height); $y++) {
+                    $alpha = $bitmap.GetPixel($x, $y).A
+                    if ($alpha -gt 0 -and $alpha -lt 190) { $partialAlphaPixels++ }
+                }
+            }
+            Assert-True ($partialAlphaPixels -ge 4) 'The rounded edge has no partial-alpha antialiasing pixels.'
         }
         finally {
             $bitmap.Dispose()
@@ -394,21 +735,27 @@ try {
                 dpi = [int] $windowDpi
             }
             adaptiveDisplaySizing = 'passed'
-            nativeRoundedRegion = 'passed'
+            alphaAntialiasedCorners = 'passed'
             fullResolutionRenderer = 'passed'
             retainedConversationTurns = 'passed'
             nonOverlappingMessages = 'passed'
             thinkingAndToolCards = 'passed'
             modelReasoningPanel = 'passed'
             sessionSidebar = 'passed'
-            backgroundDrag = 'passed'
+            backgroundDrag = $dragGestureContract
+            inputMode = $script:inputMode
+            streamingStopButton = 'passed'
+            manualScrollPreserved = 'passed'
+            latestMessageButton = 'passed'
+            thinkingDeduplication = 'passed'
+            hoverReducesTransparency = $hoverOpacityContract
             evidencePath = $EvidencePath
         } | ConvertTo-Json -Depth 4
         return
     }
 
     $chipBounds = $docsChip.Current.BoundingRectangle
-    [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(
+    [void] [ZommiElectronUiNative]::MovePointer(
         [int] ($chipBounds.X + ($chipBounds.Width / 2)),
         [int] ($chipBounds.Y + ($chipBounds.Height / 2)))
 
@@ -427,7 +774,7 @@ try {
     Assert-True ($null -eq $previewImage -or $previewImage.Current.IsOffscreen) 'Text-only Alt+A context exposed an automatic image.'
 
     $previewBounds = $preview.Current.BoundingRectangle
-    [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(
+    [void] [ZommiElectronUiNative]::MovePointer(
         [int] ($previewBounds.X + ($previewBounds.Width / 2)),
         [int] ($previewBounds.Y + ($previewBounds.Height / 2)))
     Start-Sleep -Milliseconds 450
@@ -459,10 +806,10 @@ try {
     $dragEnd = New-Object System.Drawing.Point(
         [int] ($selectorBounds.X + 220),
         [int] ($selectorBounds.Y + 170))
-    [System.Windows.Forms.Cursor]::Position = $dragStart
+    [void] [ZommiElectronUiNative]::MovePointer($dragStart.X, $dragStart.Y)
     [ZommiElectronUiNative]::LeftButtonDown()
     Start-Sleep -Milliseconds 100
-    [System.Windows.Forms.Cursor]::Position = $dragEnd
+    [void] [ZommiElectronUiNative]::MovePointer($dragEnd.X, $dragEnd.Y)
     Start-Sleep -Milliseconds 150
     [ZommiElectronUiNative]::LeftButtonUp()
 
@@ -471,7 +818,7 @@ try {
     $secondImageChip = Wait-AutomationElementByName $window 'Attached context [image 2]' 15
     Assert-True ($null -ne $secondImageChip) 'Explicit image selection did not append a new image context.'
     $secondImageBounds = $secondImageChip.Current.BoundingRectangle
-    [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(
+    [void] [ZommiElectronUiNative]::MovePointer(
         [int] ($secondImageBounds.X + ($secondImageBounds.Width / 2)),
         [int] ($secondImageBounds.Y + ($secondImageBounds.Height / 2)))
     $imagePreview = Wait-AutomationElementById $window 'ContextPreviewImage' 10
@@ -494,7 +841,7 @@ try {
             dpi = [int] $windowDpi
         }
         adaptiveDisplaySizing = 'passed'
-        nativeRoundedRegion = 'passed'
+        alphaAntialiasedCorners = 'passed'
         accessibility = 'passed'
         structuredContexts = 'passed'
         retainedConversationTurns = 'passed'
@@ -502,7 +849,13 @@ try {
         thinkingAndToolCards = 'passed'
         modelReasoningPanel = 'passed'
         sessionSidebar = 'passed'
-        backgroundDrag = 'passed'
+        backgroundDrag = $dragGestureContract
+        inputMode = $script:inputMode
+        streamingStopButton = 'passed'
+        manualScrollPreserved = 'passed'
+        latestMessageButton = 'passed'
+        thinkingDeduplication = 'passed'
+        hoverReducesTransparency = $hoverOpacityContract
         selectedTextPrimary = 'passed'
         automaticAltAImage = 'absent'
         explicitAltShiftAImage = 'passed'
@@ -518,9 +871,7 @@ finally {
     if ($null -ne $process -and -not $process.HasExited) {
         Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
     }
-    if (Test-Path -LiteralPath $resolvedExecutable -PathType Leaf) {
-        foreach ($candidate in (Get-ExactExecutableProcesses $resolvedExecutable)) {
-            Stop-Process -Id $candidate.ProcessId -Force -ErrorAction SilentlyContinue
-        }
+    foreach ($candidate in (Get-AllZommiProcesses)) {
+        Stop-Process -Id $candidate.ProcessId -Force -ErrorAction SilentlyContinue
     }
 }

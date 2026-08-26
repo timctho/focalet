@@ -21,6 +21,7 @@ var tests = new (string Name, Action Body)[]
     ("Accessibility tree preserves provider structure without inferred Markdown", AccessibilityTreePreservesProviderStructure),
     ("Context tokens use URL abbreviations and remain unique", ContextTokensUseUrlAbbreviations),
     ("Codex reasoning deltas are preserved as thinking output", ReasoningDeltaIsPreserved),
+    ("Completed Codex thinking de-duplicates equivalent summary and content", CompletedReasoningIsDeduplicated),
     ("Codex commentary is preserved as thinking output", CommentaryIsPreservedAsThinking),
     ("Codex tool lifecycle and command output are preserved", ToolStreamingIsPreserved),
     ("Every current Codex tool item type is surfaced", EveryToolItemTypeIsSurfaced),
@@ -261,9 +262,10 @@ static void ContextPreviewOmitsInternalMetadata()
     True(!preview.Contains("Safety:", StringComparison.Ordinal), "The safety footer leaked into the context preview.");
 
     var invocation = ContextFormatter.FormatInvocation(snapshot, now.AddSeconds(1));
-    Contains("confidence medium", invocation);
-    Contains("Snapshot confidence: high", invocation);
-    Contains("Safety:", invocation);
+    True(!invocation.Contains("confidence medium", StringComparison.OrdinalIgnoreCase), "Pointer confidence leaked into invocation context.");
+    True(!invocation.Contains("Snapshot confidence:", StringComparison.Ordinal), "Snapshot confidence leaked into invocation context.");
+    True(!invocation.Contains("automation id", StringComparison.OrdinalIgnoreCase), "Pointer automation id leaked into invocation context.");
+    True(!invocation.Contains("Safety:", StringComparison.Ordinal), "The redundant safety footer leaked into invocation context.");
 }
 
 static void AccessibilityTreePreservesProviderStructure()
@@ -295,6 +297,14 @@ static void AccessibilityTreePreservesProviderStructure()
                             Row = 1,
                             Column = 0,
                         },
+                        new AccessibilityNodeInfo
+                        {
+                            Role = "Group",
+                            Children =
+                            [
+                                new AccessibilityNodeInfo { Role = "Text", Name = "Necessary label" },
+                            ],
+                        },
                     ],
                 },
             ],
@@ -306,6 +316,8 @@ static void AccessibilityTreePreservesProviderStructure()
     Contains("\"role\": \"Table\"", context);
     Contains("\"row\": 1", context);
     Contains("\"column\": 0", context);
+    Contains("Necessary label", context);
+    True(!context.Contains("\"role\": \"Group\"", StringComparison.Ordinal), "Empty layout wrappers leaked into compact accessibility JSON.");
     True(!context.Contains("windows-uia-control-view", StringComparison.Ordinal), "Capture-source metadata leaked into compact accessibility JSON.");
     True(!context.Contains("\"nodeCount\"", StringComparison.Ordinal), "Node-count metadata leaked into compact accessibility JSON.");
     True(!context.Contains("\"bounds\"", StringComparison.Ordinal), "Pixel-bound metadata leaked into compact accessibility JSON.");
@@ -355,6 +367,26 @@ static void ReasoningDeltaIsPreserved()
     Equal(CodexStreamLifecycle.Delta, update.Lifecycle);
     Equal("reasoning-1", update.ItemId);
     Equal("Inspecting the selected page", update.Text);
+}
+
+static void CompletedReasoningIsDeduplicated()
+{
+    using var document = JsonDocument.Parse("""
+        {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "reasoning",
+            "id": "reasoning-1",
+            "summary": ["Inspecting"],
+            "content": ["Inspecting files and tests."],
+            "status": "completed"
+          }
+        }
+        """);
+
+    var update = NotNull(CodexStreamProtocol.ParseNotification("item/completed", document.RootElement));
+    Equal("Inspecting files and tests.", update.Text);
 }
 
 static void CommentaryIsPreservedAsThinking()

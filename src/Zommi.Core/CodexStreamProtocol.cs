@@ -242,7 +242,21 @@ public static class CodexStreamProtocol
             }
         }
 
-        return string.Join(Environment.NewLine, values);
+        var distinct = new List<string>();
+        foreach (var candidate in values)
+        {
+            if (distinct.Any(existing =>
+                    existing.Equals(candidate, StringComparison.Ordinal) ||
+                    existing.Contains(candidate, StringComparison.Ordinal)))
+            {
+                continue;
+            }
+
+            distinct.RemoveAll(existing => candidate.Contains(existing, StringComparison.Ordinal));
+            distinct.Add(candidate);
+        }
+
+        return string.Join(Environment.NewLine, distinct);
     }
 
     private static string JoinNonEmpty(string separator, params string?[] values) =>

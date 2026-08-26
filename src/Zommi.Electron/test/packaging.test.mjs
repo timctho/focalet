@@ -12,6 +12,14 @@ test('Electron startup does not await readiness from top-level module evaluation
   assert.match(main, /void\s+startApplication\(\)\.catch/);
 });
 
+test('packaged acceptance scripts separate Electron options from application flags', async () => {
+  const repositoryRoot = join(appDirectory, '..', '..');
+  const uiContract = await readFile(join(repositoryRoot, 'scripts', 'test-windows-ui-contract.ps1'), 'utf8');
+  const sendAcceptance = await readFile(join(repositoryRoot, 'scripts', 'test-windows-send-acceptance.ps1'), 'utf8');
+  assert.match(uiContract, /'--force-renderer-accessibility',\s*'--',\s*'--acceptance-ui-seeded'/);
+  assert.match(sendAcceptance, /'--',\s*'--no-auto-launch'/);
+});
+
 test('sandboxed windows use packaged CommonJS preload bridges', async () => {
   const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
   const selector = await readFile(join(appDirectory, 'image-selector.mjs'), 'utf8');
@@ -60,7 +68,7 @@ test('Codex startup timeouts reset the connection and preserve actionable errors
   assert.match(renderer, /!status\.classList\.contains\('warning'\)/);
 });
 
-test('light liquid glass adapts to each display and clips the native window corners', async () => {
+test('light liquid glass adapts to each display and keeps alpha-antialiased corners', async () => {
   const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
   const styles = await readFile(join(appDirectory, 'renderer', 'styles.css'), 'utf8');
   assert.match(main, /nativeTheme\.themeSource\s*=\s*'light'/);
@@ -69,11 +77,16 @@ test('light liquid glass adapts to each display and clips the native window corn
   assert.match(main, /calculateAdaptiveWindowSize\(display\.workArea, expanded\)/);
   assert.match(main, /screen\.on\('display-metrics-changed'/);
   assert.match(main, /setContentSize\(size\.width, size\.height/);
-  assert.match(main, /roundedCorners:\s*false/);
+  assert.match(main, /roundedCorners:\s*true/);
   assert.match(main, /hasShadow:\s*false/);
-  assert.match(main, /mainWindow\.setShape\(rectangles\)/);
+  assert.match(main, /backgroundColor:\s*'#00000000'/);
+  assert.doesNotMatch(main, /\.setShape\(/);
+  assert.match(main, /createZommiIcon\(\)/);
+  assert.match(main, /image\/svg\+xml/);
+  assert.doesNotMatch(main, /iVBORw0KGgoAAAANSUhEUgAAAA4AAAAO/);
   assert.doesNotMatch(main, /setBackgroundMaterial\('acrylic'\)/);
   assert.match(styles, /color-scheme:\s*light/);
+  assert.match(styles, /clip-path:\s*inset\(0 round 30px\)/);
   assert.match(styles, /\.glass\s*\{[\s\S]*width:\s*100%[\s\S]*height:\s*100%/);
   assert.doesNotMatch(styles, /\.glass\s*\{[\s\S]{0,200}margin:\s*12px/);
 });
@@ -121,10 +134,27 @@ test('blank glass regions use native dragging and movement turns off expensive b
   const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
   const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
   assert.match(styles, /\.glass\s*\{[\s\S]*-webkit-app-region:\s*drag/);
-  assert.match(styles, /\.drag-ready\s*\{\s*-webkit-app-region:\s*drag/);
+  assert.match(styles, /\.transcript::after\s*\{[\s\S]*-webkit-app-region:\s*drag/);
+  assert.match(styles, /\.conversation-turn\s*\{[\s\S]*-webkit-app-region:\s*drag/);
   assert.match(styles, /body\.window-moving[\s\S]*backdrop-filter:\s*none/);
-  assert.match(renderer, /updateBackgroundDragSurface/);
+  assert.doesNotMatch(renderer, /updateBackgroundDragSurface|drag-ready/);
   assert.match(main, /mainWindow\.on\('will-move'/);
+});
+
+test('streaming send control becomes a stop control backed by Codex turn interruption', async () => {
+  const html = await readFile(join(appDirectory, 'renderer', 'index.html'), 'utf8');
+  const preload = await readFile(join(appDirectory, 'preload.cjs'), 'utf8');
+  const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
+  const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
+  const portableBridge = await readFile(join(appDirectory, 'codex-bridge.mjs'), 'utf8');
+  const windowsBridge = await readFile(join(appDirectory, '..', 'Zommi.Windows', 'CodexAppServerClient.cs'), 'utf8');
+  assert.match(html, /class="ui-icon stop-icon"/);
+  assert.match(preload, /interrupt:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('chat:interrupt'\)/);
+  assert.match(renderer, /window\.zommi\.interrupt\(\)/);
+  assert.match(renderer, /setAttribute\('aria-label', turnActive \? 'Stop response' : 'Send message'\)/);
+  assert.match(main, /ipcMain\.handle\('chat:interrupt'/);
+  assert.match(portableBridge, /#request\('turn\/interrupt', \{ threadId: this\.threadId, turnId \}\)/);
+  assert.match(windowsBridge, /"turn\/interrupt"[\s\S]*new \{ threadId, turnId \}/);
 });
 
 test('streaming preserves manual scroll position and exposes a latest-message control', async () => {

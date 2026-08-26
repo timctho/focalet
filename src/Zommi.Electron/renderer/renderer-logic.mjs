@@ -15,6 +15,19 @@ export function mergeActivityText(currentValue, incomingValue, kind, lifecycle) 
   return `${current}${separator}${incoming}`;
 }
 
+export function mergeDistinctTextSections(sections) {
+  const values = [];
+  for (const section of sections || []) {
+    const value = String(section || '').trim();
+    if (!value || values.some((existing) => existing === value || existing.includes(value))) continue;
+    for (let index = values.length - 1; index >= 0; index--) {
+      if (value.includes(values[index])) values.splice(index, 1);
+    }
+    values.push(value);
+  }
+  return values.join('\n');
+}
+
 export function extractDisplayUserText(value) {
   const text = String(value || '');
   const match = text.match(/<user_message>\s*([\s\S]*?)\s*<\/user_message>/i);

@@ -3,6 +3,7 @@ import {
   extractDisplayUserText,
   isNearBottom,
   mergeActivityText,
+  mergeDistinctTextSections,
   sessionTitle,
 } from './renderer-logic.mjs';
 
@@ -33,11 +34,11 @@ let assistantElement = null;
 let assistantTextNode = null;
 let currentTurnBody = null;
 let turnActive = false;
+let interruptRequested = false;
 let previewTimer = null;
 let turnNumber = 0;
 let autoFollow = true;
 let programmaticScroll = false;
-let activeDragSurface = null;
 let activeThreadId = null;
 let sessions = [];
 let models = [];
@@ -52,19 +53,19 @@ document.querySelector('#ClosePreview').addEventListener('click', hidePreview);
 toggleSessions.addEventListener('click', toggleSessionSidebar);
 newSession.addEventListener('click', createSession);
 openModelPanel.addEventListener('click', toggleModelPanel);
+glass.addEventListener('mouseenter', () => window.zommi.reportAcceptanceHover?.(true));
+glass.addEventListener('mouseleave', () => window.zommi.reportAcceptanceHover?.(false));
 modelSummary.addEventListener('click', toggleModelPanel);
 modelSelect.addEventListener('change', selectModel);
 effortSelect.addEventListener('change', selectEffort);
 scrollToLatest.addEventListener('click', () => scrollTranscript({ force: true }));
 transcript.addEventListener('scroll', handleTranscriptScroll, { passive: true });
-glass.addEventListener('mousemove', updateBackgroundDragSurface);
-glass.addEventListener('mouseleave', clearBackgroundDragSurface);
-sendButton.addEventListener('click', sendMessage);
+sendButton.addEventListener('click', handlePrimaryAction);
 composer.addEventListener('input', resizeComposer);
 composer.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
-    sendMessage();
+    if (!turnActive) sendMessage();
   }
   if (event.key === 'Escape') window.zommi.hide();
 });
@@ -126,7 +127,7 @@ function renderAttachments() {
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.setAttribute('aria-label', `Remove ${attachment.token}`);
-    remove.textContent = '×';
+    remove.append(createUiIcon('close'));
     remove.addEventListener('click', () => removeAttachment(attachment.id));
     chip.append(label, remove);
     chip.addEventListener('mouseenter', () => showPreview(attachment));
@@ -312,7 +313,8 @@ async function sendMessage() {
   const message = composer.value.trim();
   if (!message) return;
   turnActive = true;
-  sendButton.disabled = true;
+  interruptRequested = false;
+  renderPrimaryAction();
   composer.disabled = true;
   renderSessions();
   renderModelControls();
@@ -339,6 +341,37 @@ async function sendMessage() {
   }
 }
 
+function handlePrimaryAction() {
+  if (turnActive) {
+    void stopTurn();
+    return;
+  }
+  void sendMessage();
+}
+
+async function stopTurn() {
+  if (!turnActive || interruptRequested) return;
+  interruptRequested = true;
+  renderPrimaryAction();
+  renderStatus('stopping…');
+  try {
+    await window.zommi.interrupt();
+  } catch (error) {
+    if (!turnActive) return;
+    interruptRequested = false;
+    renderPrimaryAction();
+    renderStatus(`Could not stop response: ${error.message}`, true);
+  }
+}
+
+function renderPrimaryAction() {
+  sendButton.classList.toggle('is-stop', turnActive);
+  sendButton.classList.toggle('stop-requested', interruptRequested);
+  sendButton.disabled = turnActive && interruptRequested;
+  sendButton.setAttribute('aria-label', turnActive ? 'Stop response' : 'Send message');
+  sendButton.title = turnActive ? (interruptRequested ? 'Stopping…' : 'Stop') : 'Send';
+}
+
 function updateActiveSessionTitle(message) {
   let session = sessions.find((item) => item.id === activeThreadId);
   if (!session && activeThreadId) {
@@ -362,7 +395,7 @@ function renderStreamUpdate(update) {
       const avatar = document.createElement('span');
       avatar.className = 'assistant-mark';
       avatar.setAttribute('aria-hidden', 'true');
-      avatar.textContent = '✦';
+      avatar.append(createUiIcon('sparkle'));
       assistantElement = document.createElement('div');
       assistantElement.className = 'message assistant';
       assistantTextNode = document.createTextNode('');
@@ -394,7 +427,7 @@ function createActivity(kind, title) {
   const icon = document.createElement('span');
   icon.className = 'activity-icon';
   icon.setAttribute('aria-hidden', 'true');
-  icon.textContent = kind === 'thinking' ? '✦' : kind === 'plan' ? '≡' : '⌘';
+  icon.append(createUiIcon(kind === 'thinking' ? 'sparkle' : kind === 'plan' ? 'plan' : 'tool'));
   const heading = document.createElement('span');
   heading.className = 'activity-title';
   heading.textContent = kind === 'thinking' ? 'Thinking' : title || 'Activity';
@@ -440,6 +473,23 @@ function updateActivity(activity, update, lifecycle) {
 function compactLabel(value) {
   const line = String(value).split(/\r?\n/, 1)[0].replace(/\s+/g, ' ').trim();
   return line.length <= 70 ? line : `${line.slice(0, 69)}…`;
+}
+
+function createUiIcon(name) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'ui-icon');
+  svg.setAttribute('viewBox', '0 0 20 20');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  const paths = {
+    close: 'm6 6 8 8m0-8-8 8',
+    sparkle: 'M10 3.5c.55 3.8 2.7 5.95 6.5 6.5-3.8.55-5.95 2.7-6.5 6.5-.55-3.8-2.7-5.95-6.5-6.5 3.8-.55 5.95-2.7 6.5-6.5Z',
+    plan: 'M5 5.5h10M5 10h10M5 14.5h7',
+    tool: 'M6.3 5.1a3.4 3.4 0 0 0 4.2 4.4l4.2 4.2-1.9 1.9-4.2-4.2a3.4 3.4 0 0 1-4.2-4.3l2 2 1.9-1.9-2-2.1Z',
+  };
+  path.setAttribute('d', paths[name] || paths.tool);
+  svg.append(path);
+  return svg;
 }
 
 function normalizeKind(value) {
@@ -496,15 +546,18 @@ function appendError(message) {
 
 function completeTurn(turnStatus) {
   turnActive = false;
+  interruptRequested = false;
   for (const activity of activityElements.values()) {
     if (activity.element.classList.contains('completed')) continue;
     activity.element.classList.add('completed');
     activity.state.textContent = 'done';
     activity.element.open = false;
   }
-  sendButton.disabled = false;
+  renderPrimaryAction();
   composer.disabled = false;
-  if (String(turnStatus).toLowerCase() === 'completed') renderStatus('ready');
+  const normalizedStatus = String(turnStatus).toLowerCase();
+  if (normalizedStatus === 'completed') renderStatus('ready');
+  else if (normalizedStatus === 'interrupted') renderStatus('stopped');
   else if (!status.classList.contains('warning')) renderStatus(`turn ${turnStatus}`, true);
   renderSessions();
   renderModelControls();
@@ -597,7 +650,7 @@ function renderHistoryItem(item) {
     return;
   }
   if (item.type === 'reasoning') {
-    const text = [...(item.summary || []), ...(item.content || [])].filter(Boolean).join('\n');
+    const text = mergeDistinctTextSections([...(item.summary || []), ...(item.content || [])]);
     renderStreamUpdate({ kind: 'thinking', lifecycle: 'completed', title: 'Thinking', text, itemId: item.id, status: 'done' });
     return;
   }
@@ -632,26 +685,6 @@ function appendWelcome() {
   transcript.append(welcome);
 }
 
-function updateBackgroundDragSurface(event) {
-  const target = event.target;
-  const eligible = target === transcript || target?.classList?.contains('conversation-turn') ||
-    target?.classList?.contains('turn-body') || target?.classList?.contains('message-row') ||
-    target?.classList?.contains('welcome');
-  if (!eligible) {
-    clearBackgroundDragSurface();
-    return;
-  }
-  if (activeDragSurface === target) return;
-  clearBackgroundDragSurface();
-  activeDragSurface = target;
-  activeDragSurface.classList.add('drag-ready');
-}
-
-function clearBackgroundDragSurface() {
-  activeDragSurface?.classList.remove('drag-ready');
-  activeDragSurface = null;
-}
-
 function seedAcceptanceConversation() {
   if (transcript.querySelector('.conversation-turn')) return;
   removeWelcome();
@@ -670,6 +703,4 @@ function seedAcceptanceConversation() {
   beginTurn('Now compare it with the second tab.', ['[shop.example.com]']);
   renderStreamUpdate({ kind: 'assistant', lifecycle: 'delta', title: 'Codex', text: 'I’ll keep both contexts separate and compare only the facts each tab exposes.' });
   renderStatus('ready');
-  if (!sessionSidebar.classList.contains('open')) toggleSessions.click();
-  if (modelPanel.hidden) modelSummary.click();
 }

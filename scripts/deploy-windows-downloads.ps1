@@ -58,6 +58,8 @@ function Assert-DirectoryMatches {
             throw "Directory hash mismatch: $relativePath"
         }
     }
+
+    return $actualHashes.Count
 }
 
 function Get-ExactTargetProcesses {
@@ -94,7 +96,7 @@ if (-not $targetDirectory.StartsWith($expectedPrefix, [StringComparison]::Ordina
 try {
     Copy-Item -LiteralPath $sourceDirectory -Destination $pendingDirectory -Recurse
     Copy-Item -LiteralPath $sourceArchive -Destination $pendingArchive
-    Assert-DirectoryMatches $sourceDirectory $pendingDirectory
+    $null = Assert-DirectoryMatches $sourceDirectory $pendingDirectory
 
     $sourceArchiveHash = (Get-FileHash -LiteralPath $sourceArchive -Algorithm SHA256).Hash
     $pendingArchiveHash = (Get-FileHash -LiteralPath $pendingArchive -Algorithm SHA256).Hash
@@ -127,7 +129,7 @@ try {
     Move-Item -LiteralPath $pendingArchive -Destination $targetArchive
     $archiveReplaced = $true
 
-    Assert-DirectoryMatches $sourceDirectory $targetDirectory
+    $deployedFileCount = Assert-DirectoryMatches $sourceDirectory $targetDirectory
     $targetArchiveHash = (Get-FileHash -LiteralPath $targetArchive -Algorithm SHA256).Hash
     if ($targetArchiveHash -ne $sourceArchiveHash) {
         throw 'The deployed portable archive does not match the source archive.'
@@ -179,7 +181,7 @@ try {
     [ordered]@{
         targetDirectory = $targetDirectory
         targetArchive = $targetArchive
-        files = (Get-DirectoryHashes $targetDirectory).Count
+        files = $deployedFileCount
         executableSha256 = (Get-FileHash -LiteralPath (Join-Path $targetDirectory 'Zommi.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
         archiveSha256 = $targetArchiveHash.ToLowerInvariant()
         stoppedProcesses = $stoppedProcessCount

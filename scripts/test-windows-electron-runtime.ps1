@@ -154,8 +154,12 @@ function Set-AutomationValue {
 function Invoke-AutomationElement {
     param([System.Windows.Automation.AutomationElement] $Element)
 
-    $invokePattern = $Element.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-    ([System.Windows.Automation.InvokePattern] $invokePattern).Invoke()
+    $bounds = $Element.Current.BoundingRectangle
+    Assert-True ($bounds.Width -gt 0 -and $bounds.Height -gt 0) 'Cannot click an element without visible bounds.'
+    [ZommiElectronAcceptanceNative]::Click(
+        [int] ($bounds.X + ($bounds.Width / 2)),
+        [int] ($bounds.Y + ($bounds.Height / 2)))
+    Start-Sleep -Milliseconds 180
 }
 
 function Get-ExactExecutableProcesses {
@@ -172,6 +176,10 @@ function Get-ExactExecutableProcesses {
                 [StringComparison]::OrdinalIgnoreCase)
         }
     )
+}
+
+function Get-AllZommiProcesses {
+    return @(Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'Zommi.exe' })
 }
 
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
@@ -202,6 +210,8 @@ public static class ZommiElectronAcceptanceNative {
     private static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
     [DllImport("user32.dll")]
     private static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")]
+    private static extern void mouse_event(uint flags, uint dx, uint dy, int data, UIntPtr extraInfo);
 
     public static bool Activate(IntPtr target) {
         IntPtr foreground = GetForegroundWindow();
@@ -228,6 +238,14 @@ public static class ZommiElectronAcceptanceNative {
     public static bool MovePointer(int x, int y) {
         return SetCursorPos(x, y);
     }
+
+    public static void Click(int x, int y) {
+        SetCursorPos(x, y);
+        System.Threading.Thread.Sleep(100);
+        mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);
+        System.Threading.Thread.Sleep(55);
+        mouse_event(0x0004, 0, 0, 0, UIntPtr.Zero);
+    }
 }
 '@
 
@@ -245,6 +263,11 @@ $browserMarker = 'ZOMMI_ELECTRON_' + [Guid]::NewGuid().ToString('N')
 
 try {
     New-Item -ItemType Directory -Path $temporaryRoot | Out-Null
+    foreach ($existing in (Get-AllZommiProcesses)) {
+        Stop-Process -Id $existing.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Milliseconds 1500
+    Assert-True (@(Get-AllZommiProcesses).Count -eq 0) 'A pre-existing Zommi product process retained the single-instance lock.'
     $electron = Start-Process `
         -FilePath $resolvedExecutable `
         -WorkingDirectory $packageDirectory `
@@ -407,6 +430,22 @@ try {
         $effortSelect = Wait-AutomationElementById $window 'EffortSelect' 10
         Assert-True ($null -ne $modelSelect -and -not $modelSelect.Current.IsOffscreen) 'The live model catalog selector did not open.'
         Assert-True ($null -ne $effortSelect -and -not $effortSelect.Current.IsOffscreen) 'The live reasoning-level selector did not open.'
+        $effortValuePatternObject = $null
+        if ($effortSelect.TryGetCurrentPattern(
+            [System.Windows.Automation.ValuePattern]::Pattern,
+            [ref] $effortValuePatternObject)) {
+            $effortBefore = ([System.Windows.Automation.ValuePattern] $effortValuePatternObject).Current.Value
+            Invoke-AutomationElement $effortSelect
+            [System.Windows.Forms.SendKeys]::SendWait('{DOWN}{ENTER}')
+            Start-Sleep -Milliseconds 250
+            $effortSelect = Find-AutomationElementById $window 'EffortSelect'
+            $effortValuePatternObject = $null
+            [void] $effortSelect.TryGetCurrentPattern(
+                [System.Windows.Automation.ValuePattern]::Pattern,
+                [ref] $effortValuePatternObject)
+            $effortAfter = ([System.Windows.Automation.ValuePattern] $effortValuePatternObject).Current.Value
+            Assert-True ($effortAfter -ne $effortBefore) 'A real selection did not change the live reasoning level.'
+        }
         Invoke-AutomationElement $modelSummary
 
         $toggleSessions = Wait-AutomationElementById $window 'ToggleSessions' 10
@@ -466,10 +505,8 @@ finally {
     if ($null -ne $electron -and -not $electron.HasExited) {
         Stop-Process -Id $electron.Id -Force -ErrorAction SilentlyContinue
     }
-    if (Test-Path -LiteralPath $resolvedExecutable -PathType Leaf) {
-        foreach ($candidate in (Get-ExactExecutableProcesses $resolvedExecutable)) {
-            Stop-Process -Id $candidate.ProcessId -Force -ErrorAction SilentlyContinue
-        }
+    foreach ($candidate in (Get-AllZommiProcesses)) {
+        Stop-Process -Id $candidate.ProcessId -Force -ErrorAction SilentlyContinue
     }
     if ($null -ne $edgeWindow -and -not $edgeWindow.HasExited) {
         try { [void] $edgeWindow.CloseMainWindow() } catch { }

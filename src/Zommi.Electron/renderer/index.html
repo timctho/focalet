@@ -15,17 +15,27 @@
     <aside id="SessionSidebar" class="session-sidebar no-drag" aria-label="Chat sessions" aria-hidden="true">
       <div class="sidebar-head">
         <span>Chats</span>
-        <button id="NewSession" class="small-round" type="button" aria-label="Create new chat" title="New chat">＋</button>
+        <button id="NewSession" class="small-round" type="button" aria-label="Create new chat" title="New chat">
+          <svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4.5v11M4.5 10h11"/></svg>
+        </button>
       </div>
       <nav id="SessionList" class="session-list" aria-label="Zommi chat sessions"></nav>
     </aside>
 
     <header class="titlebar">
-      <button id="HideZommi" class="round-button no-drag" aria-label="Hide Zommi" title="Hide">×</button>
-      <button id="ToggleSessions" class="round-button no-drag menu" aria-label="Show chat sessions" aria-expanded="false" title="Chats">☰</button>
+      <button id="HideZommi" class="round-button no-drag" aria-label="Hide Zommi" title="Hide">
+        <svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="m5.5 5.5 9 9m0-9-9 9"/></svg>
+      </button>
+      <button id="ToggleSessions" class="round-button no-drag menu" aria-label="Show chat sessions" aria-expanded="false" title="Chats">
+        <svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 6h10M5 10h10M5 14h10"/></svg>
+      </button>
       <div class="drag-region" aria-hidden="true"></div>
-      <button id="OpenModelPanel" class="round-button no-drag controls" aria-label="Choose model and reasoning level" aria-expanded="false" title="Model settings">⌄</button>
-      <button id="ExpandZommi" class="round-button no-drag expand" aria-label="Expand Zommi" title="Expand">↗</button>
+      <button id="OpenModelPanel" class="round-button no-drag controls" aria-label="Choose model and reasoning level" aria-expanded="false" title="Model settings">
+        <svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="m5.5 8 4.5 4 4.5-4"/></svg>
+      </button>
+      <button id="ExpandZommi" class="round-button no-drag expand" aria-label="Expand Zommi" title="Expand">
+        <svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 5H5v2.5M12.5 5H15v2.5M7.5 15H5v-2.5m7.5 2.5H15v-2.5"/></svg>
+      </button>
     </header>
 
     <section id="CodexTranscript" class="transcript" role="log" aria-live="polite" aria-label="Codex conversation including thinking and tool activity">
@@ -35,7 +45,7 @@
       </div>
     </section>
 
-    <button id="ScrollToLatest" class="scroll-latest no-drag" type="button" aria-label="Scroll to latest message" title="Latest message" hidden>↓</button>
+    <button id="ScrollToLatest" class="scroll-latest no-drag" type="button" aria-label="Scroll to latest message" title="Latest message" hidden><svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M5.5 8 10 12l4.5-4"/></svg></button>
 
     <aside id="ModelPanel" class="model-panel no-drag" aria-label="Model settings" hidden>
       <div class="panel-heading">Model settings</div>
@@ -49,7 +59,7 @@
     <aside id="ContextPreview" class="context-preview" aria-label="Attached context preview" hidden>
       <div class="preview-head">
         <span id="PreviewTitle">Context</span>
-        <button id="ClosePreview" aria-label="Close context preview">×</button>
+        <button id="ClosePreview" aria-label="Close context preview"><svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="m5.5 5.5 9 9m0-9-9 9"/></svg></button>
       </div>
       <img id="ContextPreviewImage" alt="Attached visual context preview" hidden>
       <pre id="ContextPreviewText" tabindex="0"></pre>
@@ -59,9 +69,12 @@
       <div id="ContextChips" class="context-chips" aria-label="Attached contexts"></div>
       <button id="ModelSummary" class="model-summary" type="button" aria-label="Choose model and reasoning level" aria-expanded="false">Loading models…</button>
       <div class="composer-row">
-        <button id="SelectImage" class="composer-button plus" aria-label="Select image context" title="Select image context">+</button>
+        <button id="SelectImage" class="composer-button plus" aria-label="Select image context" title="Select image context"><svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4.5v11M4.5 10h11"/></svg></button>
         <textarea id="ZommiComposer" rows="1" aria-label="Zommi message with attached context tokens" placeholder="Ask Codex"></textarea>
-        <button id="SendMessage" class="composer-button send" aria-label="Send message" title="Send">↑</button>
+        <button id="SendMessage" class="composer-button send" aria-label="Send message" title="Send">
+          <svg class="ui-icon send-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 15.5v-11m-4 4 4-4 4 4"/></svg>
+          <svg class="ui-icon stop-icon" viewBox="0 0 20 20" aria-hidden="true"><rect x="6" y="6" width="8" height="8" rx="1.5"/></svg>
+        </button>
       </div>
     </section>
 

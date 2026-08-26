@@ -28,6 +28,7 @@ internal sealed class CodexAppServerClient : IDisposable
     private JsonElement? activeThread;
     private bool activeThreadHasHistory;
     private string? pendingSessionName;
+    private string? activeTurnId;
 
     public event Action<string>? StatusChanged;
 
@@ -77,7 +78,7 @@ internal sealed class CodexAppServerClient : IDisposable
         IReadOnlyList<string> imageDataUrls) =>
         StartTurnAsync(userMessage, invocationContexts, imageDataUrls, null, null);
 
-    public async Task StartTurnAsync(
+    public async Task<string> StartTurnAsync(
         string userMessage,
         IReadOnlyList<ContextSnapshot> invocationContexts,
         IReadOnlyList<string> imageDataUrls,
@@ -114,7 +115,7 @@ internal sealed class CodexAppServerClient : IDisposable
 
         try
         {
-            _ = await SendRequestAsync(
+            var response = await SendRequestAsync(
                 "turn/start",
                 new
                 {
@@ -125,6 +126,14 @@ internal sealed class CodexAppServerClient : IDisposable
                     summary = "detailed",
                 },
                 lifetime.Token).ConfigureAwait(false);
+            activeTurnId = response.TryGetProperty("turn", out var turn) &&
+                           turn.TryGetProperty("id", out var turnIdElement)
+                ? turnIdElement.GetString()
+                : activeTurnId;
+            if (string.IsNullOrWhiteSpace(activeTurnId))
+            {
+                throw new InvalidOperationException("Codex started a turn without returning its id.");
+            }
         }
         catch
         {
@@ -138,6 +147,24 @@ internal sealed class CodexAppServerClient : IDisposable
 
         CurrentModel = string.IsNullOrWhiteSpace(model) ? CurrentModel : model;
         CurrentEffort = string.IsNullOrWhiteSpace(effort) ? CurrentEffort : effort;
+        return activeTurnId;
+    }
+
+    public async Task<object> InterruptTurnAsync()
+    {
+        await EnsureStartedAsync().ConfigureAwait(false);
+        var threadId = ThreadId ?? throw new InvalidOperationException("Codex did not create a thread.");
+        var turnId = activeTurnId;
+        if (string.IsNullOrWhiteSpace(turnId))
+        {
+            throw new InvalidOperationException("There is no active Codex turn to stop.");
+        }
+
+        _ = await SendRequestAsync(
+            "turn/interrupt",
+            new { threadId, turnId },
+            lifetime.Token).ConfigureAwait(false);
+        return new { interrupted = true, threadId, turnId };
     }
 
     public async Task<object> GetChatStateAsync()
@@ -497,6 +524,12 @@ internal sealed class CodexAppServerClient : IDisposable
             }
 
             TrackStreamItemKind(method, parameters);
+            if (method.Equals("turn/started", StringComparison.Ordinal) &&
+                parameters.TryGetProperty("turn", out var startedTurn) &&
+                startedTurn.TryGetProperty("id", out var startedTurnId))
+            {
+                activeTurnId = startedTurnId.GetString() ?? activeTurnId;
+            }
             var streamUpdate = CodexStreamProtocol.ParseNotification(method, parameters);
             if (streamUpdate is { Kind: CodexStreamKind.Assistant, ItemId: not null } &&
                 streamItemKinds.TryGetValue(streamUpdate.ItemId, out var mappedKind))
@@ -549,7 +582,9 @@ internal sealed class CodexAppServerClient : IDisposable
                         StatusChanged?.Invoke($"Codex turn {status}: {turnDetail}");
                     }
                     streamItemKinds.Clear();
-                    _ = CompleteTurnAsync(status);
+                    activeTurnId = null;
+                    TurnCompleted?.Invoke(status);
+                    _ = CompleteTurnMetadataAsync();
                     break;
                 case "error":
                     var errorMessage = parameters.TryGetProperty("error", out var errorObject) &&
@@ -630,7 +665,7 @@ internal sealed class CodexAppServerClient : IDisposable
             : CodexStreamKind.Assistant;
     }
 
-    private async Task CompleteTurnAsync(string status)
+    private async Task CompleteTurnMetadataAsync()
     {
         var name = pendingSessionName;
         pendingSessionName = null;
@@ -650,7 +685,6 @@ internal sealed class CodexAppServerClient : IDisposable
             }
         }
 
-        TurnCompleted?.Invoke(status);
     }
 
     private static string BuildTurnText(
@@ -722,6 +756,7 @@ internal sealed class CodexAppServerClient : IDisposable
             activeThread = null;
             activeThreadHasHistory = false;
             pendingSessionName = null;
+            activeTurnId = null;
             startTask = null;
         }
 
@@ -772,6 +807,7 @@ internal sealed class CodexAppServerClient : IDisposable
             activeThread = null;
             activeThreadHasHistory = false;
             pendingSessionName = null;
+            activeTurnId = null;
             startTask = null;
         }
         StopProcess(activeProcess);

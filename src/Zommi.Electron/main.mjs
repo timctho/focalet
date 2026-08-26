@@ -13,8 +13,16 @@ const seededAcceptance = process.argv.includes('--acceptance-ui-seeded');
 const acceptanceEvidencePath = process.argv
   .find((argument) => argument.startsWith('--acceptance-evidence='))
   ?.slice('--acceptance-evidence='.length);
+const acceptanceHoverRestPath = process.argv
+  .find((argument) => argument.startsWith('--acceptance-hover-rest='))
+  ?.slice('--acceptance-hover-rest='.length);
+const acceptanceHoverActivePath = process.argv
+  .find((argument) => argument.startsWith('--acceptance-hover-active='))
+  ?.slice('--acceptance-hover-active='.length);
+const acceptanceInputProbePath = process.argv
+  .find((argument) => argument.startsWith('--acceptance-input-probe='))
+  ?.slice('--acceptance-input-probe='.length);
 const noAutoLaunch = process.argv.includes('--no-auto-launch');
-const windowCornerRadius = 30;
 let mainWindow = null;
 let tray = null;
 let backend = null;
@@ -24,6 +32,8 @@ let displaySignature = null;
 let shortcuts = { context: false, image: false };
 let movementSettledTimer = null;
 let windowMoving = false;
+let seededStreamTimer = null;
+let seededStreamTurnId = null;
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
@@ -60,6 +70,9 @@ async function startApplication() {
       if (acceptanceEvidencePath) {
         setTimeout(() => captureAcceptanceEvidence(acceptanceEvidencePath), 700);
       }
+      if (acceptanceInputProbePath) {
+        setTimeout(() => runAcceptanceInputProbe(acceptanceInputProbePath), 900);
+      }
     });
   } else {
     mainWindow.webContents.once('did-finish-load', sendShortcutState);
@@ -72,6 +85,78 @@ async function startApplication() {
     globalShortcut.unregisterAll();
     backend?.stop?.();
   });
+}
+
+async function runAcceptanceInputProbe(path) {
+  const result = { inputPath: 'webContents.sendInputEvent' };
+  try {
+    await clickRendererElement('#ToggleSessions');
+    result.sessionSidebar = await evaluateRenderer(`document.querySelector('#SessionSidebar')?.classList.contains('open') === true`);
+    await clickRendererElement('#OpenModelPanel');
+    result.modelPanel = await evaluateRenderer(`document.querySelector('#ModelPanel')?.hidden === false`);
+    const effortBefore = await evaluateRenderer(`document.querySelector('#EffortSelect')?.value || ''`);
+    await clickRendererElement('#EffortSelect');
+    for (const keyCode of ['Down', 'Enter']) {
+      mainWindow.webContents.sendInputEvent({ type: 'keyDown', keyCode });
+      mainWindow.webContents.sendInputEvent({ type: 'keyUp', keyCode });
+    }
+    await delay(180);
+    const effortAfter = await evaluateRenderer(`document.querySelector('#EffortSelect')?.value || ''`);
+    result.reasoningChanged = Boolean(effortBefore && effortAfter && effortBefore !== effortAfter);
+    await clickRendererElement('#OpenModelPanel');
+    await clickRendererElement('#ToggleSessions');
+
+    await clickRendererElement('#ZommiComposer');
+    mainWindow.webContents.insertText('seeded streaming input acceptance');
+    await delay(100);
+    await clickRendererElement('#SendMessage');
+    await delay(300);
+    result.stopButtonDuringStreaming = await evaluateRenderer(`document.querySelector('#SendMessage')?.getAttribute('aria-label') === 'Stop response'`);
+    await delay(2500);
+    const transcriptPoint = await rendererElementCenter('#CodexTranscript');
+    mainWindow.webContents.sendInputEvent({ type: 'mouseMove', x: transcriptPoint.x, y: transcriptPoint.y });
+    mainWindow.webContents.sendInputEvent({ type: 'mouseWheel', x: transcriptPoint.x, y: transcriptPoint.y, deltaY: 720, canScroll: true });
+    await delay(250);
+    const manualScrollState = await evaluateRenderer(`{ const e = document.querySelector('#CodexTranscript'); return e ? { top: e.scrollTop, distance: e.scrollHeight - e.scrollTop - e.clientHeight } : null; }`);
+    await delay(1000);
+    const streamedScrollState = await evaluateRenderer(`{ const e = document.querySelector('#CodexTranscript'); return e ? { top: e.scrollTop, distance: e.scrollHeight - e.scrollTop - e.clientHeight } : null; }`);
+    result.manualScrollPreserved = Boolean(manualScrollState && streamedScrollState && manualScrollState.distance > 40 && Math.abs(streamedScrollState.top - manualScrollState.top) <= 2);
+    result.latestButtonVisible = await evaluateRenderer(`document.querySelector('#ScrollToLatest')?.hidden === false`);
+    await clickRendererElement('#ScrollToLatest');
+    await delay(180);
+    result.latestButtonReturnsToBottom = await evaluateRenderer(`{ const e = document.querySelector('#CodexTranscript'); return Boolean(e && e.scrollHeight - e.scrollTop - e.clientHeight <= 40); }`);
+    await clickRendererElement('#SendMessage');
+    await delay(250);
+    result.stopCompleted = await evaluateRenderer(`document.querySelector('#CodexStatus')?.textContent === 'stopped' && document.querySelector('#SendMessage')?.getAttribute('aria-label') === 'Send message'`);
+    result.thinkingDeduplicated = await evaluateRenderer(`(document.querySelector('#CodexTranscript')?.textContent.match(/Preparing a long streamed response\./g) || []).length === 1`);
+    result.passed = Object.entries(result).filter(([key]) => key !== 'inputPath').every(([, value]) => value === true);
+  } catch (error) {
+    result.passed = false;
+    result.error = error.message;
+  }
+  await writeFile(path, `${JSON.stringify(result, null, 2)}\n`);
+}
+
+async function clickRendererElement(selector) {
+  const point = await rendererElementCenter(selector);
+  mainWindow.webContents.sendInputEvent({ type: 'mouseMove', x: point.x, y: point.y });
+  mainWindow.webContents.sendInputEvent({ type: 'mouseDown', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+  mainWindow.webContents.sendInputEvent({ type: 'mouseUp', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+  await delay(180);
+}
+
+async function rendererElementCenter(selector) {
+  const rectangle = await evaluateRenderer(`{ const e = document.querySelector(${JSON.stringify(selector)}); if (!e) return null; const r = e.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), width: r.width, height: r.height }; }`);
+  if (!rectangle || rectangle.width <= 0 || rectangle.height <= 0) throw new Error(`Renderer element is not visible: ${selector}`);
+  return rectangle;
+}
+
+function evaluateRenderer(expression) {
+  return mainWindow.webContents.executeJavaScript(`(() => ${expression})()`);
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 async function captureAcceptanceEvidence(path) {
@@ -90,15 +175,16 @@ function createWindow() {
   displaySignature = signatureForDisplay(initialDisplay);
   mainWindow = new BrowserWindow({
     title: 'Zommi — floating Codex chat',
+    icon: createZommiIcon(),
     width: initialSize.width,
     height: initialSize.height,
     minWidth: 640,
     minHeight: 500,
     useContentSize: true,
     transparent: true,
-    backgroundColor: '#00FFFFFF',
+    backgroundColor: '#00000000',
     frame: false,
-    roundedCorners: false,
+    roundedCorners: true,
     hasShadow: false,
     resizable: true,
     show: false,
@@ -118,14 +204,12 @@ function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
   mainWindow.loadFile(join(moduleDirectory, 'renderer', 'index.html'));
-  mainWindow.on('resize', applyRoundedWindowShape);
   mainWindow.on('will-move', () => setWindowMoving(true));
   mainWindow.on('move', () => {
     setWindowMoving(true);
     clearTimeout(movementSettledTimer);
     movementSettledTimer = setTimeout(() => setWindowMoving(false), 90);
   });
-  applyRoundedWindowShape();
   mainWindow.on('close', (event) => {
     if (quitting) return;
     event.preventDefault();
@@ -159,26 +243,10 @@ function applyAdaptiveWindowSize(display, force = false) {
   displaySignature = nextSignature;
   const size = calculateAdaptiveWindowSize(display.workArea, expanded);
   mainWindow.setContentSize(size.width, size.height, false);
-  applyRoundedWindowShape();
 }
 
 function signatureForDisplay(display) {
   return `${display.id}:${display.workArea.width}x${display.workArea.height}@${display.scaleFactor}:${expanded}`;
-}
-
-function applyRoundedWindowShape() {
-  if (!mainWindow || mainWindow.isDestroyed() || process.platform === 'darwin' || typeof mainWindow.setShape !== 'function') return;
-  const [width, height] = mainWindow.getSize();
-  const radius = Math.min(windowCornerRadius, Math.floor(width / 2), Math.floor(height / 2));
-  const rectangles = [{ x: 0, y: radius, width, height: Math.max(1, height - (radius * 2)) }];
-  for (let y = 0; y < radius; y += 1) {
-    const distance = radius - y - 0.5;
-    const inset = Math.ceil(radius - Math.sqrt((radius * radius) - (distance * distance)));
-    const rowWidth = Math.max(1, width - (inset * 2));
-    rectangles.push({ x: inset, y, width: rowWidth, height: 1 });
-    rectangles.push({ x: inset, y: height - y - 1, width: rowWidth, height: 1 });
-  }
-  mainWindow.setShape(rectangles);
 }
 
 function clamp(value, minimum, maximum) {
@@ -186,8 +254,7 @@ function clamp(value, minimum, maximum) {
 }
 
 function createTray() {
-  const dot = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAA4AAAAOCAQAAAC1QeVaAAAAKUlEQVR42mP4z8AARAwMjIwgE4yM/4H4P4j/B+L/QPwfiP8D8X8g/g8AOl0R/RiK5wsAAAAASUVORK5CYII=');
-  tray = new Tray(dot);
+  tray = new Tray(createZommiIcon());
   tray.setToolTip('Zommi floating Codex chat');
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open floating chat', click: () => showWindow() },
@@ -197,6 +264,15 @@ function createTray() {
     { label: 'Exit Zommi', click: () => { quitting = true; app.quit(); } },
   ]));
   tray.on('double-click', () => showWindow());
+}
+
+function createZommiIcon() {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+    <defs><linearGradient id="g" x1="10" y1="8" x2="54" y2="58" gradientUnits="userSpaceOnUse"><stop stop-color="#85c7ff"/><stop offset=".48" stop-color="#8278f5"/><stop offset="1" stop-color="#d574d8"/></linearGradient></defs>
+    <circle cx="32" cy="32" r="29" fill="url(#g)"/><circle cx="32" cy="32" r="27.5" fill="none" stroke="#fff" stroke-opacity=".72"/>
+    <path d="M32 15c1.35 9.9 7.1 15.65 17 17-9.9 1.35-15.65 7.1-17 17-1.35-9.9-7.1-15.65-17-17 9.9-1.35 15.65-7.1 17-17Z" fill="#fff"/>
+  </svg>`;
+  return nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`);
 }
 
 function createBackend() {
@@ -225,6 +301,11 @@ function registerShortcuts() {
 function registerIpc() {
   ipcMain.on('window:hide', () => mainWindow?.hide());
   ipcMain.on('window:toggle-expanded', () => toggleExpanded());
+  ipcMain.on('acceptance:hover-state', (_event, hovered) => {
+    if (!seededAcceptance) return;
+    const path = hovered ? acceptanceHoverActivePath : acceptanceHoverRestPath;
+    if (path) setTimeout(() => captureAcceptanceEvidence(path), 260);
+  });
   ipcMain.handle('clipboard:write', (_event, text) => clipboard.writeText(String(text || '')));
   ipcMain.handle('context:select-image', () => selectImageContext());
   ipcMain.handle('chat:state', async () => {
@@ -251,9 +332,45 @@ function registerIpc() {
     const images = attachments.map((item) => item.imageDataUrl).filter(Boolean);
     const options = readModelOptions(payload);
     sendStatus('thinking…');
+    if (seededAcceptance) return startSeededStream();
     if (process.platform === 'win32') return backend.request('startTurn', { message, snapshots, images, ...options });
     return backend.startTurn(message, snapshots, images, options);
   });
+  ipcMain.handle('chat:interrupt', async () => {
+    sendStatus('stopping…');
+    if (seededAcceptance) {
+      const turnId = seededStreamTurnId;
+      if (!turnId) throw new Error('There is no active Codex turn to stop.');
+      clearInterval(seededStreamTimer);
+      seededStreamTimer = null;
+      seededStreamTurnId = null;
+      setTimeout(() => send('turn:completed', 'interrupted'), 80);
+      return { interrupted: true, threadId: 'seeded-zommi-thread', turnId };
+    }
+    if (process.platform === 'win32') return backend.request('interruptTurn');
+    return backend.interruptTurn();
+  });
+}
+
+function startSeededStream() {
+  if (seededStreamTurnId) throw new Error('A seeded acceptance turn is already active.');
+  seededStreamTurnId = `seeded-turn-${Date.now()}`;
+  const turnId = seededStreamTurnId;
+  let line = 0;
+  send('stream:update', { kind: 'thinking', lifecycle: 'started', title: 'Thinking', text: '', itemId: `${turnId}-thinking` });
+  send('stream:update', { kind: 'thinking', lifecycle: 'delta', title: 'Thinking', text: 'Preparing a long streamed response.', itemId: `${turnId}-thinking` });
+  send('stream:update', { kind: 'thinking', lifecycle: 'completed', title: 'Thinking', text: 'Preparing a long streamed response.', status: 'done', itemId: `${turnId}-thinking` });
+  seededStreamTimer = setInterval(() => {
+    if (seededStreamTurnId !== turnId) return;
+    line += 1;
+    send('stream:update', { kind: 'assistant', lifecycle: 'delta', title: 'Codex', text: `Streaming acceptance line ${line}.\n`, itemId: `${turnId}-assistant` });
+    if (line < 300) return;
+    clearInterval(seededStreamTimer);
+    seededStreamTimer = null;
+    seededStreamTurnId = null;
+    send('turn:completed', 'completed');
+  }, 60);
+  return { accepted: true, threadId: 'seeded-zommi-thread', turnId };
 }
 
 function readModelOptions(payload) {

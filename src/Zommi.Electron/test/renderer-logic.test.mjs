@@ -5,6 +5,7 @@ import {
   extractDisplayUserText,
   isNearBottom,
   mergeActivityText,
+  mergeDistinctTextSections,
   sessionTitle,
 } from '../renderer/renderer-logic.mjs';
 
@@ -14,6 +15,14 @@ test('completed thinking replaces streamed text instead of duplicating it', () =
   assert.equal(
     mergeActivityText('Inspecting', 'Inspecting the structure.', 'thinking', 'completed'),
     'Inspecting the structure.',
+  );
+});
+
+test('persisted thinking prefers the fuller section instead of showing summary and content twice', () => {
+  assert.equal(mergeDistinctTextSections(['Inspecting files.', 'Inspecting files.']), 'Inspecting files.');
+  assert.equal(
+    mergeDistinctTextSections(['Inspecting', 'Inspecting files and tests.']),
+    'Inspecting files and tests.',
   );
 });
 

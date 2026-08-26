@@ -5,7 +5,9 @@ param(
 
     [int] $TimeoutSeconds = 180,
 
-    [switch] $RequireChromeTool
+    [switch] $RequireChromeTool,
+
+    [switch] $InterruptStreaming
 )
 
 Set-StrictMode -Version Latest
@@ -72,6 +74,20 @@ function Get-ElementText {
     return [string] $Element.Current.Name
 }
 
+function Invoke-PhysicalClick {
+    param([System.Windows.Automation.AutomationElement] $Element)
+
+    $bounds = $Element.Current.BoundingRectangle
+    Assert-True ($bounds.Width -gt 0 -and $bounds.Height -gt 0) 'Cannot click an element without visible bounds.'
+    [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(
+        [int] ($bounds.X + ($bounds.Width / 2)),
+        [int] ($bounds.Y + ($bounds.Height / 2)))
+    Start-Sleep -Milliseconds 100
+    [ZommiSendAcceptanceNative]::LeftButtonDown()
+    Start-Sleep -Milliseconds 55
+    [ZommiSendAcceptanceNative]::LeftButtonUp()
+}
+
 function Test-ChromeMcpLifecycle {
     param([System.Windows.Automation.AutomationElement] $Root)
 
@@ -126,12 +142,34 @@ if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
 }
 
 Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class ZommiSendAcceptanceNative {
+    [DllImport("user32.dll")]
+    private static extern void mouse_event(uint flags, uint dx, uint dy, int data, UIntPtr extraInfo);
+
+    public static void LeftButtonDown() { mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero); }
+    public static void LeftButtonUp() { mouse_event(0x0004, 0, 0, 0, UIntPtr.Zero); }
+}
+'@
 $resolvedExecutable = [IO.Path]::GetFullPath($ExecutablePath)
 Assert-True (Test-Path -LiteralPath $resolvedExecutable -PathType Leaf) 'The packaged Zommi.exe is missing.'
 $fixtureDirectory = $null
 
 try {
-if ($RequireChromeTool) {
+foreach ($existing in @(Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'Zommi.exe' })) {
+    Stop-Process -Id $existing.ProcessId -Force -ErrorAction SilentlyContinue
+}
+Start-Sleep -Milliseconds 1500
+if ($InterruptStreaming) {
+    $expectedToken = 'ZOMMI_STOP_SHOULD_NOT_COMPLETE_' + [Guid]::NewGuid().ToString('N')
+    $prompt = "Use the terminal tool to run sleep 30, then reply with exactly $expectedToken."
+}
+elseif ($RequireChromeTool) {
     $fixtureDirectory = Join-Path ([IO.Path]::GetTempPath()) ('zommi-chrome-tool-acceptance-' + [Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $fixtureDirectory | Out-Null
     $expectedToken = 'ZOMMI_CHROME_TOOL_' + [Guid]::NewGuid().ToString('N')
@@ -150,7 +188,7 @@ else {
 Start-Process `
     -FilePath $resolvedExecutable `
     -WorkingDirectory (Split-Path -Parent $resolvedExecutable) `
-    -ArgumentList '--no-auto-launch' | Out-Null
+    -ArgumentList @('--', '--no-auto-launch') | Out-Null
 $deadline = [DateTime]::UtcNow.AddSeconds(15)
 $window = $null
 while ($null -eq $window -and [DateTime]::UtcNow -lt $deadline) {
@@ -167,9 +205,67 @@ Assert-True ($null -ne $send) 'The Send button was not exposed through UI Automa
 
 $valuePattern = $composer.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
 ([System.Windows.Automation.ValuePattern] $valuePattern).SetValue($prompt)
-$invokePattern = $send.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
 $stopwatch = [Diagnostics.Stopwatch]::StartNew()
-([System.Windows.Automation.InvokePattern] $invokePattern).Invoke()
+Invoke-PhysicalClick $send
+
+if ($InterruptStreaming) {
+    $accepted = $false
+    $stopButton = $null
+    $statusText = ''
+    $transcriptText = ''
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        Start-Sleep -Milliseconds 100
+        $window = Find-ZommiWindow $resolvedExecutable
+        if ($null -eq $window) { continue }
+        $composer = Find-ElementById $window 'ZommiComposer'
+        $stopButton = Find-ElementByName $window 'Stop response'
+        $status = Find-ElementById $window 'CodexStatus'
+        $transcript = Find-ElementById $window 'CodexTranscript'
+        if ($null -ne $status) { $statusText = [string] $status.Current.Name }
+        if ($null -ne $transcript) { $transcriptText = Get-ElementText $transcript }
+        if ($null -ne $composer) {
+            $currentValuePattern = $composer.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+            $accepted = [string]::IsNullOrEmpty(([System.Windows.Automation.ValuePattern] $currentValuePattern).Current.Value)
+        }
+        if ($accepted -and $null -ne $stopButton -and $stopButton.Current.IsEnabled) { break }
+    }
+    Assert-True $accepted "The live turn was not accepted before interruption. Status: $statusText"
+    Assert-True ($null -ne $stopButton) 'The live send button did not become Stop response.'
+    Invoke-PhysicalClick $stopButton
+
+    $stopped = $false
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        Start-Sleep -Milliseconds 100
+        $window = Find-ZommiWindow $resolvedExecutable
+        if ($null -eq $window) { continue }
+        $send = Find-ElementByName $window 'Send message'
+        $status = Find-ElementById $window 'CodexStatus'
+        $transcript = Find-ElementById $window 'CodexTranscript'
+        if ($null -ne $status) { $statusText = [string] $status.Current.Name }
+        if ($null -ne $transcript) { $transcriptText = Get-ElementText $transcript }
+        if ($null -ne $send -and $send.Current.IsEnabled -and $statusText -eq 'Codex status: stopped') {
+            $stopped = $true
+            break
+        }
+    }
+    $stopwatch.Stop()
+    Assert-True ($transcriptText -notmatch 'Error invoking remote method|operation has timed out|Could not stop response') "The live interrupt surfaced an error. Transcript: $transcriptText"
+    Assert-True $stopped "turn/interrupt did not complete as interrupted. Status: $statusText Transcript: $transcriptText"
+    $unexpectedResponse = Find-ElementByName $window $expectedToken
+    Assert-True ($null -eq $unexpectedResponse) 'The interrupted turn still completed its forbidden final response.'
+    [ordered]@{
+        executablePath = $resolvedExecutable
+        turnAccepted = 'passed'
+        stopButton = 'passed'
+        turnInterrupt = 'passed'
+        interruptedStatus = 'passed'
+        elapsedMilliseconds = $stopwatch.ElapsedMilliseconds
+        status = $statusText
+    } | ConvertTo-Json
+    return
+}
 
 $accepted = $false
 $completed = $false
@@ -231,6 +327,9 @@ if ($RequireChromeTool) {
 } | ConvertTo-Json
 }
 finally {
+    foreach ($candidate in @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq 'Zommi.exe' })) {
+        Stop-Process -Id $candidate.ProcessId -Force -ErrorAction SilentlyContinue
+    }
     if ($null -ne $fixtureDirectory -and (Test-Path -LiteralPath $fixtureDirectory)) {
         Remove-Item -LiteralPath $fixtureDirectory -Recurse -Force -ErrorAction SilentlyContinue
     }

@@ -118,10 +118,13 @@ internal static class ElectronNativeHost
                     : [];
                 var model = ReadOptionalString(parameters, "model");
                 var effort = ReadOptionalString(parameters, "effort");
-                codex.StartTurnAsync(message, snapshots, images, model, effort).GetAwaiter().GetResult();
-                result = new { accepted = true, codex.ThreadId };
+                var turnId = codex.StartTurnAsync(message, snapshots, images, model, effort).GetAwaiter().GetResult();
+                result = new { accepted = true, codex.ThreadId, turnId };
                 return false;
             }
+            case "interruptTurn":
+                result = codex.InterruptTurnAsync().GetAwaiter().GetResult();
+                return false;
             case "getChatState":
                 result = codex.GetChatStateAsync().GetAwaiter().GetResult();
                 return false;
