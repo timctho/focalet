@@ -61,6 +61,10 @@ Build the package, then run from Windows PowerShell:
 
 .\scripts\test-windows-runtime.ps1 `
   -ExecutablePath .\artifacts\zommi-win-x64\Zommi.exe
+
+.\scripts\test-windows-send-acceptance.ps1 `
+  -ExecutablePath .\artifacts\zommi-win-x64\Zommi.exe `
+  -RequireChromeTool
 ```
 
 The UI contract uses seeded contexts plus the real packaged image selector. The
@@ -68,4 +72,7 @@ runtime contract opens an isolated Edge fixture, invokes the real Alt+A path,
 checks its accessibility hierarchy and pointer label, and requires Codex to
 stream a random exact token from the attached context. It does not prove
 arbitrary protected, canvas-only, elevated, or secure-desktop surfaces, agent
-tool availability, or control of the user's signed-in tab.
+tool availability, or control of the user's signed-in tab. The separate Send
+acceptance creates a private random local page and requires the configured
+user-owned `chrome` MCP server to expose a tool lifecycle and return its token;
+it still does not prove control of the user's signed-in tab.

@@ -67,6 +67,12 @@ Codex CLI must already be installed, signed in, and available on the WSL shell
 `PATH`. The prototype is unsigned, so Windows SmartScreen may require **More
 info → Run anyway** on first launch.
 
+Browser-control tools remain owned by Codex. A browser tool injected by the
+ChatGPT desktop host is scoped to that host's Agent Session and is not inherited
+by Zommi's separately launched app-server. To use Chrome from Zommi, configure a
+user-owned Chrome MCP server in the default WSL Codex runtime; see
+[the Windows browser-tool setup](docs/windows-prototype.md#optional-user-owned-chrome-tool).
+
 Run the Electron and managed contract checks with:
 
 ```sh

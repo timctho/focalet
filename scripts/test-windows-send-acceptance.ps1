@@ -3,7 +3,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $ExecutablePath,
 
-    [int] $TimeoutSeconds = 180
+    [int] $TimeoutSeconds = 180,
+
+    [switch] $RequireChromeTool
 )
 
 Set-StrictMode -Version Latest
@@ -70,6 +72,25 @@ function Get-ElementText {
     return [string] $Element.Current.Name
 }
 
+function Test-ChromeMcpLifecycle {
+    param([System.Windows.Automation.AutomationElement] $Root)
+
+    $elements = $Root.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition)
+    foreach ($element in $elements) {
+        try {
+            if ([string] $element.Current.Name -match '^chrome\s+\S+\s+(new_page|navigate_page|take_snapshot|evaluate_script)$') {
+                return $true
+            }
+        }
+        catch {
+            # Activity elements can disappear while a turn is streaming.
+        }
+    }
+    return $false
+}
+
 function Find-ZommiWindow {
     param([string] $ResolvedExecutable)
 
@@ -107,6 +128,24 @@ if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
 Add-Type -AssemblyName UIAutomationClient
 $resolvedExecutable = [IO.Path]::GetFullPath($ExecutablePath)
 Assert-True (Test-Path -LiteralPath $resolvedExecutable -PathType Leaf) 'The packaged Zommi.exe is missing.'
+$fixtureDirectory = $null
+
+try {
+if ($RequireChromeTool) {
+    $fixtureDirectory = Join-Path ([IO.Path]::GetTempPath()) ('zommi-chrome-tool-acceptance-' + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $fixtureDirectory | Out-Null
+    $expectedToken = 'ZOMMI_CHROME_TOOL_' + [Guid]::NewGuid().ToString('N')
+    $fixturePath = Join-Path $fixtureDirectory 'secret.html'
+    [IO.File]::WriteAllText(
+        $fixturePath,
+        "<!doctype html><title>Private Zommi Chrome acceptance</title><main id='secret'>$expectedToken</main>")
+    $fixtureUri = ([Uri] $fixturePath).AbsoluteUri
+    $prompt = "Use the Chrome MCP browser tools to open $fixtureUri, read the exact token beginning ZOMMI_CHROME_TOOL_, and reply with that token only. Do not use shell, web search, attached snapshots, or accessibility automation."
+}
+else {
+    $expectedToken = 'ZOMMI_SEND_COMPLETED_' + [Guid]::NewGuid().ToString('N')
+    $prompt = "Reply with exactly $expectedToken and nothing else."
+}
 
 Start-Process -FilePath $resolvedExecutable -WorkingDirectory (Split-Path -Parent $resolvedExecutable) | Out-Null
 $deadline = [DateTime]::UtcNow.AddSeconds(15)
@@ -124,8 +163,6 @@ Assert-True ($null -ne $composer) 'The composer was not exposed through UI Autom
 Assert-True ($null -ne $send) 'The Send button was not exposed through UI Automation.'
 
 $valuePattern = $composer.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-$expectedToken = 'ZOMMI_SEND_COMPLETED_' + [Guid]::NewGuid().ToString('N')
-$prompt = "Reply with exactly $expectedToken and nothing else."
 ([System.Windows.Automation.ValuePattern] $valuePattern).SetValue($prompt)
 $invokePattern = $send.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
 $stopwatch = [Diagnostics.Stopwatch]::StartNew()
@@ -137,6 +174,7 @@ $acceptedMilliseconds = $null
 $statusText = ''
 $transcriptText = ''
 $responseText = ''
+$sawChromeMcp = $false
 $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
 while ([DateTime]::UtcNow -lt $deadline) {
     Start-Sleep -Milliseconds 100
@@ -150,6 +188,7 @@ while ([DateTime]::UtcNow -lt $deadline) {
     if ($null -ne $status) { $statusText = [string] $status.Current.Name }
     if ($null -ne $transcript) { $transcriptText = Get-ElementText $transcript }
     if ($null -ne $response) { $responseText = Get-ElementText $response }
+    if ($RequireChromeTool -and -not $sawChromeMcp) { $sawChromeMcp = Test-ChromeMcpLifecycle $window }
     if ($transcriptText -match 'Error invoking remote method|operation has timed out' -or
         $statusText -match 'turn failed|Codex error') { break }
     if ($null -ne $composer) {
@@ -160,7 +199,8 @@ while ([DateTime]::UtcNow -lt $deadline) {
             $acceptedMilliseconds = $stopwatch.ElapsedMilliseconds
         }
     }
-    if ($null -ne $response -and $null -ne $send -and $send.Current.IsEnabled) {
+    if ($null -ne $response -and $null -ne $send -and $send.Current.IsEnabled -and
+        (-not $RequireChromeTool -or $sawChromeMcp)) {
         $completed = $true
         break
     }
@@ -171,6 +211,9 @@ Assert-True ($transcriptText -notmatch 'Error invoking remote method|operation h
 Assert-True $accepted "chat:send was not accepted within $TimeoutSeconds seconds. Status: $statusText Transcript: $transcriptText"
 Assert-True ($statusText -notmatch 'turn failed|Codex error') "The Codex turn failed. Status: $statusText Transcript: $transcriptText"
 Assert-True $completed "Codex did not complete with the expected response within $TimeoutSeconds seconds. Expected: $expectedToken Status: $statusText Response: $responseText"
+if ($RequireChromeTool) {
+    Assert-True $sawChromeMcp 'The packaged UI did not expose a Chrome MCP tool lifecycle.'
+}
 
 [ordered]@{
     executablePath = $resolvedExecutable
@@ -179,6 +222,13 @@ Assert-True $completed "Codex did not complete with the expected response within
     turnCompleted = 'passed'
     completedMilliseconds = $stopwatch.ElapsedMilliseconds
     response = $responseText
+    chromeMcp = if ($RequireChromeTool) { 'passed' } else { 'not requested' }
     remoteTimeout = 'absent'
     status = $statusText
 } | ConvertTo-Json
+}
+finally {
+    if ($null -ne $fixtureDirectory -and (Test-Path -LiteralPath $fixtureDirectory)) {
+        Remove-Item -LiteralPath $fixtureDirectory -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
