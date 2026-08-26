@@ -53,13 +53,14 @@ document.querySelector('#ClosePreview').addEventListener('click', hidePreview);
 toggleSessions.addEventListener('click', toggleSessionSidebar);
 newSession.addEventListener('click', createSession);
 openModelPanel.addEventListener('click', toggleModelPanel);
-glass.addEventListener('mouseenter', () => window.zommi.reportAcceptanceHover?.(true));
-glass.addEventListener('mouseleave', () => window.zommi.reportAcceptanceHover?.(false));
+glass.addEventListener('mouseenter', () => setPointerOverGlass(true));
+glass.addEventListener('mouseleave', () => setPointerOverGlass(false));
 modelSummary.addEventListener('click', toggleModelPanel);
 modelSelect.addEventListener('change', selectModel);
 effortSelect.addEventListener('change', selectEffort);
 scrollToLatest.addEventListener('click', () => scrollTranscript({ force: true }));
 transcript.addEventListener('scroll', handleTranscriptScroll, { passive: true });
+transcript.addEventListener('wheel', handleTranscriptWheel, { passive: true });
 sendButton.addEventListener('click', handlePrimaryAction);
 composer.addEventListener('input', resizeComposer);
 composer.addEventListener('keydown', (event) => {
@@ -85,6 +86,11 @@ window.zommi.onShortcuts((state) => {
 });
 
 void initializeChatControls();
+
+function setPointerOverGlass(pointerOver) {
+  glass.classList.toggle('pointer-over', pointerOver);
+  requestAnimationFrame(() => window.zommi.reportAcceptanceHover?.(pointerOver));
+}
 
 function addAttachment(attachment) {
   attachment.token = createToken(attachment);
@@ -580,8 +586,17 @@ function focusComposer() {
 }
 
 function handleTranscriptScroll() {
-  if (programmaticScroll) return;
-  autoFollow = isNearBottom(transcript);
+  const nearBottom = isNearBottom(transcript);
+  if (programmaticScroll && nearBottom) return;
+  if (programmaticScroll) programmaticScroll = false;
+  autoFollow = nearBottom;
+  updateLatestButton();
+}
+
+function handleTranscriptWheel(event) {
+  if (!event.deltaY) return;
+  programmaticScroll = false;
+  autoFollow = false;
   updateLatestButton();
 }
 

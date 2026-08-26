@@ -133,9 +133,19 @@ test('blank glass regions use native dragging and movement turns off expensive b
   const styles = await readFile(join(appDirectory, 'renderer', 'styles.css'), 'utf8');
   const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
   const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
-  assert.match(styles, /\.glass\s*\{[\s\S]*-webkit-app-region:\s*drag/);
+  const glassRule = styles.match(/\.glass\s*\{([^}]*)\}/)?.[1];
+  assert.ok(glassRule, 'The root glass rule is missing.');
+  assert.doesNotMatch(glassRule, /-webkit-app-region/);
+  assert.match(styles, /\.titlebar\s*\{[\s\S]*?-webkit-app-region:\s*drag/);
+  assert.match(styles, /\.edge-drag\s*\{[\s\S]*?-webkit-app-region:\s*drag/);
   assert.match(styles, /\.transcript::after\s*\{[\s\S]*-webkit-app-region:\s*drag/);
-  assert.match(styles, /\.conversation-turn\s*\{[\s\S]*-webkit-app-region:\s*drag/);
+  for (const selector of ['.welcome', '.conversation-turn', '.turn-body', '.message-row']) {
+    const escaped = selector.replace('.', '\\.');
+    const rule = styles.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))?.[1] || '';
+    assert.doesNotMatch(rule, /-webkit-app-region:\s*drag/, `${selector} must remain interactive.`);
+  }
+  assert.match(styles, /\.glass:hover::after,\s*\.glass\.pointer-over::after\s*\{\s*opacity:\s*0\.72/);
+  assert.match(renderer, /glass\.classList\.toggle\('pointer-over', pointerOver\)/);
   assert.match(styles, /body\.window-moving[\s\S]*backdrop-filter:\s*none/);
   assert.doesNotMatch(renderer, /updateBackgroundDragSurface|drag-ready/);
   assert.match(main, /mainWindow\.on\('will-move'/);
@@ -162,6 +172,9 @@ test('streaming preserves manual scroll position and exposes a latest-message co
   const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
   assert.match(html, /id="ScrollToLatest"/);
   assert.match(renderer, /if \(!force && !autoFollow\)/);
+  assert.match(renderer, /transcript\.addEventListener\('wheel', handleTranscriptWheel/);
+  assert.match(renderer, /if \(programmaticScroll && nearBottom\) return/);
+  assert.match(renderer, /if \(!event\.deltaY\) return;[\s\S]*autoFollow = false/);
   assert.match(renderer, /isNearBottom\(transcript\)/);
 });
 

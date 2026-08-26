@@ -59,7 +59,9 @@ button { color: inherit; }
     inset 0 -1px 0 rgba(111, 135, 165, 0.12);
   backdrop-filter: blur(48px) saturate(175%);
   -webkit-backdrop-filter: blur(48px) saturate(175%);
-  -webkit-app-region: drag;
+  /* Keep the root on Chromium's default interactive hit testing. Native drag
+     regions swallow real pointer events on Windows, while an explicit root
+     no-drag would also override the narrow child drag gutters below. */
 }
 
 .glass::before {
@@ -87,7 +89,8 @@ button { color: inherit; }
   transition: opacity 150ms ease;
 }
 
-.glass:hover::after { opacity: 0.52; }
+.glass:hover::after,
+.glass.pointer-over::after { opacity: 0.72; }
 
 button,
 textarea,
@@ -131,6 +134,20 @@ body.window-moving .glass::after { display: none; }
 
 .ambient-one { top: -210px; right: -60px; background: #acd5ff; }
 .ambient-two { bottom: -235px; left: 16%; background: #ecd4ff; }
+
+/* Narrow gutters preserve native, low-latency dragging without turning the
+   actual chat surface into an input-eating caption region. */
+.edge-drag {
+  position: absolute;
+  z-index: 7;
+  top: 62px;
+  bottom: 20px;
+  width: 30px;
+  -webkit-app-region: drag;
+}
+
+.edge-drag-left { left: 0; }
+.edge-drag-right { right: 0; }
 
 .titlebar {
   position: absolute;
@@ -389,7 +406,6 @@ textarea:focus::-webkit-scrollbar-thumb,
   justify-items: center;
   gap: 13px;
   color: rgba(54, 66, 83, 0.44);
-  -webkit-app-region: drag;
 }
 
 .welcome p { margin: 0; font-size: 13px; }
@@ -409,11 +425,7 @@ textarea:focus::-webkit-scrollbar-thumb,
   display: grid;
   gap: 11px;
   margin: 0 0 23px;
-  -webkit-app-region: drag;
 }
-
-.turn-body,
-.message-row { -webkit-app-region: drag; }
 
 .message-row { display: flex; min-width: 0; }
 .message-row.user { justify-content: flex-end; }
