@@ -1,3 +1,12 @@
+import {
+  effortsForModel,
+  extractDisplayUserText,
+  isNearBottom,
+  mergeActivityText,
+  sessionTitle,
+} from './renderer-logic.mjs';
+
+const glass = document.querySelector('.glass');
 const transcript = document.querySelector('#CodexTranscript');
 const composer = document.querySelector('#ZommiComposer');
 const chips = document.querySelector('#ContextChips');
@@ -8,6 +17,16 @@ const preview = document.querySelector('#ContextPreview');
 const previewTitle = document.querySelector('#PreviewTitle');
 const previewText = document.querySelector('#ContextPreviewText');
 const previewImage = document.querySelector('#ContextPreviewImage');
+const scrollToLatest = document.querySelector('#ScrollToLatest');
+const sessionSidebar = document.querySelector('#SessionSidebar');
+const sessionList = document.querySelector('#SessionList');
+const toggleSessions = document.querySelector('#ToggleSessions');
+const newSession = document.querySelector('#NewSession');
+const modelPanel = document.querySelector('#ModelPanel');
+const modelSelect = document.querySelector('#ModelSelect');
+const effortSelect = document.querySelector('#EffortSelect');
+const modelSummary = document.querySelector('#ModelSummary');
+const openModelPanel = document.querySelector('#OpenModelPanel');
 const attachments = [];
 const activityElements = new Map();
 let assistantElement = null;
@@ -16,11 +35,30 @@ let currentTurnBody = null;
 let turnActive = false;
 let previewTimer = null;
 let turnNumber = 0;
+let autoFollow = true;
+let programmaticScroll = false;
+let activeDragSurface = null;
+let activeThreadId = null;
+let sessions = [];
+let models = [];
+let selectedModel = '';
+let selectedEffort = '';
+let sessionBusy = false;
 
 document.querySelector('#HideZommi').addEventListener('click', () => window.zommi.hide());
 document.querySelector('#ExpandZommi').addEventListener('click', () => window.zommi.toggleExpanded());
 document.querySelector('#SelectImage').addEventListener('click', () => window.zommi.selectImage());
 document.querySelector('#ClosePreview').addEventListener('click', hidePreview);
+toggleSessions.addEventListener('click', toggleSessionSidebar);
+newSession.addEventListener('click', createSession);
+openModelPanel.addEventListener('click', toggleModelPanel);
+modelSummary.addEventListener('click', toggleModelPanel);
+modelSelect.addEventListener('change', selectModel);
+effortSelect.addEventListener('change', selectEffort);
+scrollToLatest.addEventListener('click', () => scrollTranscript({ force: true }));
+transcript.addEventListener('scroll', handleTranscriptScroll, { passive: true });
+glass.addEventListener('mousemove', updateBackgroundDragSurface);
+glass.addEventListener('mouseleave', clearBackgroundDragSurface);
 sendButton.addEventListener('click', sendMessage);
 composer.addEventListener('input', resizeComposer);
 composer.addEventListener('keydown', (event) => {
@@ -39,10 +77,13 @@ window.zommi.onStream(renderStreamUpdate);
 window.zommi.onTurnCompleted(completeTurn);
 window.zommi.onFocusComposer(() => focusComposer());
 window.zommi.onAcceptanceConversation?.(seedAcceptanceConversation);
+window.zommi.onWindowMoving?.((moving) => document.body.classList.toggle('window-moving', Boolean(moving)));
 window.zommi.onShortcuts((state) => {
   shortcuts.textContent = 'Alt+A context · Alt+Shift+A image';
   shortcuts.setAttribute('aria-label', `Alt+A registered: ${Boolean(state.context)}; Alt+Shift+A registered: ${Boolean(state.image)}`);
 });
+
+void initializeChatControls();
 
 function addAttachment(attachment) {
   attachment.token = createToken(attachment);
@@ -124,13 +165,157 @@ function hidePreview() {
   preview.hidden = true;
 }
 
+async function initializeChatControls() {
+  try {
+    const state = await window.zommi.getChatState();
+    applyChatState(state, { renderHistory: true });
+  } catch (error) {
+    renderStatus(`Chat controls unavailable: ${error.message}`, true);
+  }
+}
+
+function applyChatState(state, { renderHistory = false } = {}) {
+  activeThreadId = state?.activeThreadId || state?.thread?.id || activeThreadId;
+  if (Array.isArray(state?.models) && state.models.length) models = state.models;
+  if (Array.isArray(state?.sessions)) sessions = state.sessions;
+  selectedModel = state?.activeModel || selectedModel || models.find((model) => model.isDefault)?.model || models[0]?.model || '';
+  const activeModel = findSelectedModel();
+  const supported = effortsForModel(activeModel);
+  selectedEffort = state?.activeEffort || selectedEffort || activeModel?.defaultReasoningEffort || supported[0] || '';
+  if (supported.length && !supported.includes(selectedEffort)) selectedEffort = activeModel?.defaultReasoningEffort || supported[0];
+  renderModelControls();
+  renderSessions();
+  if (renderHistory) renderThreadHistory(state?.thread);
+}
+
+function renderModelControls() {
+  modelSelect.replaceChildren();
+  for (const model of models) {
+    const option = document.createElement('option');
+    option.value = model.model || model.id;
+    option.textContent = model.displayName || model.model || model.id;
+    option.selected = option.value === selectedModel;
+    modelSelect.append(option);
+  }
+  modelSelect.disabled = !models.length || turnActive || sessionBusy;
+
+  const model = findSelectedModel();
+  const efforts = effortsForModel(model);
+  effortSelect.replaceChildren();
+  for (const effort of efforts) {
+    const option = document.createElement('option');
+    option.value = effort;
+    option.textContent = formatEffort(effort);
+    option.selected = effort === selectedEffort;
+    effortSelect.append(option);
+  }
+  effortSelect.disabled = !efforts.length || turnActive || sessionBusy;
+  const modelName = model?.displayName || selectedModel || 'Default model';
+  modelSummary.textContent = `${modelName}${selectedEffort ? ` · ${formatEffort(selectedEffort)}` : ''}`;
+  modelSummary.disabled = sessionBusy;
+}
+
+function findSelectedModel() {
+  return models.find((model) => (model.model || model.id) === selectedModel) || null;
+}
+
+function formatEffort(value) {
+  const text = String(value || '');
+  return text ? `${text[0].toUpperCase()}${text.slice(1)}` : '';
+}
+
+function selectModel() {
+  selectedModel = modelSelect.value;
+  const model = findSelectedModel();
+  const efforts = effortsForModel(model);
+  if (!efforts.includes(selectedEffort)) selectedEffort = model?.defaultReasoningEffort || efforts[0] || '';
+  renderModelControls();
+}
+
+function selectEffort() {
+  selectedEffort = effortSelect.value;
+  renderModelControls();
+}
+
+function toggleModelPanel() {
+  const open = modelPanel.hidden;
+  modelPanel.hidden = !open;
+  openModelPanel.setAttribute('aria-expanded', String(open));
+  modelSummary.setAttribute('aria-expanded', String(open));
+}
+
+function toggleSessionSidebar() {
+  const open = !sessionSidebar.classList.contains('open');
+  sessionSidebar.classList.toggle('open', open);
+  sessionSidebar.setAttribute('aria-hidden', String(!open));
+  toggleSessions.setAttribute('aria-expanded', String(open));
+  toggleSessions.setAttribute('aria-label', `${open ? 'Hide' : 'Show'} chat sessions`);
+}
+
+function renderSessions() {
+  sessionList.replaceChildren();
+  const ordered = [...sessions];
+  if (activeThreadId && !ordered.some((session) => session.id === activeThreadId)) {
+    ordered.unshift({ id: activeThreadId, preview: 'New chat' });
+  }
+  for (const session of ordered) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `session-item${session.id === activeThreadId ? ' active' : ''}`;
+    button.textContent = sessionTitle(session);
+    button.title = extractDisplayUserText(session.name || session.preview || 'New chat');
+    button.disabled = sessionBusy || turnActive || session.id === activeThreadId;
+    button.addEventListener('click', () => switchSession(session.id));
+    sessionList.append(button);
+  }
+  newSession.disabled = sessionBusy || turnActive;
+}
+
+async function createSession() {
+  if (sessionBusy || turnActive) return;
+  setSessionBusy(true);
+  try {
+    const state = await window.zommi.createSession({ model: selectedModel, effort: selectedEffort });
+    applyChatState(state, { renderHistory: true });
+    renderStatus('New chat ready');
+    focusComposer();
+  } catch (error) {
+    renderStatus(`Could not create chat: ${error.message}`, true);
+  } finally {
+    setSessionBusy(false);
+  }
+}
+
+async function switchSession(threadId) {
+  if (sessionBusy || turnActive || threadId === activeThreadId) return;
+  setSessionBusy(true);
+  try {
+    const state = await window.zommi.switchSession(threadId);
+    applyChatState(state, { renderHistory: true });
+    renderStatus('Chat switched');
+    focusComposer();
+  } catch (error) {
+    renderStatus(`Could not switch chat: ${error.message}`, true);
+  } finally {
+    setSessionBusy(false);
+  }
+}
+
+function setSessionBusy(busy) {
+  sessionBusy = busy;
+  renderSessions();
+  renderModelControls();
+}
+
 async function sendMessage() {
-  if (turnActive) return;
+  if (turnActive || sessionBusy) return;
   const message = composer.value.trim();
   if (!message) return;
   turnActive = true;
   sendButton.disabled = true;
   composer.disabled = true;
+  renderSessions();
+  renderModelControls();
   removeWelcome();
   beginTurn(message, attachments.map((item) => item.token));
   assistantElement = null;
@@ -140,7 +325,10 @@ async function sendMessage() {
     await window.zommi.send({
       message,
       attachments: attachments.map(({ snapshot, imageDataUrl }) => ({ snapshot, imageDataUrl })),
+      model: selectedModel,
+      effort: selectedEffort,
     });
+    updateActiveSessionTitle(message);
     attachments.splice(0);
     composer.value = '';
     renderAttachments();
@@ -149,6 +337,16 @@ async function sendMessage() {
     appendError(error.message);
     completeTurn('failed');
   }
+}
+
+function updateActiveSessionTitle(message) {
+  let session = sessions.find((item) => item.id === activeThreadId);
+  if (!session && activeThreadId) {
+    session = { id: activeThreadId, preview: message, updatedAt: Math.floor(Date.now() / 1000) };
+    sessions.unshift(session);
+  }
+  if (session && (!session.preview || session.preview === 'New chat')) session.preview = message;
+  renderSessions();
 }
 
 function renderStreamUpdate(update) {
@@ -209,7 +407,7 @@ function createActivity(kind, title) {
   const content = document.createElement('pre');
   content.className = 'activity-content';
   element.append(summary, content);
-  return { element, subtitle, state, content, hasText: false };
+  return { element, subtitle, state, content, text: '', hasText: false };
 }
 
 function updateActivity(activity, update, lifecycle) {
@@ -221,8 +419,12 @@ function updateActivity(activity, update, lifecycle) {
     }
     const shouldUseAsSubtitleOnly = lifecycle === 'started' && kind === 'tool' && !activity.hasText;
     if (!shouldUseAsSubtitleOnly) {
-      activity.content.append(document.createTextNode(text));
-      activity.hasText = true;
+      const merged = mergeActivityText(activity.text, text, kind, lifecycle);
+      if (merged !== activity.text) {
+        activity.text = merged;
+        activity.content.textContent = merged;
+      }
+      activity.hasText = Boolean(activity.text);
     }
   }
   activity.content.hidden = !activity.hasText;
@@ -231,7 +433,7 @@ function updateActivity(activity, update, lifecycle) {
     activity.state.textContent = update.status || 'done';
     activity.element.open = false;
   } else {
-    activity.state.textContent = lifecycle === 'started' ? 'running' : 'live';
+    activity.state.textContent = kind === 'thinking' ? 'thinking' : 'running';
   }
 }
 
@@ -276,7 +478,7 @@ function beginTurn(message, tokens) {
   currentTurnBody.className = 'turn-body';
   turn.append(row, currentTurnBody);
   transcript.append(turn);
-  scrollTranscript();
+  scrollTranscript({ force: true });
 }
 
 function ensureTurnBody() {
@@ -294,10 +496,18 @@ function appendError(message) {
 
 function completeTurn(turnStatus) {
   turnActive = false;
+  for (const activity of activityElements.values()) {
+    if (activity.element.classList.contains('completed')) continue;
+    activity.element.classList.add('completed');
+    activity.state.textContent = 'done';
+    activity.element.open = false;
+  }
   sendButton.disabled = false;
   composer.disabled = false;
   if (String(turnStatus).toLowerCase() === 'completed') renderStatus('ready');
   else if (!status.classList.contains('warning')) renderStatus(`turn ${turnStatus}`, true);
+  renderSessions();
+  renderModelControls();
   focusComposer();
 }
 
@@ -316,12 +526,130 @@ function focusComposer() {
   setTimeout(() => composer.focus({ preventScroll: true }), 0);
 }
 
-function scrollTranscript() {
+function handleTranscriptScroll() {
+  if (programmaticScroll) return;
+  autoFollow = isNearBottom(transcript);
+  updateLatestButton();
+}
+
+function scrollTranscript({ force = false } = {}) {
+  if (!force && !autoFollow) {
+    updateLatestButton();
+    return;
+  }
+  autoFollow = true;
+  programmaticScroll = true;
   transcript.scrollTop = transcript.scrollHeight;
+  requestAnimationFrame(() => {
+    programmaticScroll = false;
+    autoFollow = isNearBottom(transcript);
+    updateLatestButton();
+  });
+}
+
+function updateLatestButton() {
+  scrollToLatest.hidden = autoFollow || isNearBottom(transcript);
 }
 
 function removeWelcome() {
   transcript.querySelector('.welcome')?.remove();
+}
+
+function renderThreadHistory(thread) {
+  transcript.replaceChildren();
+  assistantElement = null;
+  assistantTextNode = null;
+  currentTurnBody = null;
+  activityElements.clear();
+  turnNumber = 0;
+  const turns = Array.isArray(thread?.turns) ? thread.turns : [];
+  for (const turn of turns) {
+    const items = Array.isArray(turn?.items) ? turn.items : [];
+    const userItem = items.find((item) => item.type === 'userMessage');
+    const userText = userItem ? displayUserItem(userItem) : 'Continue';
+    assistantElement = null;
+    assistantTextNode = null;
+    activityElements.clear();
+    beginTurn(userText || 'Continue', []);
+    for (const item of items) renderHistoryItem(item);
+  }
+  if (!turns.length) appendWelcome();
+  autoFollow = true;
+  scrollTranscript({ force: true });
+}
+
+function displayUserItem(item) {
+  const text = (item.content || [])
+    .filter((content) => content?.type === 'text' && content.text)
+    .map((content) => content.text)
+    .join('\n');
+  return extractDisplayUserText(text);
+}
+
+function renderHistoryItem(item) {
+  if (!item || item.type === 'userMessage') return;
+  if (item.type === 'agentMessage') {
+    if (item.phase === 'commentary') {
+      renderStreamUpdate({ kind: 'thinking', lifecycle: 'completed', title: 'Thinking', text: item.text || '', itemId: item.id, status: 'done' });
+    } else {
+      renderStreamUpdate({ kind: 'assistant', lifecycle: 'completed', title: 'Codex', text: item.text || '', itemId: item.id });
+    }
+    return;
+  }
+  if (item.type === 'reasoning') {
+    const text = [...(item.summary || []), ...(item.content || [])].filter(Boolean).join('\n');
+    renderStreamUpdate({ kind: 'thinking', lifecycle: 'completed', title: 'Thinking', text, itemId: item.id, status: 'done' });
+    return;
+  }
+  if (item.type === 'plan') {
+    renderStreamUpdate({ kind: 'plan', lifecycle: 'completed', title: 'Plan', text: item.text || '', itemId: item.id, status: 'done' });
+    return;
+  }
+  const history = historyTool(item);
+  if (history) renderStreamUpdate({ ...history, lifecycle: 'completed', itemId: item.id, status: item.status || 'done' });
+}
+
+function historyTool(item) {
+  if (item.type === 'commandExecution') return { kind: 'tool', title: 'Command', text: [item.command, item.aggregatedOutput].filter(Boolean).join('\n') };
+  if (item.type === 'fileChange') return { kind: 'tool', title: 'File change', text: (item.changes || []).map((change) => [change.kind, change.path].filter(Boolean).join(' · ')).join('\n') };
+  if (item.type === 'mcpToolCall') return { kind: 'tool', title: 'MCP tool', text: [item.server, item.tool].filter(Boolean).join(' · ') };
+  if (item.type === 'dynamicToolCall') return { kind: 'tool', title: 'Tool', text: [item.namespace, item.tool].filter(Boolean).join(' · ') };
+  if (item.type === 'webSearch') return { kind: 'tool', title: 'Web search', text: item.query || '' };
+  if (item.type === 'imageView') return { kind: 'tool', title: 'View image', text: item.path || '' };
+  if (item.type === 'imageGeneration') return { kind: 'tool', title: 'Image generation', text: item.revisedPrompt || item.savedPath || '' };
+  if (item.type === 'contextCompaction') return { kind: 'tool', title: 'Context', text: 'Conversation compacted' };
+  return null;
+}
+
+function appendWelcome() {
+  const welcome = document.createElement('div');
+  welcome.className = 'welcome';
+  const orb = document.createElement('div');
+  orb.className = 'orb';
+  const text = document.createElement('p');
+  text.textContent = 'Ask about anything under your pointer.';
+  welcome.append(orb, text);
+  transcript.append(welcome);
+}
+
+function updateBackgroundDragSurface(event) {
+  const target = event.target;
+  const eligible = target === transcript || target?.classList?.contains('conversation-turn') ||
+    target?.classList?.contains('turn-body') || target?.classList?.contains('message-row') ||
+    target?.classList?.contains('welcome');
+  if (!eligible) {
+    clearBackgroundDragSurface();
+    return;
+  }
+  if (activeDragSurface === target) return;
+  clearBackgroundDragSurface();
+  activeDragSurface = target;
+  activeDragSurface.classList.add('drag-ready');
+}
+
+function clearBackgroundDragSurface() {
+  activeDragSurface?.classList.remove('drag-ready');
+  activeDragSurface = null;
 }
 
 function seedAcceptanceConversation() {

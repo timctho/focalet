@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildTurnText, compactAccessibilityTree } from '../codex-bridge.mjs';
+import { buildSessionName, buildTurnText, compactAccessibilityTree } from '../codex-bridge.mjs';
 
 test('structured browser context remains nested JSON without inferred markdown', () => {
   const context = buildTurnText('what is this?', [{
@@ -49,4 +49,10 @@ test('image note appears only for explicit selected images', () => {
   assert.equal(withoutImage, 'hello');
   const withImage = buildTurnText('hello', [], 1);
   assert.match(withImage, /User-selected image regions attached: 1/);
+});
+
+test('Zommi sessions receive a bounded persistent name', () => {
+  const name = buildSessionName('  Compare   these two long documents and preserve every relevant structural difference in the answer  ');
+  assert.match(name, /^Zommi · Compare these two long documents/);
+  assert.ok(name.length <= 63);
 });

@@ -116,10 +116,24 @@ internal static class ElectronNativeHost
                 var images = parameters.TryGetProperty("images", out var imagesElement)
                     ? imagesElement.Deserialize<string[]>(JsonOptions) ?? []
                     : [];
-                codex.StartTurnAsync(message, snapshots, images).GetAwaiter().GetResult();
+                var model = ReadOptionalString(parameters, "model");
+                var effort = ReadOptionalString(parameters, "effort");
+                codex.StartTurnAsync(message, snapshots, images, model, effort).GetAwaiter().GetResult();
                 result = new { accepted = true, codex.ThreadId };
                 return false;
             }
+            case "getChatState":
+                result = codex.GetChatStateAsync().GetAwaiter().GetResult();
+                return false;
+            case "createSession":
+                result = codex.CreateSessionAsync(
+                    ReadOptionalString(request.Params, "model"),
+                    ReadOptionalString(request.Params, "effort")).GetAwaiter().GetResult();
+                return false;
+            case "switchSession":
+                result = codex.SwitchSessionAsync(
+                    ReadRequiredString(request.Params, "threadId")).GetAwaiter().GetResult();
+                return false;
             case "shutdown":
                 result = new { stopped = true };
                 return true;
@@ -164,6 +178,11 @@ internal static class ElectronNativeHost
 
         return value.GetString()!;
     }
+
+    private static string? ReadOptionalString(JsonElement parameters, string name) =>
+        parameters.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
 
     private static void WriteEvent(string eventName, object data) =>
         Write(new

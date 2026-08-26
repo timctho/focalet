@@ -22,6 +22,8 @@ let quitting = false;
 let expanded = false;
 let displaySignature = null;
 let shortcuts = { context: false, image: false };
+let movementSettledTimer = null;
+let windowMoving = false;
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
@@ -117,6 +119,12 @@ function createWindow() {
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
   mainWindow.loadFile(join(moduleDirectory, 'renderer', 'index.html'));
   mainWindow.on('resize', applyRoundedWindowShape);
+  mainWindow.on('will-move', () => setWindowMoving(true));
+  mainWindow.on('move', () => {
+    setWindowMoving(true);
+    clearTimeout(movementSettledTimer);
+    movementSettledTimer = setTimeout(() => setWindowMoving(false), 90);
+  });
   applyRoundedWindowShape();
   mainWindow.on('close', (event) => {
     if (quitting) return;
@@ -219,16 +227,42 @@ function registerIpc() {
   ipcMain.on('window:toggle-expanded', () => toggleExpanded());
   ipcMain.handle('clipboard:write', (_event, text) => clipboard.writeText(String(text || '')));
   ipcMain.handle('context:select-image', () => selectImageContext());
+  ipcMain.handle('chat:state', async () => {
+    if (seededAcceptance) return seededChatState();
+    if (process.platform === 'win32') return backend.request('getChatState');
+    return backend.getChatState();
+  });
+  ipcMain.handle('chat:create-session', async (_event, payload) => {
+    const options = readModelOptions(payload);
+    if (process.platform === 'win32') return backend.request('createSession', options);
+    return backend.createSession(options);
+  });
+  ipcMain.handle('chat:switch-session', async (_event, threadId) => {
+    const id = String(threadId || '').trim();
+    if (!id) throw new Error('A Codex thread id is required.');
+    if (process.platform === 'win32') return backend.request('switchSession', { threadId: id });
+    return backend.switchSession(id);
+  });
   ipcMain.handle('chat:send', async (_event, payload) => {
     const message = String(payload?.message || '').trim();
     if (!message) throw new Error('A message is required.');
     const attachments = Array.isArray(payload.attachments) ? payload.attachments : [];
     const snapshots = attachments.map((item) => item.snapshot).filter(Boolean);
     const images = attachments.map((item) => item.imageDataUrl).filter(Boolean);
+    const options = readModelOptions(payload);
     sendStatus('thinking…');
-    if (process.platform === 'win32') return backend.request('startTurn', { message, snapshots, images });
-    return backend.startTurn(message, snapshots, images);
+    if (process.platform === 'win32') return backend.request('startTurn', { message, snapshots, images, ...options });
+    return backend.startTurn(message, snapshots, images, options);
   });
+}
+
+function readModelOptions(payload) {
+  const model = String(payload?.model || '').trim();
+  const effort = String(payload?.effort || '').trim();
+  return {
+    ...(model ? { model } : {}),
+    ...(effort ? { effort } : {}),
+  };
 }
 
 async function startBackend() {
@@ -322,6 +356,29 @@ function toggleExpanded() {
   const display = screen.getDisplayMatching(mainWindow.getBounds());
   applyAdaptiveWindowSize(display, true);
   send('window:expanded', expanded);
+}
+
+function setWindowMoving(moving) {
+  const next = Boolean(moving);
+  if (windowMoving === next) return;
+  windowMoving = next;
+  send('window:moving', next);
+}
+
+function seededChatState() {
+  const now = Math.floor(Date.now() / 1000);
+  return {
+    activeThreadId: 'seeded-zommi-thread',
+    activeModel: 'fixture-standard',
+    activeEffort: 'medium',
+    models: [{
+      id: 'fixture-standard', model: 'fixture-standard', displayName: 'Fixture Standard', hidden: false,
+      supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'].map((reasoningEffort) => ({ reasoningEffort, description: '' })),
+      defaultReasoningEffort: 'medium',
+    }],
+    sessions: [{ id: 'seeded-zommi-thread', name: 'Structured context', preview: 'Structured context', updatedAt: now, threadSource: 'zommi' }],
+    thread: { id: 'seeded-zommi-thread', turns: [] },
+  };
 }
 
 function seedAcceptanceContexts() {

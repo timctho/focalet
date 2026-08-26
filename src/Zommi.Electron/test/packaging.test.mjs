@@ -97,6 +97,44 @@ test('conversation history renders every user turn without a singleton overlay',
   assert.match(renderer, /className = `activity-card \$\{kind\}`/);
 });
 
+test('model and session controls use Codex app-server catalogs and resumable threads', async () => {
+  const html = await readFile(join(appDirectory, 'renderer', 'index.html'), 'utf8');
+  const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
+  const portableBridge = await readFile(join(appDirectory, 'codex-bridge.mjs'), 'utf8');
+  const windowsBridge = await readFile(join(appDirectory, '..', 'Zommi.Windows', 'CodexAppServerClient.cs'), 'utf8');
+  assert.match(html, /id="SessionSidebar"/);
+  assert.match(html, /id="ModelPanel"/);
+  assert.match(renderer, /window\.zommi\.createSession/);
+  assert.match(renderer, /window\.zommi\.switchSession/);
+  assert.match(renderer, /model:\s*selectedModel/);
+  assert.match(renderer, /effort:\s*selectedEffort/);
+  for (const source of [portableBridge, windowsBridge]) {
+    assert.match(source, /model\/list/);
+    assert.match(source, /thread\/list/);
+    assert.match(source, /thread\/resume/);
+    assert.match(source, /threadSource.*zommi/s);
+  }
+});
+
+test('blank glass regions use native dragging and movement turns off expensive blur', async () => {
+  const styles = await readFile(join(appDirectory, 'renderer', 'styles.css'), 'utf8');
+  const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
+  const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
+  assert.match(styles, /\.glass\s*\{[\s\S]*-webkit-app-region:\s*drag/);
+  assert.match(styles, /\.drag-ready\s*\{\s*-webkit-app-region:\s*drag/);
+  assert.match(styles, /body\.window-moving[\s\S]*backdrop-filter:\s*none/);
+  assert.match(renderer, /updateBackgroundDragSurface/);
+  assert.match(main, /mainWindow\.on\('will-move'/);
+});
+
+test('streaming preserves manual scroll position and exposes a latest-message control', async () => {
+  const html = await readFile(join(appDirectory, 'renderer', 'index.html'), 'utf8');
+  const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
+  assert.match(html, /id="ScrollToLatest"/);
+  assert.match(renderer, /if \(!force && !autoFollow\)/);
+  assert.match(renderer, /isNearBottom\(transcript\)/);
+});
+
 test('Alt+Shift+A combines the selected image with shortcut-time pointer context', async () => {
   const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
   const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');

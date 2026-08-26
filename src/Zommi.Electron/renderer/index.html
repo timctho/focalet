@@ -12,9 +12,19 @@
     <div class="ambient ambient-one"></div>
     <div class="ambient ambient-two"></div>
 
+    <aside id="SessionSidebar" class="session-sidebar no-drag" aria-label="Chat sessions" aria-hidden="true">
+      <div class="sidebar-head">
+        <span>Chats</span>
+        <button id="NewSession" class="small-round" type="button" aria-label="Create new chat" title="New chat">＋</button>
+      </div>
+      <nav id="SessionList" class="session-list" aria-label="Zommi chat sessions"></nav>
+    </aside>
+
     <header class="titlebar">
       <button id="HideZommi" class="round-button no-drag" aria-label="Hide Zommi" title="Hide">×</button>
+      <button id="ToggleSessions" class="round-button no-drag menu" aria-label="Show chat sessions" aria-expanded="false" title="Chats">☰</button>
       <div class="drag-region" aria-hidden="true"></div>
+      <button id="OpenModelPanel" class="round-button no-drag controls" aria-label="Choose model and reasoning level" aria-expanded="false" title="Model settings">⌄</button>
       <button id="ExpandZommi" class="round-button no-drag expand" aria-label="Expand Zommi" title="Expand">↗</button>
     </header>
 
@@ -24,6 +34,17 @@
         <p>Ask about anything under your pointer.</p>
       </div>
     </section>
+
+    <button id="ScrollToLatest" class="scroll-latest no-drag" type="button" aria-label="Scroll to latest message" title="Latest message" hidden>↓</button>
+
+    <aside id="ModelPanel" class="model-panel no-drag" aria-label="Model settings" hidden>
+      <div class="panel-heading">Model settings</div>
+      <label for="ModelSelect">Model</label>
+      <select id="ModelSelect" aria-label="Codex model"></select>
+      <label for="EffortSelect">Reasoning</label>
+      <select id="EffortSelect" aria-label="Reasoning level"></select>
+      <p>Applies to the next turn and remains active for this chat.</p>
+    </aside>
 
     <aside id="ContextPreview" class="context-preview" aria-label="Attached context preview" hidden>
       <div class="preview-head">
@@ -36,6 +57,7 @@
 
     <section class="composer-shell" aria-label="Message composer">
       <div id="ContextChips" class="context-chips" aria-label="Attached contexts"></div>
+      <button id="ModelSummary" class="model-summary" type="button" aria-label="Choose model and reasoning level" aria-expanded="false">Loading models…</button>
       <div class="composer-row">
         <button id="SelectImage" class="composer-button plus" aria-label="Select image context" title="Select image context">+</button>
         <textarea id="ZommiComposer" rows="1" aria-label="Zommi message with attached context tokens" placeholder="Ask Codex"></textarea>
