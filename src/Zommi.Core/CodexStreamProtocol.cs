@@ -20,6 +20,8 @@ public enum CodexStreamLifecycle
 
 public sealed record CodexStreamUpdate
 {
+    public string? ThreadId { get; init; }
+
     public required CodexStreamKind Kind { get; init; }
 
     public required CodexStreamLifecycle Lifecycle { get; init; }

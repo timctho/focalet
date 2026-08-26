@@ -77,7 +77,7 @@ test('Codex startup timeouts reset the connection and preserve actionable errors
   assert.match(renderer, /!status\.classList\.contains\('warning'\)/);
 });
 
-test('light liquid glass adapts to each display and keeps alpha-antialiased corners', async () => {
+test('light liquid glass adapts to each display and uses inset alpha-antialiased corners', async () => {
   const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
   const styles = await readFile(join(appDirectory, 'renderer', 'styles.css'), 'utf8');
   assert.match(main, /nativeTheme\.themeSource\s*=\s*'light'/);
@@ -95,9 +95,9 @@ test('light liquid glass adapts to each display and keeps alpha-antialiased corn
   assert.doesNotMatch(main, /iVBORw0KGgoAAAANSUhEUgAAAA4AAAAO/);
   assert.doesNotMatch(main, /setBackgroundMaterial\('acrylic'\)/);
   assert.match(styles, /color-scheme:\s*light/);
-  assert.match(styles, /clip-path:\s*inset\(0 round 30px\)/);
-  assert.match(styles, /\.glass\s*\{[\s\S]*width:\s*100%[\s\S]*height:\s*100%/);
-  assert.doesNotMatch(styles, /\.glass\s*\{[\s\S]{0,200}margin:\s*12px/);
+  assert.match(styles, /\.glass\s*\{[\s\S]*position:\s*absolute;[\s\S]*inset:\s*8px/);
+  assert.doesNotMatch(styles, /clip-path:/);
+  assert.doesNotMatch(styles, /backdrop-filter:/);
 });
 
 test('scrollbars stay quiet until their scrollable surface is hovered', async () => {
@@ -109,19 +109,23 @@ test('scrollbars stay quiet until their scrollable surface is hovered', async ()
   assert.match(styles, /\.context-chips:hover::\-webkit-scrollbar-thumb/);
 });
 
-test('conversation history renders every user turn without a singleton overlay', async () => {
+test('conversation history renders user turns in bounded upward-loading pages', async () => {
   const html = await readFile(join(appDirectory, 'renderer', 'index.html'), 'utf8');
   const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
   assert.doesNotMatch(html, /QueryBubble/);
-  assert.match(renderer, /turnNumber \+= 1/);
+  assert.match(renderer, /HISTORY_PAGE_SIZE = 18/);
+  assert.match(renderer, /initialHistoryStart\(historyTurns\.length, HISTORY_PAGE_SIZE\)/);
+  assert.match(renderer, /requestAnimationFrame\(loadOlderHistory\)/);
+  assert.match(renderer, /transcript\.scrollTop = previousTop \+ transcript\.scrollHeight - previousHeight/);
   assert.match(renderer, /className = 'conversation-turn'/);
-  assert.match(renderer, /User message turn \$\{turnNumber\}/);
+  assert.match(renderer, /User message turn \$\{displayTurnNumber\}/);
   assert.match(renderer, /className = `activity-card \$\{kind\}`/);
 });
 
 test('model and session controls use Codex app-server catalogs and resumable threads', async () => {
   const html = await readFile(join(appDirectory, 'renderer', 'index.html'), 'utf8');
   const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
+  const styles = await readFile(join(appDirectory, 'renderer', 'styles.css'), 'utf8');
   const portableBridge = await readFile(join(appDirectory, 'codex-bridge.mjs'), 'utf8');
   const windowsBridge = await readFile(join(appDirectory, '..', 'Zommi.Windows', 'CodexAppServerClient.cs'), 'utf8');
   assert.match(html, /id="SessionSidebar"/);
@@ -132,6 +136,10 @@ test('model and session controls use Codex app-server catalogs and resumable thr
   assert.doesNotMatch(html, /id="ModelSelect"|id="EffortSelect"/);
   assert.match(renderer, /window\.zommi\.createSession/);
   assert.match(renderer, /window\.zommi\.switchSession/);
+  assert.match(renderer, /toggleSessions\.addEventListener\('mouseenter', openSessionSidebarFromHover\)/);
+  assert.match(renderer, /button\.dataset\.status = state/);
+  assert.match(renderer, /button\.disabled = sessionBusy \|\| session\.id === activeThreadId/);
+  assert.doesNotMatch(renderer, /sessionBusy \|\| turnActive \|\| threadId === activeThreadId/);
   assert.match(renderer, /model:\s*selectedModel/);
   assert.match(renderer, /effort:\s*selectedEffort/);
   for (const source of [portableBridge, windowsBridge]) {
@@ -139,10 +147,12 @@ test('model and session controls use Codex app-server catalogs and resumable thr
     assert.match(source, /thread\/list/);
     assert.match(source, /thread\/resume/);
     assert.match(source, /threadSource.*zommi/s);
+    assert.match(source, /activeTurns/);
   }
+  assert.match(styles, /height:\s*min\(50%, 410px\)/);
 });
 
-test('blank glass regions use native dragging and movement turns off expensive blur', async () => {
+test('blank glass regions use native dragging without move-time renderer work', async () => {
   const styles = await readFile(join(appDirectory, 'renderer', 'styles.css'), 'utf8');
   const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
   const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
@@ -152,18 +162,18 @@ test('blank glass regions use native dragging and movement turns off expensive b
   assert.match(styles, /\.titlebar\s*\{[\s\S]*?-webkit-app-region:\s*drag/);
   assert.match(styles, /\.background-drag\s*\{[\s\S]*?inset:\s*0;[\s\S]*?-webkit-app-region:\s*drag/);
   assert.doesNotMatch(styles, /\.edge-drag\s*\{/);
-  assert.match(styles, /\.transcript::after\s*\{[\s\S]*-webkit-app-region:\s*drag/);
+  assert.doesNotMatch(styles, /\.transcript::after/);
   for (const selector of ['.welcome', '.conversation-turn', '.turn-body', '.message-row']) {
     const escaped = selector.replace('.', '\\.');
     const rule = styles.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))?.[1] || '';
     assert.doesNotMatch(rule, /-webkit-app-region:\s*drag/, `${selector} must remain interactive.`);
   }
   assert.match(styles, /transition:\s*opacity 460ms cubic-bezier/);
-  assert.match(styles, /\.glass:hover::after,\s*\.glass\.pointer-over::after\s*\{\s*opacity:\s*0\.64/);
+  assert.match(styles, /\.glass:hover::after,\s*\.glass\.pointer-over::after\s*\{\s*opacity:\s*0\.58/);
   assert.match(renderer, /glass\.classList\.toggle\('pointer-over', pointerOver\)/);
-  assert.match(styles, /body\.window-moving[\s\S]*backdrop-filter:\s*none/);
+  assert.doesNotMatch(styles, /window-moving/);
   assert.doesNotMatch(renderer, /updateBackgroundDragSurface|drag-ready/);
-  assert.match(main, /mainWindow\.on\('will-move'/);
+  assert.doesNotMatch(main, /mainWindow\.on\('will-move'|mainWindow\.on\('move'/);
 });
 
 test('stream updates are frame-batched and thinking changes one status icon in place', async () => {
@@ -178,13 +188,13 @@ test('stream updates are frame-batched and thinking changes one status icon in p
   assert.doesNotMatch(renderer, /activity\.state\.textContent\s*=/);
 });
 
-test('glass rendering avoids the former high-cost blur layers', async () => {
+test('glass rendering avoids full-window blur and culls long offscreen turns', async () => {
   const styles = await readFile(join(appDirectory, 'renderer', 'styles.css'), 'utf8');
-  assert.match(styles, /backdrop-filter:\s*blur\(22px\)/);
-  assert.match(styles, /backdrop-filter:\s*blur\(14px\)/);
-  assert.doesNotMatch(styles, /blur\((?:3[0-9]|[4-9][0-9]|[1-9][0-9]{2,})px\)/);
+  assert.doesNotMatch(styles, /backdrop-filter:/);
   assert.doesNotMatch(styles, /(?:^|\n)\s*filter:\s*blur\(/);
   assert.match(styles, /overflow-anchor:\s*none/);
+  assert.match(styles, /content-visibility:\s*auto/);
+  assert.match(styles, /contain-intrinsic-size:\s*auto 220px/);
 });
 
 test('streaming send control becomes a stop control backed by Codex turn interruption', async () => {
@@ -199,7 +209,7 @@ test('streaming send control becomes a stop control backed by Codex turn interru
   assert.match(renderer, /window\.zommi\.interrupt\(\)/);
   assert.match(renderer, /setAttribute\('aria-label', turnActive \? 'Stop response' : 'Send message'\)/);
   assert.match(main, /ipcMain\.handle\('chat:interrupt'/);
-  assert.match(portableBridge, /#request\('turn\/interrupt', \{ threadId: this\.threadId, turnId \}\)/);
+  assert.match(portableBridge, /#request\('turn\/interrupt', \{ threadId, turnId \}\)/);
   assert.match(windowsBridge, /"turn\/interrupt"[\s\S]*new \{ threadId, turnId \}/);
 });
 

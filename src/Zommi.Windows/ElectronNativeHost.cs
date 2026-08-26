@@ -23,7 +23,7 @@ internal static class ElectronNativeHost
         var capture = new ForegroundContextCapture();
         codex.StatusChanged += status => WriteEvent("status", status);
         codex.StreamUpdate += update => WriteEvent("streamUpdate", update);
-        codex.TurnCompleted += status => WriteEvent("turnCompleted", status);
+        codex.TurnCompletedForThread += (threadId, status) => WriteEvent("turnCompleted", new { threadId, status });
 
         try
         {

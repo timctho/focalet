@@ -44,6 +44,20 @@ export function isNearBottom({ scrollHeight, scrollTop, clientHeight }, toleranc
   return scrollHeight - scrollTop - clientHeight <= tolerance;
 }
 
+export function initialHistoryStart(turnCount, pageSize) {
+  return Math.max(0, Number(turnCount) - Math.max(1, Number(pageSize)));
+}
+
+export function previousHistoryStart(currentStart, pageSize) {
+  return Math.max(0, Number(currentStart) - Math.max(1, Number(pageSize)));
+}
+
+export function sessionStatus(threadId, activeThreadId, runningThreadIds, unreadThreadIds) {
+  if (runningThreadIds?.has(threadId)) return 'running';
+  if (unreadThreadIds?.has(threadId)) return 'unread';
+  return threadId === activeThreadId ? 'read' : 'done';
+}
+
 export function effortsForModel(model) {
   const options = model?.supportedReasoningEfforts || [];
   return options

@@ -4,9 +4,12 @@ import {
   activityKey,
   effortsForModel,
   extractDisplayUserText,
+  initialHistoryStart,
   isNearBottom,
   mergeActivityText,
   mergeDistinctTextSections,
+  previousHistoryStart,
+  sessionStatus,
   sessionTitle,
 } from '../renderer/renderer-logic.mjs';
 
@@ -43,6 +46,21 @@ test('user-facing session labels exclude Zommi context envelopes', () => {
 test('stream following only considers a transcript near its bottom', () => {
   assert.equal(isNearBottom({ scrollHeight: 1000, scrollTop: 650, clientHeight: 300 }), false);
   assert.equal(isNearBottom({ scrollHeight: 1000, scrollTop: 675, clientHeight: 300 }), true);
+});
+
+test('long histories reveal older turns in bounded pages', () => {
+  assert.equal(initialHistoryStart(53, 18), 35);
+  assert.equal(previousHistoryStart(35, 18), 17);
+  assert.equal(previousHistoryStart(17, 18), 0);
+});
+
+test('session status prioritizes running and unread work', () => {
+  const running = new Set(['running']);
+  const unread = new Set(['unread']);
+  assert.equal(sessionStatus('running', 'active', running, unread), 'running');
+  assert.equal(sessionStatus('unread', 'active', running, unread), 'unread');
+  assert.equal(sessionStatus('active', 'active', running, unread), 'read');
+  assert.equal(sessionStatus('done', 'active', running, unread), 'done');
 });
 
 test('reasoning levels come from the selected model catalog entry', () => {

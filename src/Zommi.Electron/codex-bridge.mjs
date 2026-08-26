@@ -11,17 +11,21 @@ export class PortableCodexBridge extends EventEmitter {
     this.pending = new Map();
     this.nextId = 0;
     this.threadId = null;
-    this.activeTurnId = null;
-    this.turnStartPromise = null;
+    this.activeTurns = new Map();
+    this.turnStartPromises = new Map();
     this.activeThread = null;
     this.activeModel = null;
     this.activeEffort = null;
+    this.threadModels = new Map();
+    this.threadEfforts = new Map();
+    this.materializedThreads = new Set();
     this.models = [];
-    this.pendingSessionName = null;
-    this.pendingSessionPreview = null;
+    this.pendingSessionNames = new Map();
+    this.pendingSessionPreviews = new Map();
     this.startPromise = null;
     this.stderr = '';
     this.itemKinds = new Map();
+    this.itemThreads = new Map();
     this.cwd = options.cwd ?? process.env.ZOMMI_CODEX_CWD ?? homedir();
   }
 
@@ -32,49 +36,62 @@ export class PortableCodexBridge extends EventEmitter {
 
   async startTurn(message, snapshots = [], images = [], options = {}) {
     await this.ensureStarted();
-    const shouldNameThread = !this.activeThread?.name && !this.activeThread?.preview;
+    const threadId = this.threadId;
+    if (!threadId) throw new Error('Codex did not create a thread.');
+    if (this.activeTurns.has(threadId) || this.turnStartPromises.has(threadId)) {
+      throw new Error('This chat already has an active Codex turn.');
+    }
+    const shouldNameThread = !this.materializedThreads.has(threadId);
     const input = [{ type: 'text', text: buildTurnText(message, snapshots, images.length) }];
     for (const url of images) {
       if (!url.startsWith('data:image/')) throw new Error('Image context must be a data URL.');
       input.push({ type: 'image', url });
     }
-    const params = { threadId: this.threadId, input, summary: 'detailed' };
+    const params = { threadId, input, summary: 'detailed' };
     if (options.model) params.model = String(options.model);
     if (options.effort) params.effort = String(options.effort);
     if (shouldNameThread) {
-      this.pendingSessionName = buildSessionName(message);
-      this.pendingSessionPreview = String(message).trim();
+      this.pendingSessionNames.set(threadId, buildSessionName(message));
+      this.pendingSessionPreviews.set(threadId, String(message).trim());
     }
-    this.activeTurnId = null;
+    let result;
     try {
-      this.turnStartPromise = this.#request('turn/start', params);
-      const result = await this.turnStartPromise;
-      this.activeTurnId = result?.turn?.id || this.activeTurnId;
-      if (!this.activeTurnId) throw new Error('Codex started a turn without returning its id.');
+      const turnStartPromise = this.#request('turn/start', params);
+      this.turnStartPromises.set(threadId, turnStartPromise);
+      result = await turnStartPromise;
+      const turnId = result?.turn?.id || this.activeTurns.get(threadId);
+      if (!turnId) throw new Error('Codex started a turn without returning its id.');
+      this.activeTurns.set(threadId, turnId);
     } catch (error) {
       if (shouldNameThread) {
-        this.pendingSessionName = null;
-        this.pendingSessionPreview = null;
+        this.pendingSessionNames.delete(threadId);
+        this.pendingSessionPreviews.delete(threadId);
       }
       throw error;
     } finally {
-      this.turnStartPromise = null;
+      this.turnStartPromises.delete(threadId);
     }
-    if (params.model) this.activeModel = params.model;
-    if (params.effort) this.activeEffort = params.effort;
-    return { accepted: true, threadId: this.threadId, turnId: this.activeTurnId };
+    if (params.model) this.threadModels.set(threadId, params.model);
+    if (params.effort) this.threadEfforts.set(threadId, params.effort);
+    if (threadId === this.threadId) {
+      if (params.model) this.activeModel = params.model;
+      if (params.effort) this.activeEffort = params.effort;
+    }
+    return { accepted: true, threadId, turnId: this.activeTurns.get(threadId) };
   }
 
   async interruptTurn() {
     await this.ensureStarted();
-    if (!this.activeTurnId && this.turnStartPromise) {
-      const result = await this.turnStartPromise;
-      this.activeTurnId = result?.turn?.id || this.activeTurnId;
+    const threadId = this.threadId;
+    if (!threadId) throw new Error('Codex did not create a thread.');
+    if (!this.activeTurns.has(threadId) && this.turnStartPromises.has(threadId)) {
+      const result = await this.turnStartPromises.get(threadId);
+      if (result?.turn?.id) this.activeTurns.set(threadId, result.turn.id);
     }
-    const turnId = this.activeTurnId;
-    if (!this.threadId || !turnId) throw new Error('There is no active Codex turn to stop.');
-    await this.#request('turn/interrupt', { threadId: this.threadId, turnId });
-    return { interrupted: true, threadId: this.threadId, turnId };
+    const turnId = this.activeTurns.get(threadId);
+    if (!turnId) throw new Error('There is no active Codex turn to stop.');
+    await this.#request('turn/interrupt', { threadId, turnId });
+    return { interrupted: true, threadId, turnId };
   }
 
   async getChatState() {
@@ -83,7 +100,7 @@ export class PortableCodexBridge extends EventEmitter {
       this.#loadModels(),
       this.#listZommiSessions(),
     ]);
-    if (this.activeThread?.name || this.activeThread?.preview || this.activeThread?.turns?.length) {
+    if (this.materializedThreads.has(this.threadId)) {
       const thread = await this.#request('thread/read', { threadId: this.threadId, includeTurns: true });
       this.activeThread = thread?.thread || this.activeThread;
     }
@@ -93,7 +110,10 @@ export class PortableCodexBridge extends EventEmitter {
   async createSession(options = {}) {
     await this.ensureStarted();
     const result = await this.#startThread(options.model || null);
-    if (options.effort) this.activeEffort = String(options.effort);
+    if (options.effort) {
+      this.activeEffort = String(options.effort);
+      this.threadEfforts.set(this.threadId, this.activeEffort);
+    }
     const sessions = await this.#listZommiSessions();
     return this.#chatState(this.models, sessions, result.thread);
   }
@@ -101,7 +121,10 @@ export class PortableCodexBridge extends EventEmitter {
   async switchSession(threadId) {
     await this.ensureStarted();
     if (!threadId) throw new Error('A Codex thread id is required.');
-    const result = await this.#request('thread/resume', { threadId: String(threadId) });
+    const id = String(threadId);
+    const result = this.activeTurns.has(id)
+      ? await this.#request('thread/read', { threadId: id, includeTurns: true })
+      : await this.#request('thread/resume', { threadId: id });
     this.#setActiveThread(result);
     const sessions = await this.#listZommiSessions();
     return this.#chatState(this.models, sessions, result.thread);
@@ -166,10 +189,15 @@ export class PortableCodexBridge extends EventEmitter {
     this.threadId = result?.thread?.id;
     if (!this.threadId) throw new Error('Codex returned a thread without an id.');
     this.activeThread = result.thread;
-    this.activeModel = result.model || this.activeModel;
-    this.activeEffort = result.reasoningEffort || this.activeEffort;
-    this.pendingSessionName = null;
-    this.pendingSessionPreview = null;
+    const model = result.model || result.thread?.model;
+    const effort = result.reasoningEffort || result.thread?.reasoningEffort;
+    if (model) this.threadModels.set(this.threadId, model);
+    if (effort) this.threadEfforts.set(this.threadId, effort);
+    this.activeModel = this.threadModels.get(this.threadId) || model || this.activeModel;
+    this.activeEffort = this.threadEfforts.get(this.threadId) || effort || this.activeEffort;
+    if (result.thread?.name || result.thread?.preview || result.thread?.turns?.length) {
+      this.materializedThreads.add(this.threadId);
+    }
   }
 
   async #loadModels() {
@@ -199,6 +227,7 @@ export class PortableCodexBridge extends EventEmitter {
       models,
       sessions,
       thread,
+      activeTurns: [...this.activeTurns].map(([threadId, turnId]) => ({ threadId, turnId })),
     };
   }
 
@@ -243,34 +272,43 @@ export class PortableCodexBridge extends EventEmitter {
   }
 
   #handleNotification(method, params) {
-    if (params.threadId && this.threadId && params.threadId !== this.threadId) return;
-    if (method === 'turn/started' && params.turn?.id) this.activeTurnId = params.turn.id;
+    const threadId = String(params.threadId || this.threadId || '');
+    if (method === 'turn/started' && threadId && params.turn?.id) this.activeTurns.set(threadId, params.turn.id);
     if (method === 'item/started' && params.item?.id && params.item?.type === 'agentMessage') {
       this.itemKinds.set(params.item.id, params.item.phase === 'commentary' ? 'thinking' : 'assistant');
+      this.itemThreads.set(params.item.id, threadId);
     }
     const update = parseStreamUpdate(method, params, this.itemKinds);
-    if (update) this.emit('streamUpdate', update);
-    if (method === 'item/completed' && params.item?.id) this.itemKinds.delete(params.item.id);
+    if (update) this.emit('streamUpdate', { ...update, threadId });
+    if (method === 'item/completed' && params.item?.id) {
+      this.itemKinds.delete(params.item.id);
+      this.itemThreads.delete(params.item.id);
+    }
     if (method === 'turn/completed') {
-      this.itemKinds.clear();
-      if (!params.turn?.id || params.turn.id === this.activeTurnId) this.activeTurnId = null;
+      for (const [itemId, itemThreadId] of this.itemThreads) {
+        if (itemThreadId !== threadId) continue;
+        this.itemKinds.delete(itemId);
+        this.itemThreads.delete(itemId);
+      }
+      if (threadId) this.activeTurns.delete(threadId);
       const completedStatus = params.turn?.status || 'completed';
-      this.emit('turnCompleted', completedStatus);
-      void this.#completeTurnMetadata();
+      this.emit('turnCompleted', { threadId, status: completedStatus });
+      void this.#completeTurnMetadata(threadId);
     }
     if (method === 'error') this.emit('status', JSON.stringify(params));
   }
 
-  async #completeTurnMetadata() {
-    const name = this.pendingSessionName;
-    const preview = this.pendingSessionPreview;
-    this.pendingSessionName = null;
-    this.pendingSessionPreview = null;
-    if (this.activeThread && preview) this.activeThread.preview = preview;
+  async #completeTurnMetadata(threadId) {
+    const name = this.pendingSessionNames.get(threadId);
+    const preview = this.pendingSessionPreviews.get(threadId);
+    this.pendingSessionNames.delete(threadId);
+    this.pendingSessionPreviews.delete(threadId);
+    this.materializedThreads.add(threadId);
+    if (this.threadId === threadId && this.activeThread && preview) this.activeThread.preview = preview;
     if (name) {
       try {
-        await this.#request('thread/name/set', { threadId: this.threadId, name });
-        if (this.activeThread) this.activeThread.name = name;
+        await this.#request('thread/name/set', { threadId, name });
+        if (this.threadId === threadId && this.activeThread) this.activeThread.name = name;
       } catch (error) {
         this.emit('status', `Zommi session naming failed: ${error.message}`);
       }

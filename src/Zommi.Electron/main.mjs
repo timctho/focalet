@@ -33,10 +33,10 @@ let quitting = false;
 let expanded = false;
 let displaySignature = null;
 let shortcuts = { context: false, image: false };
-let movementSettledTimer = null;
-let windowMoving = false;
 let seededStreamTimer = null;
 let seededStreamTurnId = null;
+let seededStreamThreadId = null;
+let seededActiveThreadId = 'seeded-zommi-thread';
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
@@ -93,8 +93,15 @@ async function startApplication() {
 async function runAcceptanceInputProbe(path) {
   const result = { inputPath: 'webContents.sendInputEvent' };
   try {
+    const sessionTogglePoint = await rendererElementCenter('#ToggleSessions');
+    mainWindow.webContents.sendInputEvent({ type: 'mouseMove', x: sessionTogglePoint.x, y: sessionTogglePoint.y });
+    await delay(260);
+    result.sessionSidebarHover = await evaluateRenderer(`document.querySelector('#SessionSidebar')?.classList.contains('open') === true`);
+    result.sessionSidebarHalfHeight = await evaluateRenderer(`{ const p = document.querySelector('#SessionSidebar')?.getBoundingClientRect(); const g = document.querySelector('.glass')?.getBoundingClientRect(); return Boolean(p && g && p.height <= g.height / 2 + 1); }`);
+    result.activeSessionShowsRead = await evaluateRenderer(`document.querySelector('#SessionList .session-item[data-thread-id="seeded-zommi-thread"]')?.dataset.status === 'read'`);
+    result.inactiveSessionShowsDone = await evaluateRenderer(`document.querySelector('#SessionList .session-item[data-thread-id="seeded-secondary-thread"]')?.dataset.status === 'done'`);
+    result.sessionStatusesUseIcons = await evaluateRenderer(`document.querySelectorAll('#SessionList .session-item .session-status .ui-icon').length === 2`);
     await clickRendererElement('#ToggleSessions');
-    result.sessionSidebar = await evaluateRenderer(`document.querySelector('#SessionSidebar')?.classList.contains('open') === true`);
     await clickRendererElement('#ModelSummary');
     await delay(260);
     result.modelPanel = await evaluateRenderer(`document.querySelector('#ModelPanel')?.hidden === false`);
@@ -110,12 +117,32 @@ async function runAcceptanceInputProbe(path) {
     await clickRendererElement('#ModelSummary');
     await clickRendererElement('#ToggleSessions');
 
+    const initialHistoryCount = await evaluateRenderer(`document.querySelectorAll('#CodexTranscript .conversation-turn').length`);
+    await evaluateRenderer(`{ const e = document.querySelector('#CodexTranscript'); e.scrollTop = 0; e.dispatchEvent(new Event('scroll')); return true; }`);
+    await delay(220);
+    const pagedHistoryState = await evaluateRenderer(`{ const e = document.querySelector('#CodexTranscript'); return { count: e.querySelectorAll('.conversation-turn').length, top: e.scrollTop }; }`);
+    result.historyLoadsInPages = initialHistoryCount < 42 && pagedHistoryState.count > initialHistoryCount && pagedHistoryState.top > 0;
+    for (let page = 0; page < 3; page += 1) {
+      await evaluateRenderer(`{ const e = document.querySelector('#CodexTranscript'); e.scrollTop = 0; e.dispatchEvent(new Event('scroll')); return true; }`);
+      await delay(180);
+    }
+    result.historyReachesFirstTurn = await evaluateRenderer(`{ const e = document.querySelector('#CodexTranscript'); e.scrollTop = 0; return e.querySelector('.conversation-turn')?.getAttribute('aria-label') === 'Conversation turn 1'; }`);
+
     await clickRendererElement('#ZommiComposer');
     mainWindow.webContents.insertText('seeded streaming input acceptance');
     await delay(100);
     await clickRendererElement('#SendMessage');
     await delay(300);
     result.stopButtonDuringStreaming = await evaluateRenderer(`document.querySelector('#SendMessage')?.getAttribute('aria-label') === 'Stop response'`);
+    await clickRendererElement('#ToggleSessions');
+    await clickRendererElement('#SessionList .session-item[data-thread-id="seeded-secondary-thread"]');
+    await delay(260);
+    result.sessionSwitchDuringStreaming = await evaluateRenderer(`document.querySelector('#SessionList .session-item.active')?.dataset.threadId === 'seeded-secondary-thread'`);
+    result.backgroundSessionShowsRunning = await evaluateRenderer(`document.querySelector('#SessionList .session-item[data-thread-id="seeded-zommi-thread"]')?.dataset.status === 'running'`);
+    result.switchedSessionComposerEnabled = await evaluateRenderer(`document.querySelector('#ZommiComposer')?.disabled === false`);
+    await clickRendererElement('#SessionList .session-item[data-thread-id="seeded-zommi-thread"]');
+    await delay(260);
+    result.returnedToRunningSession = await evaluateRenderer(`document.querySelector('#SendMessage')?.getAttribute('aria-label') === 'Stop response'`);
     await delay(2500);
     const transcriptPoint = await rendererElementCenter('#CodexTranscript');
     mainWindow.webContents.sendInputEvent({ type: 'mouseMove', x: transcriptPoint.x, y: transcriptPoint.y });
@@ -137,6 +164,11 @@ async function runAcceptanceInputProbe(path) {
     result.thinkingCardsPerTurn = await evaluateRenderer(`[...document.querySelectorAll('#CodexTranscript .conversation-turn')].map((turn) => turn.querySelectorAll('.activity-card.thinking').length)`);
     result.singleThinkingCard = result.thinkingCardsPerTurn.some((count) => count > 0) && result.thinkingCardsPerTurn.every((count) => count <= 1);
     result.thinkingUsesStatusIcon = await evaluateRenderer(`Boolean(document.querySelector('#CodexTranscript .activity-card.thinking .activity-state[data-status="done"] .ui-icon'))`);
+    await clickRendererElement('#ToggleSessions');
+    await clickRendererElement('#SessionList .session-item[data-thread-id="seeded-secondary-thread"]');
+    send('turn:completed', { threadId: 'seeded-zommi-thread', status: 'completed' });
+    await delay(180);
+    result.backgroundCompletionShowsUnread = await evaluateRenderer(`document.querySelector('#SessionList .session-item[data-thread-id="seeded-zommi-thread"]')?.dataset.status === 'unread'`);
     result.passed = Object.entries(result)
       .filter(([key]) => !['inputPath', 'modelPanelDiagnostics', 'manualScrollDiagnostics', 'thinkingCardsPerTurn'].includes(key))
       .every(([, value]) => value === true);
@@ -214,12 +246,6 @@ function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
   mainWindow.loadFile(join(moduleDirectory, 'renderer', 'index.html'));
-  mainWindow.on('will-move', () => setWindowMoving(true));
-  mainWindow.on('move', () => {
-    setWindowMoving(true);
-    clearTimeout(movementSettledTimer);
-    movementSettledTimer = setTimeout(() => setWindowMoving(false), 90);
-  });
   mainWindow.on('close', (event) => {
     if (quitting) return;
     event.preventDefault();
@@ -325,12 +351,20 @@ function registerIpc() {
   });
   ipcMain.handle('chat:create-session', async (_event, payload) => {
     const options = readModelOptions(payload);
+    if (seededAcceptance) {
+      seededActiveThreadId = 'seeded-secondary-thread';
+      return seededChatState();
+    }
     if (process.platform === 'win32') return backend.request('createSession', options);
     return backend.createSession(options);
   });
   ipcMain.handle('chat:switch-session', async (_event, threadId) => {
     const id = String(threadId || '').trim();
     if (!id) throw new Error('A Codex thread id is required.');
+    if (seededAcceptance) {
+      seededActiveThreadId = id;
+      return seededChatState();
+    }
     if (process.platform === 'win32') return backend.request('switchSession', { threadId: id });
     return backend.switchSession(id);
   });
@@ -342,7 +376,7 @@ function registerIpc() {
     const images = attachments.map((item) => item.imageDataUrl).filter(Boolean);
     const options = readModelOptions(payload);
     sendStatus('thinking…');
-    if (seededAcceptance) return startSeededStream();
+    if (seededAcceptance) return startSeededStream(seededActiveThreadId);
     if (process.platform === 'win32') return backend.request('startTurn', { message, snapshots, images, ...options });
     return backend.startTurn(message, snapshots, images, options);
   });
@@ -350,37 +384,41 @@ function registerIpc() {
     sendStatus('stopping…');
     if (seededAcceptance) {
       const turnId = seededStreamTurnId;
-      if (!turnId) throw new Error('There is no active Codex turn to stop.');
+      const threadId = seededStreamThreadId;
+      if (!turnId || !threadId || threadId !== seededActiveThreadId) throw new Error('There is no active Codex turn to stop.');
       clearInterval(seededStreamTimer);
       seededStreamTimer = null;
       seededStreamTurnId = null;
-      setTimeout(() => send('turn:completed', 'interrupted'), 80);
-      return { interrupted: true, threadId: 'seeded-zommi-thread', turnId };
+      seededStreamThreadId = null;
+      setTimeout(() => send('turn:completed', { threadId, status: 'interrupted' }), 80);
+      return { interrupted: true, threadId, turnId };
     }
     if (process.platform === 'win32') return backend.request('interruptTurn');
     return backend.interruptTurn();
   });
 }
 
-function startSeededStream() {
+function startSeededStream(threadId) {
   if (seededStreamTurnId) throw new Error('A seeded acceptance turn is already active.');
   seededStreamTurnId = `seeded-turn-${Date.now()}`;
+  seededStreamThreadId = threadId;
   const turnId = seededStreamTurnId;
   let line = 0;
-  send('stream:update', { kind: 'thinking', lifecycle: 'started', title: 'Thinking', text: '', itemId: `${turnId}-thinking` });
-  send('stream:update', { kind: 'thinking', lifecycle: 'delta', title: 'Thinking', text: 'Preparing a long streamed response.', itemId: `${turnId}-thinking` });
-  send('stream:update', { kind: 'thinking', lifecycle: 'completed', title: 'Thinking', text: 'Preparing a long streamed response.', status: 'done', itemId: `${turnId}-thinking` });
+  send('stream:update', { threadId, kind: 'thinking', lifecycle: 'started', title: 'Thinking', text: '', itemId: `${turnId}-thinking` });
+  send('stream:update', { threadId, kind: 'thinking', lifecycle: 'delta', title: 'Thinking', text: 'Preparing a long streamed response.', itemId: `${turnId}-thinking` });
+  send('stream:update', { threadId, kind: 'thinking', lifecycle: 'completed', title: 'Thinking', text: 'Preparing a long streamed response.', status: 'done', itemId: `${turnId}-thinking` });
   seededStreamTimer = setInterval(() => {
     if (seededStreamTurnId !== turnId) return;
     line += 1;
-    send('stream:update', { kind: 'assistant', lifecycle: 'delta', title: 'Codex', text: `Streaming acceptance line ${line}.\n`, itemId: `${turnId}-assistant` });
+    send('stream:update', { threadId, kind: 'assistant', lifecycle: 'delta', title: 'Codex', text: `Streaming acceptance line ${line}.\n`, itemId: `${turnId}-assistant` });
     if (line < 300) return;
     clearInterval(seededStreamTimer);
     seededStreamTimer = null;
     seededStreamTurnId = null;
-    send('turn:completed', 'completed');
+    seededStreamThreadId = null;
+    send('turn:completed', { threadId, status: 'completed' });
   }, 60);
-  return { accepted: true, threadId: 'seeded-zommi-thread', turnId };
+  return { accepted: true, threadId, turnId };
 }
 
 function readModelOptions(payload) {
@@ -485,17 +523,14 @@ function toggleExpanded() {
   send('window:expanded', expanded);
 }
 
-function setWindowMoving(moving) {
-  const next = Boolean(moving);
-  if (windowMoving === next) return;
-  windowMoving = next;
-  send('window:moving', next);
-}
-
 function seededChatState() {
   const now = Math.floor(Date.now() / 1000);
+  const sessions = [
+    { id: 'seeded-zommi-thread', name: 'Structured context', preview: 'Structured context', updatedAt: now, threadSource: 'zommi' },
+    { id: 'seeded-secondary-thread', name: 'Background comparison', preview: 'Background comparison', updatedAt: now - 30, threadSource: 'zommi' },
+  ];
   return {
-    activeThreadId: 'seeded-zommi-thread',
+    activeThreadId: seededActiveThreadId,
     activeModel: 'fixture-standard',
     activeEffort: 'medium',
     models: [{
@@ -503,9 +538,35 @@ function seededChatState() {
       supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'].map((reasoningEffort) => ({ reasoningEffort, description: '' })),
       defaultReasoningEffort: 'medium',
     }],
-    sessions: [{ id: 'seeded-zommi-thread', name: 'Structured context', preview: 'Structured context', updatedAt: now, threadSource: 'zommi' }],
-    thread: { id: 'seeded-zommi-thread', turns: [] },
+    sessions,
+    activeTurns: seededStreamTurnId && seededStreamThreadId
+      ? [{ threadId: seededStreamThreadId, turnId: seededStreamTurnId }]
+      : [],
+    thread: { id: seededActiveThreadId, turns: seededHistory(seededActiveThreadId) },
   };
+}
+
+function seededHistory(threadId) {
+  if (threadId === 'seeded-secondary-thread') {
+    return [{ id: 'secondary-turn', items: [
+      { id: 'secondary-user', type: 'userMessage', content: [{ type: 'text', text: 'Keep this chat available while another session is running.' }] },
+      { id: 'secondary-agent', type: 'agentMessage', phase: 'final', status: 'completed', text: 'This independent session remains interactive.' },
+    ] }];
+  }
+  const turns = Array.from({ length: 42 }, (_value, index) => ({
+    id: `history-turn-${index + 1}`,
+    items: [
+      { id: `history-user-${index + 1}`, type: 'userMessage', content: [{ type: 'text', text: `History question ${index + 1}` }] },
+      { id: `history-agent-${index + 1}`, type: 'agentMessage', phase: 'final', status: 'completed', text: `History answer ${index + 1}` },
+    ],
+  }));
+  if (seededStreamThreadId === threadId && seededStreamTurnId) {
+    turns.push({ id: seededStreamTurnId, items: [
+      { id: `${seededStreamTurnId}-user`, type: 'userMessage', content: [{ type: 'text', text: 'seeded streaming input acceptance' }] },
+      { id: `${seededStreamTurnId}-thinking`, type: 'reasoning', status: 'completed', summary: ['Preparing a long streamed response.'], content: [] },
+    ] });
+  }
+  return turns;
 }
 
 function seedAcceptanceContexts() {

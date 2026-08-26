@@ -17,6 +17,12 @@ internal sealed class CodexAppServerClient : IDisposable
     private readonly CancellationTokenSource lifetime = new();
     private readonly ConcurrentDictionary<long, TaskCompletionSource<JsonElement>> pending = new();
     private readonly ConcurrentDictionary<string, CodexStreamKind> streamItemKinds = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, string> streamItemThreads = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, string> activeTurns = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, string> pendingSessionNames = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, byte> materializedThreads = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, string> threadModels = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, string> threadEfforts = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim writer = new(1, 1);
     private readonly object startLock = new();
     private readonly StringBuilder recentStandardError = new();
@@ -26,9 +32,6 @@ internal sealed class CodexAppServerClient : IDisposable
     private long nextRequestId;
     private bool disposed;
     private JsonElement? activeThread;
-    private bool activeThreadHasHistory;
-    private string? pendingSessionName;
-    private string? activeTurnId;
 
     public event Action<string>? StatusChanged;
 
@@ -37,6 +40,8 @@ internal sealed class CodexAppServerClient : IDisposable
     public event Action<CodexStreamUpdate>? StreamUpdate;
 
     public event Action<string>? TurnCompleted;
+
+    public event Action<string, string>? TurnCompletedForThread;
 
     public string? ThreadId { get; private set; }
 
@@ -91,8 +96,13 @@ internal sealed class CodexAppServerClient : IDisposable
         }
 
         await EnsureStartedAsync().ConfigureAwait(false);
-        var shouldNameThread = !activeThreadHasHistory;
         var threadId = ThreadId ?? throw new InvalidOperationException("Codex did not create a thread.");
+        if (activeTurns.ContainsKey(threadId))
+        {
+            throw new InvalidOperationException("This chat already has an active Codex turn.");
+        }
+
+        var shouldNameThread = !materializedThreads.ContainsKey(threadId);
         var turnText = BuildTurnText(userMessage, invocationContexts, imageDataUrls.Count);
         var inputs = new List<object>
         {
@@ -110,7 +120,7 @@ internal sealed class CodexAppServerClient : IDisposable
 
         if (shouldNameThread)
         {
-            pendingSessionName = BuildSessionName(userMessage);
+            pendingSessionNames[threadId] = BuildSessionName(userMessage);
         }
 
         try
@@ -126,36 +136,53 @@ internal sealed class CodexAppServerClient : IDisposable
                     summary = "detailed",
                 },
                 lifetime.Token).ConfigureAwait(false);
-            activeTurnId = response.TryGetProperty("turn", out var turn) &&
-                           turn.TryGetProperty("id", out var turnIdElement)
+            var turnId = response.TryGetProperty("turn", out var turn) &&
+                         turn.TryGetProperty("id", out var turnIdElement)
                 ? turnIdElement.GetString()
-                : activeTurnId;
-            if (string.IsNullOrWhiteSpace(activeTurnId))
+                : activeTurns.GetValueOrDefault(threadId);
+            if (string.IsNullOrWhiteSpace(turnId))
             {
                 throw new InvalidOperationException("Codex started a turn without returning its id.");
             }
+
+            activeTurns[threadId] = turnId;
         }
         catch
         {
             if (shouldNameThread)
             {
-                pendingSessionName = null;
+                _ = pendingSessionNames.TryRemove(threadId, out _);
             }
 
             throw;
         }
 
-        CurrentModel = string.IsNullOrWhiteSpace(model) ? CurrentModel : model;
-        CurrentEffort = string.IsNullOrWhiteSpace(effort) ? CurrentEffort : effort;
-        return activeTurnId;
+        if (!string.IsNullOrWhiteSpace(model))
+        {
+            threadModels[threadId] = model;
+            if (ThreadId == threadId)
+            {
+                CurrentModel = model;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(effort))
+        {
+            threadEfforts[threadId] = effort;
+            if (ThreadId == threadId)
+            {
+                CurrentEffort = effort;
+            }
+        }
+
+        return activeTurns[threadId];
     }
 
     public async Task<object> InterruptTurnAsync()
     {
         await EnsureStartedAsync().ConfigureAwait(false);
         var threadId = ThreadId ?? throw new InvalidOperationException("Codex did not create a thread.");
-        var turnId = activeTurnId;
-        if (string.IsNullOrWhiteSpace(turnId))
+        if (!activeTurns.TryGetValue(threadId, out var turnId))
         {
             throw new InvalidOperationException("There is no active Codex turn to stop.");
         }
@@ -175,7 +202,7 @@ internal sealed class CodexAppServerClient : IDisposable
             new { limit = 100, includeHidden = false },
             lifetime.Token).ConfigureAwait(false);
         var sessions = await ListZommiSessionsAsync(lifetime.Token).ConfigureAwait(false);
-        if (activeThread is { } currentThread && activeThreadHasHistory)
+        if (activeThread is not null && ThreadId is { } threadId && materializedThreads.ContainsKey(threadId))
         {
             var threadResponse = await SendRequestAsync(
                 "thread/read",
@@ -195,6 +222,10 @@ internal sealed class CodexAppServerClient : IDisposable
         if (!string.IsNullOrWhiteSpace(effort))
         {
             CurrentEffort = effort;
+            if (ThreadId is { } threadId)
+            {
+                threadEfforts[threadId] = effort;
+            }
         }
 
         var sessions = await ListZommiSessionsAsync(lifetime.Token).ConfigureAwait(false);
@@ -205,7 +236,20 @@ internal sealed class CodexAppServerClient : IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(threadId);
         await EnsureStartedAsync().ConfigureAwait(false);
-        var result = await ResumeThreadAsync(threadId, lifetime.Token).ConfigureAwait(false);
+        JsonElement result;
+        if (activeTurns.ContainsKey(threadId))
+        {
+            result = await SendRequestAsync(
+                "thread/read",
+                new { threadId, includeTurns = true },
+                lifetime.Token).ConfigureAwait(false);
+            SetActiveThread(result);
+        }
+        else
+        {
+            result = await ResumeThreadAsync(threadId, lifetime.Token).ConfigureAwait(false);
+        }
+
         var sessions = await ListZommiSessionsAsync(lifetime.Token).ConfigureAwait(false);
         return ChatState([], sessions, result.GetProperty("thread").Clone());
     }
@@ -357,13 +401,32 @@ internal sealed class CodexAppServerClient : IDisposable
         activeThread = response.GetProperty("thread").Clone();
         ThreadId = activeThread.Value.GetProperty("id").GetString()
             ?? throw new InvalidOperationException("Codex returned a thread without an id.");
-        CurrentModel = response.TryGetProperty("model", out var model) ? model.GetString() : null;
-        CurrentEffort = response.TryGetProperty("reasoningEffort", out var effort) &&
-                        effort.ValueKind == JsonValueKind.String
+        var modelValue = response.TryGetProperty("model", out var model) && model.ValueKind == JsonValueKind.String
+            ? model.GetString()
+            : activeThread.Value.TryGetProperty("model", out var threadModel) && threadModel.ValueKind == JsonValueKind.String
+                ? threadModel.GetString()
+                : null;
+        var effortValue = response.TryGetProperty("reasoningEffort", out var effort) && effort.ValueKind == JsonValueKind.String
             ? effort.GetString()
-            : null;
-        activeThreadHasHistory = HasMaterializedHistory(activeThread.Value);
-        pendingSessionName = null;
+            : activeThread.Value.TryGetProperty("reasoningEffort", out var threadEffort) && threadEffort.ValueKind == JsonValueKind.String
+                ? threadEffort.GetString()
+                : null;
+        if (!string.IsNullOrWhiteSpace(modelValue))
+        {
+            threadModels[ThreadId] = modelValue;
+        }
+
+        if (!string.IsNullOrWhiteSpace(effortValue))
+        {
+            threadEfforts[ThreadId] = effortValue;
+        }
+
+        CurrentModel = threadModels.GetValueOrDefault(ThreadId);
+        CurrentEffort = threadEfforts.GetValueOrDefault(ThreadId);
+        if (HasMaterializedHistory(activeThread.Value))
+        {
+            materializedThreads[ThreadId] = 0;
+        }
     }
 
     private object ChatState(JsonElement[] models, JsonElement[] sessions, JsonElement thread) => new
@@ -374,6 +437,7 @@ internal sealed class CodexAppServerClient : IDisposable
         Models = models,
         Sessions = sessions,
         Thread = thread,
+        ActiveTurns = activeTurns.Select(entry => new { ThreadId = entry.Key, TurnId = entry.Value }).ToArray(),
     };
 
     private static JsonElement[] ReadArray(JsonElement element, string propertyName) =>
@@ -528,7 +592,12 @@ internal sealed class CodexAppServerClient : IDisposable
                 parameters.TryGetProperty("turn", out var startedTurn) &&
                 startedTurn.TryGetProperty("id", out var startedTurnId))
             {
-                activeTurnId = startedTurnId.GetString() ?? activeTurnId;
+                var notificationThreadId = ReadNotificationThreadId(parameters);
+                var turnId = startedTurnId.GetString();
+                if (!string.IsNullOrWhiteSpace(notificationThreadId) && !string.IsNullOrWhiteSpace(turnId))
+                {
+                    activeTurns[notificationThreadId] = turnId;
+                }
             }
             var streamUpdate = CodexStreamProtocol.ParseNotification(method, parameters);
             if (streamUpdate is { Kind: CodexStreamKind.Assistant, ItemId: not null } &&
@@ -543,14 +612,16 @@ internal sealed class CodexAppServerClient : IDisposable
 
             if (streamUpdate is not null)
             {
-                StreamUpdate?.Invoke(streamUpdate);
+                StreamUpdate?.Invoke(streamUpdate with { ThreadId = ReadNotificationThreadId(parameters) });
             }
 
             if (method.Equals("item/completed", StringComparison.Ordinal) &&
                 parameters.TryGetProperty("item", out var completedItem) &&
                 completedItem.TryGetProperty("id", out var completedItemId))
             {
-                _ = streamItemKinds.TryRemove(completedItemId.GetString() ?? string.Empty, out _);
+                var itemId = completedItemId.GetString() ?? string.Empty;
+                _ = streamItemKinds.TryRemove(itemId, out _);
+                _ = streamItemThreads.TryRemove(itemId, out _);
             }
 
             switch (method)
@@ -564,6 +635,7 @@ internal sealed class CodexAppServerClient : IDisposable
                     break;
                 case "turn/completed":
                     var status = "completed";
+                    var completedThreadId = ReadNotificationThreadId(parameters);
                     string? turnDetail = null;
                     if (parameters.TryGetProperty("turn", out var turn) &&
                         turn.TryGetProperty("status", out var statusElement))
@@ -581,10 +653,21 @@ internal sealed class CodexAppServerClient : IDisposable
                     {
                         StatusChanged?.Invoke($"Codex turn {status}: {turnDetail}");
                     }
-                    streamItemKinds.Clear();
-                    activeTurnId = null;
-                    TurnCompleted?.Invoke(status);
-                    _ = CompleteTurnMetadataAsync();
+                    foreach (var item in streamItemThreads.Where(item => item.Value == completedThreadId).ToArray())
+                    {
+                        _ = streamItemKinds.TryRemove(item.Key, out _);
+                        _ = streamItemThreads.TryRemove(item.Key, out _);
+                    }
+                    if (!string.IsNullOrWhiteSpace(completedThreadId))
+                    {
+                        _ = activeTurns.TryRemove(completedThreadId, out _);
+                        TurnCompletedForThread?.Invoke(completedThreadId, status);
+                        if (completedThreadId == ThreadId)
+                        {
+                            TurnCompleted?.Invoke(status);
+                        }
+                        _ = CompleteTurnMetadataAsync(completedThreadId);
+                    }
                     break;
                 case "error":
                     var errorMessage = parameters.TryGetProperty("error", out var errorObject) &&
@@ -663,14 +746,23 @@ internal sealed class CodexAppServerClient : IDisposable
         streamItemKinds[itemId] = string.Equals(phase, "commentary", StringComparison.Ordinal)
             ? CodexStreamKind.Thinking
             : CodexStreamKind.Assistant;
+        var threadId = ReadNotificationThreadId(parameters);
+        if (!string.IsNullOrWhiteSpace(threadId))
+        {
+            streamItemThreads[itemId] = threadId;
+        }
     }
 
-    private async Task CompleteTurnMetadataAsync()
+    private string? ReadNotificationThreadId(JsonElement parameters) =>
+        parameters.TryGetProperty("threadId", out var threadId) && threadId.ValueKind == JsonValueKind.String
+            ? threadId.GetString()
+            : ThreadId;
+
+    private async Task CompleteTurnMetadataAsync(string threadId)
     {
-        var name = pendingSessionName;
-        pendingSessionName = null;
-        activeThreadHasHistory = true;
-        if (!string.IsNullOrWhiteSpace(name) && ThreadId is { } threadId)
+        _ = pendingSessionNames.TryRemove(threadId, out var name);
+        materializedThreads[threadId] = 0;
+        if (!string.IsNullOrWhiteSpace(name))
         {
             try
             {
@@ -754,9 +846,13 @@ internal sealed class CodexAppServerClient : IDisposable
             CurrentModel = null;
             CurrentEffort = null;
             activeThread = null;
-            activeThreadHasHistory = false;
-            pendingSessionName = null;
-            activeTurnId = null;
+            streamItemKinds.Clear();
+            streamItemThreads.Clear();
+            activeTurns.Clear();
+            pendingSessionNames.Clear();
+            materializedThreads.Clear();
+            threadModels.Clear();
+            threadEfforts.Clear();
             startTask = null;
         }
 
@@ -805,9 +901,13 @@ internal sealed class CodexAppServerClient : IDisposable
             CurrentModel = null;
             CurrentEffort = null;
             activeThread = null;
-            activeThreadHasHistory = false;
-            pendingSessionName = null;
-            activeTurnId = null;
+            streamItemKinds.Clear();
+            streamItemThreads.Clear();
+            activeTurns.Clear();
+            pendingSessionNames.Clear();
+            materializedThreads.Clear();
+            threadModels.Clear();
+            threadEfforts.Clear();
             startTask = null;
         }
         StopProcess(activeProcess);

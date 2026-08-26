@@ -2,11 +2,17 @@ import {
   activityKey,
   effortsForModel,
   extractDisplayUserText,
+  initialHistoryStart,
   isNearBottom,
   mergeActivityText,
   mergeDistinctTextSections,
+  previousHistoryStart,
+  sessionStatus,
   sessionTitle,
 } from './renderer-logic.mjs';
+
+const HISTORY_PAGE_SIZE = 18;
+const HISTORY_LOAD_THRESHOLD_PX = 96;
 
 const glass = document.querySelector('.glass');
 const transcript = document.querySelector('#CodexTranscript');
@@ -31,8 +37,10 @@ const effortList = document.querySelector('#EffortList');
 const modelSummary = document.querySelector('#ModelSummary');
 const modelSummaryLabel = document.querySelector('#ModelSummaryLabel');
 const attachments = [];
-const activityElements = new Map();
+let activityElements = new Map();
 const pendingStreamUpdates = [];
+const activeTurns = new Map();
+const unreadThreadIds = new Set();
 let assistantElement = null;
 let assistantTextNode = null;
 let currentTurnBody = null;
@@ -49,12 +57,22 @@ let models = [];
 let selectedModel = '';
 let selectedEffort = '';
 let sessionBusy = false;
+let sessionPanelPinned = false;
+let sessionPanelCloseTimer = null;
+let historyTurns = [];
+let historyStartIndex = 0;
+let historyLoading = false;
+let historyLoadFrame = 0;
 
 document.querySelector('#HideZommi').addEventListener('click', () => window.zommi.hide());
 document.querySelector('#ExpandZommi').addEventListener('click', () => window.zommi.toggleExpanded());
 document.querySelector('#SelectImage').addEventListener('click', () => window.zommi.selectImage());
 document.querySelector('#ClosePreview').addEventListener('click', hidePreview);
 toggleSessions.addEventListener('click', toggleSessionSidebar);
+toggleSessions.addEventListener('mouseenter', openSessionSidebarFromHover);
+toggleSessions.addEventListener('mouseleave', scheduleSessionSidebarClose);
+sessionSidebar.addEventListener('mouseenter', cancelSessionSidebarClose);
+sessionSidebar.addEventListener('mouseleave', scheduleSessionSidebarClose);
 newSession.addEventListener('click', createSession);
 glass.addEventListener('mouseenter', () => setPointerOverGlass(true));
 glass.addEventListener('mouseleave', () => setPointerOverGlass(false));
@@ -84,7 +102,6 @@ window.zommi.onStream(queueStreamUpdate);
 window.zommi.onTurnCompleted(completeTurn);
 window.zommi.onFocusComposer(() => focusComposer());
 window.zommi.onAcceptanceConversation?.(seedAcceptanceConversation);
-window.zommi.onWindowMoving?.((moving) => document.body.classList.toggle('window-moving', Boolean(moving)));
 window.zommi.onShortcuts((state) => {
   shortcuts.textContent = 'Alt+A context · Alt+Shift+A image';
   shortcuts.setAttribute('aria-label', `Alt+A registered: ${Boolean(state.context)}; Alt+Shift+A registered: ${Boolean(state.image)}`);
@@ -190,6 +207,14 @@ function applyChatState(state, { renderHistory = false } = {}) {
   activeThreadId = state?.activeThreadId || state?.thread?.id || activeThreadId;
   if (Array.isArray(state?.models) && state.models.length) models = state.models;
   if (Array.isArray(state?.sessions)) sessions = state.sessions;
+  if (Array.isArray(state?.activeTurns)) {
+    activeTurns.clear();
+    for (const turn of state.activeTurns) {
+      if (turn?.threadId) activeTurns.set(String(turn.threadId), String(turn.turnId || 'running'));
+    }
+  }
+  markSessionRead(activeThreadId);
+  syncActiveTurnState();
   selectedModel = state?.activeModel || selectedModel || models.find((model) => model.isDefault)?.model || models[0]?.model || '';
   const activeModel = findSelectedModel();
   const supported = effortsForModel(activeModel);
@@ -198,6 +223,8 @@ function applyChatState(state, { renderHistory = false } = {}) {
   renderModelControls();
   renderSessions();
   if (renderHistory) renderThreadHistory(state?.thread);
+  renderPrimaryAction();
+  composer.disabled = turnActive || sessionBusy;
 }
 
 function renderModelControls() {
@@ -333,35 +360,89 @@ function handleModelSearchKeydown(event) {
   firstOption.focus({ preventScroll: true });
 }
 
-function toggleSessionSidebar() {
-  const open = !sessionSidebar.classList.contains('open');
+function setSessionSidebarOpen(open) {
   sessionSidebar.classList.toggle('open', open);
   sessionSidebar.setAttribute('aria-hidden', String(!open));
   toggleSessions.setAttribute('aria-expanded', String(open));
   toggleSessions.setAttribute('aria-label', `${open ? 'Hide' : 'Show'} chat sessions`);
 }
 
+function toggleSessionSidebar() {
+  sessionPanelPinned = !sessionPanelPinned;
+  setSessionSidebarOpen(sessionPanelPinned || toggleSessions.matches(':hover') || sessionSidebar.matches(':hover'));
+}
+
+function openSessionSidebarFromHover() {
+  cancelSessionSidebarClose();
+  setSessionSidebarOpen(true);
+}
+
+function cancelSessionSidebarClose() {
+  clearTimeout(sessionPanelCloseTimer);
+  sessionPanelCloseTimer = null;
+}
+
+function scheduleSessionSidebarClose() {
+  cancelSessionSidebarClose();
+  sessionPanelCloseTimer = setTimeout(() => {
+    if (!sessionPanelPinned && !toggleSessions.matches(':hover') && !sessionSidebar.matches(':hover')) {
+      setSessionSidebarOpen(false);
+    }
+  }, 220);
+}
+
 function renderSessions() {
   sessionList.replaceChildren();
   const ordered = [...sessions];
+  const runningThreadIds = new Set(activeTurns.keys());
   if (activeThreadId && !ordered.some((session) => session.id === activeThreadId)) {
     ordered.unshift({ id: activeThreadId, preview: 'New chat' });
   }
   for (const session of ordered) {
+    const state = sessionStatus(session.id, activeThreadId, runningThreadIds, unreadThreadIds);
     const button = document.createElement('button');
     button.type = 'button';
     button.className = `session-item${session.id === activeThreadId ? ' active' : ''}`;
-    button.textContent = sessionTitle(session);
+    button.dataset.threadId = session.id;
+    button.dataset.status = state;
     button.title = extractDisplayUserText(session.name || session.preview || 'New chat');
-    button.disabled = sessionBusy || turnActive || session.id === activeThreadId;
+    button.setAttribute('aria-label', sessionTitle(session));
+    button.setAttribute('aria-description', sessionStatusLabel(state));
+    button.disabled = sessionBusy || session.id === activeThreadId;
+    const stateIcon = document.createElement('span');
+    stateIcon.className = `session-status ${state}`;
+    stateIcon.setAttribute('aria-label', sessionStatusLabel(state));
+    stateIcon.title = sessionStatusLabel(state);
+    stateIcon.append(createUiIcon(sessionStatusIcon(state)));
+    const label = document.createElement('span');
+    label.className = 'session-name';
+    label.textContent = sessionTitle(session);
+    button.append(stateIcon, label);
     button.addEventListener('click', () => switchSession(session.id));
     sessionList.append(button);
   }
-  newSession.disabled = sessionBusy || turnActive;
+  newSession.disabled = sessionBusy;
+}
+
+function sessionStatusLabel(value) {
+  return ({ running: 'Running', unread: 'Unread', read: 'Read', done: 'Done' })[value] || 'Done';
+}
+
+function sessionStatusIcon(value) {
+  return ({ running: 'spinner', unread: 'unread', read: 'read', done: 'check' })[value] || 'check';
+}
+
+function markSessionRead(threadId) {
+  if (threadId) unreadThreadIds.delete(threadId);
+}
+
+function syncActiveTurnState() {
+  turnActive = Boolean(activeThreadId && activeTurns.has(activeThreadId));
+  if (!turnActive) interruptRequested = false;
 }
 
 async function createSession() {
-  if (sessionBusy || turnActive) return;
+  if (sessionBusy) return;
   setSessionBusy(true);
   try {
     const state = await window.zommi.createSession({ model: selectedModel, effort: selectedEffort });
@@ -376,11 +457,12 @@ async function createSession() {
 }
 
 async function switchSession(threadId) {
-  if (sessionBusy || turnActive || threadId === activeThreadId) return;
+  if (sessionBusy || threadId === activeThreadId) return;
   setSessionBusy(true);
   try {
     const state = await window.zommi.switchSession(threadId);
     applyChatState(state, { renderHistory: true });
+    if (!sessionPanelPinned) setSessionSidebarOpen(false);
     renderStatus('Chat switched');
     focusComposer();
   } catch (error) {
@@ -392,6 +474,7 @@ async function switchSession(threadId) {
 
 function setSessionBusy(busy) {
   sessionBusy = busy;
+  composer.disabled = busy || turnActive;
   renderSessions();
   renderModelControls();
 }
@@ -400,33 +483,48 @@ async function sendMessage() {
   if (turnActive || sessionBusy) return;
   const message = composer.value.trim();
   if (!message) return;
+  const sendingThreadId = activeThreadId;
+  if (!sendingThreadId) return;
+  const sendingAttachments = attachments.map(({ snapshot, imageDataUrl }) => ({ snapshot, imageDataUrl }));
+  const sendingTokens = attachments.map((item) => item.token);
   closeModelPanel();
-  turnActive = true;
+  activeTurns.set(sendingThreadId, 'starting');
+  syncActiveTurnState();
   interruptRequested = false;
   renderPrimaryAction();
   composer.disabled = true;
   renderSessions();
   renderModelControls();
   removeWelcome();
-  beginTurn(message, attachments.map((item) => item.token));
+  beginTurn(message, sendingTokens);
   assistantElement = null;
   assistantTextNode = null;
-  activityElements.clear();
+  activityElements = new Map();
+  attachments.splice(0);
+  composer.value = '';
+  renderAttachments();
+  resizeComposer();
   try {
-    await window.zommi.send({
+    const result = await window.zommi.send({
       message,
-      attachments: attachments.map(({ snapshot, imageDataUrl }) => ({ snapshot, imageDataUrl })),
+      attachments: sendingAttachments,
       model: selectedModel,
       effort: selectedEffort,
     });
-    updateActiveSessionTitle(message);
-    attachments.splice(0);
-    composer.value = '';
-    renderAttachments();
-    resizeComposer();
+    activeTurns.set(sendingThreadId, result?.turnId || activeTurns.get(sendingThreadId) || 'running');
+    updateSessionTitle(sendingThreadId, message);
+    if (activeThreadId === sendingThreadId) {
+      syncActiveTurnState();
+      renderPrimaryAction();
+    }
+    renderSessions();
   } catch (error) {
-    appendError(error.message);
-    completeTurn('failed');
+    activeTurns.delete(sendingThreadId);
+    if (activeThreadId === sendingThreadId) {
+      composer.value = message;
+      appendError(error.message);
+    }
+    completeTurn({ threadId: sendingThreadId, status: 'failed' });
   }
 }
 
@@ -461,10 +559,10 @@ function renderPrimaryAction() {
   sendButton.title = turnActive ? (interruptRequested ? 'Stopping…' : 'Stop') : 'Send';
 }
 
-function updateActiveSessionTitle(message) {
-  let session = sessions.find((item) => item.id === activeThreadId);
-  if (!session && activeThreadId) {
-    session = { id: activeThreadId, preview: message, updatedAt: Math.floor(Date.now() / 1000) };
+function updateSessionTitle(threadId, message) {
+  let session = sessions.find((item) => item.id === threadId);
+  if (!session && threadId) {
+    session = { id: threadId, preview: message, updatedAt: Math.floor(Date.now() / 1000) };
     sessions.unshift(session);
   }
   if (session && (!session.preview || session.preview === 'New chat')) session.preview = message;
@@ -472,6 +570,12 @@ function updateActiveSessionTitle(message) {
 }
 
 function queueStreamUpdate(update) {
+  const threadId = String(update?.threadId || activeThreadId || '');
+  if (!threadId) return;
+  const wasRunning = activeTurns.has(threadId);
+  activeTurns.set(threadId, activeTurns.get(threadId) || update?.itemId || 'running');
+  if (!wasRunning) renderSessions();
+  if (threadId !== activeThreadId) return;
   pendingStreamUpdates.push(update);
   if (streamFrame) return;
   streamFrame = requestAnimationFrame(flushStreamUpdates);
@@ -482,7 +586,9 @@ function flushStreamUpdates() {
   streamFrame = 0;
   if (!pendingStreamUpdates.length) return;
   const updates = pendingStreamUpdates.splice(0);
-  for (const update of updates) renderStreamUpdate(update, { deferScroll: true });
+  for (const update of updates) {
+    if (!update?.threadId || update.threadId === activeThreadId) renderStreamUpdate(update, { deferScroll: true });
+  }
   scrollTranscript();
 }
 
@@ -606,6 +712,8 @@ function createUiIcon(name) {
     tool: 'M6.3 5.1a3.4 3.4 0 0 0 4.2 4.4l4.2 4.2-1.9 1.9-4.2-4.2a3.4 3.4 0 0 1-4.2-4.3l2 2 1.9-1.9-2-2.1Z',
     check: 'm5.5 10 3 3 6-6',
     spinner: 'M15.5 10a5.5 5.5 0 1 1-2.1-4.3',
+    unread: 'M10 5.5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Z',
+    read: 'M3.8 10s2.2-3.4 6.2-3.4 6.2 3.4 6.2 3.4-2.2 3.4-6.2 3.4S3.8 10 3.8 10Zm6.2-1.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z',
   };
   path.setAttribute('d', paths[name] || paths.tool);
   svg.append(path);
@@ -622,15 +730,16 @@ function normalizeLifecycle(value) {
   return String(value || 'delta').toLowerCase();
 }
 
-function beginTurn(message, tokens) {
-  turnNumber += 1;
+function beginTurn(message, tokens, options = {}) {
+  const displayTurnNumber = options.number || turnNumber + 1;
+  turnNumber = Math.max(turnNumber, displayTurnNumber);
   const turn = document.createElement('section');
   turn.className = 'conversation-turn';
-  turn.setAttribute('aria-label', `Conversation turn ${turnNumber}`);
+  turn.setAttribute('aria-label', `Conversation turn ${displayTurnNumber}`);
 
   const row = document.createElement('article');
   row.className = 'message-row user';
-  row.setAttribute('aria-label', `User message turn ${turnNumber}`);
+  row.setAttribute('aria-label', `User message turn ${displayTurnNumber}`);
   const bubble = document.createElement('div');
   bubble.className = 'message user';
   if (tokens.length) {
@@ -647,8 +756,9 @@ function beginTurn(message, tokens) {
   currentTurnBody = document.createElement('div');
   currentTurnBody.className = 'turn-body';
   turn.append(row, currentTurnBody);
-  transcript.append(turn);
-  scrollTranscript({ force: true });
+  (options.parent || transcript).append(turn);
+  if (options.scroll !== false) scrollTranscript({ force: true });
+  return turn;
 }
 
 function ensureTurnBody() {
@@ -664,9 +774,19 @@ function appendError(message) {
   currentTurnBody.append(element);
 }
 
-function completeTurn(turnStatus) {
+function completeTurn(completion) {
+  const threadId = typeof completion === 'object' && completion
+    ? String(completion.threadId || activeThreadId || '')
+    : String(activeThreadId || '');
+  const turnStatus = typeof completion === 'object' && completion ? completion.status : completion;
+  activeTurns.delete(threadId);
+  if (threadId !== activeThreadId) {
+    if (threadId) unreadThreadIds.add(threadId);
+    renderSessions();
+    return;
+  }
   flushStreamUpdates();
-  turnActive = false;
+  syncActiveTurnState();
   interruptRequested = false;
   for (const activity of activityElements.values()) {
     if (activity.element.classList.contains('completed')) continue;
@@ -675,7 +795,7 @@ function completeTurn(turnStatus) {
     activity.element.open = false;
   }
   renderPrimaryAction();
-  composer.disabled = false;
+  composer.disabled = sessionBusy;
   const normalizedStatus = String(turnStatus).toLowerCase();
   if (normalizedStatus === 'completed') renderStatus('ready');
   else if (normalizedStatus === 'interrupted') renderStatus('stopped');
@@ -701,6 +821,9 @@ function focusComposer() {
 }
 
 function handleTranscriptScroll() {
+  if (!historyLoading && historyStartIndex > 0 && transcript.scrollTop <= HISTORY_LOAD_THRESHOLD_PX) {
+    if (!historyLoadFrame) historyLoadFrame = requestAnimationFrame(loadOlderHistory);
+  }
   const nearBottom = isNearBottom(transcript);
   if (programmaticScroll && nearBottom) return;
   if (programmaticScroll) programmaticScroll = false;
@@ -742,26 +865,55 @@ function renderThreadHistory(thread) {
   pendingStreamUpdates.splice(0);
   if (streamFrame) cancelAnimationFrame(streamFrame);
   streamFrame = 0;
+  if (historyLoadFrame) cancelAnimationFrame(historyLoadFrame);
+  historyLoadFrame = 0;
   transcript.replaceChildren();
   assistantElement = null;
   assistantTextNode = null;
   currentTurnBody = null;
-  activityElements.clear();
+  activityElements = new Map();
   turnNumber = 0;
-  const turns = Array.isArray(thread?.turns) ? thread.turns : [];
-  for (const turn of turns) {
+  historyTurns = Array.isArray(thread?.turns) ? thread.turns : [];
+  historyStartIndex = initialHistoryStart(historyTurns.length, HISTORY_PAGE_SIZE);
+  renderHistoryRange(historyStartIndex, historyTurns.length, transcript);
+  if (!historyTurns.length) appendWelcome();
+  autoFollow = true;
+  scrollTranscript({ force: true });
+}
+
+function renderHistoryRange(start, end, parent) {
+  for (let index = start; index < end; index += 1) {
+    const turn = historyTurns[index];
     const items = Array.isArray(turn?.items) ? turn.items : [];
     const userItem = items.find((item) => item.type === 'userMessage');
     const userText = userItem ? displayUserItem(userItem) : 'Continue';
     assistantElement = null;
     assistantTextNode = null;
-    activityElements.clear();
-    beginTurn(userText || 'Continue', []);
-    for (const item of items) renderHistoryItem(item);
+    activityElements = new Map();
+    beginTurn(userText || 'Continue', [], { number: index + 1, parent, scroll: false });
+    for (const item of items) renderHistoryItem(item, { deferScroll: true });
   }
-  if (!turns.length) appendWelcome();
-  autoFollow = true;
-  scrollTranscript({ force: true });
+}
+
+function loadOlderHistory() {
+  historyLoadFrame = 0;
+  if (historyLoading || historyStartIndex <= 0) return;
+  historyLoading = true;
+  const previousHeight = transcript.scrollHeight;
+  const previousTop = transcript.scrollTop;
+  const nextStart = previousHistoryStart(historyStartIndex, HISTORY_PAGE_SIZE);
+  const firstRenderedTurn = transcript.querySelector('.conversation-turn');
+  const cursor = { assistantElement, assistantTextNode, currentTurnBody, activityElements };
+  const fragment = document.createDocumentFragment();
+  renderHistoryRange(nextStart, historyStartIndex, fragment);
+  transcript.insertBefore(fragment, firstRenderedTurn);
+  historyStartIndex = nextStart;
+  assistantElement = cursor.assistantElement;
+  assistantTextNode = cursor.assistantTextNode;
+  currentTurnBody = cursor.currentTurnBody;
+  activityElements = cursor.activityElements;
+  transcript.scrollTop = previousTop + transcript.scrollHeight - previousHeight;
+  historyLoading = false;
 }
 
 function displayUserItem(item) {
@@ -772,27 +924,33 @@ function displayUserItem(item) {
   return extractDisplayUserText(text);
 }
 
-function renderHistoryItem(item) {
+function renderHistoryItem(item, { deferScroll = false } = {}) {
   if (!item || item.type === 'userMessage') return;
+  const lifecycle = isCompletedHistoryItem(item) ? 'completed' : 'delta';
   if (item.type === 'agentMessage') {
     if (item.phase === 'commentary') {
-      renderStreamUpdate({ kind: 'thinking', lifecycle: 'completed', title: 'Thinking', text: item.text || '', itemId: item.id, status: 'done' });
+      renderStreamUpdate({ kind: 'thinking', lifecycle, title: 'Thinking', text: item.text || '', itemId: item.id, status: item.status }, { deferScroll });
     } else {
-      renderStreamUpdate({ kind: 'assistant', lifecycle: 'completed', title: 'Codex', text: item.text || '', itemId: item.id });
+      renderStreamUpdate({ kind: 'assistant', lifecycle, title: 'Codex', text: item.text || '', itemId: item.id }, { deferScroll });
     }
     return;
   }
   if (item.type === 'reasoning') {
     const text = mergeDistinctTextSections([...(item.summary || []), ...(item.content || [])]);
-    renderStreamUpdate({ kind: 'thinking', lifecycle: 'completed', title: 'Thinking', text, itemId: item.id, status: 'done' });
+    renderStreamUpdate({ kind: 'thinking', lifecycle, title: 'Thinking', text, itemId: item.id, status: item.status }, { deferScroll });
     return;
   }
   if (item.type === 'plan') {
-    renderStreamUpdate({ kind: 'plan', lifecycle: 'completed', title: 'Plan', text: item.text || '', itemId: item.id, status: 'done' });
+    renderStreamUpdate({ kind: 'plan', lifecycle, title: 'Plan', text: item.text || '', itemId: item.id, status: item.status }, { deferScroll });
     return;
   }
   const history = historyTool(item);
-  if (history) renderStreamUpdate({ ...history, lifecycle: 'completed', itemId: item.id, status: item.status || 'done' });
+  if (history) renderStreamUpdate({ ...history, lifecycle, itemId: item.id, status: item.status || 'done' }, { deferScroll });
+}
+
+function isCompletedHistoryItem(item) {
+  const value = String(item?.status || '').toLowerCase();
+  return !value || ['completed', 'failed', 'declined', 'interrupted', 'cancelled'].includes(value);
 }
 
 function historyTool(item) {

@@ -784,15 +784,25 @@ try {
         $bitmap = [System.Drawing.Bitmap]::FromFile($resolvedEvidencePath)
         try {
             Assert-True ($bitmap.Width -ge ($bounds.Width - 2) -and $bitmap.Height -ge ($bounds.Height - 2)) 'The captured renderer surface did not preserve the adaptive native pixel dimensions.'
-            $edgePixels = @(
+            $surfaceInset = 9
+            $surfaceEdgePixels = @(
+                $bitmap.GetPixel([int] ($bitmap.Width / 2), $surfaceInset),
+                $bitmap.GetPixel([int] ($bitmap.Width / 2), $bitmap.Height - 1 - $surfaceInset),
+                $bitmap.GetPixel($surfaceInset, [int] ($bitmap.Height / 2)),
+                $bitmap.GetPixel($bitmap.Width - 1 - $surfaceInset, [int] ($bitmap.Height / 2))
+            )
+            foreach ($pixel in $surfaceEdgePixels) {
+                $brightness = ([int] $pixel.R + [int] $pixel.G + [int] $pixel.B) / 3
+                Assert-True ($pixel.A -ge 160 -and $brightness -ge 150) 'The inset glass surface retained a dark or transparent edge.'
+            }
+            $outerEdgePixels = @(
                 $bitmap.GetPixel([int] ($bitmap.Width / 2), 1),
                 $bitmap.GetPixel([int] ($bitmap.Width / 2), $bitmap.Height - 2),
                 $bitmap.GetPixel(1, [int] ($bitmap.Height / 2)),
                 $bitmap.GetPixel($bitmap.Width - 2, [int] ($bitmap.Height / 2))
             )
-            foreach ($pixel in $edgePixels) {
-                $brightness = ([int] $pixel.R + [int] $pixel.G + [int] $pixel.B) / 3
-                Assert-True ($pixel.A -ge 200 -and $brightness -ge 150) 'The renderer retained a dark or transparent border around the glass surface.'
+            foreach ($pixel in $outerEdgePixels) {
+                Assert-True ($pixel.A -le 16) 'The transparent outer gutter retained a square dark border.'
             }
             $cornerPixels = @(
                 $bitmap.GetPixel(0, 0),
