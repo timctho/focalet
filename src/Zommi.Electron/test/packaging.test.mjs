@@ -44,6 +44,17 @@ test('Zommi source and packager do not contain a product-owned browser tool runt
   await assert.rejects(access(join(appDirectory, '..', 'Zommi.Windows', 'ChromeDevToolsBrowser.cs')));
 });
 
+test('Codex startup timeouts reset the connection and preserve actionable errors', async () => {
+  const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
+  const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
+  const windowsBridge = await readFile(join(appDirectory, '..', 'Zommi.Windows', 'CodexAppServerClient.cs'), 'utf8');
+  assert.match(windowsBridge, /StartupRequestTimeout\s*=\s*TimeSpan\.FromSeconds\(120\)/);
+  assert.match(windowsBridge, /ResetConnection\(candidate\)/);
+  assert.match(windowsBridge, /did not respond to '\{method\}'/);
+  assert.match(main, /isWarningStatus\(status\)/);
+  assert.match(renderer, /!status\.classList\.contains\('warning'\)/);
+});
+
 test('glass surfaces hide transcript, preview, composer, and chip scrollbars', async () => {
   const styles = await readFile(join(appDirectory, 'renderer', 'styles.css'), 'utf8');
   assert.match(styles, /scrollbar-width:\s*none/);

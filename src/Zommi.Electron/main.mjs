@@ -117,7 +117,7 @@ function createBackend() {
   if (process.platform === 'win32') {
     const executable = process.env.ZOMMI_NATIVE_HOST_PATH || join(process.resourcesPath, 'native', 'Zommi.exe');
     backend = new NativeHostClient(executable);
-    backend.on('status', (status) => sendStatus(status));
+    backend.on('status', (status) => sendStatus(status, isWarningStatus(status)));
     backend.on('streamUpdate', (update) => send('stream:update', update));
     backend.on('turnCompleted', (status) => send('turn:completed', status));
     backend.on('error', (error) => sendStatus(error.message, true));
@@ -125,7 +125,7 @@ function createBackend() {
     return;
   }
   backend = new PortableCodexBridge();
-  backend.on('status', (status) => sendStatus(status));
+  backend.on('status', (status) => sendStatus(status, isWarningStatus(status)));
   backend.on('streamUpdate', (update) => send('stream:update', update));
   backend.on('turnCompleted', (status) => send('turn:completed', status));
 }
@@ -259,6 +259,10 @@ function send(channel, payload) {
 
 function sendStatus(message, warning = false) {
   send('status:changed', { message: String(message), warning });
+}
+
+function isWarningStatus(message) {
+  return /error|failed|exited|timed? out|did not respond/i.test(String(message));
 }
 
 function sendShortcutState() {

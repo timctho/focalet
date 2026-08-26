@@ -213,7 +213,8 @@ function completeTurn(turnStatus) {
   turnActive = false;
   sendButton.disabled = false;
   composer.disabled = false;
-  renderStatus(String(turnStatus).toLowerCase() === 'completed' ? 'ready' : `turn ${turnStatus}`, turnStatus !== 'completed');
+  if (String(turnStatus).toLowerCase() === 'completed') renderStatus('ready');
+  else if (!status.classList.contains('warning')) renderStatus(`turn ${turnStatus}`, true);
   focusComposer();
 }
 
