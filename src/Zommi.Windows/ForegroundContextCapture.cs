@@ -2,12 +2,16 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Windows.Automation;
+using FlaUI.Core;
+using FlaUI.Core.AutomationElements;
+using FlaUI.Core.Definitions;
+using FlaUI.Core.Exceptions;
+using FlaUI.UIA3;
 using Zommi.Core;
 
 namespace Zommi.Windows;
 
-internal sealed class ForegroundContextCapture
+internal sealed class ForegroundContextCapture : IDisposable
 {
     private const int MaximumVisibleTextItems = 128;
     private const int MaximumVisibleTextCharacters = 30_000;
@@ -22,6 +26,22 @@ internal sealed class ForegroundContextCapture
     {
         "brave", "chrome", "firefox", "msedge", "opera",
     };
+
+    private readonly UIA3Automation automation = new()
+    {
+        ConnectionTimeout = TimeSpan.FromMilliseconds(1500),
+        TransactionTimeout = TimeSpan.FromMilliseconds(3000),
+    };
+    private readonly ITreeWalker controlViewWalker;
+    private readonly ITreeWalker rawViewWalker;
+
+    public ForegroundContextCapture()
+    {
+        controlViewWalker = automation.TreeWalkerFactory.GetControlViewWalker();
+        rawViewWalker = automation.TreeWalkerFactory.GetRawViewWalker();
+    }
+
+    public void Dispose() => automation.Dispose();
 
     public CaptureResult Capture(DateTimeOffset nowUtc)
     {
@@ -132,21 +152,21 @@ internal sealed class ForegroundContextCapture
         }
     }
 
-    private static LocatorInfo? TryReadBrowserUrl(IntPtr windowHandle)
+    private LocatorInfo? TryReadBrowserUrl(IntPtr windowHandle)
     {
         try
         {
-            var root = AutomationElement.FromHandle(windowHandle);
-            var editCondition = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit);
+            var root = automation.FromHandle(windowHandle);
+            var editCondition = automation.ConditionFactory.ByControlType(ControlType.Edit);
             var edits = root.FindAll(TreeScope.Descendants, editCondition);
-            foreach (AutomationElement edit in edits.Cast<AutomationElement>().Take(80))
+            foreach (var edit in edits.Take(80))
             {
-                if (edit.Current.IsPassword || !edit.TryGetCurrentPattern(ValuePattern.Pattern, out var patternObject))
+                if (edit.Properties.IsPassword.ValueOrDefault)
                 {
                     continue;
                 }
 
-                var value = ((ValuePattern)patternObject).Current.Value?.Trim();
+                var value = edit.Patterns.Value.PatternOrDefault?.Value.ValueOrDefault?.Trim();
                 var uri = ParseBrowserUrl(value);
                 if (uri is not null)
                 {
@@ -162,13 +182,13 @@ internal sealed class ForegroundContextCapture
         return null;
     }
 
-    internal static IReadOnlyList<string> TryReadSelectedText(IntPtr windowHandle)
+    internal IReadOnlyList<string> TryReadSelectedText(IntPtr windowHandle)
     {
         try
         {
-            var root = AutomationElement.FromHandle(windowHandle);
+            var root = automation.FromHandle(windowHandle);
             var candidates = new List<AutomationElement>();
-            var focused = AutomationElement.FocusedElement;
+            var focused = automation.FocusedElement();
             if (focused is not null && IsWithinWindow(focused, root))
             {
                 var current = focused;
@@ -180,28 +200,25 @@ internal sealed class ForegroundContextCapture
                         break;
                     }
 
-                    current = TreeWalker.ControlViewWalker.GetParent(current);
+                    current = controlViewWalker.GetParent(current);
                 }
             }
 
-            var documentCondition = new PropertyCondition(
-                AutomationElement.ControlTypeProperty,
-                ControlType.Document);
+            var documentCondition = automation.ConditionFactory.ByControlType(ControlType.Document);
             candidates.AddRange(root
                 .FindAll(TreeScope.Descendants, documentCondition)
-                .Cast<AutomationElement>()
                 .Take(12));
 
             var selected = new VisibleTextCollector(maximumItems: 8, maximumCharacters: 6000);
-            foreach (var candidate in candidates.DistinctBy(element => element.GetRuntimeId().Aggregate(17, (hash, part) => (hash * 31) + part)))
+            foreach (var candidate in candidates.Distinct())
             {
-                if (candidate.Current.IsPassword ||
-                    !candidate.TryGetCurrentPattern(TextPattern.Pattern, out var patternObject))
+                if (candidate.Properties.IsPassword.ValueOrDefault ||
+                    candidate.Patterns.Text.PatternOrDefault is not { } textPattern)
                 {
                     continue;
                 }
 
-                foreach (var range in ((TextPattern)patternObject).GetSelection())
+                foreach (var range in textPattern.GetSelection())
                 {
                     selected.Add(range.GetText(4000));
                 }
@@ -314,25 +331,26 @@ internal sealed class ForegroundContextCapture
         return (null, []);
     }
 
-    private static IndicatedTargetInfo? TryReadPointerTarget(IntPtr windowHandle, NativeMethods.Point point)
+    private IndicatedTargetInfo? TryReadPointerTarget(IntPtr windowHandle, NativeMethods.Point point)
     {
         try
         {
-            var root = AutomationElement.FromHandle(windowHandle);
-            var element = AutomationElement.FromPoint(new System.Windows.Point(point.X, point.Y));
-            if (!IsWithinWindow(element, root) || element.Current.IsPassword)
+            var root = automation.FromHandle(windowHandle);
+            var element = automation.FromPoint(new Point(point.X, point.Y));
+            if (!IsWithinWindow(element, root) || element.Properties.IsPassword.ValueOrDefault)
             {
                 return null;
             }
 
-            var bounds = element.Current.BoundingRectangle;
+            var name = element.Properties.Name.ValueOrDefault;
+            var bounds = element.Properties.BoundingRectangle.ValueOrDefault;
             return new IndicatedTargetInfo
             {
-                Name = Limit(element.Current.Name, 240),
-                ControlType = element.Current.ControlType?.ProgrammaticName?.Replace("ControlType.", string.Empty, StringComparison.Ordinal),
-                AutomationId = Limit(element.Current.AutomationId, 120),
-                Bounds = string.Create(CultureInfo.InvariantCulture, $"{bounds.X:0},{bounds.Y:0},{bounds.Width:0},{bounds.Height:0}"),
-                Confidence = string.IsNullOrWhiteSpace(element.Current.Name) ? "limited" : "medium",
+                Name = Limit(name, 240),
+                ControlType = FormatControlType(element.Properties.ControlType.ValueOrDefault),
+                AutomationId = Limit(element.Properties.AutomationId.ValueOrDefault, 120),
+                Bounds = FormatBounds(bounds),
+                Confidence = string.IsNullOrWhiteSpace(name) ? "limited" : "medium",
             };
         }
         catch (Exception exception) when (exception is ElementNotAvailableException or InvalidOperationException or COMException)
@@ -341,7 +359,7 @@ internal sealed class ForegroundContextCapture
         }
     }
 
-    private static IReadOnlyList<string> TryReadVisibleText(IntPtr windowHandle, NativeMethods.Point point)
+    private IReadOnlyList<string> TryReadVisibleText(IntPtr windowHandle, NativeMethods.Point point)
     {
         try
         {
@@ -349,10 +367,10 @@ internal sealed class ForegroundContextCapture
                 MaximumVisibleTextItems,
                 MaximumVisibleTextCharacters,
                 MaximumVisibleTextItemCharacters);
-            var root = AutomationElement.FromHandle(windowHandle);
+            var root = automation.FromHandle(windowHandle);
 
-            var hovered = AutomationElement.FromPoint(new System.Windows.Point(point.X, point.Y));
-            if (IsWithinWindow(hovered, root) && !hovered.Current.IsPassword)
+            var hovered = automation.FromPoint(new Point(point.X, point.Y));
+            if (IsWithinWindow(hovered, root) && !hovered.Properties.IsPassword.ValueOrDefault)
             {
                 var current = hovered;
                 for (var depth = 0; depth < 16 && current is not null; depth++)
@@ -363,18 +381,15 @@ internal sealed class ForegroundContextCapture
                         break;
                     }
 
-                    current = TreeWalker.ControlViewWalker.GetParent(current);
+                    current = controlViewWalker.GetParent(current);
                 }
             }
 
             if (!collector.IsFull)
             {
-                var documentCondition = new PropertyCondition(
-                    AutomationElement.ControlTypeProperty,
-                    ControlType.Document);
-                foreach (AutomationElement document in root
+                var documentCondition = automation.ConditionFactory.ByControlType(ControlType.Document);
+                foreach (var document in root
                     .FindAll(TreeScope.Descendants, documentCondition)
-                    .Cast<AutomationElement>()
                     .Take(8))
                 {
                     CollectElementText(document, collector, includeDocumentText: true);
@@ -393,13 +408,13 @@ internal sealed class ForegroundContextCapture
                 CollectElementText(
                     element,
                     collector,
-                    includeDocumentText: element.Current.ControlType == ControlType.Document);
+                    includeDocumentText: element.Properties.ControlType.ValueOrDefault == ControlType.Document);
 
-                var child = TreeWalker.ControlViewWalker.GetFirstChild(element);
+                var child = controlViewWalker.GetFirstChild(element);
                 for (var siblings = 0; child is not null && siblings < 80; siblings++)
                 {
                     queue.Enqueue(child);
-                    child = TreeWalker.ControlViewWalker.GetNextSibling(child);
+                    child = controlViewWalker.GetNextSibling(child);
                 }
             }
 
@@ -411,13 +426,13 @@ internal sealed class ForegroundContextCapture
         }
     }
 
-    private static AccessibilityTreeInfo? TryReadBrowserAccessibility(
+    private AccessibilityTreeInfo? TryReadBrowserAccessibility(
         IntPtr windowHandle,
         NativeMethods.Point point)
     {
         try
         {
-            var root = AutomationElement.FromHandle(windowHandle);
+            var root = automation.FromHandle(windowHandle);
             var document = FindDocumentUnderPointer(root, point) ?? FindFirstDocument(root);
             if (document is null)
             {
@@ -445,33 +460,31 @@ internal sealed class ForegroundContextCapture
         }
     }
 
-    private static AutomationElement? FindDocumentUnderPointer(
+    private AutomationElement? FindDocumentUnderPointer(
         AutomationElement root,
         NativeMethods.Point point)
     {
-        var current = AutomationElement.FromPoint(new System.Windows.Point(point.X, point.Y));
+        var current = automation.FromPoint(new Point(point.X, point.Y));
         for (var depth = 0; current is not null && depth < 48; depth++)
         {
-            if (current.Current.ControlType == ControlType.Document && IsWithinWindow(current, root))
+            if (current.Properties.ControlType.ValueOrDefault == ControlType.Document && IsWithinWindow(current, root))
             {
                 return current;
             }
 
-            current = TreeWalker.ControlViewWalker.GetParent(current);
+            current = controlViewWalker.GetParent(current);
         }
 
         return null;
     }
 
-    private static AutomationElement? FindFirstDocument(AutomationElement root)
+    private AutomationElement? FindFirstDocument(AutomationElement root)
     {
-        var documentCondition = new PropertyCondition(
-            AutomationElement.ControlTypeProperty,
-            ControlType.Document);
+        var documentCondition = automation.ConditionFactory.ByControlType(ControlType.Document);
         return root.FindFirst(TreeScope.Descendants, documentCondition);
     }
 
-    private static AccessibilityNodeInfo? CaptureAccessibilityNode(
+    private AccessibilityNodeInfo? CaptureAccessibilityNode(
         AutomationElement element,
         AccessibilityCaptureBudget budget,
         int depth)
@@ -483,8 +496,7 @@ internal sealed class ForegroundContextCapture
 
         try
         {
-            var current = element.Current;
-            if (current.IsPassword)
+            if (element.Properties.IsPassword.ValueOrDefault)
             {
                 return new AccessibilityNodeInfo { Role = "Password" };
             }
@@ -497,39 +509,36 @@ internal sealed class ForegroundContextCapture
             int? columnSpan = null;
             IReadOnlyList<string>? rowHeaders = null;
             IReadOnlyList<string>? columnHeaders = null;
-            if (element.TryGetCurrentPattern(GridPattern.Pattern, out var gridPatternObject))
+            if (element.Patterns.Grid.PatternOrDefault is { } grid)
             {
-                var grid = ((GridPattern)gridPatternObject).Current;
-                rowCount = grid.RowCount;
-                columnCount = grid.ColumnCount;
+                rowCount = grid.RowCount.ValueOrDefault;
+                columnCount = grid.ColumnCount.ValueOrDefault;
             }
 
-            if (element.TryGetCurrentPattern(GridItemPattern.Pattern, out var gridItemPatternObject))
+            if (element.Patterns.GridItem.PatternOrDefault is { } gridItem)
             {
-                var gridItem = ((GridItemPattern)gridItemPatternObject).Current;
-                row = gridItem.Row;
-                column = gridItem.Column;
-                rowSpan = gridItem.RowSpan;
-                columnSpan = gridItem.ColumnSpan;
+                row = gridItem.Row.ValueOrDefault;
+                column = gridItem.Column.ValueOrDefault;
+                rowSpan = gridItem.RowSpan.ValueOrDefault;
+                columnSpan = gridItem.ColumnSpan.ValueOrDefault;
             }
 
-            if (element.TryGetCurrentPattern(TableItemPattern.Pattern, out var tableItemPatternObject))
+            if (element.Patterns.TableItem.PatternOrDefault is { } tableItem)
             {
-                var tableItem = (TableItemPattern)tableItemPatternObject;
-                rowHeaders = ReadHeaderNames(tableItem.Current.GetRowHeaderItems(), budget);
-                columnHeaders = ReadHeaderNames(tableItem.Current.GetColumnHeaderItems(), budget);
+                rowHeaders = ReadHeaderNames(tableItem.RowHeaderItems.ValueOrDefault ?? [], budget);
+                columnHeaders = ReadHeaderNames(tableItem.ColumnHeaderItems.ValueOrDefault ?? [], budget);
             }
 
             string? value = null;
-            if (element.TryGetCurrentPattern(ValuePattern.Pattern, out var valuePatternObject))
+            if (element.Patterns.Value.PatternOrDefault is { } valuePattern)
             {
-                value = budget.TakeText(((ValuePattern)valuePatternObject).Current.Value, 2_000);
+                value = budget.TakeText(valuePattern.Value.ValueOrDefault, 2_000);
             }
 
             var children = new List<AccessibilityNodeInfo>();
             if (depth < MaximumAccessibilityDepth && !budget.IsFull)
             {
-                var child = TreeWalker.ControlViewWalker.GetFirstChild(element);
+                var child = controlViewWalker.GetFirstChild(element);
                 for (var sibling = 0; child is not null && sibling < 120 && !budget.IsFull; sibling++)
                 {
                     var capturedChild = CaptureAccessibilityNode(child, budget, depth + 1);
@@ -538,7 +547,7 @@ internal sealed class ForegroundContextCapture
                         children.Add(capturedChild);
                     }
 
-                    child = TreeWalker.ControlViewWalker.GetNextSibling(child);
+                    child = controlViewWalker.GetNextSibling(child);
                 }
 
                 if (child is not null)
@@ -546,20 +555,19 @@ internal sealed class ForegroundContextCapture
                     budget.MarkTruncated();
                 }
             }
-            else if (budget.IsFull || TreeWalker.ControlViewWalker.GetFirstChild(element) is not null)
+            else if (budget.IsFull || controlViewWalker.GetFirstChild(element) is not null)
             {
                 budget.MarkTruncated();
             }
 
             return new AccessibilityNodeInfo
             {
-                Role = current.ControlType?.ProgrammaticName?.Replace("ControlType.", string.Empty, StringComparison.Ordinal)
-                    ?? "Unknown",
-                Name = budget.TakeText(current.Name, 1_000),
+                Role = FormatControlType(element.Properties.ControlType.ValueOrDefault) ?? "Unknown",
+                Name = budget.TakeText(element.Properties.Name.ValueOrDefault, 1_000),
                 Value = value,
-                AutomationId = budget.TakeText(current.AutomationId, 240),
-                Bounds = FormatBounds(current.BoundingRectangle),
-                IsOffscreen = current.IsOffscreen,
+                AutomationId = budget.TakeText(element.Properties.AutomationId.ValueOrDefault, 240),
+                Bounds = FormatBounds(element.Properties.BoundingRectangle.ValueOrDefault),
+                IsOffscreen = element.Properties.IsOffscreen.ValueOrDefault,
                 RowCount = rowCount,
                 ColumnCount = columnCount,
                 Row = row,
@@ -584,29 +592,24 @@ internal sealed class ForegroundContextCapture
     {
         var names = headers
             .Take(32)
-            .Select(header => budget.TakeText(header.Current.Name, 500))
+            .Select(header => budget.TakeText(header.Properties.Name.ValueOrDefault, 500))
             .Where(name => name is not null)
             .Cast<string>()
             .ToArray();
         return names.Length == 0 ? null : names;
     }
 
-    private static Rectangle? ToScreenRectangle(System.Windows.Rect bounds)
+    private static Rectangle? ToScreenRectangle(Rectangle bounds)
     {
-        if (bounds.IsEmpty || bounds.Width <= 0 || bounds.Height <= 0 ||
-            double.IsNaN(bounds.X) || double.IsNaN(bounds.Y))
+        if (bounds.IsEmpty || bounds.Width <= 0 || bounds.Height <= 0)
         {
             return null;
         }
 
-        return Rectangle.FromLTRB(
-            (int)Math.Floor(bounds.Left),
-            (int)Math.Floor(bounds.Top),
-            (int)Math.Ceiling(bounds.Right),
-            (int)Math.Ceiling(bounds.Bottom));
+        return bounds;
     }
 
-    private static string? FormatBounds(System.Windows.Rect bounds)
+    private static string? FormatBounds(Rectangle bounds)
     {
         var rectangle = ToScreenRectangle(bounds);
         return rectangle is null
@@ -616,11 +619,13 @@ internal sealed class ForegroundContextCapture
                 $"{rectangle.Value.X},{rectangle.Value.Y},{rectangle.Value.Width},{rectangle.Value.Height}");
     }
 
-    private static bool IsWithinWindow(AutomationElement element, AutomationElement root)
+    private bool IsWithinWindow(AutomationElement element, AutomationElement root)
     {
         try
         {
-            if (element.Current.ProcessId == root.Current.ProcessId)
+            var elementProcessId = element.Properties.ProcessId.ValueOrDefault;
+            var rootProcessId = root.Properties.ProcessId.ValueOrDefault;
+            if (elementProcessId != 0 && elementProcessId == rootProcessId)
             {
                 return true;
             }
@@ -633,7 +638,7 @@ internal sealed class ForegroundContextCapture
                     return true;
                 }
 
-                current = TreeWalker.RawViewWalker.GetParent(current);
+                current = rawViewWalker.GetParent(current);
             }
         }
         catch (Exception exception) when (exception is ElementNotAvailableException or InvalidOperationException or COMException)
@@ -651,20 +656,20 @@ internal sealed class ForegroundContextCapture
     {
         try
         {
-            if (element.Current.IsPassword)
+            if (element.Properties.IsPassword.ValueOrDefault)
             {
                 return;
             }
 
-            collector.Add(element.Current.Name);
-            if (element.TryGetCurrentPattern(ValuePattern.Pattern, out var valuePattern))
+            collector.Add(element.Properties.Name.ValueOrDefault);
+            if (element.Patterns.Value.PatternOrDefault is { } valuePattern)
             {
-                collector.Add(((ValuePattern)valuePattern).Current.Value);
+                collector.Add(valuePattern.Value.ValueOrDefault);
             }
 
-            if (includeDocumentText && element.TryGetCurrentPattern(TextPattern.Pattern, out var textPattern))
+            if (includeDocumentText && element.Patterns.Text.PatternOrDefault is { } textPattern)
             {
-                collector.Add(((TextPattern)textPattern).DocumentRange.GetText(MaximumDocumentTextCharacters));
+                collector.Add(textPattern.DocumentRange.GetText(MaximumDocumentTextCharacters));
             }
         }
         catch (Exception exception) when (exception is ElementNotAvailableException or InvalidOperationException or COMException)
@@ -696,6 +701,9 @@ internal sealed class ForegroundContextCapture
         "opera" => "Opera",
         _ => processName,
     };
+
+    private static string? FormatControlType(ControlType controlType) =>
+        controlType == ControlType.Unknown ? null : controlType.ToString();
 
     private static string? Limit(string? value, int maximumLength)
     {

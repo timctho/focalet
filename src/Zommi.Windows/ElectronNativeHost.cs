@@ -20,7 +20,7 @@ internal static class ElectronNativeHost
     {
         ApplicationConfiguration.Initialize();
         using var codex = new CodexAppServerClient();
-        var capture = new ForegroundContextCapture();
+        using var capture = new ForegroundContextCapture();
         codex.StatusChanged += status => WriteEvent("status", status);
         codex.StreamUpdate += update => WriteEvent("streamUpdate", update);
         codex.TurnCompletedForThread += (threadId, status) => WriteEvent("turnCompleted", new { threadId, status });

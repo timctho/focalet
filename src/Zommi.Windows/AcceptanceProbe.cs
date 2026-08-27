@@ -76,7 +76,8 @@ internal static class AcceptanceProbe
     {
         try
         {
-            var result = new ForegroundContextCapture().Capture(DateTimeOffset.UtcNow);
+            using var capture = new ForegroundContextCapture();
+            var result = capture.Capture(DateTimeOffset.UtcNow);
             Console.Out.Write(JsonSerializer.Serialize(result, new JsonSerializerOptions
             {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -390,7 +391,8 @@ internal static class AcceptanceProbe
             editor.Focus();
             Application.DoEvents();
 
-            var selection = ForegroundContextCapture.TryReadSelectedText(form.Handle);
+            using var capture = new ForegroundContextCapture();
+            var selection = capture.TryReadSelectedText(form.Handle);
             Console.Out.Write(JsonSerializer.Serialize(new
             {
                 marker,

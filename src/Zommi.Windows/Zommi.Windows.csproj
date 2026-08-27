@@ -13,4 +13,8 @@
   <ItemGroup>
     <ProjectReference Include="..\Zommi.Core\Zommi.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FlaUI.Core" Version="5.0.0" />
+    <PackageReference Include="FlaUI.UIA3" Version="5.0.0" />
+  </ItemGroup>
 </Project>

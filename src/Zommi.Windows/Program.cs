@@ -71,8 +71,9 @@ internal static class Program
             ? () => new RegionSelectionForm(_ => Convert.FromBase64String(
                 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="))
             : null;
+        using var capture = new ForegroundContextCapture();
         var form = new MainForm(
-            new ForegroundContextCapture(),
+            capture,
             new CodexAppServerClient(),
             autoLaunch,
             selectorFactory);
