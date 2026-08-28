@@ -58,6 +58,12 @@ test('Pi prompt returns after acceptance and completes when the official agent_e
   const streamed = once(adapter, 'streamUpdate');
   fixture.send({ type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', contentIndex: 0, delta: 'considering' } });
   assert.equal((await streamed)[0].kind, 'thinking');
+  const imageStreamed = once(adapter, 'streamUpdate');
+  fixture.send({
+    type: 'tool_execution_end', toolName: 'generate_image', toolCallId: 'image-tool',
+    result: { content: [{ type: 'image', mimeType: 'image/png', data: 'aGVsbG8=' }] },
+  });
+  assert.equal((await imageStreamed)[0].artifacts[0].dataUrl, 'data:image/png;base64,aGVsbG8=');
   const completed = once(adapter, 'turnCompleted');
   fixture.send({ type: 'agent_end' });
   assert.deepEqual((await completed)[0], {
@@ -93,10 +99,14 @@ test('Pi message history groups assistant reasoning, text, tool calls, and resul
       { type: 'text', text: 'answer' },
       { type: 'toolCall', id: 'tool-1', name: 'read', arguments: { path: 'a' } },
     ] },
-    { id: 'r1', role: 'toolResult', toolCallId: 'tool-1', content: [{ type: 'text', text: 'file' }] },
+    { id: 'r1', role: 'toolResult', toolCallId: 'tool-1', content: [
+      { type: 'text', text: 'file' },
+      { type: 'image', mimeType: 'image/png', data: 'aGVsbG8=' },
+    ] },
   ]);
   assert.equal(turns.length, 1);
   assert.deepEqual(turns[0].items.map((item) => item.type), ['userMessage', 'reasoning', 'agentMessage', 'dynamicToolCall', 'commandExecution']);
+  assert.equal(turns[0].items.at(-1).artifacts[0].dataUrl, 'data:image/png;base64,aGVsbG8=');
 });
 
 test('Pi conformance reports an accepted turn as unknown when its process exits', async () => {

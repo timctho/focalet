@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; frame-src 'self' data:; style-src 'self'; script-src 'self'">
   <title>Zommi — floating agent chat</title>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -23,12 +23,16 @@
       <button id="HideZommi" class="round-button no-drag" aria-label="Hide Zommi" title="Hide">
         <svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="m5.5 5.5 9 9m0-9-9 9"/></svg>
       </button>
-      <button id="ToggleSessions" class="round-button no-drag menu" aria-label="Show chat sessions" aria-expanded="false" title="Chats">
+      <button id="ToggleSessions" class="round-button no-drag menu" aria-label="Chat sessions — hover to show" aria-expanded="false" title="Chats — hover to show">
         <svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 6h10M5 10h10M5 14h10"/></svg>
       </button>
       <button id="RuntimeSummary" class="runtime-summary no-drag" type="button" aria-label="Choose agent runtime" aria-haspopup="listbox" aria-expanded="false">
         <span id="RuntimeStatusDot" class="runtime-status-dot" data-status="detecting" aria-hidden="true"></span>
         <span id="RuntimeSummaryLabel">Finding agents…</span>
+        <svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="m5.5 12 4.5-4 4.5 4"/></svg>
+      </button>
+      <button id="ModelSummary" class="model-summary no-drag" type="button" aria-label="Choose model and reasoning level" aria-haspopup="listbox" aria-expanded="false">
+        <span id="ModelSummaryLabel">Loading…</span>
         <svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="m5.5 12 4.5-4 4.5 4"/></svg>
       </button>
       <div class="drag-region" aria-hidden="true"></div>
@@ -78,6 +82,18 @@
       </details>
     </aside>
 
+    <aside id="ModelPanel" class="model-panel no-drag" aria-label="Choose model and reasoning" hidden>
+      <label class="model-search" for="ModelSearch">
+        <svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="4.5"/><path d="m12 12 4 4"/></svg>
+        <input id="ModelSearch" type="search" autocomplete="off" spellcheck="false" placeholder="Search models" aria-label="Search models">
+      </label>
+      <div id="ModelList" class="model-list" role="listbox" aria-label="Agent models"></div>
+      <div class="reasoning-section">
+        <div class="section-label">Reasoning</div>
+        <div id="EffortList" class="effort-list" role="listbox" aria-label="Reasoning level"></div>
+      </div>
+    </aside>
+
     <section id="CodexTranscript" class="transcript" role="log" aria-live="polite" aria-label="Agent conversation including thinking and tool activity">
       <div class="welcome">
         <div class="orb"></div>
@@ -114,26 +130,19 @@
       <pre id="ContextPreviewText" tabindex="0"></pre>
     </aside>
 
+    <aside id="ArtifactViewer" class="artifact-viewer no-drag" role="dialog" aria-modal="true" aria-labelledby="ArtifactViewerTitle" hidden>
+      <div class="artifact-viewer-head">
+        <span id="ArtifactViewerTitle">Preview</span>
+        <button id="CloseArtifactViewer" type="button" aria-label="Close artifact preview"><svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="m5.5 5.5 9 9m0-9-9 9"/></svg></button>
+      </div>
+      <div id="ArtifactViewerBody" class="artifact-viewer-body"></div>
+    </aside>
+
     <section class="composer-shell" aria-label="Message composer">
-      <aside id="ModelPanel" class="model-panel no-drag" aria-label="Choose model and reasoning" hidden>
-        <label class="model-search" for="ModelSearch">
-          <svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="4.5"/><path d="m12 12 4 4"/></svg>
-          <input id="ModelSearch" type="search" autocomplete="off" spellcheck="false" placeholder="Search models" aria-label="Search models">
-        </label>
-        <div id="ModelList" class="model-list" role="listbox" aria-label="Agent models"></div>
-        <div class="reasoning-section">
-          <div class="section-label">Reasoning</div>
-          <div id="EffortList" class="effort-list" role="listbox" aria-label="Reasoning level"></div>
-        </div>
-      </aside>
       <div id="ContextChips" class="context-chips" aria-label="Attached contexts"></div>
       <div class="composer-row">
         <button id="SelectImage" class="composer-button plus" aria-label="Select image context" title="Select image context"><svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4.5v11M4.5 10h11"/></svg></button>
         <textarea id="ZommiComposer" rows="1" aria-label="Zommi message with attached context tokens" placeholder="Ask your agent"></textarea>
-        <button id="ModelSummary" class="model-summary" type="button" aria-label="Choose model and reasoning level" aria-haspopup="listbox" aria-expanded="false">
-          <span id="ModelSummaryLabel">Loading…</span>
-          <svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="m5.5 12 4.5-4 4.5 4"/></svg>
-        </button>
         <button id="SendMessage" class="composer-button send" aria-label="Send message" title="Send">
           <svg class="ui-icon send-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 15.5v-11m-4 4 4-4 4 4"/></svg>
           <svg class="ui-icon stop-icon" viewBox="0 0 20 20" aria-hidden="true"><rect x="6" y="6" width="8" height="8" rx="1.5"/></svg>

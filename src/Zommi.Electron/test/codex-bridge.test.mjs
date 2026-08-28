@@ -10,6 +10,7 @@ import {
   codexLaunchArgs,
   codexRuntimeVersion,
   compactAccessibilityTree,
+  parseStreamUpdate,
 } from '../codex-bridge.mjs';
 import { assertAcceptedTurnBecomesUnknownOnRuntimeExit, assertSafeUnknownNativeDiagnostic, installPendingRequestExitProbe } from './adapter-conformance.mjs';
 
@@ -106,6 +107,19 @@ test('image note appears only for explicit selected images', () => {
   assert.equal(withoutImage, 'hello');
   const withImage = buildTurnText('hello', [], 1);
   assert.match(withImage, /User-selected image regions attached: 1/);
+});
+
+test('completed image generation and HTML file changes retain structured preview artifacts', () => {
+  const image = parseStreamUpdate('item/completed', { item: {
+    id: 'generated-1', type: 'imageGeneration', status: 'completed', result: 'aGVsbG8=',
+    savedPath: '/workspace/render.png', failure: null,
+  } }, new Map(), { cwd: '/workspace' });
+  const html = parseStreamUpdate('item/completed', { item: {
+    id: 'change-1', type: 'fileChange', status: 'completed', changes: [{ kind: 'add', path: 'preview.html' }],
+  } }, new Map(), { cwd: '/workspace' });
+  assert.equal(image.artifacts[0].dataUrl, 'data:image/png;base64,aGVsbG8=');
+  assert.equal(html.artifacts[0].path, 'preview.html');
+  assert.equal(html.artifacts[0].cwd, '/workspace');
 });
 
 test('Zommi sessions receive a bounded persistent name', () => {

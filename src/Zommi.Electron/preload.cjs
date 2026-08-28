@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('zommi', {
   createSession: (payload) => ipcRenderer.invoke('chat:create-session', payload),
   switchSession: (threadId) => ipcRenderer.invoke('chat:switch-session', threadId),
   copy: (text) => ipcRenderer.invoke('clipboard:write', text),
+  loadArtifactPreview: (artifact) => ipcRenderer.invoke('artifact:preview', artifact),
   reportAcceptanceHover: (hovered) => ipcRenderer.send('acceptance:hover-state', Boolean(hovered)),
   onContext: (callback) => subscribe('context:added', callback),
   onRuntimeState: (callback) => subscribe('runtime:state', callback),

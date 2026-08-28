@@ -86,12 +86,10 @@ test('matches become stable protocol and compatibility Runtime Targets', () => {
     { executableName: 'codex', executablePath: '/usr/bin/codex' },
   ]);
   assert.equal(first.find((target) => target.adapterId === 'codex-app-server').id, second[0].id);
-  assert.deepEqual(first.filter((target) => target.runtimeId === 'hermes').map((target) => target.adapterId), [
-    'hermes-acp', 'hermes-gateway',
-  ]);
+  assert.deepEqual(first.filter((target) => target.runtimeId === 'hermes').map((target) => target.adapterId), ['hermes-acp']);
   const openClaw = targetsFromMatches(host, [{ executableName: 'openclaw', executablePath: '/home/u/bin/openclaw' }]);
   assert.deepEqual(openClaw.map((target) => target.adapterId), ['openclaw-acp']);
-  assert.equal(openClaw[0].protocolName, 'Gateway via ACP');
+  assert.equal(openClaw[0].protocolName, 'ACP');
   assert.equal(openClaw[0].minimumProtocolVersion, 1);
   assert.deepEqual(openClaw[0].capabilities, []);
   assert.ok(openClaw[0].capabilityHints.includes('session.list.v1'));

@@ -5,6 +5,7 @@ import { appendFile, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NativeHostClient } from './native-host.mjs';
+import { loadArtifactPreview } from './artifact-preview.mjs';
 import { RuntimeBroker } from './runtime-broker.mjs';
 import { RuntimeDiscovery } from './runtime-discovery.mjs';
 import { capturePortableContext } from './platform-capture.mjs';
@@ -174,6 +175,11 @@ async function runAcceptanceInputProbe(path) {
     await evaluateRenderer(`window.zommi.endWindowDrag()`);
     result.manualTopDragDiagnostics = { before: beforeManualDrag, after: afterManualDrag };
     result.manualTopDrag = afterManualDrag.x - beforeManualDrag.x === 54 && afterManualDrag.y - beforeManualDrag.y === 26;
+    const draggedOrbBounds = compactHitBounds(afterManualDrag);
+    setPanelOpen(false, { animate: false });
+    const collapsedAfterDrag = compactHitBounds(mainWindow.getBounds());
+    result.collapsedOrbFollowsDraggedWindow = collapsedAfterDrag.x === draggedOrbBounds.x && collapsedAfterDrag.y === draggedOrbBounds.y;
+    setPanelOpen(true, { animate: false });
     mainWindow.setBounds(beforeManualDrag, false);
     const sessionTogglePoint = await rendererElementCenter('#ToggleSessions');
     mainWindow.webContents.sendInputEvent({ type: 'mouseMove', x: sessionTogglePoint.x, y: sessionTogglePoint.y });
@@ -183,6 +189,11 @@ async function runAcceptanceInputProbe(path) {
     result.activeSessionShowsRead = await evaluateRenderer(`document.querySelector('#SessionList .session-item[data-thread-id="seeded-zommi-thread"]')?.dataset.status === 'read'`);
     result.inactiveSessionShowsDone = await evaluateRenderer(`document.querySelector('#SessionList .session-item[data-thread-id="seeded-secondary-thread"]')?.dataset.status === 'done'`);
     result.sessionStatusesUseIcons = await evaluateRenderer(`document.querySelectorAll('#SessionList .session-item .session-status .ui-icon').length === 2`);
+    await clickRendererElement('#ToggleSessions');
+    const sessionAwayPoint = await rendererElementCenter('#CodexTranscript');
+    mainWindow.webContents.sendInputEvent({ type: 'mouseMove', x: sessionAwayPoint.x, y: sessionAwayPoint.y });
+    await delay(280);
+    result.sessionSidebarClickDoesNotPin = await evaluateRenderer(`document.querySelector('#SessionSidebar')?.classList.contains('open') === false`);
     await clickRendererElement('#RuntimeSummary');
     result.runtimePickerOpens = await evaluateRenderer(`document.querySelector('#RuntimePanel')?.hidden === false && document.querySelector('#RuntimeSummary')?.getAttribute('aria-expanded') === 'true'`);
     result.runtimePickerShowsSelectedTarget = await evaluateRenderer(`document.querySelector('#RuntimeList .runtime-target.selected')?.dataset.targetId === 'seeded-codex-target'`);
@@ -218,8 +229,10 @@ async function runAcceptanceInputProbe(path) {
     result.chatControlsLeaveLoading = await evaluateRenderer(`{ const label = document.querySelector('#ModelSummaryLabel')?.textContent?.trim() || ''; const composer = document.querySelector('#ZommiComposer'); return Boolean(label && !/^(Loading|Connecting|Retry)/i.test(label) && composer && !composer.disabled); }`);
     result.modelPanel = await evaluateRenderer(`document.querySelector('#ModelPanel')?.hidden === false`);
     result.modelPanelDiagnostics = await evaluateRenderer(`{ const e = document.querySelector('#ModelPanel'); const r = e?.getBoundingClientRect(); const s = e ? getComputedStyle(e) : null; return r && s ? { x: r.x, y: r.y, width: r.width, height: r.height, display: s.display, opacity: s.opacity, visibility: s.visibility } : null; }`);
-    result.modelPanelOpensUpward = await evaluateRenderer(`{ const p = document.querySelector('#ModelPanel')?.getBoundingClientRect(); const s = document.querySelector('#ModelSummary')?.getBoundingClientRect(); return Boolean(p && s && p.bottom < s.top); }`);
-    result.modelSwitchBottomRight = await evaluateRenderer(`{ const s = document.querySelector('#ModelSummary')?.getBoundingClientRect(); const c = document.querySelector('.composer-shell')?.getBoundingClientRect(); return Boolean(s && c && s.left > c.left + c.width / 2 && s.bottom > c.top + c.height / 2); }`);
+    result.modelPanelOpensBelowTopControl = await evaluateRenderer(`{ const p = document.querySelector('#ModelPanel')?.getBoundingClientRect(); const s = document.querySelector('#ModelSummary')?.getBoundingClientRect(); return Boolean(p && s && p.top > s.bottom); }`);
+    result.modelSelectionBesideAgentAtTop = await evaluateRenderer(`{ const m = document.querySelector('#ModelSummary')?.getBoundingClientRect(); const r = document.querySelector('#RuntimeSummary')?.getBoundingClientRect(); const c = document.querySelector('.composer-shell')?.getBoundingClientRect(); return Boolean(m && r && c && m.left >= r.right && Math.abs((m.top + m.height / 2) - (r.top + r.height / 2)) <= 2 && m.bottom < c.top); }`);
+    result.generatedImageDisplayed = await evaluateRenderer(`Boolean(document.querySelector('#CodexTranscript .artifact-card.image img'))`);
+    result.generatedHtmlPreviewDisplayed = await evaluateRenderer(`Boolean(document.querySelector('#CodexTranscript .artifact-card.html iframe')?.srcdoc.includes('ZOMMI_HTML_PREVIEW'))`);
     if (acceptanceModelEvidencePath) await captureAcceptanceEvidence(acceptanceModelEvidencePath);
     const effortBefore = await evaluateRenderer(`document.querySelector('#EffortList .effort-option.selected')?.dataset.effort || ''`);
     await clickRendererElement('#EffortList .effort-option:not(.selected)');
@@ -227,6 +240,12 @@ async function runAcceptanceInputProbe(path) {
     const effortAfter = await evaluateRenderer(`document.querySelector('#EffortList .effort-option.selected')?.dataset.effort || ''`);
     result.reasoningChanged = Boolean(effortBefore && effortAfter && effortBefore !== effortAfter);
     await clickRendererElement('#ModelSummary');
+    await evaluateRenderer(`{ document.querySelector('#CodexTranscript .artifact-card.image .artifact-open')?.click(); return true; }`);
+    result.generatedImageExpandedPreview = await evaluateRenderer(`Boolean(document.querySelector('#ArtifactViewer')?.hidden === false && document.querySelector('#ArtifactViewerBody img'))`);
+    await evaluateRenderer(`{ document.querySelector('#CloseArtifactViewer')?.click(); return true; }`);
+    await evaluateRenderer(`{ document.querySelector('#CodexTranscript .artifact-card.html .artifact-open')?.click(); return true; }`);
+    result.generatedHtmlExpandedPreview = await evaluateRenderer(`Boolean(document.querySelector('#ArtifactViewer')?.hidden === false && document.querySelector('#ArtifactViewerBody iframe')?.srcdoc.includes('ZOMMI_HTML_PREVIEW'))`);
+    await evaluateRenderer(`{ document.querySelector('#CloseArtifactViewer')?.click(); return true; }`);
     await clickRendererElement('#ToggleSessions');
 
     const initialHistoryCount = await evaluateRenderer(`document.querySelectorAll('#CodexTranscript .conversation-turn').length`);
@@ -488,6 +507,9 @@ function registerIpc() {
     if (path) setTimeout(() => captureAcceptanceEvidence(path), 300);
   });
   ipcMain.handle('clipboard:write', (_event, text) => clipboard.writeText(String(text || '')));
+  ipcMain.handle('artifact:preview', (_event, request) => loadArtifactPreview(request, {
+    runtimeState: seededAcceptance ? seededRuntimeState() : backend.getRuntimeState(),
+  }));
   ipcMain.handle('context:select-image', () => selectImageContext());
   ipcMain.handle('runtime:state', async () => {
     if (seededAcceptance) return seededRuntimeState();
@@ -836,7 +858,7 @@ function setPanelOpen(open, { animate = true, position = null } = {}) {
   else mainWindow.setIgnoreMouseEvents(true, { forward: true });
   send('window:presentation', { open, large: largePanel });
   const target = targetBoundsForDisplay(display, position);
-  if (position || !open) mainWindow.setBounds(target, false);
+  if (position) mainWindow.setBounds(target, false);
   setTimeout(() => send('window:bounds-settled', { open: panelOpen }), animate ? 240 : 50);
 }
 
@@ -886,7 +908,7 @@ function seededChatState() {
     activeTurns: seededStreamTurnId && seededStreamThreadId
       ? [{ threadId: seededStreamThreadId, turnId: seededStreamTurnId }]
       : [],
-    thread: { id: seededActiveThreadId, turns: seededHistory(seededActiveThreadId) },
+    thread: { id: seededActiveThreadId, cwd: '/home/example/Project/zommi', turns: seededHistory(seededActiveThreadId) },
   };
 }
 
@@ -918,7 +940,7 @@ function seededRuntimeState() {
       ],
       adapters: [
         { adapterId: 'codex-app-server', displayName: 'Codex', protocolName: 'app-server', hostKinds: ['native', 'wsl'], acceptsEndpoint: false },
-        { adapterId: 'openclaw-acp', displayName: 'OpenClaw', protocolName: 'Gateway via ACP', hostKinds: ['native', 'wsl'], acceptsEndpoint: false },
+        { adapterId: 'openclaw-acp', displayName: 'OpenClaw', protocolName: 'ACP', hostKinds: ['native', 'wsl'], acceptsEndpoint: false },
         { adapterId: 'openclaw-gateway', displayName: 'OpenClaw', protocolName: 'Direct Gateway', hostKinds: ['remote'], acceptsEndpoint: true },
       ],
       overrides: [{
@@ -936,13 +958,20 @@ function seededHistory(threadId) {
       { id: 'secondary-agent', type: 'agentMessage', phase: 'final', status: 'completed', text: 'This independent session remains interactive.' },
     ] }];
   }
-  const turns = Array.from({ length: 42 }, (_value, index) => ({
-    id: `history-turn-${index + 1}`,
-    items: [
+  const turns = Array.from({ length: 42 }, (_value, index) => {
+    const items = [
       { id: `history-user-${index + 1}`, type: 'userMessage', content: [{ type: 'text', text: `History question ${index + 1}` }] },
       { id: `history-agent-${index + 1}`, type: 'agentMessage', phase: 'final', status: 'completed', text: `History answer ${index + 1}` },
-    ],
-  }));
+    ];
+    if (index === 41) {
+      const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#edf4ff"/><circle cx="320" cy="170" r="90" fill="#779cff"/><text x="320" y="310" text-anchor="middle" font-family="sans-serif" font-size="28" fill="#253b68">ZOMMI IMAGE PREVIEW</text></svg>';
+      items.push(
+        { id: 'history-generated-image', type: 'imageGeneration', status: 'completed', revisedPrompt: 'Zommi preview', result: Buffer.from(svg).toString('base64'), savedPath: '/tmp/zommi-preview.svg', failure: null },
+        { id: 'history-generated-html', type: 'mcpToolCall', status: 'completed', server: 'preview', tool: 'render', result: { content: [{ type: 'resource', resource: { uri: 'preview.html', mimeType: 'text/html', text: '<main style="font:28px sans-serif;padding:48px;color:#253b68">ZOMMI_HTML_PREVIEW</main>' } }], structuredContent: null } },
+      );
+    }
+    return { id: `history-turn-${index + 1}`, items };
+  });
   if (seededStreamThreadId === threadId && seededStreamTurnId) {
     turns.push({ id: seededStreamTurnId, items: [
       { id: `${seededStreamTurnId}-user`, type: 'userMessage', content: [{ type: 'text', text: 'seeded streaming input acceptance' }] },

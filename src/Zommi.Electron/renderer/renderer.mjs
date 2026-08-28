@@ -11,6 +11,7 @@ import {
   sessionStatus,
   sessionTitle,
 } from './renderer-logic.mjs';
+import { artifactsFromText, artifactsFromThreadItem, sandboxHtmlDocument } from '../artifacts.mjs';
 
 const HISTORY_PAGE_SIZE = 18;
 const HISTORY_LOAD_THRESHOLD_PX = 96;
@@ -68,8 +69,12 @@ const modelList = document.querySelector('#ModelList');
 const effortList = document.querySelector('#EffortList');
 const modelSummary = document.querySelector('#ModelSummary');
 const modelSummaryLabel = document.querySelector('#ModelSummaryLabel');
+const artifactViewer = document.querySelector('#ArtifactViewer');
+const artifactViewerTitle = document.querySelector('#ArtifactViewerTitle');
+const artifactViewerBody = document.querySelector('#ArtifactViewerBody');
 const attachments = [];
 let activityElements = new Map();
+let artifactElements = new Map();
 const pendingStreamUpdates = [];
 const activeTurns = new Map();
 const unreadThreadIds = new Set();
@@ -90,7 +95,6 @@ let models = [];
 let selectedModel = '';
 let selectedEffort = '';
 let sessionBusy = false;
-let sessionPanelPinned = false;
 let sessionPanelCloseTimer = null;
 let historyTurns = [];
 let historyStartIndex = 0;
@@ -101,6 +105,7 @@ let pendingManualDragPoint = null;
 let chatControlsLoading = false;
 let chatControlsReady = false;
 let runtimeBusy = false;
+let currentThreadCwd = '';
 let runtimeState = {
   targets: [], activeTargetId: null, activeTarget: null, capabilities: [],
   settings: { hosts: [], adapters: [], overrides: [] },
@@ -120,7 +125,6 @@ topDragHandle.addEventListener('pointercancel', endManualWindowDrag);
 document.querySelector('#ExpandZommi').addEventListener('click', () => window.zommi.toggleExpanded());
 selectImage.addEventListener('click', () => window.zommi.selectImage());
 document.querySelector('#ClosePreview').addEventListener('click', hidePreview);
-toggleSessions.addEventListener('click', toggleSessionSidebar);
 toggleSessions.addEventListener('mouseenter', openSessionSidebarFromHover);
 toggleSessions.addEventListener('mouseleave', scheduleSessionSidebarClose);
 sessionSidebar.addEventListener('mouseenter', cancelSessionSidebarClose);
@@ -134,6 +138,7 @@ saveRuntimeOverride.addEventListener('click', saveRuntimeTargetOverride);
 glass.addEventListener('mouseenter', () => setPointerOverGlass(true));
 glass.addEventListener('mouseleave', () => setPointerOverGlass(false));
 modelSummary.addEventListener('click', toggleModelPanel);
+document.querySelector('#CloseArtifactViewer').addEventListener('click', closeArtifactViewer);
 modelSearch.addEventListener('input', renderModelOptions);
 modelSearch.addEventListener('keydown', handleModelSearchKeydown);
 document.addEventListener('pointerdown', closeModelPanelFromOutside);
@@ -688,9 +693,11 @@ function closeModelPanelFromOutside(event) {
 }
 
 function handleGlobalKeydown(event) {
-  if (event.key !== 'Escape' || (modelPanel.hidden && runtimePanel.hidden)) return;
+  if (event.key !== 'Escape' || (modelPanel.hidden && runtimePanel.hidden && artifactViewer.hidden)) return;
   event.preventDefault();
-  if (!runtimePanel.hidden) {
+  if (!artifactViewer.hidden) {
+    closeArtifactViewer();
+  } else if (!runtimePanel.hidden) {
     closeRuntimePanel();
     runtimeSummary.focus({ preventScroll: true });
   } else {
@@ -794,6 +801,7 @@ async function signInToRuntime() {
 function resetChatForRuntimeSwitch() {
   dismissApproval();
   dismissQuestion();
+  closeArtifactViewer();
   activeThreadId = null;
   sessions = [];
   models = [];
@@ -1027,12 +1035,7 @@ function setSessionSidebarOpen(open) {
   sessionSidebar.classList.toggle('open', open);
   sessionSidebar.setAttribute('aria-hidden', String(!open));
   toggleSessions.setAttribute('aria-expanded', String(open));
-  toggleSessions.setAttribute('aria-label', `${open ? 'Hide' : 'Show'} chat sessions`);
-}
-
-function toggleSessionSidebar() {
-  sessionPanelPinned = !sessionPanelPinned;
-  setSessionSidebarOpen(sessionPanelPinned || toggleSessions.matches(':hover') || sessionSidebar.matches(':hover'));
+  toggleSessions.setAttribute('aria-label', `Chat sessions — ${open ? 'visible while hovered' : 'hover to show'}`);
 }
 
 function openSessionSidebarFromHover() {
@@ -1048,7 +1051,7 @@ function cancelSessionSidebarClose() {
 function scheduleSessionSidebarClose() {
   cancelSessionSidebarClose();
   sessionPanelCloseTimer = setTimeout(() => {
-    if (!sessionPanelPinned && !toggleSessions.matches(':hover') && !sessionSidebar.matches(':hover')) {
+    if (!toggleSessions.matches(':hover') && !sessionSidebar.matches(':hover')) {
       setSessionSidebarOpen(false);
     }
   }, 220);
@@ -1139,7 +1142,6 @@ async function switchSession(threadId) {
   try {
     const state = await window.zommi.switchSession(threadId);
     applyChatState(state, { renderHistory: true });
-    if (!sessionPanelPinned) setSessionSidebarOpen(false);
     renderStatus('Chat switched');
     focusComposer();
   } catch (error) {
@@ -1186,6 +1188,7 @@ async function sendMessage() {
   assistantElement = null;
   assistantTextNode = null;
   activityElements = new Map();
+  artifactElements = new Map();
   attachments.splice(0);
   renderAttachments();
   try {
@@ -1307,6 +1310,7 @@ function renderStreamUpdate(update, { deferScroll = false, turnCompleted = false
       currentTurnBody.append(row);
     }
     if (update.text) assistantTextNode.data = update.replace ? update.text : `${assistantTextNode.data}${update.text}`;
+    renderArtifacts(update.artifacts, update.runtimeTargetId);
     if (!deferScroll) scrollTranscript();
     return;
   }
@@ -1318,6 +1322,7 @@ function renderStreamUpdate(update, { deferScroll = false, turnCompleted = false
     currentTurnBody.append(activity.element);
   }
   updateActivity(activity, update, lifecycle, { turnCompleted });
+  renderArtifacts(update.artifacts, update.runtimeTargetId);
   if (!deferScroll) scrollTranscript();
 }
 
@@ -1418,6 +1423,98 @@ function compactLabel(value) {
   return line.length <= 70 ? line : `${line.slice(0, 69)}…`;
 }
 
+function renderArtifacts(values, runtimeTargetId = activeRuntimeTargetId) {
+  for (const artifact of Array.isArray(values) ? values : []) {
+    const key = artifact?.path
+      ? `${artifact.kind}:${artifact.path}`
+      : artifact?.dataUrl
+        ? `${artifact.kind}:data:${artifact.dataUrl.length}:${artifact.dataUrl.slice(-64)}`
+        : String(artifact?.id || '');
+    if (!key || artifactElements.has(key)) continue;
+    const card = document.createElement('figure');
+    card.className = `artifact-card ${artifact.kind}`;
+    card.dataset.artifactId = String(artifact.id || artifact.path || artifact.kind);
+    const header = document.createElement('div');
+    header.className = 'artifact-head';
+    const kind = document.createElement('span');
+    kind.className = 'artifact-kind';
+    kind.textContent = artifact.kind === 'html' ? 'HTML' : 'Image';
+    const title = document.createElement('span');
+    title.className = 'artifact-title';
+    title.textContent = artifact.title || (artifact.kind === 'html' ? 'HTML preview' : 'Generated image');
+    header.append(kind, title);
+    const surface = document.createElement('div');
+    surface.className = 'artifact-surface loading';
+    surface.textContent = 'Loading preview…';
+    const footer = document.createElement('figcaption');
+    const path = document.createElement('span');
+    path.className = 'artifact-path';
+    path.textContent = artifact.path || 'Generated in this chat';
+    path.title = path.textContent;
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'artifact-open';
+    open.textContent = 'Preview';
+    open.disabled = true;
+    footer.append(path, open);
+    card.append(header, surface, footer);
+    currentTurnBody.append(card);
+    const state = { card, surface, open, artifact, loaded: null };
+    artifactElements.set(key, state);
+    void hydrateArtifact(state, runtimeTargetId);
+  }
+}
+
+async function hydrateArtifact(state, runtimeTargetId) {
+  try {
+    const artifact = state.artifact;
+    const loaded = artifact.kind === 'image' && artifact.dataUrl
+      ? { ...artifact, dataUrl: artifact.dataUrl }
+      : artifact.kind === 'html' && typeof artifact.html === 'string'
+        ? { ...artifact, html: artifact.html }
+        : await window.zommi.loadArtifactPreview({ ...artifact, runtimeTargetId: runtimeTargetId || activeRuntimeTargetId });
+    state.loaded = loaded;
+    state.surface.replaceChildren(createArtifactMedia(loaded, true));
+    state.surface.classList.remove('loading');
+    state.open.disabled = false;
+    state.open.addEventListener('click', () => showArtifactViewer(loaded, artifact));
+  } catch (error) {
+    state.card.classList.add('failed');
+    state.surface.classList.remove('loading');
+    state.surface.textContent = `Preview unavailable · ${error.message}`;
+  }
+}
+
+function createArtifactMedia(loaded, compact) {
+  if (loaded.kind === 'image') {
+    const image = document.createElement('img');
+    image.src = loaded.dataUrl;
+    image.alt = loaded.title || loaded.name || 'Generated image';
+    image.loading = compact ? 'lazy' : 'eager';
+    return image;
+  }
+  const frame = document.createElement('iframe');
+  frame.className = 'artifact-html-frame';
+  frame.title = loaded.title || loaded.name || 'Generated HTML preview';
+  frame.setAttribute('sandbox', '');
+  frame.setAttribute('referrerpolicy', 'no-referrer');
+  frame.tabIndex = compact ? -1 : 0;
+  frame.srcdoc = sandboxHtmlDocument(loaded.html);
+  return frame;
+}
+
+function showArtifactViewer(loaded, artifact) {
+  artifactViewerTitle.textContent = artifact.title || loaded.name || (loaded.kind === 'html' ? 'HTML preview' : 'Generated image');
+  artifactViewerBody.replaceChildren(createArtifactMedia(loaded, false));
+  artifactViewer.hidden = false;
+  document.querySelector('#CloseArtifactViewer').focus({ preventScroll: true });
+}
+
+function closeArtifactViewer() {
+  artifactViewer.hidden = true;
+  artifactViewerBody.replaceChildren();
+}
+
 function createUiIcon(name) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('class', 'ui-icon');
@@ -1506,6 +1603,7 @@ function completeTurn(completion) {
     return;
   }
   flushStreamUpdates();
+  renderArtifacts(artifactsFromText(assistantTextNode?.data, { cwd: currentThreadCwd }), completion?.runtimeTargetId);
   terminalTurnStatus = true;
   syncActiveTurnState();
   interruptRequested = false;
@@ -1611,7 +1709,9 @@ function renderThreadHistory(thread) {
   assistantTextNode = null;
   currentTurnBody = null;
   activityElements = new Map();
+  artifactElements = new Map();
   turnNumber = 0;
+  currentThreadCwd = String(thread?.cwd || '');
   historyTurns = Array.isArray(thread?.turns) ? thread.turns : [];
   historyStartIndex = initialHistoryStart(historyTurns.length, HISTORY_PAGE_SIZE);
   renderHistoryRange(historyStartIndex, historyTurns.length, transcript);
@@ -1629,6 +1729,7 @@ function renderHistoryRange(start, end, parent) {
     assistantElement = null;
     assistantTextNode = null;
     activityElements = new Map();
+    artifactElements = new Map();
     beginTurn(userText || 'Continue', [], { number: index + 1, parent, scroll: false });
     const turnCompleted = activeTurns.get(activeThreadId) !== turn?.id;
     for (const item of items) renderHistoryItem(item, { deferScroll: true, turnCompleted });
@@ -1643,7 +1744,7 @@ function loadOlderHistory() {
   const previousTop = transcript.scrollTop;
   const nextStart = previousHistoryStart(historyStartIndex, HISTORY_PAGE_SIZE);
   const firstRenderedTurn = transcript.querySelector('.conversation-turn');
-  const cursor = { assistantElement, assistantTextNode, currentTurnBody, activityElements };
+  const cursor = { assistantElement, assistantTextNode, currentTurnBody, activityElements, artifactElements };
   const fragment = document.createDocumentFragment();
   renderHistoryRange(nextStart, historyStartIndex, fragment);
   transcript.insertBefore(fragment, firstRenderedTurn);
@@ -1652,6 +1753,7 @@ function loadOlderHistory() {
   assistantTextNode = cursor.assistantTextNode;
   currentTurnBody = cursor.currentTurnBody;
   activityElements = cursor.activityElements;
+  artifactElements = cursor.artifactElements;
   transcript.scrollTop = previousTop + transcript.scrollHeight - previousHeight;
   historyLoading = false;
 }
@@ -1667,11 +1769,12 @@ function displayUserItem(item) {
 function renderHistoryItem(item, { deferScroll = false, turnCompleted = true } = {}) {
   if (!item || item.type === 'userMessage') return;
   const lifecycle = isCompletedHistoryItem(item) ? 'completed' : 'delta';
+  const artifacts = artifactsFromThreadItem(item, { cwd: currentThreadCwd });
   if (item.type === 'agentMessage') {
     if (item.phase === 'commentary') {
-      renderStreamUpdate({ kind: 'thinking', lifecycle, title: 'Thinking', text: item.text || '', itemId: item.id, status: item.status }, { deferScroll, turnCompleted });
+      renderStreamUpdate({ kind: 'thinking', lifecycle, title: 'Thinking', text: item.text || '', itemId: item.id, status: item.status, artifacts }, { deferScroll, turnCompleted });
     } else {
-      renderStreamUpdate({ kind: 'assistant', lifecycle, title: activeRuntimeName, text: item.text || '', itemId: item.id }, { deferScroll, turnCompleted });
+      renderStreamUpdate({ kind: 'assistant', lifecycle, title: activeRuntimeName, text: item.text || '', itemId: item.id, artifacts }, { deferScroll, turnCompleted });
     }
     return;
   }
@@ -1685,7 +1788,7 @@ function renderHistoryItem(item, { deferScroll = false, turnCompleted = true } =
     return;
   }
   const history = historyTool(item);
-  if (history) renderStreamUpdate({ ...history, lifecycle, itemId: item.id, status: item.status || 'done' }, { deferScroll, turnCompleted });
+  if (history) renderStreamUpdate({ ...history, lifecycle, itemId: item.id, status: item.status || 'done', artifacts }, { deferScroll, turnCompleted });
 }
 
 function isCompletedHistoryItem(item) {
@@ -1732,6 +1835,14 @@ function seedAcceptanceConversation() {
   assistantTextNode = null;
   activityElements.clear();
   beginTurn('Now compare it with the second tab.', ['[shop.example.com]']);
-  renderStreamUpdate({ kind: 'assistant', lifecycle: 'delta', title: 'Codex', text: 'I’ll keep both contexts separate and compare only the facts each tab exposes.' });
+  const generatedImage = btoa('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#edf4ff"/><circle cx="320" cy="170" r="90" fill="#779cff"/><text x="320" y="310" text-anchor="middle" font-family="sans-serif" font-size="28" fill="#253b68">ZOMMI IMAGE PREVIEW</text></svg>');
+  renderStreamUpdate({
+    kind: 'assistant', lifecycle: 'completed', title: 'Codex',
+    text: 'I’ll keep both contexts separate and compare only the facts each tab exposes.',
+    artifacts: [
+      { id: 'seed-generated-image', kind: 'image', title: 'Generated image', dataUrl: `data:image/svg+xml;base64,${generatedImage}` },
+      { id: 'seed-generated-html', kind: 'html', title: 'Generated HTML', path: 'preview.html', html: '<main style="font:28px sans-serif;padding:48px;color:#253b68">ZOMMI_HTML_PREVIEW</main>' },
+    ],
+  });
   renderStatus('ready');
 }

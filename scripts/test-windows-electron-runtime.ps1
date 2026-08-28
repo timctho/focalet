@@ -633,7 +633,11 @@ try {
 
         $toggleSessions = Wait-AutomationElementById $window 'ToggleSessions' 10
         Assert-True ($null -ne $toggleSessions) 'The live session sidebar control was not exposed.'
-        Invoke-AutomationElement $toggleSessions
+        $sessionToggleBounds = $toggleSessions.Current.BoundingRectangle
+        Assert-True ([ZommiElectronAcceptanceNative]::MovePointer(
+            [int] ($sessionToggleBounds.X + ($sessionToggleBounds.Width / 2)),
+            [int] ($sessionToggleBounds.Y + ($sessionToggleBounds.Height / 2)))) 'Could not hover the chat session control.'
+        Start-Sleep -Milliseconds 300
         $newSession = Wait-AutomationElementById $window 'NewSession' 10
         Assert-True ($null -ne $newSession -and -not $newSession.Current.IsOffscreen) 'The new-chat control was not visible in the session sidebar.'
         Invoke-AutomationElement $newSession

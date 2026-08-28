@@ -27,7 +27,7 @@ test('OpenClaw local target uses the official ACP credential bridge adapter', ()
     ...target('wsl-openclaw', 'openclaw-acp', {
       kind: 'wsl', name: 'Ubuntu', displayName: 'WSL · Ubuntu', isDefault: true,
     }, 40),
-    runtimeId: 'openclaw', displayName: 'OpenClaw', protocolName: 'Gateway via ACP',
+    runtimeId: 'openclaw', displayName: 'OpenClaw', protocolName: 'ACP',
     executableName: 'openclaw', executablePath: '/home/user/bin/openclaw', runtimeHome: '/home/user',
   };
   const adapter = createDefaultRuntimeAdapter(runtimeTarget, {

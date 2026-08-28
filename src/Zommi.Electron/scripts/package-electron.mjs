@@ -82,7 +82,7 @@ async function assemblePlatformPackage(extracted, output, targetPlatform, native
 async function copyApplication(destination) {
   await mkdir(destination, { recursive: true });
   const files = [
-    'main.mjs', 'preload.cjs', 'native-host.mjs', 'codex-bridge.mjs', 'runtime-catalog.mjs',
+    'main.mjs', 'preload.cjs', 'native-host.mjs', 'codex-bridge.mjs', 'artifacts.mjs', 'artifact-preview.mjs', 'runtime-catalog.mjs',
     'runtime-discovery.mjs', 'runtime-settings.mjs', 'runtime-broker.mjs', 'broker-protocol.mjs', 'context-handoff.mjs',
     'protocol-framing.mjs', 'adapter-diagnostics.mjs', 'transport-metrics.mjs',
     'acp-adapter.mjs', 'pi-rpc-adapter.mjs',

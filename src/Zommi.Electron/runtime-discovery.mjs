@@ -311,7 +311,12 @@ export function parseExecutableMatches(output) {
 export function targetsFromMatches(host, matches, catalog = RUNTIME_CATALOG) {
   const targets = [];
   for (const match of deduplicateMatches(matches)) {
-    for (const entry of catalogEntriesForExecutable(match.executableName, host.kind, catalog)) {
+    const entries = catalogEntriesForExecutable(match.executableName, host.kind, catalog);
+    const acpRuntimeIds = new Set(entries
+      .filter((entry) => entry.adapterId.endsWith('-acp'))
+      .map((entry) => entry.runtimeId));
+    for (const entry of entries.filter((candidate) =>
+      !acpRuntimeIds.has(candidate.runtimeId) || candidate.adapterId.endsWith('-acp'))) {
       const profileId = match.profileId || 'default';
       const identity = [host.id, entry.adapterId, match.executablePath, profileId].join('\0');
       targets.push({

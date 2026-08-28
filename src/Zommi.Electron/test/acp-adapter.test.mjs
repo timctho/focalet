@@ -48,6 +48,12 @@ test('ACP prompt acknowledges immediately, streams normalized updates, and compl
     params: { sessionId: 'session-new', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'hi' }, messageId: 'message-a' } },
   });
   assert.equal((await streamed)[0].text, 'hi');
+  const imageStreamed = once(adapter, 'streamUpdate');
+  fixture.send({
+    jsonrpc: '2.0', method: 'session/update',
+    params: { sessionId: 'session-new', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'image', mimeType: 'image/png', data: 'aGVsbG8=' }, messageId: 'message-image' } },
+  });
+  assert.equal((await imageStreamed)[0].artifacts[0].dataUrl, 'data:image/png;base64,aGVsbG8=');
   const toolStreamed = once(adapter, 'streamUpdate');
   fixture.send({
     jsonrpc: '2.0', method: 'session/update',

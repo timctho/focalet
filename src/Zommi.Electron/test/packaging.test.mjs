@@ -229,9 +229,13 @@ test('model and session controls use Codex app-server catalogs and resumable thr
   assert.match(html, /id="ModelList"/);
   assert.match(html, /id="EffortList"/);
   assert.doesNotMatch(html, /id="ModelSelect"|id="EffortSelect"/);
+  assert.ok(html.indexOf('id="RuntimeSummary"') < html.indexOf('id="ModelSummary"'));
+  assert.ok(html.indexOf('id="ModelSummary"') < html.indexOf('class="drag-region"'));
+  assert.ok(html.indexOf('id="ModelSummary"') < html.indexOf('class="composer-shell"'));
   assert.match(renderer, /window\.zommi\.createSession/);
   assert.match(renderer, /window\.zommi\.switchSession/);
   assert.match(renderer, /toggleSessions\.addEventListener\('mouseenter', openSessionSidebarFromHover\)/);
+  assert.doesNotMatch(renderer, /toggleSessions\.addEventListener\('click'|sessionPanelPinned|toggleSessionSidebar/);
   assert.match(renderer, /button\.dataset\.status = state/);
   assert.match(renderer, /button\.disabled = sessionBusy \|\| session\.id === activeThreadId/);
   assert.doesNotMatch(renderer, /sessionBusy \|\| turnActive \|\| threadId === activeThreadId/);
@@ -329,6 +333,25 @@ test('Alt+A expands the anchored panel without cursor-relative window movement',
   assert.match(main, /HOVER_COLLAPSE_DELAY_MS\s*=\s*500/);
   assert.match(main, /setTimeout\(\(\) => setPanelOpen\(false\), HOVER_COLLAPSE_DELAY_MS\)/);
   assert.match(main, /const hitBounds = panelOpen \? bounds : compactHitBounds\(bounds\)/);
+  const panelOpenBody = main.match(/function setPanelOpen\([^]*?\n\}/)?.[0] || '';
+  assert.match(panelOpenBody, /if \(position\) mainWindow\.setBounds\(target, false\)/);
+  assert.doesNotMatch(panelOpenBody, /!open\).*setBounds|if \([^)]*!open[^)]*\) mainWindow\.setBounds/);
+});
+
+test('generated images and HTML artifacts cross the adapter boundary into sandboxed chat previews', async () => {
+  const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
+  const preload = await readFile(join(appDirectory, 'preload.cjs'), 'utf8');
+  const bridge = await readFile(join(appDirectory, 'codex-bridge.mjs'), 'utf8');
+  const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
+  const html = await readFile(join(appDirectory, 'renderer', 'index.html'), 'utf8');
+  const packager = await readFile(join(appDirectory, 'scripts', 'package-electron.mjs'), 'utf8');
+  assert.match(bridge, /artifactsFromThreadItem\(item, options\)/);
+  assert.match(main, /ipcMain\.handle\('artifact:preview'/);
+  assert.match(preload, /loadArtifactPreview:.*artifact:preview/);
+  assert.match(renderer, /renderArtifacts\(update\.artifacts/);
+  assert.match(renderer, /frame\.setAttribute\('sandbox', ''\)/);
+  assert.match(html, /id="ArtifactViewer"/);
+  assert.match(packager, /'artifacts\.mjs', 'artifact-preview\.mjs'/);
 });
 
 test('compact orb is a small antialiased vector and panel morphs from its bottom-center anchor', async () => {

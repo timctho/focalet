@@ -1,4 +1,4 @@
-export const RUNTIME_CATALOG_VERSION = 5;
+export const RUNTIME_CATALOG_VERSION = 6;
 
 const CODEX_CAPABILITIES = [
   'session.list.v1',
@@ -150,7 +150,7 @@ export const RUNTIME_CATALOG = Object.freeze([
     runtimeId: 'openclaw',
     adapterId: 'openclaw-acp',
     displayName: 'OpenClaw',
-    protocolName: 'Gateway via ACP',
+    protocolName: 'ACP',
     executables: Object.freeze(['openclaw']),
     hostKinds: Object.freeze(['native', 'wsl']),
     launchArgs: Object.freeze(['acp']),

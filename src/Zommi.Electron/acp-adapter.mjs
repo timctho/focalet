@@ -7,6 +7,7 @@ import { normalizeClientOperationId, sanitizeDiagnostic } from './broker-protoco
 import { BoundedLineDecoder } from './protocol-framing.mjs';
 import { recordNativeDiagnostic } from './adapter-diagnostics.mjs';
 import { emitProtocolWrite } from './transport-metrics.mjs';
+import { artifactsFromContent } from './artifacts.mjs';
 
 const ACP_PROTOCOL_VERSION = 1;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
@@ -410,6 +411,7 @@ export class AcpAdapter extends EventEmitter {
     }
     if (kind === 'agent_message_chunk' || kind === 'agent_thought_chunk') {
       const text = contentText(update.content);
+      const artifacts = kind === 'agent_message_chunk' ? artifactsFromContent([update.content], { cwd: this.cwd }) : [];
       const itemId = update.messageId || `${sessionId}-${kind}`;
       const itemType = kind === 'agent_message_chunk' ? 'agentMessage' : 'reasoning';
       this.#appendOrMergeHistoryItem(sessionId, itemId, itemType, text);
@@ -420,6 +422,7 @@ export class AcpAdapter extends EventEmitter {
         title: kind === 'agent_message_chunk' ? this.runtimeDisplayName : 'Thinking',
         text,
         itemId,
+        ...(artifacts.length ? { artifacts } : {}),
         turnId,
         clientOperationId,
       });
@@ -429,8 +432,10 @@ export class AcpAdapter extends EventEmitter {
       const lifecycle = kind === 'tool_call' ? 'started'
         : ['completed', 'failed'].includes(update.status) ? 'completed' : 'delta';
       const text = toolUpdateText(update);
+      const artifacts = artifactsFromContent(update.content, { cwd: this.cwd });
       this.#appendOrMergeHistoryItem(sessionId, update.toolCallId, 'dynamicToolCall', text, {
         status: update.status,
+        ...(artifacts.length ? { artifacts } : {}),
         turnId,
         clientOperationId,
         tool: update.title || update.kind || 'Tool',
@@ -482,6 +487,8 @@ export class AcpAdapter extends EventEmitter {
       if (type === 'agentMessage') item.phase = 'final';
       if (type === 'reasoning') item.summary = [];
       items.push(item);
+    } else {
+      Object.assign(item, extra);
     }
     if (type === 'reasoning') item.summary = [`${item.summary?.[0] || ''}${text || ''}`];
     else if (type === 'agentMessage') item.text = `${item.text || ''}${text || ''}`;

@@ -6,6 +6,7 @@ import { buildContextHandoff, compactAccessibilityTree } from './context-handoff
 import { BoundedLineDecoder } from './protocol-framing.mjs';
 import { recordNativeDiagnostic } from './adapter-diagnostics.mjs';
 import { emitProtocolWrite } from './transport-metrics.mjs';
+import { artifactsFromThreadItem } from './artifacts.mjs';
 
 export { buildContextHandoff as buildTurnText, compactAccessibilityTree } from './context-handoff.mjs';
 
@@ -391,7 +392,7 @@ export class CodexAppServerAdapter extends EventEmitter {
       this.itemKinds.set(params.item.id, params.item.phase === 'commentary' ? 'thinking' : 'assistant');
       this.itemThreads.set(params.item.id, threadId);
     }
-    const update = parseStreamUpdate(method, params, this.itemKinds);
+    const update = parseStreamUpdate(method, params, this.itemKinds, { cwd: this.cwd });
     const turnId = String(params.turnId || params.turn?.id || this.activeTurns.get(threadId) || '');
     const clientOperationId = this.turnClientOperations.get(threadId) || null;
     if (update) this.emit('streamUpdate', {
@@ -490,7 +491,7 @@ export function codexLaunchArgs(command, args) {
   ];
 }
 
-function parseStreamUpdate(method, params, itemKinds) {
+export function parseStreamUpdate(method, params, itemKinds, options = {}) {
   const itemId = params.itemId || params.item?.id || null;
   if (method === 'item/agentMessage/delta') {
     return update(itemKinds.get(itemId) || 'assistant', 'delta', itemKinds.get(itemId) === 'thinking' ? 'Thinking' : 'Codex', params.delta || '', itemId);
@@ -502,6 +503,7 @@ function parseStreamUpdate(method, params, itemKinds) {
   if (method === 'item/started' || method === 'item/completed') {
     const lifecycle = method.endsWith('started') ? 'started' : 'completed';
     const item = params.item || {};
+    const artifacts = lifecycle === 'completed' ? artifactsFromThreadItem(item, options) : [];
     if (item.type === 'agentMessage' && lifecycle === 'completed' && item.text) {
       const kind = itemKinds.get(item.id) || (item.phase === 'commentary' ? 'thinking' : 'assistant');
       return {
@@ -510,6 +512,7 @@ function parseStreamUpdate(method, params, itemKinds) {
         // emit no deltas and corrects a partial streamed value without
         // duplicating the final answer in the renderer.
         replace: true,
+        ...(artifacts.length ? { artifacts } : {}),
       };
     }
     const mapping = {
@@ -518,7 +521,10 @@ function parseStreamUpdate(method, params, itemKinds) {
       webSearch: ['tool', 'Web search'], imageView: ['tool', 'View image'], imageGeneration: ['tool', 'Image generation'],
     }[item.type];
     if (!mapping) return null;
-    return update(mapping[0], lifecycle, mapping[1], describeItem(item, lifecycle), item.id, item.status);
+    return {
+      ...update(mapping[0], lifecycle, mapping[1], describeItem(item, lifecycle), item.id, item.status),
+      ...(artifacts.length ? { artifacts } : {}),
+    };
   }
   return null;
 }

@@ -6,6 +6,7 @@ import { buildContextHandoff } from './context-handoff.mjs';
 import { ambiguousOutcome, normalizeClientOperationId, sanitizeDiagnostic } from './broker-protocol.mjs';
 import { recordNativeDiagnostic } from './adapter-diagnostics.mjs';
 import { emitProtocolWrite } from './transport-metrics.mjs';
+import { artifactsFromContent } from './artifacts.mjs';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const MAX_FRAME_BYTES = 16 * 1024 * 1024;
@@ -387,6 +388,7 @@ export class PiRpcAdapter extends EventEmitter {
     if (event.type === 'tool_execution_start' || event.type === 'tool_execution_update' || event.type === 'tool_execution_end') {
       const lifecycle = event.type.endsWith('_start') ? 'started' : event.type.endsWith('_end') ? 'completed' : 'delta';
       const payload = event.result || event.partialResult;
+      const artifacts = artifactsFromContent(payload?.content, { cwd: this.cwd });
       this.emit('streamUpdate', {
         threadId: sessionId,
         kind: lifecycle === 'delta' ? 'toolOutput' : 'tool',
@@ -395,6 +397,7 @@ export class PiRpcAdapter extends EventEmitter {
         text: piToolText(payload, event.args),
         itemId: event.toolCallId,
         status: event.isError ? 'failed' : lifecycle === 'completed' ? 'completed' : null,
+        ...(artifacts.length ? { artifacts } : {}),
         turnId: turnId || null,
         clientOperationId,
       });
@@ -463,9 +466,11 @@ export function piMessagesToTurns(messages) {
         });
       }
     } else if (role === 'toolResult') {
+      const artifacts = artifactsFromContent(message.content);
       turns.at(-1).items.push({
         id: message.toolCallId || message.id || randomUUID(), type: 'commandExecution', status: message.isError ? 'failed' : 'completed',
         aggregatedOutput: piMessageText(message),
+        ...(artifacts.length ? { artifacts } : {}),
       });
     }
   }
