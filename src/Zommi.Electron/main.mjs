@@ -34,6 +34,9 @@ const acceptanceInputProbePath = process.argv
 const acceptanceModelEvidencePath = process.argv
   .find((argument) => argument.startsWith('--acceptance-model-evidence='))
   ?.slice('--acceptance-model-evidence='.length);
+const acceptanceArtifactEvidencePath = process.argv
+  .find((argument) => argument.startsWith('--acceptance-artifact-evidence='))
+  ?.slice('--acceptance-artifact-evidence='.length);
 const acceptanceRuntimeEvidencePath = process.argv
   .find((argument) => argument.startsWith('--acceptance-runtime-evidence='))
   ?.slice('--acceptance-runtime-evidence='.length);
@@ -179,12 +182,26 @@ async function runAcceptanceInputProbe(path) {
     setPanelOpen(false, { animate: false });
     const collapsedAfterDrag = compactHitBounds(mainWindow.getBounds());
     result.collapsedOrbFollowsDraggedWindow = collapsedAfterDrag.x === draggedOrbBounds.x && collapsedAfterDrag.y === draggedOrbBounds.y;
+    await delay(540);
+    const compactAnimationBefore = await evaluateRenderer(`{ const orb = document.querySelector('#ZommiOrb'); const animations = orb?.getAnimations({ subtree: true }) || []; return { times: animations.map((animation) => Number(animation.currentTime) || 0), panelVisibility: getComputedStyle(document.querySelector('.panel-shell')).visibility, rimCount: orb?.querySelectorAll('.orb-spectrum-rim, .orb-glass-rim').length || 0 }; }`);
+    await delay(180);
+    const compactAnimationAfter = await evaluateRenderer(`(document.querySelector('#ZommiOrb')?.getAnimations({ subtree: true }) || []).map((animation) => Number(animation.currentTime) || 0)`);
+    result.compactOrbIdleAnimationRuns = compactAnimationBefore.times.length >= 3
+      && compactAnimationAfter.some((time, index) => time > compactAnimationBefore.times[index]);
+    result.compactOrbHasNoLegacySurfaceOrGrayRim = compactAnimationBefore.panelVisibility === 'hidden'
+      && compactAnimationBefore.rimCount === 0;
     setPanelOpen(true, { animate: false });
     mainWindow.setBounds(beforeManualDrag, false);
+    mainWindow.focus();
+    await delay(160);
+    const initialSessionAwayPoint = await rendererElementCenter('#CodexTranscript');
+    mainWindow.webContents.sendInputEvent({ type: 'mouseMove', x: initialSessionAwayPoint.x, y: initialSessionAwayPoint.y });
+    await delay(60);
     const sessionTogglePoint = await rendererElementCenter('#ToggleSessions');
     mainWindow.webContents.sendInputEvent({ type: 'mouseMove', x: sessionTogglePoint.x, y: sessionTogglePoint.y });
     await delay(260);
     result.sessionSidebarHover = await evaluateRenderer(`document.querySelector('#SessionSidebar')?.classList.contains('open') === true`);
+    result.sessionSidebarHoverDiagnostics = await evaluateRenderer(`{ const toggle = document.querySelector('#ToggleSessions'); const sidebar = document.querySelector('#SessionSidebar'); const point = toggle?.getBoundingClientRect(); const hit = point ? document.elementFromPoint(point.left + point.width / 2, point.top + point.height / 2) : null; return { bodyClass: document.body.className, glassClass: document.querySelector('.glass')?.className || '', panelVisibility: getComputedStyle(document.querySelector('.panel-shell')).visibility, toggleHidden: Boolean(toggle?.hidden), toggleHovered: Boolean(toggle?.matches(':hover')), centerElement: hit?.id || String(hit?.className || hit?.tagName || ''), sidebarClass: sidebar?.className || '' }; }`);
     result.sessionSidebarHalfHeight = await evaluateRenderer(`{ const p = document.querySelector('#SessionSidebar')?.getBoundingClientRect(); const g = document.querySelector('.glass')?.getBoundingClientRect(); return Boolean(p && g && p.height <= g.height / 2 + 1); }`);
     result.activeSessionShowsRead = await evaluateRenderer(`document.querySelector('#SessionList .session-item[data-thread-id="seeded-zommi-thread"]')?.dataset.status === 'read'`);
     result.inactiveSessionShowsDone = await evaluateRenderer(`document.querySelector('#SessionList .session-item[data-thread-id="seeded-secondary-thread"]')?.dataset.status === 'done'`);
@@ -231,6 +248,7 @@ async function runAcceptanceInputProbe(path) {
     result.modelPanelDiagnostics = await evaluateRenderer(`{ const e = document.querySelector('#ModelPanel'); const r = e?.getBoundingClientRect(); const s = e ? getComputedStyle(e) : null; return r && s ? { x: r.x, y: r.y, width: r.width, height: r.height, display: s.display, opacity: s.opacity, visibility: s.visibility } : null; }`);
     result.modelPanelOpensBelowTopControl = await evaluateRenderer(`{ const p = document.querySelector('#ModelPanel')?.getBoundingClientRect(); const s = document.querySelector('#ModelSummary')?.getBoundingClientRect(); return Boolean(p && s && p.top > s.bottom); }`);
     result.modelSelectionBesideAgentAtTop = await evaluateRenderer(`{ const m = document.querySelector('#ModelSummary')?.getBoundingClientRect(); const r = document.querySelector('#RuntimeSummary')?.getBoundingClientRect(); const c = document.querySelector('.composer-shell')?.getBoundingClientRect(); return Boolean(m && r && c && m.left >= r.right && Math.abs((m.top + m.height / 2) - (r.top + r.height / 2)) <= 2 && m.bottom < c.top); }`);
+    result.markdownDisplayed = await evaluateRenderer(`Boolean(document.querySelector('#CodexTranscript .message.user strong') && document.querySelector('#CodexTranscript .message.assistant strong') && document.querySelector('#CodexTranscript .message.assistant ul') && document.querySelector('#CodexTranscript .message.assistant code'))`);
     result.generatedImageDisplayed = await evaluateRenderer(`Boolean(document.querySelector('#CodexTranscript .artifact-card.image img'))`);
     result.generatedHtmlPreviewDisplayed = await evaluateRenderer(`Boolean(document.querySelector('#CodexTranscript .artifact-card.html iframe')?.srcdoc.includes('ZOMMI_HTML_PREVIEW'))`);
     if (acceptanceModelEvidencePath) await captureAcceptanceEvidence(acceptanceModelEvidencePath);
@@ -242,6 +260,8 @@ async function runAcceptanceInputProbe(path) {
     await clickRendererElement('#ModelSummary');
     await evaluateRenderer(`{ document.querySelector('#CodexTranscript .artifact-card.image .artifact-open')?.click(); return true; }`);
     result.generatedImageExpandedPreview = await evaluateRenderer(`Boolean(document.querySelector('#ArtifactViewer')?.hidden === false && document.querySelector('#ArtifactViewerBody img'))`);
+    result.artifactViewerClearsTopSelectionIcons = await evaluateRenderer(`{ const viewer = document.querySelector('#ArtifactViewer')?.getBoundingClientRect(); const controls = ['#HideZommi', '#ToggleSessions', '#RuntimeSummary', '#ModelSummary', '#ExpandZommi'].map((selector) => document.querySelector(selector)?.getBoundingClientRect()).filter(Boolean); return Boolean(viewer && controls.length && viewer.top >= Math.max(...controls.map((control) => control.bottom))); }`);
+    if (acceptanceArtifactEvidencePath) await captureAcceptanceEvidence(acceptanceArtifactEvidencePath);
     await evaluateRenderer(`{ document.querySelector('#CloseArtifactViewer')?.click(); return true; }`);
     await evaluateRenderer(`{ document.querySelector('#CodexTranscript .artifact-card.html .artifact-open')?.click(); return true; }`);
     result.generatedHtmlExpandedPreview = await evaluateRenderer(`Boolean(document.querySelector('#ArtifactViewer')?.hidden === false && document.querySelector('#ArtifactViewerBody iframe')?.srcdoc.includes('ZOMMI_HTML_PREVIEW'))`);
@@ -307,7 +327,7 @@ async function runAcceptanceInputProbe(path) {
     await delay(180);
     result.backgroundCompletionShowsUnread = await evaluateRenderer(`document.querySelector('#SessionList .session-item[data-thread-id="seeded-zommi-thread"]')?.dataset.status === 'unread'`);
     result.passed = Object.entries(result)
-      .filter(([key]) => !['inputPath', 'dragRegionStyles', 'manualTopDragDiagnostics', 'modelPanelDiagnostics', 'manualScrollDiagnostics', 'thinkingCardsPerTurn'].includes(key))
+      .filter(([key]) => !['inputPath', 'dragRegionStyles', 'manualTopDragDiagnostics', 'sessionSidebarHoverDiagnostics', 'modelPanelDiagnostics', 'manualScrollDiagnostics', 'thinkingCardsPerTurn'].includes(key))
       .every(([, value]) => value === true);
   } catch (error) {
     result.passed = false;
@@ -429,9 +449,14 @@ function createTray() {
 
 function createZommiIcon() {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-    <defs><linearGradient id="g" x1="10" y1="8" x2="54" y2="58" gradientUnits="userSpaceOnUse"><stop stop-color="#85c7ff"/><stop offset=".48" stop-color="#8278f5"/><stop offset="1" stop-color="#d574d8"/></linearGradient></defs>
-    <circle cx="32" cy="32" r="29" fill="url(#g)"/><circle cx="32" cy="32" r="27.5" fill="none" stroke="#fff" stroke-opacity=".72"/>
-    <path d="M32 15c1.35 9.9 7.1 15.65 17 17-9.9 1.35-15.65 7.1-17 17-1.35-9.9-7.1-15.65-17-17 9.9-1.35 15.65-7.1 17-17Z" fill="#fff"/>
+    <defs>
+      <radialGradient id="base" cx="0" cy="0" r="1" gradientTransform="translate(22 17) rotate(46) scale(47)"><stop stop-color="#e9fbff"/><stop offset=".28" stop-color="#5dc9f5"/><stop offset=".62" stop-color="#665ee8"/><stop offset="1" stop-color="#4b247f"/></radialGradient>
+      <linearGradient id="aurora" x1="13" y1="12" x2="53" y2="52" gradientUnits="userSpaceOnUse"><stop stop-color="#62f1df"/><stop offset=".48" stop-color="#5579ff"/><stop offset="1" stop-color="#e16bc7"/></linearGradient>
+    </defs>
+    <circle cx="32" cy="32" r="29" fill="url(#base)"/>
+    <ellipse cx="25" cy="28" rx="22" ry="13" fill="url(#aurora)" opacity=".64" transform="rotate(-18 25 28)"/>
+    <ellipse cx="44" cy="42" rx="18" ry="12" fill="#df77dc" opacity=".42" transform="rotate(24 44 42)"/>
+    <ellipse cx="22" cy="18" rx="11" ry="7" fill="#fff" opacity=".46" transform="rotate(-24 22 18)"/>
   </svg>`;
   return nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`);
 }
@@ -460,6 +485,7 @@ function createBackend() {
   backend = new RuntimeBroker({
     discovery,
     preferencePath: join(userData, 'runtime-preferences.json'),
+    forceDiscoveryOnInitialize: true,
   });
   backend.on('status', ({ message, warning, targetId, status }) => {
     writeRuntimeLog('runtime-status', `target=${targetId || ''} status=${status || ''} ${message}`);
@@ -960,8 +986,8 @@ function seededHistory(threadId) {
   }
   const turns = Array.from({ length: 42 }, (_value, index) => {
     const items = [
-      { id: `history-user-${index + 1}`, type: 'userMessage', content: [{ type: 'text', text: `History question ${index + 1}` }] },
-      { id: `history-agent-${index + 1}`, type: 'agentMessage', phase: 'final', status: 'completed', text: `History answer ${index + 1}` },
+      { id: `history-user-${index + 1}`, type: 'userMessage', content: [{ type: 'text', text: index === 41 ? 'History **question 42**' : `History question ${index + 1}` }] },
+      { id: `history-agent-${index + 1}`, type: 'agentMessage', phase: 'final', status: 'completed', text: index === 41 ? '**History answer 42**\n\n- Markdown list\n- `inline code`' : `History answer ${index + 1}` },
     ];
     if (index === 41) {
       const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#edf4ff"/><circle cx="320" cy="170" r="90" fill="#779cff"/><text x="320" y="310" text-anchor="middle" font-family="sans-serif" font-size="28" fill="#253b68">ZOMMI IMAGE PREVIEW</text></svg>';

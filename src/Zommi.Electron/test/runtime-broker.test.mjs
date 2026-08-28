@@ -134,6 +134,36 @@ test('resume rediscovery reuses TTL-aware discovery without forcing a full refre
   assert.equal(discovery.refreshCalls, 0);
 });
 
+test('launch initialization can force fresh discovery instead of reusing the persisted TTL cache', async () => {
+  const discovery = new FakeDiscovery([
+    target('wsl-codex', 'codex-app-server', { kind: 'wsl', displayName: 'WSL · Ubuntu', isDefault: true }, 10),
+  ]);
+  const broker = new RuntimeBroker({
+    discovery,
+    autoWarm: false,
+    forceDiscoveryOnInitialize: true,
+    adapterFactory: fakeAdapterFactory,
+  });
+  await broker.initialize();
+  assert.deepEqual(discovery.discoverOptions, [{ force: true }]);
+});
+
+test('a runtime found by background launch discovery is selected and warmed automatically', async () => {
+  const discovered = target('wsl-pi', 'pi-rpc', { kind: 'wsl', displayName: 'WSL · Debian' }, 20);
+  const discovery = new DeferredBackgroundDiscovery([], [discovered]);
+  const adapter = new FakeAdapter('pi-thread');
+  const broker = new RuntimeBroker({ discovery, adapterFactory: () => adapter });
+  const ready = new Promise((resolve) => broker.on('status', (value) => {
+    if (value.targetId === discovered.id && value.status === 'ready') resolve(value);
+  }));
+  const initial = await broker.initialize();
+  assert.equal(initial.activeTargetId, null);
+  discovery.finishBackground();
+  await ready;
+  assert.equal(broker.getRuntimeState().activeTargetId, discovered.id);
+  assert.equal(broker.getStatus(discovered.id).status, 'ready');
+});
+
 test('automatic activation falls back only to another machine mode of the same runtime', async () => {
   const discovery = new FakeDiscovery([
     target('hermes-acp', 'hermes-acp', { kind: 'wsl', displayName: 'WSL · Ubuntu', isDefault: true }, 30),
@@ -373,6 +403,24 @@ class FakeDiscovery extends EventEmitter {
   }
 
   invalidateTarget() {}
+}
+
+class DeferredBackgroundDiscovery extends FakeDiscovery {
+  constructor(eagerTargets, backgroundTargets) {
+    super(eagerTargets);
+    this.backgroundTargets = backgroundTargets;
+    this.background = new Promise((resolve) => { this.resolveBackground = resolve; });
+  }
+
+  async waitForBackground() {
+    return this.background;
+  }
+
+  finishBackground() {
+    this.targets = this.backgroundTargets;
+    this.emit('targetsChanged', this.targets);
+    this.resolveBackground(this.targets);
+  }
 }
 
 class FakeAdapter extends EventEmitter {

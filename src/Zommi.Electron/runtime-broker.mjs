@@ -36,6 +36,7 @@ export class RuntimeBroker extends EventEmitter {
     this.preferencePath = options.preferencePath ?? null;
     this.adapterFactory = options.adapterFactory ?? createDefaultRuntimeAdapter;
     this.autoWarm = options.autoWarm ?? true;
+    this.forceDiscoveryOnInitialize = options.forceDiscoveryOnInitialize ?? false;
     this.targets = [];
     this.activeTargetId = null;
     this.adapters = new Map();
@@ -391,12 +392,17 @@ export class RuntimeBroker extends EventEmitter {
 
   async #initialize() {
     await this.#loadPreferences();
-    const targets = await this.discovery.discover();
+    const targets = await this.discovery.discover(this.forceDiscoveryOnInitialize ? { force: true } : undefined);
     this.#applyDiscoveredTargets(targets);
     if (this.autoWarm && this.activeTargetId) {
       void this.warmSelectedTarget().catch(() => {});
     }
-    void this.discovery.waitForBackground().then((complete) => this.#applyDiscoveredTargets(complete));
+    void this.discovery.waitForBackground().then(async (complete) => {
+      this.#applyDiscoveredTargets(complete);
+      if (this.autoWarm && this.activeTargetId) {
+        await this.warmSelectedTarget().catch(() => {});
+      }
+    });
     return this.getRuntimeState();
   }
 

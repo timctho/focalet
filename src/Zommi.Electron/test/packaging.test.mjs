@@ -278,6 +278,7 @@ test('zero-config runtime UX exposes discovery, deterministic selection, refresh
   assert.doesNotMatch(`${html}\n${renderer}`, /setup wizard|first[- ]run wizard/i);
   assert.match(main, /new RuntimeDiscovery/);
   assert.match(main, /new RuntimeBroker/);
+  assert.match(main, /forceDiscoveryOnInitialize:\s*true/);
   assert.match(main, /runtime-preferences\.json/);
 });
 
@@ -354,8 +355,31 @@ test('generated images and HTML artifacts cross the adapter boundary into sandbo
   assert.match(packager, /'artifacts\.mjs', 'artifact-preview\.mjs'/);
 });
 
+test('expanded artifact previews clear the top runtime and model selection controls', async () => {
+  const styles = await readFile(join(appDirectory, 'renderer', 'styles.css'), 'utf8');
+  const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
+  assert.match(styles, /\.artifact-viewer\s*\{[\s\S]*?inset:\s*64px 30px 30px/);
+  assert.match(main, /artifactViewerClearsTopSelectionIcons/);
+});
+
+test('assistant messages render safe Markdown from the packaged renderer dependency', async () => {
+  const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
+  const markdown = await readFile(join(appDirectory, 'renderer', 'markdown.mjs'), 'utf8');
+  const styles = await readFile(join(appDirectory, 'renderer', 'styles.css'), 'utf8');
+  const packager = await readFile(join(appDirectory, 'scripts', 'package-electron.mjs'), 'utf8');
+  assert.match(renderer, /import \{ renderMarkdown \} from '\.\/markdown\.mjs'/);
+  assert.match(renderer, /assistantElement\.innerHTML = renderMarkdown\(assistantText\)/);
+  assert.match(renderer, /text\.innerHTML = renderMarkdown\(message\)/);
+  assert.match(markdown, /marked\.esm\.js/);
+  assert.match(markdown, /html\(\{ text \}\)[\s\S]*escapeHtml\(text\)/);
+  assert.match(markdown, /\['http', 'https', 'mailto'\]/);
+  assert.match(styles, /\.markdown-content pre code/);
+  assert.match(packager, /copyRuntimeDependencies/);
+});
+
 test('compact orb is a small antialiased vector and panel morphs from its bottom-center anchor', async () => {
   const html = await readFile(join(appDirectory, 'renderer', 'index.html'), 'utf8');
+  const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
   const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
   const styles = await readFile(join(appDirectory, 'renderer', 'styles.css'), 'utf8');
   const layout = await readFile(join(appDirectory, 'window-layout.mjs'), 'utf8');
@@ -370,12 +394,17 @@ test('compact orb is a small antialiased vector and panel morphs from its bottom
   assert.doesNotMatch(styles, /\.compact-orb[^{]*\{[^}]*filter:/);
   assert.match(styles, /\.compact-orb\s*\{[\s\S]*?box-shadow:\s*none/);
   assert.match(styles, /\.panel-shell\s*\{[\s\S]*?transform-origin:\s*50% 100%/);
-  assert.match(styles, /\.glass\.is-compact \.panel-shell\s*\{[\s\S]*?scale\(var\(--orb-scale-x\), var\(--orb-scale-y\)\)/);
+  assert.match(styles, /\.glass\.is-compact \.panel-shell\s*\{[\s\S]*?scale\(var\(--orb-scale-x\), var\(--orb-scale-y\)\);[\s\S]*?visibility:\s*hidden/);
   assert.match(renderer, /orbSize \/ panelWidth/);
   assert.match(renderer, /const working = activeTurns\.size > 0/);
   assert.match(renderer, /compactOrb\.classList\.toggle\('is-working', working\)/);
-  assert.match(styles, /\.compact-orb\.is-working::before\s*\{[^}]*animation:\s*orb-halo-tempo 4\.55s/);
+  assert.match(styles, /\.compact-orb::before\s*\{[\s\S]*?animation:\s*orb-idle-halo 6\.8s/);
+  assert.match(styles, /\.compact-orb\.is-working::before\s*\{[^}]*animation:\s*orb-halo-tempo 2\.8s/);
+  assert.match(styles, /\.compact-orb \.orb-core\s*\{[^}]*animation:\s*orb-idle-breathe 7\.2s/);
   assert.match(styles, /@keyframes orb-nebula-drift-a/);
+  assert.doesNotMatch(html, /orb-spectrum-rim|orb-glass-rim/);
+  assert.match(main, /compactOrbIdleAnimationRuns/);
+  assert.match(main, /compactOrbHasNoLegacySurfaceOrGrayRim/);
   assert.match(renderer, /new ResizeObserver\(syncPanelMorphGeometry\)\.observe\(glass\)/);
   assert.match(layout, /COMPACT_WINDOW_SIZE\s*=\s*56/);
 });

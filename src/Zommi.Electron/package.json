@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@openclaw/gateway-client": "2026.8.1-beta.3",
-    "@openclaw/gateway-protocol": "2026.8.1-beta.3"
+    "@openclaw/gateway-protocol": "2026.8.1-beta.3",
+    "marked": "18.0.11"
   }
 }

@@ -12,6 +12,7 @@ import {
   sessionTitle,
 } from './renderer-logic.mjs';
 import { artifactsFromText, artifactsFromThreadItem, sandboxHtmlDocument } from '../artifacts.mjs';
+import { renderMarkdown } from './markdown.mjs';
 
 const HISTORY_PAGE_SIZE = 18;
 const HISTORY_LOAD_THRESHOLD_PX = 96;
@@ -79,7 +80,7 @@ const pendingStreamUpdates = [];
 const activeTurns = new Map();
 const unreadThreadIds = new Set();
 let assistantElement = null;
-let assistantTextNode = null;
+let assistantText = '';
 let currentTurnBody = null;
 let streamFrame = 0;
 let turnActive = false;
@@ -1186,7 +1187,7 @@ async function sendMessage() {
   removeWelcome();
   beginTurn(message, sendingTokens);
   assistantElement = null;
-  assistantTextNode = null;
+  assistantText = '';
   activityElements = new Map();
   artifactElements = new Map();
   attachments.splice(0);
@@ -1303,13 +1304,14 @@ function renderStreamUpdate(update, { deferScroll = false, turnCompleted = false
       avatar.setAttribute('aria-hidden', 'true');
       avatar.append(createUiIcon('sparkle'));
       assistantElement = document.createElement('div');
-      assistantElement.className = 'message assistant';
-      assistantTextNode = document.createTextNode('');
-      assistantElement.append(assistantTextNode);
+      assistantElement.className = 'message assistant markdown-content';
       row.append(avatar, assistantElement);
       currentTurnBody.append(row);
     }
-    if (update.text) assistantTextNode.data = update.replace ? update.text : `${assistantTextNode.data}${update.text}`;
+    if (update.text) {
+      assistantText = update.replace ? update.text : `${assistantText}${update.text}`;
+      assistantElement.innerHTML = renderMarkdown(assistantText);
+    }
     renderArtifacts(update.artifacts, update.runtimeTargetId);
     if (!deferScroll) scrollTranscript();
     return;
@@ -1564,9 +1566,9 @@ function beginTurn(message, tokens, options = {}) {
     context.textContent = tokens.join(' ');
     bubble.append(context);
   }
-  const text = document.createElement('span');
-  text.className = 'message-text';
-  text.textContent = message;
+  const text = document.createElement('div');
+  text.className = 'message-text markdown-content';
+  text.innerHTML = renderMarkdown(message);
   bubble.append(text);
   row.append(bubble);
   currentTurnBody = document.createElement('div');
@@ -1603,7 +1605,7 @@ function completeTurn(completion) {
     return;
   }
   flushStreamUpdates();
-  renderArtifacts(artifactsFromText(assistantTextNode?.data, { cwd: currentThreadCwd }), completion?.runtimeTargetId);
+  renderArtifacts(artifactsFromText(assistantText, { cwd: currentThreadCwd }), completion?.runtimeTargetId);
   terminalTurnStatus = true;
   syncActiveTurnState();
   interruptRequested = false;
@@ -1706,7 +1708,7 @@ function renderThreadHistory(thread) {
   historyLoadFrame = 0;
   transcript.replaceChildren();
   assistantElement = null;
-  assistantTextNode = null;
+  assistantText = '';
   currentTurnBody = null;
   activityElements = new Map();
   artifactElements = new Map();
@@ -1727,7 +1729,7 @@ function renderHistoryRange(start, end, parent) {
     const userItem = items.find((item) => item.type === 'userMessage');
     const userText = userItem ? displayUserItem(userItem) : 'Continue';
     assistantElement = null;
-    assistantTextNode = null;
+    assistantText = '';
     activityElements = new Map();
     artifactElements = new Map();
     beginTurn(userText || 'Continue', [], { number: index + 1, parent, scroll: false });
@@ -1744,13 +1746,13 @@ function loadOlderHistory() {
   const previousTop = transcript.scrollTop;
   const nextStart = previousHistoryStart(historyStartIndex, HISTORY_PAGE_SIZE);
   const firstRenderedTurn = transcript.querySelector('.conversation-turn');
-  const cursor = { assistantElement, assistantTextNode, currentTurnBody, activityElements, artifactElements };
+  const cursor = { assistantElement, assistantText, currentTurnBody, activityElements, artifactElements };
   const fragment = document.createDocumentFragment();
   renderHistoryRange(nextStart, historyStartIndex, fragment);
   transcript.insertBefore(fragment, firstRenderedTurn);
   historyStartIndex = nextStart;
   assistantElement = cursor.assistantElement;
-  assistantTextNode = cursor.assistantTextNode;
+  assistantText = cursor.assistantText;
   currentTurnBody = cursor.currentTurnBody;
   activityElements = cursor.activityElements;
   artifactElements = cursor.artifactElements;
@@ -1832,7 +1834,7 @@ function seedAcceptanceConversation() {
   renderStreamUpdate({ kind: 'assistant', lifecycle: 'delta', title: 'Codex', text: 'The selected section is preserved as structured context, including its table rows and headers.' });
 
   assistantElement = null;
-  assistantTextNode = null;
+  assistantText = '';
   activityElements.clear();
   beginTurn('Now compare it with the second tab.', ['[shop.example.com]']);
   const generatedImage = btoa('<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#edf4ff"/><circle cx="320" cy="170" r="90" fill="#779cff"/><text x="320" y="310" text-anchor="middle" font-family="sans-serif" font-size="28" fill="#253b68">ZOMMI IMAGE PREVIEW</text></svg>');

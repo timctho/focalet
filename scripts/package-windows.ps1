@@ -133,7 +133,9 @@ $preloadPath = Join-Path $outputDirectory 'resources/app/preload.cjs'
 $windowLayoutPath = Join-Path $outputDirectory 'resources/app/window-layout.mjs'
 $rendererHtmlPath = Join-Path $outputDirectory 'resources/app/renderer/index.html'
 $rendererPath = Join-Path $outputDirectory 'resources/app/renderer/renderer.mjs'
+$rendererMarkdownPath = Join-Path $outputDirectory 'resources/app/renderer/markdown.mjs'
 $rendererStylesPath = Join-Path $outputDirectory 'resources/app/renderer/styles.css'
+$markedRuntimePath = Join-Path $outputDirectory 'resources/app/node_modules/marked/lib/marked.esm.js'
 $wslHookPath = Join-Path $outputDirectory 'Zommi.WslHook.ps1'
 $hashPath = Join-Path $outputDirectory 'SHA256SUMS.txt'
 if (-not (Test-Path -LiteralPath $executablePath) -or
@@ -160,7 +162,9 @@ if (-not (Test-Path -LiteralPath $executablePath) -or
     -not (Test-Path -LiteralPath $windowLayoutPath) -or
     -not (Test-Path -LiteralPath $rendererHtmlPath) -or
     -not (Test-Path -LiteralPath $rendererPath) -or
+    -not (Test-Path -LiteralPath $rendererMarkdownPath) -or
     -not (Test-Path -LiteralPath $rendererStylesPath) -or
+    -not (Test-Path -LiteralPath $markedRuntimePath) -or
     -not (Test-Path -LiteralPath $wslHookPath)) {
     throw "The package is incomplete; required runtime files are missing from $outputDirectory."
 }
@@ -188,7 +192,9 @@ $preloadHash = (Get-FileHash -Algorithm SHA256 $preloadPath).Hash.ToLowerInvaria
 $windowLayoutHash = (Get-FileHash -Algorithm SHA256 $windowLayoutPath).Hash.ToLowerInvariant()
 $rendererHtmlHash = (Get-FileHash -Algorithm SHA256 $rendererHtmlPath).Hash.ToLowerInvariant()
 $rendererHash = (Get-FileHash -Algorithm SHA256 $rendererPath).Hash.ToLowerInvariant()
+$rendererMarkdownHash = (Get-FileHash -Algorithm SHA256 $rendererMarkdownPath).Hash.ToLowerInvariant()
 $rendererStylesHash = (Get-FileHash -Algorithm SHA256 $rendererStylesPath).Hash.ToLowerInvariant()
+$markedRuntimeHash = (Get-FileHash -Algorithm SHA256 $markedRuntimePath).Hash.ToLowerInvariant()
 $wslHookHash = (Get-FileHash -Algorithm SHA256 $wslHookPath).Hash.ToLowerInvariant()
 Set-Content -Path $hashPath -Encoding ascii -Value `
     "$hash  Zommi.exe", `
@@ -215,7 +221,9 @@ Set-Content -Path $hashPath -Encoding ascii -Value `
     "$windowLayoutHash  resources/app/window-layout.mjs", `
     "$rendererHtmlHash  resources/app/renderer/index.html", `
     "$rendererHash  resources/app/renderer/renderer.mjs", `
+    "$rendererMarkdownHash  resources/app/renderer/markdown.mjs", `
     "$rendererStylesHash  resources/app/renderer/styles.css", `
+    "$markedRuntimeHash  resources/app/node_modules/marked/lib/marked.esm.js", `
     "$wslHookHash  Zommi.WslHook.ps1"
 
 $archivePath = "$outputDirectory.zip"

@@ -25,6 +25,7 @@ for (const required of [
   'resources/app/main.mjs', 'resources/app/runtime-broker.mjs', 'resources/app/runtime-settings.mjs',
   'resources/app/context-handoff.mjs', 'resources/app/protocol-framing.mjs',
   'resources/app/adapter-diagnostics.mjs', 'resources/app/transport-metrics.mjs',
+  'resources/app/renderer/markdown.mjs', 'resources/app/node_modules/marked/lib/marked.esm.js',
 ]) await access(join(packageDirectory, required));
 
 const hashPath = join(packageDirectory, 'SHA256SUMS.txt');
