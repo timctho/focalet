@@ -19,11 +19,7 @@ internal static class ElectronNativeHost
     public static int Run()
     {
         ApplicationConfiguration.Initialize();
-        using var codex = new CodexAppServerClient();
         using var capture = new ForegroundContextCapture();
-        codex.StatusChanged += status => WriteEvent("status", status);
-        codex.StreamUpdate += update => WriteEvent("streamUpdate", update);
-        codex.TurnCompletedForThread += (threadId, status) => WriteEvent("turnCompleted", new { threadId, status });
 
         try
         {
@@ -49,7 +45,7 @@ internal static class ElectronNativeHost
 
                 try
                 {
-                    var shouldExit = ProcessRequest(request, capture, codex, out var result);
+                    var shouldExit = ProcessRequest(request, capture, out var result);
                     WriteResponse(request.Id, true, result, null);
                     if (shouldExit)
                     {
@@ -74,7 +70,6 @@ internal static class ElectronNativeHost
     private static bool ProcessRequest(
         NativeHostRequest request,
         ForegroundContextCapture capture,
-        CodexAppServerClient codex,
         out object? result)
     {
         switch (request.Method)
@@ -88,54 +83,27 @@ internal static class ElectronNativeHost
                 return false;
             case "capture":
             {
-                var captured = capture.Capture(DateTimeOffset.UtcNow);
+                var captured = TryReadCapturePoint(request.Params, out var pointerX, out var pointerY)
+                    ? capture.CaptureAt(DateTimeOffset.UtcNow, pointerX, pointerY)
+                    : capture.Capture(DateTimeOffset.UtcNow);
+                var previewStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+                var previewText = captured.Snapshot is null
+                    ? null
+                    : ContextFormatter.FormatPreview(captured.Snapshot, DateTimeOffset.UtcNow);
+                var previewMilliseconds = (long)System.Diagnostics.Stopwatch.GetElapsedTime(previewStartedAt).TotalMilliseconds;
                 result = new
                 {
                     captured.Snapshot,
                     captured.PreservePrevious,
-                    PreviewText = captured.Snapshot is null
-                        ? null
-                        : ContextFormatter.FormatPreview(captured.Snapshot, DateTimeOffset.UtcNow),
+                    captured.ElapsedMilliseconds,
+                    captured.Timings,
+                    PreviewMilliseconds = previewMilliseconds,
+                    PreviewText = previewText,
                 };
                 return false;
             }
             case "selectImage":
                 result = SelectImage();
-                return false;
-            case "startCodex":
-                codex.EnsureStartedAsync().GetAwaiter().GetResult();
-                result = new { codex.ThreadId, codex.IsReady };
-                return false;
-            case "startTurn":
-            {
-                var parameters = request.Params;
-                var message = ReadRequiredString(parameters, "message");
-                var snapshots = parameters.TryGetProperty("snapshots", out var snapshotsElement)
-                    ? snapshotsElement.Deserialize<ContextSnapshot[]>(JsonOptions) ?? []
-                    : [];
-                var images = parameters.TryGetProperty("images", out var imagesElement)
-                    ? imagesElement.Deserialize<string[]>(JsonOptions) ?? []
-                    : [];
-                var model = ReadOptionalString(parameters, "model");
-                var effort = ReadOptionalString(parameters, "effort");
-                var turnId = codex.StartTurnAsync(message, snapshots, images, model, effort).GetAwaiter().GetResult();
-                result = new { accepted = true, codex.ThreadId, turnId };
-                return false;
-            }
-            case "interruptTurn":
-                result = codex.InterruptTurnAsync().GetAwaiter().GetResult();
-                return false;
-            case "getChatState":
-                result = codex.GetChatStateAsync().GetAwaiter().GetResult();
-                return false;
-            case "createSession":
-                result = codex.CreateSessionAsync(
-                    ReadOptionalString(request.Params, "model"),
-                    ReadOptionalString(request.Params, "effort")).GetAwaiter().GetResult();
-                return false;
-            case "switchSession":
-                result = codex.SwitchSessionAsync(
-                    ReadRequiredString(request.Params, "threadId")).GetAwaiter().GetResult();
                 return false;
             case "shutdown":
                 result = new { stopped = true };
@@ -143,6 +111,19 @@ internal static class ElectronNativeHost
             default:
                 throw new InvalidOperationException($"Unknown native-host method '{request.Method}'.");
         }
+    }
+
+    private static bool TryReadCapturePoint(JsonElement parameters, out int x, out int y)
+    {
+        x = 0;
+        y = 0;
+        return parameters.ValueKind == JsonValueKind.Object &&
+            parameters.TryGetProperty("point", out var point) &&
+            point.ValueKind == JsonValueKind.Object &&
+            point.TryGetProperty("x", out var xValue) &&
+            xValue.TryGetInt32(out x) &&
+            point.TryGetProperty("y", out var yValue) &&
+            yValue.TryGetInt32(out y);
     }
 
     private static object SelectImage()
@@ -171,29 +152,6 @@ internal static class ElectronNativeHost
             },
         };
     }
-
-    private static string ReadRequiredString(JsonElement parameters, string name)
-    {
-        if (!parameters.TryGetProperty(name, out var value) || string.IsNullOrWhiteSpace(value.GetString()))
-        {
-            throw new ArgumentException($"Native-host parameter '{name}' is required.");
-        }
-
-        return value.GetString()!;
-    }
-
-    private static string? ReadOptionalString(JsonElement parameters, string name) =>
-        parameters.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
-            ? value.GetString()
-            : null;
-
-    private static void WriteEvent(string eventName, object data) =>
-        Write(new
-        {
-            type = "event",
-            @event = eventName,
-            data,
-        });
 
     private static void WriteResponse(string? id, bool ok, object? result, string? error) =>
         Write(new

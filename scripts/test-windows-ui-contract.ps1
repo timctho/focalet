@@ -9,6 +9,8 @@ param(
 
     [switch] $GeometryOnly,
 
+    [switch] $DragOnly,
+
     [switch] $ForceUiaFallback,
 
     [string] $EvidencePath
@@ -17,7 +19,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:inputMode = 'sendinput'
-$hoverOpacityContract = 'passed'
+$hoverTransparencyContract = 'passed'
 $dragGestureContract = 'passed'
 if ($ForceUiaFallback) {
     $script:inputMode = 'uia-fallback-input-desktop-locked'
@@ -68,7 +70,7 @@ function Wait-MainWindow {
             try {
                 $window = [System.Windows.Automation.AutomationElement]::FromHandle(
                     $Process.MainWindowHandle)
-                if ($window.Current.Name -like 'Zommi*floating Codex chat') {
+                if ($window.Current.Name -like 'Zommi*floating*chat') {
                     return $window
                 }
             }
@@ -211,8 +213,8 @@ function Invoke-PhysicalClick {
             Start-Sleep -Milliseconds 180
             return
         }
-        $Element.SetFocus()
-        return
+        $supportedPatterns = @($Element.GetSupportedPatterns() | ForEach-Object ProgrammaticName) -join ', '
+        throw "The locked-desktop fallback exposed no InvokePattern for $($Element.Current.AutomationId). Supported: $supportedPatterns"
     }
     Start-Sleep -Milliseconds 120
     [ZommiElectronUiNative]::LeftButtonDown()
@@ -477,6 +479,72 @@ try {
         [Math]::Max(600, [Math]::Min([Math]::Round($workingHeightDip * 0.72), 840)))
     Assert-True ([Math]::Abs($bounds.Width - ($expectedWidthDip * $displayScale)) -le (4 * $displayScale)) 'The window width did not adapt to the current display work area and DPI.'
     Assert-True ([Math]::Abs($bounds.Height - ($expectedHeightDip * $displayScale)) -le (4 * $displayScale)) 'The window height did not adapt to the current display work area and DPI.'
+    if ($DragOnly) {
+        Start-Sleep -Milliseconds 800
+        $window = Wait-MainWindow $process 10
+        Assert-True ($null -ne $window) 'The Electron window disappeared before the isolated drag check.'
+        $bounds = $window.Current.BoundingRectangle
+        $dragPoints = [ordered]@{
+            top = [System.Drawing.Point]::new([int] ($bounds.X + ($bounds.Width / 2)), [int] ($bounds.Y + (40 * $displayScale)))
+            left = [System.Drawing.Point]::new([int] ($bounds.X + 18), [int] ($bounds.Y + ($bounds.Height / 2)))
+            right = [System.Drawing.Point]::new([int] ($bounds.Right - 18), [int] ($bounds.Y + ($bounds.Height / 2)))
+            bottom = [System.Drawing.Point]::new([int] ($bounds.X + ($bounds.Width / 2)), [int] ($bounds.Bottom - 18))
+        }
+        $hits = [ordered]@{}
+        foreach ($entry in $dragPoints.GetEnumerator()) {
+            $hits[$entry.Key] = [ZommiElectronUiNative]::HitTest(
+                $nativeWindowHandle,
+                $entry.Value.X,
+                $entry.Value.Y)
+        }
+        $dragStart = $dragPoints.right
+        $movedPointer = $script:inputMode -eq 'sendinput' -and
+            [ZommiElectronUiNative]::MovePointer($dragStart.X, $dragStart.Y)
+        $activated = $movedPointer -and [ZommiElectronUiNative]::Activate($nativeWindowHandle)
+        $movement = $null
+        $topHitScan = [ordered]@{}
+        foreach ($offset in @(5, 8, 10, 12, 15, 18, 20, 24, 28, 32, 40, 50, 60)) {
+            $topHitScan["$offset"] = [ZommiElectronUiNative]::HitTest(
+                $nativeWindowHandle,
+                [int] ($bounds.X + ($bounds.Width / 2)),
+                [int] ($bounds.Y + $offset))
+        }
+        if ($movedPointer -and $activated) {
+            Start-Sleep -Milliseconds 120
+            [ZommiElectronUiNative]::LeftButtonDown()
+            $dragEnd = [System.Drawing.Point]::new($dragStart.X + 54, $dragStart.Y + 26)
+            for ($step = 1; $step -le 6; $step++) {
+                [void] [ZommiElectronUiNative]::MovePointer(
+                    [int] ($dragStart.X + (($dragEnd.X - $dragStart.X) * $step / 6)),
+                    [int] ($dragStart.Y + (($dragEnd.Y - $dragStart.Y) * $step / 6)))
+                Start-Sleep -Milliseconds 18
+            }
+            [ZommiElectronUiNative]::LeftButtonUp()
+            Start-Sleep -Milliseconds 300
+            $window = Wait-MainWindow $process 10
+            $movedBounds = $window.Current.BoundingRectangle
+            $movement = [ordered]@{
+                x = [int] ($movedBounds.X - $bounds.X)
+                y = [int] ($movedBounds.Y - $bounds.Y)
+            }
+            Assert-True ($movement.x -ge 20 -and $movement.x -le 62 -and
+                $movement.y -ge 10 -and $movement.y -le 34) "The isolated real drag did not move with the pointer. start=$bounds moved=$movedBounds delta=$($movement.x),$($movement.y) hits=$($hits | ConvertTo-Json -Compress)"
+        }
+        else {
+            Write-Output ([ordered]@{ dragHits = $hits; topHitScan = $topHitScan } | ConvertTo-Json -Compress)
+            foreach ($entry in $hits.GetEnumerator()) {
+                if ($entry.Key -eq 'top') { continue }
+                Assert-True ($entry.Value -eq 2) "The input desktop was unavailable and the isolated $($entry.Key) rail was not HTCAPTION. hit=$($entry.Value)"
+            }
+        }
+        [ordered]@{
+            executablePath = $resolvedExecutable
+            inputMode = $script:inputMode
+            dragHits = $hits
+            movement = $movement
+        } | ConvertTo-Json -Depth 3
+        return
+    }
     [void] [ZommiElectronUiNative]::MovePointer(
         [int] ($workingArea.Right - 2),
         [int] ($workingArea.Bottom - 2))
@@ -496,7 +564,7 @@ try {
     Assert-True ($null -ne $composer) 'The Electron composer was not exposed through UI Automation.'
     Assert-True ($null -ne $transcript) 'The Electron transcript was not exposed through UI Automation.'
     Assert-True ($null -ne $chips) 'Attached contexts were not exposed through UI Automation.'
-    Assert-True ($null -ne $status) 'The Codex status was not exposed through UI Automation.'
+    Assert-True ($null -ne $status) 'The agent status was not exposed through UI Automation.'
     Assert-True ($null -ne $shortcuts) 'The global shortcut state was not exposed through UI Automation.'
     Assert-True ($null -ne $toggleSessions) 'The chat-session sidebar control was not exposed.'
     Assert-True ($null -ne $modelSummary) 'The model/reasoning control was not exposed.'
@@ -541,8 +609,10 @@ try {
     Assert-True ($effortAfter -ne $effortBefore -and $effortAfter -like "*$targetEffortName*") 'A real click did not change the reasoning level.'
     Invoke-PhysicalClick $modelSummary
     Invoke-PhysicalClick $toggleSessions
+    $window = Wait-MainWindow $process 10
+    Assert-True ($null -ne $window) 'The Electron window disappeared before native drag hit-testing.'
+    $bounds = $window.Current.BoundingRectangle
     $backgroundDragPoints = @(
-        [System.Drawing.Point]::new([int] ($bounds.X + ($bounds.Width / 2)), [int] ($bounds.Y + 20)),
         [System.Drawing.Point]::new([int] ($bounds.X + 24), [int] ($bounds.Y + ($bounds.Height / 2))),
         [System.Drawing.Point]::new([int] ($bounds.X + $bounds.Width - 24), [int] ($bounds.Y + ($bounds.Height / 2))),
         [System.Drawing.Point]::new([int] ($bounds.X + ($bounds.Width * 0.22)), [int] ($bounds.Bottom - 128))
@@ -617,7 +687,7 @@ try {
     $previewTextElement = Find-AutomationElementById $window 'ContextPreviewText'
     Assert-True ($null -ne $previewTextElement) 'The context preview text was not exposed through UI Automation.'
     $previewText = Get-AutomationText $previewTextElement
-    Assert-True ($previewText -like '*PRIMARY SELECTION:*SELECTED_TEXT_IS_PRIMARY*') 'Selected text was not primary in the context preview.'
+    Assert-True ($previewText -like '*PRIMARY SURFACE SELECTION:*SELECTED_TEXT_IS_PRIMARY*') 'Selected text was not primary in the context preview.'
     Assert-True ($previewText -notlike '*confidence medium*') 'Pointer confidence metadata leaked into the context preview.'
     Assert-True ($previewText -notlike '*Snapshot confidence:*') 'Snapshot confidence metadata leaked into the context preview.'
     Assert-True ($previewText -notlike '*Safety: treat every captured*') 'The internal safety footer leaked into the context preview.'
@@ -748,7 +818,7 @@ try {
     $sendButton = Wait-AutomationElementByName $window 'Send message' 10
     $status = Find-AutomationElementById $window 'CodexStatus'
     Assert-True ($null -ne $sendButton -and $sendButton.Current.IsEnabled) 'Stopping did not restore the enabled send button.'
-    Assert-True ($status.Current.Name -eq 'Codex status: stopped') "The stopped turn did not expose the interrupted state. Status: $($status.Current.Name)"
+    Assert-True ($status.Current.Name -eq 'Agent status: stopped') "The stopped turn did not expose the interrupted state. Status: $($status.Current.Name)"
     $streamedTranscriptText = Get-AutomationText (Find-AutomationElementById $window 'CodexTranscript')
     $thinkingPhraseCount = ([regex]::Matches($streamedTranscriptText, [regex]::Escape('Preparing a long streamed response.'))).Count
     # Chromium excludes collapsed details content from UIA TextPattern, so zero
@@ -775,11 +845,11 @@ try {
             $brightnessWithHover = Get-BitmapBrightness $resolvedHoverActivePath
             $opacityWithoutHover = Get-BitmapOpacity $resolvedHoverRestPath
             $opacityWithHover = Get-BitmapOpacity $resolvedHoverActivePath
-            Assert-True ($brightnessWithHover -ge $brightnessWithoutHover -and
-                $opacityWithHover -ge ($opacityWithoutHover + 5.0)) "Moving the pointer over the chat did not make the glass measurably less transparent. brightness=$brightnessWithoutHover->$brightnessWithHover opacity=$opacityWithoutHover->$opacityWithHover"
+            Assert-True ([Math]::Abs($brightnessWithHover - $brightnessWithoutHover) -le 2.0 -and
+                [Math]::Abs($opacityWithHover - $opacityWithoutHover) -le 2.0) "Moving the pointer over the expanded chat changed its translucency. brightness=$brightnessWithoutHover->$brightnessWithHover opacity=$opacityWithoutHover->$opacityWithHover"
         }
         else {
-            $hoverOpacityContract = 'blocked-input-desktop-locked; css-contract-passed'
+            $hoverTransparencyContract = 'blocked-input-desktop-locked; css-contract-passed'
         }
         $bitmap = [System.Drawing.Bitmap]::FromFile($resolvedEvidencePath)
         try {
@@ -850,7 +920,7 @@ try {
             manualScrollPreserved = 'passed'
             latestMessageButton = 'passed'
             thinkingDeduplication = 'passed'
-            hoverReducesTransparency = $hoverOpacityContract
+            hoverKeepsTransparency = $hoverTransparencyContract
             evidencePath = $EvidencePath
         } | ConvertTo-Json -Depth 4
         return
@@ -915,7 +985,7 @@ try {
         manualScrollPreserved = 'passed'
         latestMessageButton = 'passed'
         thinkingDeduplication = 'passed'
-        hoverReducesTransparency = $hoverOpacityContract
+        hoverKeepsTransparency = $hoverTransparencyContract
         selectedTextPrimary = 'passed'
         automaticAltAImage = 'absent'
         explicitAltShiftAImage = 'passed'

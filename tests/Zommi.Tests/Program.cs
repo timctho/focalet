@@ -17,14 +17,10 @@ var tests = new (string Name, Action Body)[]
     ("Invocation context includes bounded sanitized visible text", InvocationContextIncludesVisibleText),
     ("Invocation context preserves bounded long webpage text", InvocationContextPreservesLongWebpageText),
     ("Invocation context prioritizes selected text across multiple captures", InvocationContextPrioritizesSelection),
+    ("Invocation context prioritizes structured surface selection over the pointer", InvocationContextPrioritizesStructuredSelection),
     ("Context preview omits confidence and safety metadata", ContextPreviewOmitsInternalMetadata),
     ("Accessibility tree preserves provider structure without inferred Markdown", AccessibilityTreePreservesProviderStructure),
     ("Context tokens use URL abbreviations and remain unique", ContextTokensUseUrlAbbreviations),
-    ("Codex reasoning deltas are preserved as thinking output", ReasoningDeltaIsPreserved),
-    ("Completed Codex thinking de-duplicates equivalent summary and content", CompletedReasoningIsDeduplicated),
-    ("Codex commentary is preserved as thinking output", CommentaryIsPreservedAsThinking),
-    ("Codex tool lifecycle and command output are preserved", ToolStreamingIsPreserved),
-    ("Every current Codex tool item type is surfaced", EveryToolItemTypeIsSurfaced),
     ("The latest snapshot atomically replaces the prior one", LatestSnapshotWins),
     ("Hook installation preserves, de-duplicates, and uninstalls cleanly", HookConfigurationRoundTrip),
 };
@@ -242,11 +238,45 @@ static void InvocationContextPrioritizesSelection()
     var context = ContextFormatter.FormatInvocation([selected, second], now.AddSeconds(2));
     Contains("Context 1 of 2", context);
     Contains("Context 2 of 2", context);
-    Contains("PRIMARY SELECTION", context);
+    Contains("PRIMARY SURFACE SELECTION", context);
     True(
         context.IndexOf("the exact highlighted sentence", StringComparison.Ordinal) <
         context.IndexOf("surrounding page content", StringComparison.Ordinal),
         "Selected text did not precede lower-priority visible text.");
+}
+
+static void InvocationContextPrioritizesStructuredSelection()
+{
+    var now = new DateTimeOffset(2026, 8, 25, 2, 0, 0, TimeSpan.Zero);
+    var snapshot = Snapshot("selected-shape", now) with
+    {
+        Selection = [],
+        SelectionElements =
+        [
+            new SelectedElementInfo
+            {
+                ControlType = "DataItem",
+                Name = "Revenue",
+                Value = "$42",
+                Formula = "=SUM(B2:B8)",
+                Bounds = "100,200,300,80",
+                Row = 1,
+                Column = 2,
+            },
+        ],
+        SelectionElementCount = 4,
+    };
+
+    var context = ContextFormatter.FormatInvocation(snapshot, now.AddSeconds(1));
+    Contains("PRIMARY SURFACE SELECTION", context);
+    Contains("showing 1 of 4", context);
+    Contains("\"role\": \"DataItem\"", context);
+    Contains("\"formula\": \"=SUM(B2:B8)\"", context);
+    Contains("\"box\": \"100,200,300,80\"", context);
+    True(
+        context.IndexOf("Revenue", StringComparison.Ordinal) <
+        context.IndexOf("Mouse pointer:", StringComparison.Ordinal),
+        "Structured surface selection did not precede the pointer fallback.");
 }
 
 static void ContextPreviewOmitsInternalMetadata()
@@ -312,7 +342,7 @@ static void AccessibilityTreePreservesProviderStructure()
     };
 
     var context = ContextFormatter.FormatInvocation(snapshot, now.AddSeconds(1));
-    Contains("Browser accessibility structure", context);
+    Contains("Nearby accessibility structure", context);
     Contains("\"role\": \"Table\"", context);
     Contains("\"row\": 1", context);
     Contains("\"column\": 0", context);
@@ -346,166 +376,6 @@ static void ContextTokensUseUrlAbbreviations()
     Equal("[amazon.com 2]", ContextTokens.Create(amazon, ["[amazon.com]"]));
     Equal("[image]", ContextTokens.CreateImage());
     Equal("[image 2]", ContextTokens.CreateImage(["[image]"]));
-}
-
-static void ReasoningDeltaIsPreserved()
-{
-    using var document = JsonDocument.Parse("""
-        {
-          "itemId": "reasoning-1",
-          "threadId": "thread-1",
-          "turnId": "turn-1",
-          "summaryIndex": 0,
-          "delta": "Inspecting the selected page"
-        }
-        """);
-
-    var update = NotNull(CodexStreamProtocol.ParseNotification(
-        "item/reasoning/summaryTextDelta",
-        document.RootElement));
-    Equal(CodexStreamKind.Thinking, update.Kind);
-    Equal(CodexStreamLifecycle.Delta, update.Lifecycle);
-    Equal("reasoning-1", update.ItemId);
-    Equal("Inspecting the selected page", update.Text);
-}
-
-static void CompletedReasoningIsDeduplicated()
-{
-    using var document = JsonDocument.Parse("""
-        {
-          "threadId": "thread-1",
-          "turnId": "turn-1",
-          "item": {
-            "type": "reasoning",
-            "id": "reasoning-1",
-            "summary": ["Inspecting"],
-            "content": ["Inspecting files and tests."],
-            "status": "completed"
-          }
-        }
-        """);
-
-    var update = NotNull(CodexStreamProtocol.ParseNotification("item/completed", document.RootElement));
-    Equal("Inspecting files and tests.", update.Text);
-}
-
-static void CommentaryIsPreservedAsThinking()
-{
-    using var document = JsonDocument.Parse("""
-        {
-          "threadId": "thread-1",
-          "turnId": "turn-1",
-          "startedAtMs": 1,
-          "item": {
-            "type": "agentMessage",
-            "id": "commentary-1",
-            "phase": "commentary",
-            "text": ""
-          }
-        }
-        """);
-
-    var update = NotNull(CodexStreamProtocol.ParseNotification("item/started", document.RootElement));
-    Equal(CodexStreamKind.Thinking, update.Kind);
-    Equal("commentary-1", update.ItemId);
-}
-
-static void ToolStreamingIsPreserved()
-{
-    using var startedDocument = JsonDocument.Parse("""
-        {
-          "threadId": "thread-1",
-          "turnId": "turn-1",
-          "startedAtMs": 1,
-          "item": {
-            "type": "commandExecution",
-            "id": "command-1",
-            "command": "rg --files",
-            "cwd": "/work",
-            "status": "inProgress",
-            "commandActions": []
-          }
-        }
-        """);
-    var started = NotNull(CodexStreamProtocol.ParseNotification("item/started", startedDocument.RootElement));
-    Equal(CodexStreamKind.Tool, started.Kind);
-    Equal(CodexStreamLifecycle.Started, started.Lifecycle);
-    Equal("rg --files", started.Text);
-
-    using var deltaDocument = JsonDocument.Parse("""
-        {
-          "itemId": "command-1",
-          "threadId": "thread-1",
-          "turnId": "turn-1",
-          "delta": "README.md\n"
-        }
-        """);
-    var delta = NotNull(CodexStreamProtocol.ParseNotification(
-        "item/commandExecution/outputDelta",
-        deltaDocument.RootElement));
-    Equal(CodexStreamKind.ToolOutput, delta.Kind);
-    Equal("README.md\n", delta.Text);
-
-    using var completedDocument = JsonDocument.Parse("""
-        {
-          "threadId": "thread-1",
-          "turnId": "turn-1",
-          "completedAtMs": 2,
-          "item": {
-            "type": "commandExecution",
-            "id": "command-1",
-            "command": "rg --files",
-            "cwd": "/work",
-            "status": "completed",
-            "commandActions": [],
-            "aggregatedOutput": "README.md\n",
-            "exitCode": 0
-          }
-        }
-        """);
-    var completed = NotNull(CodexStreamProtocol.ParseNotification("item/completed", completedDocument.RootElement));
-    Equal(CodexStreamLifecycle.Completed, completed.Lifecycle);
-    Equal("README.md\n", completed.Text);
-}
-
-static void EveryToolItemTypeIsSurfaced()
-{
-    var toolTypes = new[]
-    {
-        "commandExecution",
-        "fileChange",
-        "mcpToolCall",
-        "dynamicToolCall",
-        "collabAgentToolCall",
-        "subAgentActivity",
-        "webSearch",
-        "imageView",
-        "sleep",
-        "imageGeneration",
-        "enteredReviewMode",
-        "exitedReviewMode",
-        "contextCompaction",
-    };
-
-    foreach (var type in toolTypes)
-    {
-        using var document = JsonDocument.Parse($$"""
-            {
-              "threadId": "thread-1",
-              "turnId": "turn-1",
-              "startedAtMs": 1,
-              "item": {
-                "type": "{{type}}",
-                "id": "{{type}}-1",
-                "status": "inProgress",
-                "changes": []
-              }
-            }
-            """);
-        var update = NotNull(CodexStreamProtocol.ParseNotification("item/started", document.RootElement));
-        Equal(CodexStreamKind.Tool, update.Kind);
-        Equal($"{type}-1", update.ItemId);
-    }
 }
 
 static void LatestSnapshotWins()

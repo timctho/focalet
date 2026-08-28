@@ -7,7 +7,19 @@ param(
 
     [switch] $SkipHoverPreview,
 
-    [switch] $SkipSessionUi
+    [switch] $SkipSessionUi,
+
+    [switch] $SkipPointerImmobility,
+
+    [switch] $KeepTemporaryArtifacts,
+
+    [switch] $UseCaptureTrigger,
+
+    [int] $MaxContextLatencyMilliseconds = 1500,
+
+    [int] $MaxFirstAgentOutputMilliseconds = 10000,
+
+    [int] $MaxResponseMilliseconds = 30000
 )
 
 Set-StrictMode -Version Latest
@@ -62,7 +74,7 @@ function Wait-ZommiWindow {
         foreach ($candidate in $windows) {
             try {
                 if ($candidate.Current.ProcessId -eq $Process.Id -and
-                    $candidate.Current.Name -like 'Zommi*floating Codex chat' -and
+                    $candidate.Current.Name -like 'Zommi*floating*chat' -and
                     -not $candidate.Current.IsOffscreen) {
                     return $candidate
                 }
@@ -154,6 +166,14 @@ function Set-AutomationValue {
 function Invoke-AutomationElement {
     param([System.Windows.Automation.AutomationElement] $Element)
 
+    $invokePatternObject = $null
+    if ($Element.TryGetCurrentPattern(
+        [System.Windows.Automation.InvokePattern]::Pattern,
+        [ref] $invokePatternObject)) {
+        ([System.Windows.Automation.InvokePattern] $invokePatternObject).Invoke()
+        Start-Sleep -Milliseconds 180
+        return
+    }
     $bounds = $Element.Current.BoundingRectangle
     Assert-True ($bounds.Width -gt 0 -and $bounds.Height -gt 0) 'Cannot click an element without visible bounds.'
     [ZommiElectronAcceptanceNative]::Click(
@@ -235,6 +255,12 @@ public static class ZommiElectronAcceptanceNative {
         keybd_event(0x12, 0, keyUp, UIntPtr.Zero);
     }
 
+    public static void PressAltAAt(int x, int y) {
+        SetCursorPos(x, y);
+        System.Threading.Thread.Sleep(10);
+        PressAltA();
+    }
+
     public static bool MovePointer(int x, int y) {
         return SetCursorPos(x, y);
     }
@@ -257,6 +283,10 @@ Assert-True (Test-Path -LiteralPath $nativeHost -PathType Leaf) 'The packaged Wi
 
 $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ('zommi-electron-runtime-' + [Guid]::NewGuid().ToString('N'))
 $edgeProfile = Join-Path $temporaryRoot 'edge-profile'
+$zommiProfile = Join-Path $temporaryRoot 'zommi-profile'
+$captureTriggerPath = Join-Path $temporaryRoot 'capture.trigger'
+$captureResultPath = Join-Path $temporaryRoot 'capture-result.json'
+$warmCaptureResultPath = Join-Path $temporaryRoot 'capture-result-warm.json'
 $electron = $null
 $edgeWindow = $null
 $browserMarker = 'ZOMMI_ELECTRON_' + [Guid]::NewGuid().ToString('N')
@@ -268,15 +298,27 @@ try {
     }
     Start-Sleep -Milliseconds 1500
     Assert-True (@(Get-AllZommiProcesses).Count -eq 0) 'A pre-existing Zommi product process retained the single-instance lock.'
+    $electronArguments = @("--user-data-dir=$zommiProfile", '--force-renderer-accessibility')
+    if ($UseCaptureTrigger) {
+        $electronArguments += @('--', "--acceptance-capture-trigger=$captureTriggerPath")
+    }
     $electron = Start-Process `
         -FilePath $resolvedExecutable `
         -WorkingDirectory $packageDirectory `
-        -ArgumentList '--force-renderer-accessibility' `
+        -ArgumentList $electronArguments `
         -PassThru
     Start-Sleep -Seconds 3
     $electron.Refresh()
     Assert-True (-not $electron.HasExited) 'The packaged Electron browser process exited during startup.'
-    Assert-True (@(Get-ExactExecutableProcesses $resolvedExecutable).Count -ge 3) 'Electron did not start its expected child processes.'
+    $electronProcesses = @(Get-ExactExecutableProcesses $resolvedExecutable)
+    $electronProcessDeadline = [DateTime]::UtcNow.AddSeconds(30)
+    while ($electronProcesses.Count -lt 3 -and [DateTime]::UtcNow -lt $electronProcessDeadline) {
+        Start-Sleep -Milliseconds 250
+        $electron.Refresh()
+        Assert-True (-not $electron.HasExited) 'The packaged Electron browser process exited during startup.'
+        $electronProcesses = @(Get-ExactExecutableProcesses $resolvedExecutable)
+    }
+    Assert-True ($electronProcesses.Count -ge 3) "Electron did not start its expected child processes within 30 seconds; found $($electronProcesses.Count)."
 
     if ($SkipBrowser) {
         [ordered]@{
@@ -298,12 +340,13 @@ try {
     $edgeExecutable = $edgeCandidates[0]
     $buttonName = "Mouse target $browserMarker"
     $tableName = "Usage table $browserMarker"
+    $selectionMarker = "Selected surface item $browserMarker"
     $browserTitle = "Zommi Electron Acceptance $browserMarker"
     $htmlPath = Join-Path $temporaryRoot 'electron-runtime.html'
     $rows = [string]::Join('', @(1..30 | ForEach-Object {
         "<tr><td>account-$_</td><td>$($_ * 7)</td></tr>"
     }))
-    $html = "<!doctype html><title>$browserTitle</title><main><button style='position:fixed;top:100px;right:100px;font-size:26px'>$buttonName</button><h1>Visible $browserMarker</h1><table aria-label='$tableName'><thead><tr><th>Account</th><th>Spend</th></tr></thead><tbody>$rows</tbody></table></main>"
+    $html = "<!doctype html><title>$browserTitle</title><main><button style='position:fixed;top:100px;right:100px;font-size:26px'>$buttonName</button><h1>Visible $browserMarker</h1><select multiple aria-label='Surface selection $browserMarker'><option>$selectionMarker</option><option>Unselected peer</option></select><table aria-label='$tableName'><thead><tr><th>Account</th><th>Spend</th></tr></thead><tbody>$rows</tbody></table><div aria-hidden='true' style='position:fixed;left:20px;bottom:20px;width:220px;height:100px'></div></main>"
     [IO.File]::WriteAllText($htmlPath, $html)
     $browserUri = ([Uri] $htmlPath).AbsoluteUri
     $edgeArguments = '--user-data-dir={0} --no-first-run --no-default-browser-check --force-renderer-accessibility --disable-features=msEdgeFirstRunExperience --new-window {1}' -f (Quote-Argument $edgeProfile), (Quote-Argument $browserUri)
@@ -320,21 +363,31 @@ try {
     Start-Sleep -Milliseconds 750
 
     $edgeRoot = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr] $edgeWindow.MainWindowHandle)
+    $selectedOption = Find-AutomationElementByName $edgeRoot $selectionMarker
+    Assert-True ($null -ne $selectedOption) 'Edge did not expose the controlled selection item.'
+    $selectionPatternObject = $selectedOption.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+    ([System.Windows.Automation.SelectionItemPattern] $selectionPatternObject).Select()
     $button = Find-AutomationElementByName $edgeRoot $buttonName
     Assert-True ($null -ne $button) 'Edge did not expose the controlled pointer target.'
     $buttonBounds = $button.Current.BoundingRectangle
     $pointer = New-Object System.Drawing.Point(
         [int] ($buttonBounds.X + ($buttonBounds.Width / 2)),
         [int] ($buttonBounds.Y + ($buttonBounds.Height / 2)))
-    [System.Windows.Forms.Cursor]::Position = $pointer
-    Start-Sleep -Milliseconds 250
-
-    [ZommiElectronAcceptanceNative]::PressAltA()
+    $contextStopwatch = [Diagnostics.Stopwatch]::StartNew()
+    if ($UseCaptureTrigger) {
+        [void] [ZommiElectronAcceptanceNative]::MovePointer($pointer.X, $pointer.Y)
+        Set-Content -LiteralPath $captureTriggerPath -Value (@{ x = $pointer.X; y = $pointer.Y; resultPath = $captureResultPath } | ConvertTo-Json -Compress) -Encoding ascii
+    }
+    else {
+        [ZommiElectronAcceptanceNative]::PressAltAAt($pointer.X, $pointer.Y)
+    }
     $window = Wait-ZommiWindow $electron 30
     Assert-True ($null -ne $window) 'Alt+A did not open the packaged Electron window.'
     $windowBounds = $window.Current.BoundingRectangle
     $pointerAfter = [System.Windows.Forms.Cursor]::Position
-    Assert-True ($pointer.X -eq $pointerAfter.X -and $pointer.Y -eq $pointerAfter.Y) 'Opening Electron moved the mouse pointer.'
+    if (-not $SkipPointerImmobility) {
+        Assert-True ($pointer.X -eq $pointerAfter.X -and $pointer.Y -eq $pointerAfter.Y) "Opening Electron moved the mouse pointer from $($pointer.X),$($pointer.Y) to $($pointerAfter.X),$($pointerAfter.Y)."
+    }
     $pointerInsideWindow = $pointerAfter.X -ge $windowBounds.X -and
         $pointerAfter.X -lt ($windowBounds.X + $windowBounds.Width) -and
         $pointerAfter.Y -ge $windowBounds.Y -and
@@ -342,10 +395,35 @@ try {
     Assert-True (-not $pointerInsideWindow) 'The floating Electron window opened under the pointer.'
 
     $contextChip = Wait-AutomationElementByName $window 'Attached context [context]' 30
+    $contextStopwatch.Stop()
+    $contextLatencyMilliseconds = $contextStopwatch.ElapsedMilliseconds
+    if ($UseCaptureTrigger) {
+        $captureResultDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        while (-not (Test-Path -LiteralPath $captureResultPath) -and [DateTime]::UtcNow -lt $captureResultDeadline) {
+            Start-Sleep -Milliseconds 50
+        }
+        Assert-True (Test-Path -LiteralPath $captureResultPath) 'The capture trigger did not return product timing.'
+        $captureResult = Get-Content -LiteralPath $captureResultPath -Raw | ConvertFrom-Json
+        Assert-True $captureResult.attached 'The capture trigger returned without an attached context.'
+        $contextLatencyMilliseconds = [long] $captureResult.totalMilliseconds
+    }
     Assert-True ($null -ne $contextChip) 'Alt+A did not attach the controlled browser context.'
+    Assert-True ($contextLatencyMilliseconds -le $MaxContextLatencyMilliseconds) "Context capture took $contextLatencyMilliseconds ms; budget is $MaxContextLatencyMilliseconds ms. Harness elapsed: $($contextStopwatch.ElapsedMilliseconds) ms."
     $composer = Find-AutomationElementById $window 'ZommiComposer'
     Assert-True ($null -ne $composer -and $composer.Current.HasKeyboardFocus) 'Alt+A did not focus the Electron composer.'
     Assert-True ((Get-AutomationText $composer) -notlike "*$browserMarker*") 'Raw page context leaked into the composer.'
+
+    $runtimeSummary = Wait-AutomationElementById $window 'RuntimeSummary' 20
+    Assert-True ($null -ne $runtimeSummary) 'The zero-config runtime summary was not exposed.'
+    $runtimeSummaryText = [string] $runtimeSummary.Current.Name
+    $runtimeDeadline = [DateTime]::UtcNow.AddSeconds(30)
+    while ($runtimeSummaryText -notlike '*Codex*app-server*WSL*' -and [DateTime]::UtcNow -lt $runtimeDeadline) {
+        Start-Sleep -Milliseconds 200
+        $window = Wait-ZommiWindow $electron 2
+        $runtimeSummary = Find-AutomationElementById $window 'RuntimeSummary'
+        if ($null -ne $runtimeSummary) { $runtimeSummaryText = [string] $runtimeSummary.Current.Name }
+    }
+    Assert-True ($runtimeSummaryText -like '*Codex*app-server*WSL*') "A fresh Zommi profile did not auto-discover Codex app-server in WSL. Runtime: $runtimeSummaryText"
 
     $previewContract = 'skipped'
     if (-not $SkipHoverPreview) {
@@ -362,7 +440,9 @@ try {
         $previewText = Get-AutomationText $preview
         Assert-True ($previewText -like "*$browserMarker*") 'The Alt+A preview omitted the controlled page text.'
         Assert-True ($previewText -like "*$tableName*") 'The Alt+A preview omitted the semantic table hierarchy.'
+        Assert-True ($previewText -like "*PRIMARY SURFACE SELECTION*$selectionMarker*") 'The Alt+A preview omitted the selected semantic item.'
         Assert-True ($previewText -like "*Mouse pointer:*$buttonName*") 'The hover target was not labeled as Mouse pointer.'
+        Assert-True ($previewText.IndexOf($selectionMarker, [StringComparison]::Ordinal) -lt $previewText.IndexOf('Mouse pointer:', [StringComparison]::Ordinal)) 'Surface Selection did not precede the pointer fallback.'
         Assert-True ($previewText -notlike '*"source":*') 'Accessibility capture-source metadata leaked into the compact structure.'
         Assert-True ($previewText -notlike '*"nodeCount":*') 'Accessibility node-count metadata leaked into the compact structure.'
         Assert-True ($previewText -notlike '*"automationId":*') 'Accessibility automation-id metadata leaked into the compact structure.'
@@ -372,13 +452,83 @@ try {
         $previewContract = 'passed'
     }
 
+    ([System.Windows.Automation.SelectionItemPattern] $selectionPatternObject).RemoveFromSelection()
+    $documentCondition = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Document)
+    $edgeDocument = $edgeRoot.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $documentCondition)
+    Assert-True ($null -ne $edgeDocument) 'Edge did not expose its document for the broad-target scenario.'
+    $documentBounds = $edgeDocument.Current.BoundingRectangle
+    $broadPointer = New-Object System.Drawing.Point(
+        [int] ($documentBounds.X + 80),
+        [int] ($documentBounds.Y + $documentBounds.Height - 60))
+    $warmContextStopwatch = [Diagnostics.Stopwatch]::StartNew()
+    if ($UseCaptureTrigger) {
+        [void] [ZommiElectronAcceptanceNative]::MovePointer($broadPointer.X, $broadPointer.Y)
+        Set-Content -LiteralPath $captureTriggerPath -Value (@{ x = $broadPointer.X; y = $broadPointer.Y; resultPath = $warmCaptureResultPath } | ConvertTo-Json -Compress) -Encoding ascii
+    }
+    else {
+        [ZommiElectronAcceptanceNative]::PressAltAAt($broadPointer.X, $broadPointer.Y)
+    }
+    $window = Wait-ZommiWindow $electron 10
+    $secondContextChip = Wait-AutomationElementByName $window 'Attached context [context 2]' 10
+    $warmContextStopwatch.Stop()
+    $warmContextLatencyMilliseconds = $warmContextStopwatch.ElapsedMilliseconds
+    if ($UseCaptureTrigger) {
+        $captureResultDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        while (-not (Test-Path -LiteralPath $warmCaptureResultPath) -and [DateTime]::UtcNow -lt $captureResultDeadline) {
+            Start-Sleep -Milliseconds 50
+        }
+        Assert-True (Test-Path -LiteralPath $warmCaptureResultPath) 'The warm capture trigger did not return product timing.'
+        $captureResult = Get-Content -LiteralPath $warmCaptureResultPath -Raw | ConvertFrom-Json
+        Assert-True $captureResult.attached 'The warm capture trigger returned without an attached context.'
+        $warmContextLatencyMilliseconds = [long] $captureResult.totalMilliseconds
+    }
+    $contextChipNames = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition)) | Where-Object {
+        $_.Current.Name -like 'Attached context*'
+    } | ForEach-Object { $_.Current.Name }
+    Assert-True ($null -ne $secondContextChip) "A second Alt+A did not accumulate another context token. Exposed chips: $($contextChipNames -join ', ')"
+    Assert-True ($warmContextLatencyMilliseconds -le $MaxContextLatencyMilliseconds) "Warm context capture took $warmContextLatencyMilliseconds ms; budget is $MaxContextLatencyMilliseconds ms. Harness elapsed: $($warmContextStopwatch.ElapsedMilliseconds) ms."
+    if (-not $SkipHoverPreview) {
+        $secondChipBounds = $secondContextChip.Current.BoundingRectangle
+        Assert-True ([ZommiElectronAcceptanceNative]::MovePointer(
+            [int] ($secondChipBounds.X + ($secondChipBounds.Width / 2)),
+            [int] ($secondChipBounds.Y + ($secondChipBounds.Height / 2)))) 'Could not hover the second context token.'
+        $broadPreviewText = ''
+        for ($attempt = 0; $attempt -lt 100; $attempt++) {
+            Start-Sleep -Milliseconds 100
+            $broadPreview = Find-AutomationElementById $window 'ContextPreviewText'
+            if ($null -eq $broadPreview -or $broadPreview.Current.IsOffscreen) { continue }
+            $broadPreviewText = Get-AutomationText $broadPreview
+            if ($broadPreviewText -like '*exact visual object is ambiguous*') { break }
+        }
+        Assert-True ($broadPreviewText -like '*exact visual object is ambiguous*') 'A broad document target was not labeled ambiguous.'
+        Assert-True ($broadPreviewText -notlike '*PRIMARY SURFACE SELECTION*') 'Clearing the semantic selection left a stale Surface Selection.'
+        $broadPreviewImage = Find-AutomationElementById $window 'ContextPreviewImage'
+        Assert-True ($null -eq $broadPreviewImage -or $broadPreviewImage.Current.IsOffscreen) 'The ambiguous Alt+A fallback attached an automatic image.'
+    }
+
     $prompt = 'Reply with the exact token beginning ZOMMI_ELECTRON_ from the attached context and nothing else.'
     Set-AutomationValue $composer $prompt
     $send = Find-AutomationElementById $window 'SendMessage'
-    Assert-True ($null -ne $send) 'The Electron send button was not exposed.'
+    $sendReadyDeadline = [DateTime]::UtcNow.AddSeconds(30)
+    while (($null -eq $send -or -not $send.Current.IsEnabled) -and [DateTime]::UtcNow -lt $sendReadyDeadline) {
+        Start-Sleep -Milliseconds 200
+        $window = Wait-ZommiWindow $electron 2
+        $send = Find-AutomationElementById $window 'SendMessage'
+    }
+    $sendReadyStatus = Find-AutomationElementById $window 'CodexStatus'
+    $sendReadyStatusText = if ($null -eq $sendReadyStatus) { '<missing>' } else { [string] $sendReadyStatus.Current.Name }
+    $sendReadyRuntime = Find-AutomationElementById $window 'RuntimeSummary'
+    $sendReadyRuntimeText = if ($null -eq $sendReadyRuntime) { '<missing>' } else { [string] $sendReadyRuntime.Current.Name }
+    Assert-True ($null -ne $send -and $send.Current.IsEnabled) "The Electron send button did not become ready. Status: $sendReadyStatusText Runtime: $sendReadyRuntimeText"
+    $responseStopwatch = [Diagnostics.Stopwatch]::StartNew()
     Invoke-AutomationElement $send
 
     $responseText = $null
+    $firstAgentOutputMilliseconds = $null
     $lastTranscriptText = ''
     $readyWithoutTokenAt = $null
     $deadline = [DateTime]::UtcNow.AddSeconds(180)
@@ -389,6 +539,10 @@ try {
             if ($null -ne $transcript) {
                 $candidateText = Get-AutomationText $transcript
                 $lastTranscriptText = $candidateText
+                if ($null -eq $firstAgentOutputMilliseconds -and
+                    ($candidateText -match '(?i)thinking' -or $candidateText -like "*$browserMarker*")) {
+                    $firstAgentOutputMilliseconds = $responseStopwatch.ElapsedMilliseconds
+                }
                 if ($candidateText -like "*$browserMarker*") {
                     $responseText = $candidateText
                     break
@@ -396,7 +550,7 @@ try {
                 $currentStatus = Find-AutomationElementById $currentWindow 'CodexStatus'
                 if ($candidateText -like "*$prompt*" -and
                     $null -ne $currentStatus -and
-                    $currentStatus.Current.Name -eq 'Codex status: ready') {
+                    $currentStatus.Current.Name -eq 'Agent status: ready') {
                     if ($null -eq $readyWithoutTokenAt) {
                         $readyWithoutTokenAt = [DateTime]::UtcNow
                     }
@@ -419,15 +573,29 @@ try {
         }
         throw "Codex did not stream the exact context token through Electron. Status: $statusText Transcript: $transcriptTail"
     }
+    $responseStopwatch.Stop()
+    Assert-True ($null -ne $firstAgentOutputMilliseconds) 'Codex produced no visible thinking or answer activity.'
+    Assert-True ($firstAgentOutputMilliseconds -le $MaxFirstAgentOutputMilliseconds) "First visible Codex activity took $firstAgentOutputMilliseconds ms; budget is $MaxFirstAgentOutputMilliseconds ms."
+    Assert-True ($responseStopwatch.ElapsedMilliseconds -le $MaxResponseMilliseconds) "The short exact response took $($responseStopwatch.ElapsedMilliseconds) ms; budget is $MaxResponseMilliseconds ms."
 
     $sessionUiContract = 'skipped'
     if (-not $SkipSessionUi) {
-        $window = Wait-ZommiWindow $electron 10
+        $modelSummary = $null
+        $modelStatusText = '<missing>'
+        $modelReadyDeadline = [DateTime]::UtcNow.AddSeconds(30)
+        while ([DateTime]::UtcNow -lt $modelReadyDeadline) {
+            $window = Wait-ZommiWindow $electron 2
+            if ($null -eq $window) { continue }
+            $modelSummary = Find-AutomationElementById $window 'ModelSummary'
+            $modelStatus = Find-AutomationElementById $window 'CodexStatus'
+            if ($null -ne $modelStatus) { $modelStatusText = [string] $modelStatus.Current.Name }
+            if ($null -ne $modelSummary -and $modelSummary.Current.IsEnabled) { break }
+            Start-Sleep -Milliseconds 200
+        }
+        Assert-True ($null -ne $modelSummary -and $modelSummary.Current.IsEnabled) "The live Codex model/reasoning control did not become ready. Status: $modelStatusText"
         $zommiWindowHandle = [IntPtr] $window.Current.NativeWindowHandle
         [void] [ZommiElectronAcceptanceNative]::Activate($zommiWindowHandle)
         Start-Sleep -Milliseconds 150
-        $modelSummary = Wait-AutomationElementById $window 'ModelSummary' 10
-        Assert-True ($null -ne $modelSummary) 'The live Codex model/reasoning control did not reach the renderer.'
         $effortBefore = $modelSummary.Current.Name
         Invoke-AutomationElement $modelSummary
         Start-Sleep -Milliseconds 350
@@ -515,14 +683,25 @@ try {
         executableSha256 = (Get-FileHash -LiteralPath $resolvedExecutable -Algorithm SHA256).Hash.ToLowerInvariant()
         windowsVersion = [Environment]::OSVersion.VersionString
         electronProcessCount = @(Get-ExactExecutableProcesses $resolvedExecutable).Count
-        globalAltA = 'passed'
+        globalAltA = if ($UseCaptureTrigger) { 'skipped-rdp-synthetic-input-blocked' } else { 'passed' }
+        captureDispatch = if ($UseCaptureTrigger) { 'acceptance-trigger' } else { 'global-alt-a' }
+        contextTokenMilliseconds = $contextLatencyMilliseconds
+        warmContextTokenMilliseconds = $warmContextLatencyMilliseconds
+        contextHarnessMilliseconds = $contextStopwatch.ElapsedMilliseconds
+        warmContextHarnessMilliseconds = $warmContextStopwatch.ElapsedMilliseconds
         pointerAdjacent = 'passed'
+        pointerImmobility = if ($SkipPointerImmobility) { 'skipped-rdp-pointer-drift' } else { 'passed' }
         structuredBrowserContext = 'passed'
         semanticTableHierarchy = $previewContract
         compactAccessibilityStructure = $previewContract
         pointerLabel = $previewContract
         automaticAltAImage = 'absent'
+        broadTargetAmbiguity = 'passed'
+        accumulatedContexts = 2
+        zeroConfigCodexDiscovery = $runtimeSummaryText
         codexStreaming = 'passed'
+        firstAgentOutputMilliseconds = $firstAgentOutputMilliseconds
+        responseCompletedMilliseconds = $responseStopwatch.ElapsedMilliseconds
         modelReasoningCatalog = $sessionUiContract
         createAndSwitchSession = $sessionUiContract
         responseToken = $browserMarker
@@ -543,7 +722,10 @@ finally {
     } | ForEach-Object {
         Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
     }
-    if (Test-Path -LiteralPath $temporaryRoot) {
+    if (-not $KeepTemporaryArtifacts -and (Test-Path -LiteralPath $temporaryRoot)) {
         Remove-Item -LiteralPath $temporaryRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    elseif ($KeepTemporaryArtifacts) {
+        Write-Warning "Preserved acceptance artifacts at $temporaryRoot"
     }
 }

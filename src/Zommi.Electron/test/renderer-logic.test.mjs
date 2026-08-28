@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  activityOpenState,
   activityKey,
   effortsForModel,
   extractDisplayUserText,
@@ -17,6 +18,35 @@ test('reasoning and commentary share one thinking card per turn', () => {
   assert.equal(activityKey('thinking', 'reasoning-1', 'Thinking'), 'turn-thinking');
   assert.equal(activityKey('thinking', 'commentary-2', 'Thinking'), 'turn-thinking');
   assert.equal(activityKey('tool', 'command-1', 'Command'), 'command-1');
+});
+
+test('tool activity cannot collapse thinking that is still being followed or user-expanded', () => {
+  assert.equal(activityOpenState({
+    currentOpen: true,
+    userControlled: false,
+    kind: 'thinking',
+    lifecycle: 'completed',
+  }), true);
+  assert.equal(activityOpenState({
+    currentOpen: true,
+    userControlled: true,
+    kind: 'thinking',
+    lifecycle: 'completed',
+    turnCompleted: true,
+  }), true);
+  assert.equal(activityOpenState({
+    currentOpen: false,
+    userControlled: true,
+    kind: 'thinking',
+    lifecycle: 'delta',
+  }), false);
+  assert.equal(activityOpenState({
+    currentOpen: true,
+    userControlled: false,
+    kind: 'thinking',
+    lifecycle: 'completed',
+    turnCompleted: true,
+  }), false);
 });
 
 test('completed thinking replaces streamed text instead of duplicating it', () => {

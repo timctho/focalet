@@ -31,21 +31,57 @@ _Avoid_: Screenshot, transcript, durable record
 
 **Invocation Context**:
 The Context Snapshot captured when the user invokes Floating Chat, before
-Zommi takes keyboard focus. It preserves the window, locator, visible text,
-selection, and Indicated Target that made the user's request meaningful.
+Zommi takes keyboard focus. It preserves Surface Selection first, then the
+window, locator, Indicated Target, and surrounding context that made the
+user's request meaningful.
 _Avoid_: Latest background state, post-focus capture
 
+**Surface Selection**:
+The text, range, file, or visual objects deliberately selected in the active
+surface when Zommi is invoked. It is the strongest available indication of
+what the user means and may contain one or multiple selected items.
+_Avoid_: Selected text only, pointer target, inferred region
+
 **Indicated Target**:
-The item the user is presently pointing at, selecting, or otherwise identifying
-within the active surface. It may be unknown even when other Live Context is
-available.
-_Avoid_: Click target, verified element
+The accessibility item directly under the pointer when Zommi is invoked. It is
+a fallback indication when Surface Selection is absent and may be broad or
+unknown when an application exposes only a canvas or document.
+_Avoid_: Surface Selection, click target, verified element
 
 **Agent Session**:
 An existing conversation or work session owned by Codex, Hermes, or another
 agent runtime. Zommi may act as a client of the session, but does not own its
 model, tools, authentication, or canonical history.
 _Avoid_: Zommi chat, Zommi agent
+
+**Execution Host**:
+The local or remote environment in which an agent runtime is available. Native
+Windows and each WSL distribution are separate Execution Hosts even when they
+belong to the same computer.
+_Avoid_: Agent, session, generic machine
+
+**Runtime Adapter**:
+The Zommi boundary that translates common session and turn operations to one
+agent runtime's machine-readable interaction contract.
+_Avoid_: Agent runtime, terminal skin, model provider
+
+**Runtime-Owned Bridge**:
+A machine-readable bridge supplied by the agent runtime that resolves its own
+credentials and projects its canonical sessions without revealing authentication
+material to Zommi.
+_Avoid_: Zommi credential proxy, copied token, terminal scraper
+
+**Runtime Target**:
+A specific agent runtime interaction mode on one Execution Host, including the
+runtime-owned identity needed to reach it. Two modes of the same agent product
+are separate Runtime Targets when their session authority or capabilities differ.
+_Avoid_: Agent name, discovered process, most recent session
+
+**Compatibility Adapter**:
+A visibly degraded Runtime Adapter for a terminal-only agent. It may launch and
+drive a terminal interface, but cannot imply exact session, history, approval,
+or turn semantics that the underlying runtime does not expose.
+_Avoid_: Native adapter, protocol adapter, full support
 
 **Session Binding**:
 The visible association between Zommi and the particular Agent Session intended

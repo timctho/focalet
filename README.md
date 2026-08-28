@@ -1,9 +1,9 @@
 # Zommi
 
-Zommi is a local floating context companion for Codex. Its cross-platform
-Electron shell stays in the tray, opens beside the pointer on a global
-shortcut, and uses Codex app-server for the conversation. Windows delegates
-UI Automation capture and WSL transport to a packaged native host.
+Zommi is a local floating context companion for existing agent runtimes. Its cross-platform
+Electron shell rests as a small orb above the taskbar, expands into chat on
+hover, and connects through a protocol-first runtime broker. Windows delegates
+only UI Automation capture and explicit image selection to a packaged native host.
 
 Its goal is to let someone browse, point, and ask naturally while their chosen
 agent receives a compact description of what they are seeing. Zommi does not
@@ -16,33 +16,46 @@ defined in [CONTEXT.md](CONTEXT.md).
 
 ## Status
 
-The Electron rewrite is implemented for Windows, macOS, and Linux. The current
-Windows package has controlled native acceptance; the macOS and Linux packages
-have assembly/unit evidence but still need real native-desktop acceptance. The
+The Electron client is implemented for Windows, macOS, and Linux. The final
+Windows package is cross-built and awaits native execution after Windows interop
+is restored; an earlier package in the same tranche has controlled native
+acceptance. Linux has packaged UI and real Codex transport evidence. macOS has
+assembly/unit evidence and still needs real native-desktop acceptance. The
 product provides:
 
-- a tray-resident, rounded dark-glass floating chat modeled on Pickle Glass;
-- `Alt+A` invocation that captures and moves the existing window beside the
-  pointer instead of toggling it away;
+- a tray-resident, Siri-like orb centered above the taskbar that smoothly
+  expands into a rounded translucent chat on hover;
+- constant panel translucency on hover and an automatic return to the orb
+  0.5 seconds after the pointer leaves;
+- `Alt+A` capture that opens the anchored chat without moving it to the
+  pointer;
 - cumulative URL-abbreviated context tokens directly in the composer;
 - an in-window raw-context preview that stays open while the pointer enters it
   and supports scrolling without visible scrollbars;
 - `Alt+Shift+A` drag selection for image context;
-- selected text as the primary context when the accessibility provider exposes
-  it;
-- browser URL, post-render accessibility hierarchy, Explorer path/selection,
-  bounded accessibility text, and pointer target capture;
-- a fresh WSL Codex app-server thread with streamed thinking/commentary, plans,
-  tool lifecycle/output, and final replies;
-- a plain user-resolved Codex app-server, without Zommi-owned model, provider,
-  authentication, permission, plugin, MCP, or tool configuration; and
+- selection-first context: selected text/files, UIA selected items and grid
+  coordinates, Google Sheets range boxes, and native PowerPoint
+  slide/shape/text selections when their providers expose them;
+- browser URL, nearby post-render accessibility hierarchy, Explorer
+  path/selection, bounded accessibility text, and pointer target fallback;
+- zero-config discovery on native Windows and installed WSL distributions,
+  deterministic default selection, and a visible Runtime Target picker;
+- first-class adapters for Codex app-server, Pi RPC, ACP/Hermes, Hermes Gateway,
+  OpenClaw's runtime-owned Gateway/ACP bridge, and Advanced direct OpenClaw
+  Gateway endpoints, plus a visibly degraded PTY compatibility path;
+- streamed thinking/commentary, plans, tool lifecycle/output, final replies,
+  exact interruption, and session history when the selected protocol supports them;
+- user-resolved runtimes without Zommi-owned model, provider, authentication,
+  permission, plugin, MCP, or tool configuration; and
 - conversation continuity across invocations.
 
-The Electron candidate has passing JS/.NET contracts, a native seeded UI
-contract, an explicit Alt+Shift+A image-selection contract, and a controlled
-real-Edge Alt+A-to-Codex streaming run. The earlier WinForms candidate's live
-Amazon walkthrough is historical and has not been rerun on Electron. Evidence
-boundaries are tracked in
+The current source and packages have passing JS/.NET contracts, packaged Linux
+Codex transport and seeded UI evidence, and real Codex and Hermes turns. The
+fresh-profile Windows discovery, capture, send, stream, session-switch, and
+interrupt run belongs to the preceding package revision. Final native Windows,
+locked-RDP hover, pointer immobility, physical drag, and synthetic global-hotkey
+claims remain unaccepted. Real Pi and OpenClaw runs require those CLIs to be
+installed. Evidence boundaries are tracked in
 [docs/acceptance-report.md](docs/acceptance-report.md).
 
 Build and walkthrough instructions are in
@@ -53,19 +66,23 @@ Build and walkthrough instructions are in
 1. Extract the entire `zommi-win-x64.zip` archive to a local Windows folder.
 2. Double-click `Zommi.exe`.
 
-That is the complete setup. Zommi starts Codex app-server inside the default WSL
-distribution and remains in the tray. Hover over a browser page, folder, or
-window and press **Alt+A**. Zommi captures the underlying structured context
+That is the complete Zommi setup. It searches native Windows and WSL for
+supported CLIs, reuses their existing login/configuration, selects a deterministic
+protocol target, and remains in the tray. Select a range, shape, text box, text, or
+file when that is what you mean; otherwise hover a browser page, control, or
+window and press **Alt+A**. Zommi captures the selection first, then the
+underlying pointer and surrounding structured context
 before taking focus and inserts a token such as `[amazon.com]` into the
-composer. It opens beside the pointer and focuses the composer. Switch pages
-and press Alt+A again to accumulate more tokens. Hover a token to inspect the
+composer. It expands at its fixed bottom-center position and focuses the
+composer. Switch pages and press Alt+A again to accumulate more tokens. Hover a token to inspect the
 captured text. Press **Alt+Shift+A** only when you want to attach image context.
-Type the question and press Enter; Codex thinking, tool activity, and the answer
+Type the question and press Enter; agent thinking, tool activity, and the answer
 stream into the same surface.
 
-Codex CLI must already be installed, signed in, and available on the WSL shell
-`PATH`. The prototype is unsigned, so Windows SmartScreen may require **More
-info → Run anyway** on first launch.
+A supported CLI must already be installed and authenticated in its own native or
+WSL environment. No path entry or credential copy is required. The prototype is
+unsigned, so Windows SmartScreen may require **More info → Run anyway** on first
+launch.
 
 Browser-control tools remain owned by Codex. A browser tool injected by the
 ChatGPT desktop host is scoped to that host's Agent Session and is not inherited
@@ -80,6 +97,12 @@ npm --prefix src/Zommi.Electron test
 dotnet run --project tests/Zommi.Tests/Zommi.Tests.csproj
 ```
 
+Run an authenticated, model-backed latency walkthrough with simple,
+selection-rich, and multi-context-plus-image turns using
+`node scripts/test-user-response-latency.mjs`. Its expected values live only in
+the selected context and image fixtures, so it verifies attachment use as well
+as the response budgets documented in the Windows acceptance guide.
+
 The Windows runtime suite is `scripts/test-windows-runtime.ps1`; package first,
 then run it from Windows PowerShell as described in the acceptance report.
 
@@ -87,12 +110,18 @@ then run it from Windows PowerShell as described in the acceptance report.
 
 - Local and account-free by default.
 - Floating desktop UX rather than a browser-only chat surface.
-- Structured URL, path, selected text, window, and pointer context; pixels are
-  attached only through the explicit Alt+Shift+A region-selection path.
+- Structured Surface Selection, URL, path, window, nearby accessibility, and
+  pointer fallback; pixels are attached only through the explicit
+  Alt+Shift+A region-selection path.
 - Ephemeral by default; observation does not imply recording or persistence.
-- Attached to the exact app-server thread Zommi starts; it never guesses from
-  recent or foreground sessions.
+- Attached to an exact Runtime Target and provider-owned Agent Session; it never
+  guesses from recent or foreground sessions.
 - No bundled chatbot, inference provider, or credential store.
 - Zommi neither adds nor restricts agent tools. Capabilities come from the
-  Codex app-server and its user-owned configuration; tools injected into a
+  selected runtime and its user-owned configuration; tools injected into a
   different host or session do not transfer automatically.
+
+The architecture and rollout gates are in
+[docs/multi-runtime-broker-plan.md](docs/multi-runtime-broker-plan.md), with the
+protocol-first decision in
+[docs/adr/0003-use-protocol-first-runtime-adapters.md](docs/adr/0003-use-protocol-first-runtime-adapters.md).

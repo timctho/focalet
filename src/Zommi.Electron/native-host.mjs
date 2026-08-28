@@ -2,6 +2,9 @@ import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const INTERACTIVE_REQUESTS = new Set(['selectImage']);
+
 export class NativeHostClient extends EventEmitter {
   constructor(executablePath, options = {}) {
     super();
@@ -11,6 +14,7 @@ export class NativeHostClient extends EventEmitter {
     this.pending = new Map();
     this.nextId = 0;
     this.stderr = '';
+    this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   }
 
   start() {
@@ -28,26 +32,46 @@ export class NativeHostClient extends EventEmitter {
     child.once('exit', (code) => {
       const detail = this.stderr.trim();
       const message = `Zommi native host exited with code ${code}.${detail ? ` ${detail}` : ''}`;
-      for (const { reject } of this.pending.values()) reject(new Error(message));
+      for (const completion of this.pending.values()) {
+        clearTimeout(completion.timer);
+        completion.reject(new Error(message));
+      }
       this.pending.clear();
       this.process = null;
       this.emit('exit', { code, message });
     });
     child.once('error', (error) => {
-      for (const { reject } of this.pending.values()) reject(error);
+      for (const completion of this.pending.values()) {
+        clearTimeout(completion.timer);
+        completion.reject(error);
+      }
       this.pending.clear();
+      this.process = null;
       this.emit('error', error);
     });
   }
 
-  request(method, params = {}) {
+  request(method, params = {}, options = {}) {
     this.start();
     const id = String(++this.nextId);
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const timeoutMs = options.timeoutMs ?? (INTERACTIVE_REQUESTS.has(method) ? null : this.requestTimeoutMs);
+      const timer = Number.isFinite(timeoutMs) && timeoutMs > 0
+        ? setTimeout(() => {
+          if (!this.pending.delete(id)) return;
+          const error = new Error(`Zommi native host did not respond to '${method}' within ${Math.ceil(timeoutMs / 1000)} seconds. Retry to reconnect.`);
+          this.emit('requestError', { method, error });
+          reject(error);
+        }, timeoutMs)
+        : null;
+      this.pending.set(id, { resolve, reject, timer, method });
       this.process.stdin.write(`${JSON.stringify({ id, method, params })}\n`, (error) => {
         if (!error) return;
+        const completion = this.pending.get(id);
+        if (!completion) return;
+        clearTimeout(completion.timer);
         this.pending.delete(id);
+        this.emit('requestError', { method, error });
         reject(error);
       });
     });
@@ -79,7 +103,12 @@ export class NativeHostClient extends EventEmitter {
     const completion = this.pending.get(String(envelope.id));
     if (!completion) return;
     this.pending.delete(String(envelope.id));
+    clearTimeout(completion.timer);
     if (envelope.ok) completion.resolve(envelope.result);
-    else completion.reject(new Error(envelope.error || 'Native host request failed.'));
+    else {
+      const error = new Error(envelope.error || 'Native host request failed.');
+      this.emit('requestError', { method: completion.method, error });
+      completion.reject(error);
+    }
   }
 }

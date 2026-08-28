@@ -228,12 +228,29 @@ public static class ContextFormatter
         StringBuilder builder,
         ContextSnapshot snapshot)
     {
-        if (snapshot.Selection.Count > 0)
+        if (snapshot.Selection.Count > 0 || snapshot.SelectionElements.Count > 0)
         {
-            builder.AppendLine("PRIMARY SELECTION (the user deliberately selected this before invoking Zommi):");
-            foreach (var item in snapshot.Selection.Take(8))
+            builder.AppendLine("PRIMARY SURFACE SELECTION (the user deliberately selected this before invoking Zommi):");
+            if (snapshot.Selection.Count > 0)
             {
-                builder.AppendLine($"- {Clean(item, 1000)}");
+                builder.AppendLine("Selected text or items:");
+                foreach (var item in snapshot.Selection.Take(8))
+                {
+                    builder.AppendLine($"- {Clean(item, 1000)}");
+                }
+            }
+
+            if (snapshot.SelectionElements.Count > 0)
+            {
+                var totalCount = Math.Max(
+                    snapshot.SelectionElements.Count,
+                    snapshot.SelectionElementCount ?? snapshot.SelectionElements.Count);
+                builder.AppendLine(totalCount > snapshot.SelectionElements.Count
+                    ? $"Selected accessibility elements (showing {snapshot.SelectionElements.Count} of {totalCount}):"
+                    : "Selected accessibility elements:");
+                builder.AppendLine(JsonSerializer.Serialize(
+                    snapshot.SelectionElements.Select(CompactSelectedElement),
+                    AccessibilityJsonOptions));
             }
         }
 
@@ -251,7 +268,7 @@ public static class ContextFormatter
         var hasAccessibilityTree = accessibilityTree is { Roots.Count: > 0 };
         if (hasAccessibilityTree)
         {
-            builder.AppendLine("Browser accessibility structure (compact JSON with semantic roles, necessary text, and provider grid coordinates only):");
+            builder.AppendLine("Nearby accessibility structure (compact JSON with semantic roles, selected state, necessary text, and provider grid coordinates only):");
             builder.AppendLine(JsonSerializer.Serialize(CompactAccessibilityTree(accessibilityTree!), AccessibilityJsonOptions));
         }
 
@@ -294,6 +311,16 @@ public static class ContextFormatter
                 builder.Append($" named \"{Clean(target.Name, 240)}\"");
             }
 
+            if (target.Row is not null || target.Column is not null)
+            {
+                builder.Append($" grid(row={target.Row?.ToString() ?? "?"}, column={target.Column?.ToString() ?? "?"})");
+            }
+
+            if (!string.IsNullOrWhiteSpace(target.Bounds))
+            {
+                builder.Append($" box={Clean(target.Bounds, 80)}");
+            }
+
             builder.AppendLine();
         }
 
@@ -321,6 +348,29 @@ public static class ContextFormatter
     private static bool IsBidirectionalControl(char character) =>
         character is >= '\u202A' and <= '\u202E' or >= '\u2066' and <= '\u2069';
 
+    private static CompactSelectedElementInfo CompactSelectedElement(SelectedElementInfo element)
+    {
+        var name = string.IsNullOrWhiteSpace(element.Name) ? null : Clean(element.Name, 1_000);
+        var value = string.IsNullOrWhiteSpace(element.Value) ? null : Clean(element.Value, 2_000);
+        if (string.Equals(name, value, StringComparison.Ordinal))
+        {
+            value = null;
+        }
+
+        return new CompactSelectedElementInfo
+        {
+            Role = Clean(element.ControlType, 80),
+            Name = name,
+            Value = value,
+            Formula = string.IsNullOrWhiteSpace(element.Formula) ? null : Clean(element.Formula, 1_000),
+            Box = string.IsNullOrWhiteSpace(element.Bounds) ? null : Clean(element.Bounds, 80),
+            Row = element.Row,
+            Column = element.Column,
+            RowSpan = element.RowSpan is > 1 ? element.RowSpan : null,
+            ColumnSpan = element.ColumnSpan is > 1 ? element.ColumnSpan : null,
+        };
+    }
+
     private static CompactAccessibilityTreeInfo CompactAccessibilityTree(AccessibilityTreeInfo tree) => new()
     {
         Truncated = tree.Truncated ? true : null,
@@ -341,6 +391,7 @@ public static class ContextFormatter
             ? node.Children.SelectMany(CompactAccessibilityNodes).ToArray()
             : [];
         var hasSemanticPayload = name is not null || value is not null ||
+                                 node.IsSelected is true ||
                                  node.RowCount is not null || node.ColumnCount is not null ||
                                  node.Row is not null || node.Column is not null ||
                                  node.RowHeaders is { Count: > 0 } || node.ColumnHeaders is { Count: > 0 };
@@ -356,6 +407,7 @@ public static class ContextFormatter
                 Role = role,
                 Name = name,
                 Value = value,
+                Selected = node.IsSelected is true ? true : null,
                 RowCount = node.RowCount,
                 ColumnCount = node.ColumnCount,
                 Row = node.Row,
@@ -425,6 +477,27 @@ public static class ContextFormatter
         public required IReadOnlyList<CompactAccessibilityNodeInfo> Roots { get; init; }
     }
 
+    private sealed record CompactSelectedElementInfo
+    {
+        public required string Role { get; init; }
+
+        public string? Name { get; init; }
+
+        public string? Value { get; init; }
+
+        public string? Formula { get; init; }
+
+        public string? Box { get; init; }
+
+        public int? Row { get; init; }
+
+        public int? Column { get; init; }
+
+        public int? RowSpan { get; init; }
+
+        public int? ColumnSpan { get; init; }
+    }
+
     private sealed record CompactAccessibilityNodeInfo
     {
         public required string Role { get; init; }
@@ -432,6 +505,8 @@ public static class ContextFormatter
         public string? Name { get; init; }
 
         public string? Value { get; init; }
+
+        public bool? Selected { get; init; }
 
         public int? RowCount { get; init; }
 

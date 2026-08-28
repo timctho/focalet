@@ -169,7 +169,7 @@ function Find-ZommiWindow {
     foreach ($candidate in $windows) {
         try {
             if ($candidate.Current.ProcessId -eq $Process.Id -and
-                $candidate.Current.Name -like 'Zommi*floating Codex chat' -and
+                $candidate.Current.Name -like 'Zommi*floating*chat' -and
                 -not $candidate.Current.IsOffscreen) {
                 return $candidate
             }
@@ -491,7 +491,7 @@ try {
             if ($null -ne $transcript -and $null -ne $status) {
                 $transcriptText = Get-AutomationText $transcript
                 $answerStart = $transcriptText.LastIndexOf('Codex', [StringComparison]::Ordinal)
-                if ($answerStart -ge 0 -and $status.Current.Name -like 'Codex status: ready*') {
+                if ($answerStart -ge 0 -and $status.Current.Name -like 'Agent status: ready*') {
                     $response = $transcriptText.Substring($answerStart + 'Codex'.Length).Trim()
                     if ($status.Current.Name -match 'thread ([0-9a-f-]{36})') {
                         $codexThreadId = $Matches[1]

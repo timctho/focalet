@@ -4,14 +4,42 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'">
-  <title>Zommi — floating Codex chat</title>
+  <title>Zommi — floating agent chat</title>
   <link rel="stylesheet" href="styles.css">
 </head>
-<body>
-  <main class="glass" aria-label="Zommi floating Codex chat">
+<body class="is-compact">
+  <div class="edge-drag edge-drag-right" aria-hidden="true"></div>
+  <div class="edge-drag edge-drag-bottom" aria-hidden="true"></div>
+  <div class="edge-drag edge-drag-left" aria-hidden="true"></div>
+
+  <main class="glass is-compact" aria-label="Zommi floating agent chat">
+    <div class="panel-shell" aria-hidden="true">
+      <div class="panel-surface" aria-hidden="true"></div>
+
+    <div class="edge-drag edge-drag-top" aria-hidden="true"></div>
     <div class="background-drag" aria-hidden="true"></div>
 
-    <aside id="SessionSidebar" class="session-sidebar no-drag" aria-label="Chat sessions" aria-hidden="true">
+    <header class="titlebar">
+      <button id="HideZommi" class="round-button no-drag" aria-label="Hide Zommi" title="Hide">
+        <svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="m5.5 5.5 9 9m0-9-9 9"/></svg>
+      </button>
+      <button id="ToggleSessions" class="round-button no-drag menu" aria-label="Show chat sessions" aria-expanded="false" title="Chats">
+        <svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 6h10M5 10h10M5 14h10"/></svg>
+      </button>
+      <button id="RuntimeSummary" class="runtime-summary no-drag" type="button" aria-label="Choose agent runtime" aria-haspopup="listbox" aria-expanded="false">
+        <span id="RuntimeStatusDot" class="runtime-status-dot" data-status="detecting" aria-hidden="true"></span>
+        <span id="RuntimeSummaryLabel">Finding agents…</span>
+        <svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="m5.5 12 4.5-4 4.5 4"/></svg>
+      </button>
+      <div class="drag-region" aria-hidden="true"></div>
+      <button id="ExpandZommi" class="round-button no-drag expand" aria-label="Expand Zommi" title="Expand">
+        <svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 5H5v2.5M12.5 5H15v2.5M7.5 15H5v-2.5m7.5 2.5H15v-2.5"/></svg>
+      </button>
+    </header>
+
+    <section class="panel-content" aria-label="Zommi chat panel" aria-hidden="true">
+
+    <aside id="SessionSidebar" class="session-sidebar" aria-label="Chat sessions" aria-hidden="true">
       <div class="sidebar-head">
         <span>Chats</span>
         <button id="NewSession" class="small-round" type="button" aria-label="Create new chat" title="New chat">
@@ -21,20 +49,36 @@
       <nav id="SessionList" class="session-list" aria-label="Zommi chat sessions"></nav>
     </aside>
 
-    <header class="titlebar">
-      <button id="HideZommi" class="round-button no-drag" aria-label="Hide Zommi" title="Hide">
-        <svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="m5.5 5.5 9 9m0-9-9 9"/></svg>
-      </button>
-      <button id="ToggleSessions" class="round-button no-drag menu" aria-label="Show chat sessions" aria-expanded="false" title="Chats">
-        <svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 6h10M5 10h10M5 14h10"/></svg>
-      </button>
-      <div class="drag-region" aria-hidden="true"></div>
-      <button id="ExpandZommi" class="round-button no-drag expand" aria-label="Expand Zommi" title="Expand">
-        <svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 5H5v2.5M12.5 5H15v2.5M7.5 15H5v-2.5m7.5 2.5H15v-2.5"/></svg>
-      </button>
-    </header>
+    <aside id="RuntimePanel" class="runtime-panel no-drag" aria-label="Choose agent runtime" aria-hidden="true" hidden>
+      <div class="runtime-panel-head">
+        <span>Agent runtime</span>
+        <button id="RefreshRuntimes" class="small-round" type="button" aria-label="Refresh agent runtimes" title="Refresh">
+          <svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M15 7a6 6 0 1 0 .3 5.2M15 3.8V7h-3.2"/></svg>
+        </button>
+      </div>
+      <div id="RuntimeList" class="runtime-list" role="listbox" aria-label="Discovered agent runtimes"></div>
+      <div id="RuntimeEmpty" class="runtime-empty" hidden>
+        <strong>No supported agent found</strong>
+        <span>Install and sign in to Codex, Pi, Hermes, or OpenClaw, then refresh.</span>
+      </div>
+      <button id="RuntimeSignIn" class="runtime-sign-in" type="button" hidden>Open sign-in</button>
+      <details id="RuntimeAdvanced" class="runtime-advanced">
+        <summary>Advanced overrides</summary>
+        <label>Agent
+          <select id="RuntimeOverrideAdapter" aria-label="Runtime adapter"></select>
+        </label>
+        <label id="RuntimeOverrideHostLabel">Execution host
+          <select id="RuntimeOverrideHost" aria-label="Execution host"></select>
+        </label>
+        <label><span id="RuntimeOverrideLocatorLabel">Executable path</span>
+          <input id="RuntimeOverrideLocator" type="text" autocomplete="off" spellcheck="false" aria-label="Runtime executable path or Gateway endpoint">
+        </label>
+        <button id="SaveRuntimeOverride" class="runtime-sign-in" type="button">Add override</button>
+        <div id="RuntimeOverrideList" class="runtime-override-list" aria-label="Configured runtime overrides"></div>
+      </details>
+    </aside>
 
-    <section id="CodexTranscript" class="transcript" role="log" aria-live="polite" aria-label="Codex conversation including thinking and tool activity">
+    <section id="CodexTranscript" class="transcript" role="log" aria-live="polite" aria-label="Agent conversation including thinking and tool activity">
       <div class="welcome">
         <div class="orb"></div>
         <p>Ask about anything under your pointer.</p>
@@ -42,6 +86,24 @@
     </section>
 
     <button id="ScrollToLatest" class="scroll-latest no-drag" type="button" aria-label="Scroll to latest message" title="Latest message" hidden><svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M5.5 8 10 12l4.5-4"/></svg></button>
+
+    <aside id="ApprovalPanel" class="approval-panel no-drag" role="alertdialog" aria-modal="true" aria-labelledby="ApprovalTitle" hidden>
+      <div id="ApprovalTitle" class="approval-title">Agent requests permission</div>
+      <pre id="ApprovalDetail" class="approval-detail"></pre>
+      <div id="ApprovalOptions" class="approval-options"></div>
+    </aside>
+
+    <aside id="QuestionPanel" class="approval-panel question-panel no-drag" role="dialog" aria-modal="true" aria-labelledby="QuestionTitle" aria-describedby="QuestionMessage" hidden>
+      <div id="QuestionTitle" class="approval-title">Agent asks a question</div>
+      <div id="QuestionMessage" class="question-message"></div>
+      <div id="QuestionOptions" class="question-options" role="group" aria-label="Answer choices"></div>
+      <textarea id="QuestionInput" class="question-input" rows="3" aria-label="Answer" hidden></textarea>
+      <input id="QuestionSecretInput" class="question-input question-secret-input" type="password" aria-label="Sensitive answer" autocomplete="off" spellcheck="false" hidden>
+      <div id="QuestionActions" class="approval-options">
+        <button id="QuestionCancel" class="approval-option reject" type="button">Cancel</button>
+        <button id="QuestionSubmit" class="approval-option allow" type="button" hidden>Submit</button>
+      </div>
+    </aside>
 
     <aside id="ContextPreview" class="context-preview" aria-label="Attached context preview" hidden>
       <div class="preview-head">
@@ -58,7 +120,7 @@
           <svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="4.5"/><path d="m12 12 4 4"/></svg>
           <input id="ModelSearch" type="search" autocomplete="off" spellcheck="false" placeholder="Search models" aria-label="Search models">
         </label>
-        <div id="ModelList" class="model-list" role="listbox" aria-label="Codex models"></div>
+        <div id="ModelList" class="model-list" role="listbox" aria-label="Agent models"></div>
         <div class="reasoning-section">
           <div class="section-label">Reasoning</div>
           <div id="EffortList" class="effort-list" role="listbox" aria-label="Reasoning level"></div>
@@ -67,7 +129,7 @@
       <div id="ContextChips" class="context-chips" aria-label="Attached contexts"></div>
       <div class="composer-row">
         <button id="SelectImage" class="composer-button plus" aria-label="Select image context" title="Select image context"><svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4.5v11M4.5 10h11"/></svg></button>
-        <textarea id="ZommiComposer" rows="1" aria-label="Zommi message with attached context tokens" placeholder="Ask Codex"></textarea>
+        <textarea id="ZommiComposer" rows="1" aria-label="Zommi message with attached context tokens" placeholder="Ask your agent"></textarea>
         <button id="ModelSummary" class="model-summary" type="button" aria-label="Choose model and reasoning level" aria-haspopup="listbox" aria-expanded="false">
           <span id="ModelSummaryLabel">Loading…</span>
           <svg class="ui-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="m5.5 12 4.5-4 4.5 4"/></svg>
@@ -79,10 +141,63 @@
       </div>
     </section>
 
-    <footer>
-      <span id="CodexStatus" role="status">starting…</span>
-      <span id="ZommiShortcuts" aria-label="Alt+A and Alt+Shift+A shortcut status">Alt+A context · Alt+Shift+A image</span>
-    </footer>
+      <footer>
+        <span id="CodexStatus" role="status">starting…</span>
+        <span id="ZommiShortcuts" aria-label="Alt+A and Alt+Shift+A shortcut status">Alt+A context · Alt+Shift+A image</span>
+      </footer>
+    </section>
+    </div>
+
+    <button id="ZommiOrb" class="compact-orb no-drag" type="button" aria-label="Open Zommi chat" title="Open Zommi">
+      <svg class="orb-art" viewBox="0 0 44 44" aria-hidden="true">
+        <defs>
+          <linearGradient id="orb-spectrum" x1="7" y1="5" x2="38" y2="40" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#63d8f4"/>
+            <stop offset=".36" stop-color="#5d8cff"/>
+            <stop offset=".7" stop-color="#9b6ee8"/>
+            <stop offset="1" stop-color="#f08ba8"/>
+          </linearGradient>
+          <radialGradient id="orb-depth" cx="0" cy="0" r="1" gradientTransform="translate(14 10) rotate(50) scale(35)">
+            <stop stop-color="#ffffff" stop-opacity=".92"/>
+            <stop offset=".24" stop-color="#dff7ff" stop-opacity=".68"/>
+            <stop offset=".64" stop-color="#859bf0" stop-opacity=".31"/>
+            <stop offset="1" stop-color="#725ca5" stop-opacity=".48"/>
+          </radialGradient>
+          <radialGradient id="orb-glass" cx="0" cy="0" r="1" gradientTransform="translate(13 10) rotate(46) scale(31)">
+            <stop stop-color="#ffffff" stop-opacity=".72"/>
+            <stop offset=".14" stop-color="#ffffff" stop-opacity=".16"/>
+            <stop offset=".52" stop-color="#d9eeff" stop-opacity=".03"/>
+            <stop offset=".82" stop-color="#8b91ea" stop-opacity=".11"/>
+            <stop offset="1" stop-color="#7652b2" stop-opacity=".24"/>
+          </radialGradient>
+          <radialGradient id="orb-glint" cx="0" cy="0" r="1" gradientTransform="translate(13.4 10.6) rotate(45) scale(7.8 5.2)">
+            <stop stop-color="#ffffff" stop-opacity=".94"/>
+            <stop offset=".34" stop-color="#ffffff" stop-opacity=".42"/>
+            <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+          </radialGradient>
+          <clipPath id="orb-clip"><circle cx="22" cy="22" r="20"/></clipPath>
+          <filter id="orb-nebula-soft" x="-45%" y="-45%" width="190%" height="190%" color-interpolation-filters="sRGB">
+            <feGaussianBlur stdDeviation="3.7"/>
+          </filter>
+        </defs>
+        <circle cx="22" cy="22" r="20" fill="url(#orb-depth)"/>
+        <g clip-path="url(#orb-clip)">
+          <circle cx="22" cy="22" r="20" fill="url(#orb-spectrum)" opacity=".14"/>
+          <g class="orb-nebula orb-nebula-a" filter="url(#orb-nebula-soft)">
+            <ellipse cx="13" cy="18" rx="15" ry="9" fill="#63d8f4" opacity=".8" transform="rotate(-18 13 18)"/>
+            <ellipse cx="25" cy="19" rx="15" ry="9" fill="#5d8cff" opacity=".76" transform="rotate(19 25 19)"/>
+          </g>
+          <g class="orb-nebula orb-nebula-b" filter="url(#orb-nebula-soft)">
+            <ellipse cx="25" cy="29" rx="16" ry="10" fill="#9b6ee8" opacity=".82" transform="rotate(-24 25 29)"/>
+            <ellipse cx="34" cy="31" rx="11" ry="8" fill="#f08ba8" opacity=".72" transform="rotate(21 34 31)"/>
+          </g>
+          <circle cx="22" cy="22" r="20" fill="url(#orb-glass)"/>
+        </g>
+        <circle class="orb-spectrum-rim" cx="22" cy="22" r="19.45" fill="none" stroke="url(#orb-spectrum)" stroke-opacity=".5" stroke-width="1.1"/>
+        <circle class="orb-glass-rim" cx="22" cy="22" r="20.05" fill="none" stroke="#ffffff" stroke-opacity=".8" stroke-width=".72"/>
+        <ellipse class="orb-glint" cx="13.4" cy="10.6" rx="7.8" ry="5.2" fill="url(#orb-glint)" transform="rotate(-26 13.4 10.6)"/>
+      </svg>
+    </button>
   </main>
   <script type="module" src="renderer.mjs"></script>
 </body>

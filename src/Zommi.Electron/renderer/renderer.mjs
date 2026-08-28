@@ -1,4 +1,5 @@
 import {
+  activityOpenState,
   activityKey,
   effortsForModel,
   extractDisplayUserText,
@@ -15,6 +16,10 @@ const HISTORY_PAGE_SIZE = 18;
 const HISTORY_LOAD_THRESHOLD_PX = 96;
 
 const glass = document.querySelector('.glass');
+const panelShell = document.querySelector('.panel-shell');
+const panelContent = document.querySelector('.panel-content');
+const compactOrb = document.querySelector('#ZommiOrb');
+const topDragHandle = document.querySelector('.edge-drag-top');
 const transcript = document.querySelector('#CodexTranscript');
 const composer = document.querySelector('#ZommiComposer');
 const chips = document.querySelector('#ContextChips');
@@ -30,6 +35,33 @@ const sessionSidebar = document.querySelector('#SessionSidebar');
 const sessionList = document.querySelector('#SessionList');
 const toggleSessions = document.querySelector('#ToggleSessions');
 const newSession = document.querySelector('#NewSession');
+const runtimeSummary = document.querySelector('#RuntimeSummary');
+const runtimeSummaryLabel = document.querySelector('#RuntimeSummaryLabel');
+const runtimeStatusDot = document.querySelector('#RuntimeStatusDot');
+const runtimePanel = document.querySelector('#RuntimePanel');
+const runtimeList = document.querySelector('#RuntimeList');
+const runtimeEmpty = document.querySelector('#RuntimeEmpty');
+const refreshRuntimes = document.querySelector('#RefreshRuntimes');
+const runtimeSignIn = document.querySelector('#RuntimeSignIn');
+const runtimeOverrideAdapter = document.querySelector('#RuntimeOverrideAdapter');
+const runtimeOverrideHost = document.querySelector('#RuntimeOverrideHost');
+const runtimeOverrideHostLabel = document.querySelector('#RuntimeOverrideHostLabel');
+const runtimeOverrideLocator = document.querySelector('#RuntimeOverrideLocator');
+const runtimeOverrideLocatorLabel = document.querySelector('#RuntimeOverrideLocatorLabel');
+const saveRuntimeOverride = document.querySelector('#SaveRuntimeOverride');
+const runtimeOverrideList = document.querySelector('#RuntimeOverrideList');
+const selectImage = document.querySelector('#SelectImage');
+const approvalPanel = document.querySelector('#ApprovalPanel');
+const approvalDetail = document.querySelector('#ApprovalDetail');
+const approvalOptions = document.querySelector('#ApprovalOptions');
+const questionPanel = document.querySelector('#QuestionPanel');
+const questionTitle = document.querySelector('#QuestionTitle');
+const questionMessage = document.querySelector('#QuestionMessage');
+const questionOptions = document.querySelector('#QuestionOptions');
+const questionInput = document.querySelector('#QuestionInput');
+const questionSecretInput = document.querySelector('#QuestionSecretInput');
+const questionCancel = document.querySelector('#QuestionCancel');
+const questionSubmit = document.querySelector('#QuestionSubmit');
 const modelPanel = document.querySelector('#ModelPanel');
 const modelSearch = document.querySelector('#ModelSearch');
 const modelList = document.querySelector('#ModelList');
@@ -47,6 +79,7 @@ let currentTurnBody = null;
 let streamFrame = 0;
 let turnActive = false;
 let interruptRequested = false;
+let terminalTurnStatus = false;
 let previewTimer = null;
 let turnNumber = 0;
 let autoFollow = true;
@@ -63,10 +96,29 @@ let historyTurns = [];
 let historyStartIndex = 0;
 let historyLoading = false;
 let historyLoadFrame = 0;
+let manualDragFrame = 0;
+let pendingManualDragPoint = null;
+let chatControlsLoading = false;
+let chatControlsReady = false;
+let runtimeBusy = false;
+let runtimeState = {
+  targets: [], activeTargetId: null, activeTarget: null, capabilities: [],
+  settings: { hosts: [], adapters: [], overrides: [] },
+};
+let activeRuntimeTargetId = null;
+let activeRuntimeName = 'Agent';
+let activeCapabilities = new Set();
+let pendingApproval = null;
+let pendingQuestion = null;
 
 document.querySelector('#HideZommi').addEventListener('click', () => window.zommi.hide());
+compactOrb.addEventListener('click', () => window.zommi.openPanel());
+topDragHandle.addEventListener('pointerdown', startManualWindowDrag);
+topDragHandle.addEventListener('pointermove', queueManualWindowDrag);
+topDragHandle.addEventListener('pointerup', endManualWindowDrag);
+topDragHandle.addEventListener('pointercancel', endManualWindowDrag);
 document.querySelector('#ExpandZommi').addEventListener('click', () => window.zommi.toggleExpanded());
-document.querySelector('#SelectImage').addEventListener('click', () => window.zommi.selectImage());
+selectImage.addEventListener('click', () => window.zommi.selectImage());
 document.querySelector('#ClosePreview').addEventListener('click', hidePreview);
 toggleSessions.addEventListener('click', toggleSessionSidebar);
 toggleSessions.addEventListener('mouseenter', openSessionSidebarFromHover);
@@ -74,6 +126,11 @@ toggleSessions.addEventListener('mouseleave', scheduleSessionSidebarClose);
 sessionSidebar.addEventListener('mouseenter', cancelSessionSidebarClose);
 sessionSidebar.addEventListener('mouseleave', scheduleSessionSidebarClose);
 newSession.addEventListener('click', createSession);
+runtimeSummary.addEventListener('click', toggleRuntimePanel);
+refreshRuntimes.addEventListener('click', refreshRuntimeTargets);
+runtimeSignIn.addEventListener('click', signInToRuntime);
+runtimeOverrideAdapter.addEventListener('change', renderRuntimeOverrides);
+saveRuntimeOverride.addEventListener('click', saveRuntimeTargetOverride);
 glass.addEventListener('mouseenter', () => setPointerOverGlass(true));
 glass.addEventListener('mouseleave', () => setPointerOverGlass(false));
 modelSummary.addEventListener('click', toggleModelPanel);
@@ -97,21 +154,92 @@ preview.addEventListener('mouseenter', () => clearTimeout(previewTimer));
 preview.addEventListener('mouseleave', schedulePreviewHide);
 
 window.zommi.onContext(addAttachment);
-window.zommi.onStatus(({ message, warning }) => renderStatus(message, warning));
+window.zommi.onRuntimeState?.(applyRuntimeState);
+window.zommi.onApprovalRequested?.(showApprovalRequest);
+window.zommi.onQuestionRequested?.(showQuestionRequest);
+window.zommi.onStatus(handleBackendStatus);
 window.zommi.onStream(queueStreamUpdate);
 window.zommi.onTurnCompleted(completeTurn);
 window.zommi.onFocusComposer(() => focusComposer());
+window.zommi.onWindowPresentation?.(({ open }) => setPanelPresentation(Boolean(open)));
+window.zommi.onWindowBoundsSettled?.(() => syncPanelMorphGeometry());
 window.zommi.onAcceptanceConversation?.(seedAcceptanceConversation);
 window.zommi.onShortcuts((state) => {
   shortcuts.textContent = 'Alt+A context · Alt+Shift+A image';
   shortcuts.setAttribute('aria-label', `Alt+A registered: ${Boolean(state.context)}; Alt+Shift+A registered: ${Boolean(state.image)}`);
 });
+questionCancel.addEventListener('click', () => resolveQuestion({}));
+questionSubmit.addEventListener('click', submitQuestionInput);
+questionInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    void resolveQuestion({});
+  } else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+    event.preventDefault();
+    submitQuestionInput();
+  }
+});
+questionSecretInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    void resolveQuestion({});
+  } else if (event.key === 'Enter') {
+    event.preventDefault();
+    submitQuestionInput();
+  }
+});
 
 void initializeChatControls();
+syncPanelMorphGeometry();
+new ResizeObserver(syncPanelMorphGeometry).observe(glass);
 
 function setPointerOverGlass(pointerOver) {
-  glass.classList.toggle('pointer-over', pointerOver);
   requestAnimationFrame(() => window.zommi.reportAcceptanceHover?.(pointerOver));
+}
+
+function startManualWindowDrag(event) {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  topDragHandle.setPointerCapture(event.pointerId);
+  window.zommi.beginWindowDrag({ x: event.screenX, y: event.screenY });
+}
+
+function queueManualWindowDrag(event) {
+  if (!topDragHandle.hasPointerCapture(event.pointerId)) return;
+  pendingManualDragPoint = { x: event.screenX, y: event.screenY };
+  if (manualDragFrame) return;
+  manualDragFrame = requestAnimationFrame(() => {
+    manualDragFrame = 0;
+    if (pendingManualDragPoint) window.zommi.moveWindowDrag(pendingManualDragPoint);
+    pendingManualDragPoint = null;
+  });
+}
+
+function endManualWindowDrag(event) {
+  if (topDragHandle.hasPointerCapture(event.pointerId)) topDragHandle.releasePointerCapture(event.pointerId);
+  if (manualDragFrame) cancelAnimationFrame(manualDragFrame);
+  manualDragFrame = 0;
+  pendingManualDragPoint = null;
+  window.zommi.endWindowDrag();
+}
+
+function setPanelPresentation(open) {
+  syncPanelMorphGeometry();
+  glass.classList.toggle('is-compact', !open);
+  document.body.classList.toggle('is-compact', !open);
+  panelShell.setAttribute('aria-hidden', String(!open));
+  panelContent.setAttribute('aria-hidden', String(!open));
+  compactOrb.setAttribute('aria-hidden', String(open));
+  compactOrb.tabIndex = open ? -1 : 0;
+}
+
+function syncPanelMorphGeometry() {
+  const panelWidth = panelShell?.offsetWidth || 0;
+  const panelHeight = panelShell?.offsetHeight || 0;
+  const orbSize = compactOrb?.offsetWidth || 0;
+  if (!panelWidth || !panelHeight || !orbSize) return;
+  glass.style.setProperty('--orb-scale-x', String(orbSize / panelWidth));
+  glass.style.setProperty('--orb-scale-y', String(orbSize / panelHeight));
 }
 
 function addAttachment(attachment) {
@@ -195,15 +323,41 @@ function hidePreview() {
 }
 
 async function initializeChatControls() {
+  if (chatControlsLoading) return;
+  chatControlsLoading = true;
+  renderModelControls();
   try {
+    const discovered = await window.zommi.getRuntimeState();
+    applyRuntimeState(discovered);
+    if (!discovered?.activeTargetId) {
+      chatControlsReady = false;
+      renderStatus('No supported agent found. Capture remains available.', true);
+      return;
+    }
     const state = await window.zommi.getChatState();
+    chatControlsReady = true;
     applyChatState(state, { renderHistory: true });
   } catch (error) {
+    chatControlsReady = false;
     renderStatus(`Chat controls unavailable: ${error.message}`, true);
+  } finally {
+    chatControlsLoading = false;
+    renderModelControls();
+  }
+}
+
+function handleBackendStatus({ message, warning }) {
+  const runtimeReadiness = /(?:\bready\b|loading\s+.*tools?|control\s+ready)/i.test(String(message));
+  if (!warning && runtimeReadiness && (turnActive || terminalTurnStatus)) return;
+  renderStatus(message, warning);
+  if (!chatControlsReady && /\bready\b/i.test(String(message))) {
+    void initializeChatControls();
   }
 }
 
 function applyChatState(state, { renderHistory = false } = {}) {
+  if (state?.runtime) applyRuntimeState(state.runtime);
+  activeRuntimeTargetId = state?.runtimeTargetId || activeRuntimeTargetId;
   activeThreadId = state?.activeThreadId || state?.thread?.id || activeThreadId;
   if (Array.isArray(state?.models) && state.models.length) models = state.models;
   if (Array.isArray(state?.sessions)) sessions = state.sessions;
@@ -224,12 +378,195 @@ function applyChatState(state, { renderHistory = false } = {}) {
   renderSessions();
   if (renderHistory) renderThreadHistory(state?.thread);
   renderPrimaryAction();
-  composer.disabled = turnActive || sessionBusy;
+  composer.disabled = sessionBusy;
+}
+
+function applyRuntimeState(nextState) {
+  if (!nextState) return;
+  runtimeState = {
+    targets: Array.isArray(nextState.targets) ? nextState.targets : [],
+    activeTargetId: nextState.activeTargetId || null,
+    activeTarget: nextState.activeTarget || null,
+    capabilities: Array.isArray(nextState.capabilities) ? nextState.capabilities : [],
+    settings: nextState.settings && typeof nextState.settings === 'object'
+      ? nextState.settings
+      : { hosts: [], adapters: [], overrides: [] },
+  };
+  activeRuntimeTargetId = runtimeState.activeTargetId;
+  activeRuntimeName = runtimeState.activeTarget?.displayName || 'Agent';
+  activeCapabilities = new Set(runtimeState.capabilities);
+  renderRuntimeControls();
+  renderModelControls();
+  renderSessions();
+  renderPrimaryAction();
+}
+
+function renderRuntimeControls() {
+  const active = runtimeState.targets.find((target) => target.id === runtimeState.activeTargetId)
+    || runtimeState.activeTarget;
+  runtimeSummaryLabel.textContent = active
+    ? `${active.displayName} · ${shortHostName(active.executionHost)}`
+    : runtimeBusy ? 'Finding agents…' : 'Choose agent';
+  runtimeSummary.title = active
+    ? `${active.displayName} ${active.protocolName} on ${active.executionHost?.displayName || 'this device'}`
+    : 'Choose agent runtime';
+  runtimeSummary.setAttribute('aria-label', runtimeSummary.title);
+  runtimeStatusDot.dataset.status = active?.status || (runtimeBusy ? 'detecting' : 'unreachable');
+  runtimeList.replaceChildren();
+  for (const target of runtimeState.targets) {
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.className = `runtime-target${target.id === runtimeState.activeTargetId ? ' selected' : ''}`;
+    option.dataset.targetId = target.id;
+    option.setAttribute('role', 'option');
+    option.setAttribute('aria-selected', String(target.id === runtimeState.activeTargetId));
+    option.disabled = runtimeBusy;
+    const dot = document.createElement('span');
+    dot.className = 'runtime-status-dot';
+    dot.dataset.status = target.status || 'detected';
+    dot.setAttribute('aria-hidden', 'true');
+    const copy = document.createElement('span');
+    copy.className = 'runtime-target-copy';
+    const name = document.createElement('span');
+    name.className = 'runtime-target-name';
+    name.textContent = target.displayName;
+    const detail = document.createElement('span');
+    detail.className = 'runtime-target-detail';
+    detail.textContent = `${target.protocolName} · ${target.executionHost?.displayName || 'Local'}`;
+    copy.append(name, detail);
+    const state = document.createElement('span');
+    state.className = `runtime-target-state${target.classification === 'compatible' ? ' compatible' : ''}`;
+    state.textContent = target.classification === 'compatible'
+      ? 'Compatible'
+      : runtimeStatusLabel(target.status);
+    option.append(dot, copy, state);
+    option.addEventListener('click', () => selectRuntimeTarget(target.id));
+    runtimeList.append(option);
+  }
+  runtimeEmpty.hidden = runtimeState.targets.length > 0;
+  runtimeSignIn.hidden = active?.status !== 'sign-in-required';
+  runtimeSignIn.textContent = active ? `Open ${active.displayName} sign-in` : 'Open sign-in';
+  renderRuntimeOverrides();
+  selectImage.disabled = Boolean(active) && !activeCapabilities.has('input.image.v1');
+  selectImage.title = selectImage.disabled ? `${activeRuntimeName} does not accept image input` : 'Select image context';
+}
+
+function renderRuntimeOverrides() {
+  const settings = runtimeState.settings || {};
+  const adapters = Array.isArray(settings.adapters) ? settings.adapters : [];
+  const previousAdapter = runtimeOverrideAdapter.value;
+  runtimeOverrideAdapter.replaceChildren(...adapters.map((adapter) => {
+    const option = document.createElement('option');
+    option.value = adapter.adapterId;
+    option.textContent = `${adapter.displayName} · ${adapter.protocolName}`;
+    return option;
+  }));
+  if (adapters.some((adapter) => adapter.adapterId === previousAdapter)) runtimeOverrideAdapter.value = previousAdapter;
+  const selectedAdapter = adapters.find((adapter) => adapter.adapterId === runtimeOverrideAdapter.value) || adapters[0];
+  const acceptsEndpoint = Boolean(selectedAdapter?.acceptsEndpoint);
+  runtimeOverrideHostLabel.hidden = acceptsEndpoint;
+  runtimeOverrideLocatorLabel.textContent = acceptsEndpoint ? 'Gateway endpoint' : 'Executable path';
+  runtimeOverrideLocator.placeholder = acceptsEndpoint ? 'ws://127.0.0.1:18789' : 'Absolute native or WSL path';
+
+  const previousHost = runtimeOverrideHost.value;
+  const hosts = (settings.hosts || []).filter((host) => selectedAdapter?.hostKinds?.includes(host.kind));
+  runtimeOverrideHost.replaceChildren(...hosts.map((host) => {
+    const option = document.createElement('option');
+    option.value = host.id;
+    option.textContent = host.displayName;
+    return option;
+  }));
+  if (hosts.some((host) => host.id === previousHost)) runtimeOverrideHost.value = previousHost;
+  saveRuntimeOverride.disabled = runtimeBusy || !selectedAdapter || (!acceptsEndpoint && !runtimeOverrideHost.value);
+
+  runtimeOverrideList.replaceChildren();
+  for (const override of settings.overrides || []) {
+    const row = document.createElement('div');
+    row.className = 'runtime-override';
+    const label = document.createElement('span');
+    const adapter = adapters.find((candidate) => candidate.adapterId === override.adapterId);
+    label.textContent = `${adapter?.displayName || override.adapterId} · ${override.endpoint || override.executablePath}`;
+    label.title = label.textContent;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = 'Remove';
+    remove.disabled = runtimeBusy;
+    remove.addEventListener('click', () => removeRuntimeTargetOverride(override.id));
+    row.append(label, remove);
+    runtimeOverrideList.append(row);
+  }
+}
+
+async function saveRuntimeTargetOverride() {
+  if (runtimeBusy) return;
+  const adapter = runtimeState.settings?.adapters?.find((item) => item.adapterId === runtimeOverrideAdapter.value);
+  const locator = runtimeOverrideLocator.value.trim();
+  if (!adapter || !locator) {
+    renderStatus('Choose an agent and enter an override location.', true);
+    return;
+  }
+  runtimeBusy = true;
+  renderRuntimeControls();
+  try {
+    const value = adapter.acceptsEndpoint
+      ? { adapterId: adapter.adapterId, endpoint: locator }
+      : { adapterId: adapter.adapterId, executionHostId: runtimeOverrideHost.value, executablePath: locator };
+    applyRuntimeState(await window.zommi.saveRuntimeOverride(value));
+    runtimeOverrideLocator.value = '';
+    renderStatus('Runtime override added');
+  } catch (error) {
+    renderStatus(`Could not add runtime override: ${error.message}`, true);
+  } finally {
+    runtimeBusy = false;
+    renderRuntimeControls();
+  }
+}
+
+async function removeRuntimeTargetOverride(id) {
+  if (runtimeBusy) return;
+  runtimeBusy = true;
+  renderRuntimeControls();
+  try {
+    applyRuntimeState(await window.zommi.removeRuntimeOverride(id));
+    renderStatus('Runtime override removed');
+  } catch (error) {
+    renderStatus(`Could not remove runtime override: ${error.message}`, true);
+  } finally {
+    runtimeBusy = false;
+    renderRuntimeControls();
+  }
+}
+
+function shortHostName(host) {
+  if (!host) return 'Local';
+  if (host.kind === 'wsl') return host.name || host.displayName || 'WSL';
+  return host.displayName || 'Local';
+}
+
+function runtimeStatusLabel(value) {
+  return ({
+    detected: 'Detected',
+    starting: 'Starting',
+    ready: 'Ready',
+    'sign-in-required': 'Sign in',
+    'unsupported-version': 'Unsupported',
+    unreachable: 'Unavailable',
+  })[value] || 'Detected';
 }
 
 function renderModelControls() {
   renderModelOptions();
   renderEffortOptions();
+  const supportsModelSelection = activeCapabilities.has('model.select.v1');
+  modelSummary.hidden = !runtimeState.activeTargetId || !supportsModelSelection;
+  if (modelSummary.hidden) closeModelPanel();
+  if (!chatControlsReady) {
+    modelSummaryLabel.textContent = chatControlsLoading ? 'Connecting…' : 'Retry';
+    modelSummary.title = chatControlsLoading ? `Connecting to ${activeRuntimeName}` : `Retry ${activeRuntimeName} connection`;
+    modelSummary.setAttribute('aria-label', modelSummary.title);
+    modelSummary.disabled = sessionBusy || chatControlsLoading;
+    return;
+  }
   const model = findSelectedModel();
   const modelName = model?.displayName || selectedModel || 'Default model';
   modelSummaryLabel.textContent = `${modelName}${selectedEffort ? ` · ${formatEffort(selectedEffort)}` : ''}`;
@@ -324,7 +661,12 @@ function selectEffort(value) {
 }
 
 function toggleModelPanel() {
+  if (!chatControlsReady) {
+    void initializeChatControls();
+    return;
+  }
   const open = modelPanel.hidden;
+  closeRuntimePanel();
   modelPanel.hidden = !open;
   modelSummary.setAttribute('aria-expanded', String(open));
   if (open) {
@@ -341,15 +683,20 @@ function closeModelPanel() {
 }
 
 function closeModelPanelFromOutside(event) {
-  if (modelPanel.hidden || modelPanel.contains(event.target) || modelSummary.contains(event.target)) return;
-  closeModelPanel();
+  if (!modelPanel.hidden && !modelPanel.contains(event.target) && !modelSummary.contains(event.target)) closeModelPanel();
+  if (!runtimePanel.hidden && !runtimePanel.contains(event.target) && !runtimeSummary.contains(event.target)) closeRuntimePanel();
 }
 
 function handleGlobalKeydown(event) {
-  if (event.key !== 'Escape' || modelPanel.hidden) return;
+  if (event.key !== 'Escape' || (modelPanel.hidden && runtimePanel.hidden)) return;
   event.preventDefault();
-  closeModelPanel();
-  modelSummary.focus({ preventScroll: true });
+  if (!runtimePanel.hidden) {
+    closeRuntimePanel();
+    runtimeSummary.focus({ preventScroll: true });
+  } else {
+    closeModelPanel();
+    modelSummary.focus({ preventScroll: true });
+  }
 }
 
 function handleModelSearchKeydown(event) {
@@ -358,6 +705,322 @@ function handleModelSearchKeydown(event) {
   if (!firstOption) return;
   event.preventDefault();
   firstOption.focus({ preventScroll: true });
+}
+
+function toggleRuntimePanel() {
+  const open = runtimePanel.hidden;
+  closeModelPanel();
+  runtimePanel.hidden = !open;
+  runtimePanel.setAttribute('aria-hidden', String(!open));
+  runtimeSummary.setAttribute('aria-expanded', String(open));
+  if (open) renderRuntimeControls();
+}
+
+function closeRuntimePanel() {
+  if (runtimePanel.hidden) return;
+  runtimePanel.hidden = true;
+  runtimePanel.setAttribute('aria-hidden', 'true');
+  runtimeSummary.setAttribute('aria-expanded', 'false');
+}
+
+async function selectRuntimeTarget(targetId) {
+  if (runtimeBusy) return;
+  if (targetId === runtimeState.activeTargetId) {
+    closeRuntimePanel();
+    return;
+  }
+  runtimeBusy = true;
+  chatControlsReady = false;
+  renderRuntimeControls();
+  renderModelControls();
+  renderStatus('Switching agent runtime…');
+  try {
+    const selected = await window.zommi.selectRuntime(targetId);
+    applyRuntimeState(selected);
+    resetChatForRuntimeSwitch();
+    const state = await window.zommi.getChatState();
+    chatControlsReady = true;
+    applyChatState(state, { renderHistory: true });
+    renderStatus(`${activeRuntimeName} ready`);
+    closeRuntimePanel();
+    focusComposer();
+  } catch (error) {
+    renderStatus(`Could not switch agent: ${error.message}`, true);
+    try {
+      applyRuntimeState(await window.zommi.getRuntimeState());
+    } catch {
+      // The original switching error remains the actionable result.
+    }
+  } finally {
+    runtimeBusy = false;
+    renderRuntimeControls();
+    renderModelControls();
+  }
+}
+
+async function refreshRuntimeTargets() {
+  if (runtimeBusy) return;
+  runtimeBusy = true;
+  renderRuntimeControls();
+  renderStatus('Finding agent runtimes…');
+  try {
+    const refreshed = await window.zommi.refreshRuntimes();
+    applyRuntimeState(refreshed);
+    if (refreshed.activeTargetId) await initializeChatControls();
+    else renderStatus('No supported agent found. Capture remains available.', true);
+  } catch (error) {
+    renderStatus(`Agent discovery failed: ${error.message}`, true);
+  } finally {
+    runtimeBusy = false;
+    renderRuntimeControls();
+  }
+}
+
+async function signInToRuntime() {
+  if (!runtimeState.activeTargetId || runtimeBusy) return;
+  runtimeBusy = true;
+  renderRuntimeControls();
+  try {
+    const result = await window.zommi.signInRuntime(runtimeState.activeTargetId);
+    renderStatus(`${result.displayCommand} opened in a terminal`);
+  } catch (error) {
+    renderStatus(`Could not open sign-in: ${error.message}`, true);
+  } finally {
+    runtimeBusy = false;
+    renderRuntimeControls();
+  }
+}
+
+function resetChatForRuntimeSwitch() {
+  dismissApproval();
+  dismissQuestion();
+  activeThreadId = null;
+  sessions = [];
+  models = [];
+  selectedModel = '';
+  selectedEffort = '';
+  activeTurns.clear();
+  unreadThreadIds.clear();
+  syncActiveTurnState();
+  renderThreadHistory(null);
+  renderSessions();
+  renderPrimaryAction();
+}
+
+function showQuestionRequest(request) {
+  if (request?.runtimeTargetId && request.runtimeTargetId !== activeRuntimeTargetId) return;
+  pendingQuestion = request;
+  questionTitle.textContent = request?.title || 'Agent asks a question';
+  questionMessage.textContent = request?.message || '';
+  questionOptions.replaceChildren();
+  questionInput.hidden = true;
+  questionSecretInput.hidden = true;
+  questionSubmit.hidden = true;
+  questionInput.value = '';
+  questionSecretInput.value = '';
+  if (Array.isArray(request?.questions) && request.questions.length) {
+    renderStructuredQuestions(request.questions);
+    questionSubmit.hidden = false;
+    questionPanel.hidden = false;
+    requestAnimationFrame(() => questionOptions.querySelector('input')?.focus({ preventScroll: true }));
+    return;
+  }
+  const method = String(request?.method || 'input');
+  if (method === 'confirm') {
+    addQuestionOption('Yes', { confirmed: true });
+    addQuestionOption('No', { confirmed: false });
+  } else if (method === 'select') {
+    for (const option of request?.options || []) {
+      const value = typeof option === 'string' ? option : String(option?.value ?? option?.label ?? '');
+      const label = typeof option === 'string' ? option : String(option?.label ?? option?.value ?? '');
+      if (value) addQuestionOption(label || value, { value });
+    }
+  } else {
+    const input = request?.sensitive ? questionSecretInput : questionInput;
+    input.hidden = false;
+    questionSubmit.hidden = false;
+    input.placeholder = request?.placeholder || '';
+    input.value = request?.sensitive ? '' : request?.prefill || '';
+  }
+  questionPanel.hidden = false;
+  requestAnimationFrame(() => {
+    const input = !questionSecretInput.hidden ? questionSecretInput : questionInput;
+    if (!input.hidden) {
+      input.focus({ preventScroll: true });
+      input.setSelectionRange(input.value.length, input.value.length);
+    } else {
+      questionOptions.querySelector('button')?.focus({ preventScroll: true });
+    }
+  });
+}
+
+function renderStructuredQuestions(questions) {
+  for (const question of questions.slice(0, 3)) {
+    const fieldset = document.createElement('fieldset');
+    fieldset.className = 'structured-question';
+    fieldset.dataset.questionId = String(question.questionId || '');
+    const legend = document.createElement('legend');
+    legend.textContent = question.header || 'Question';
+    const prompt = document.createElement('div');
+    prompt.className = 'structured-question-prompt';
+    prompt.textContent = question.question || '';
+    fieldset.append(legend, prompt);
+    const options = Array.isArray(question.options) ? question.options.slice(0, 4) : [];
+    for (const option of options) {
+      const label = document.createElement('label');
+      label.className = 'structured-question-option';
+      const input = document.createElement('input');
+      input.type = question.multiSelect ? 'checkbox' : 'radio';
+      input.name = `question-${domId(question.questionId)}`;
+      input.value = String(typeof option === 'string' ? option : option?.label || '');
+      input.dataset.answerOption = 'true';
+      const copy = document.createElement('span');
+      const title = document.createElement('strong');
+      title.textContent = input.value;
+      copy.append(title);
+      const description = typeof option === 'object' ? String(option?.description || '') : '';
+      if (description) {
+        const detail = document.createElement('small');
+        detail.textContent = description;
+        copy.append(detail);
+      }
+      label.append(input, copy);
+      fieldset.append(label);
+    }
+    if (question.isOther || !options.length) {
+      const other = document.createElement('input');
+      other.type = question.isSecret ? 'password' : 'text';
+      other.className = 'question-input structured-question-other';
+      other.dataset.otherAnswer = 'true';
+      other.autocomplete = 'off';
+      other.spellcheck = false;
+      other.placeholder = options.length ? 'Other answer' : 'Your answer';
+      fieldset.append(other);
+    }
+    questionOptions.append(fieldset);
+  }
+}
+
+function addQuestionOption(label, answer) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'question-option';
+  button.textContent = label;
+  button.addEventListener('click', () => resolveQuestion(answer));
+  questionOptions.append(button);
+}
+
+function submitQuestionInput() {
+  if (!pendingQuestion) return;
+  if (Array.isArray(pendingQuestion.questions) && pendingQuestion.questions.length) {
+    const answers = {};
+    for (const fieldset of questionOptions.querySelectorAll('.structured-question')) {
+      const values = [...fieldset.querySelectorAll('input[data-answer-option]:checked')]
+        .map((input) => input.value)
+        .filter(Boolean);
+      const other = fieldset.querySelector('input[data-other-answer]')?.value?.trim();
+      if (other) values.push(other);
+      answers[fieldset.dataset.questionId] = values;
+    }
+    void resolveQuestion({ answers });
+    return;
+  }
+  const input = pendingQuestion.sensitive ? questionSecretInput : questionInput;
+  void resolveQuestion({ value: input.value });
+}
+
+async function resolveQuestion(answer) {
+  if (!pendingQuestion) return;
+  const request = pendingQuestion;
+  setQuestionBusy(true);
+  try {
+    await window.zommi.resolveQuestion({
+      questionId: request.questionId,
+      answer,
+      runtimeTargetId: request.runtimeTargetId,
+      sessionId: request.sessionId || request.threadId,
+    });
+    dismissQuestion();
+    renderStatus(Object.keys(answer).length ? 'Answer sent' : 'Question cancelled');
+  } catch (error) {
+    renderStatus(`Could not answer question: ${error.message}`, true);
+    setQuestionBusy(false);
+  }
+}
+
+function setQuestionBusy(busy) {
+  for (const control of questionPanel.querySelectorAll('button, textarea, input')) control.disabled = busy;
+}
+
+function dismissQuestion() {
+  pendingQuestion = null;
+  questionPanel.hidden = true;
+  questionTitle.textContent = 'Agent asks a question';
+  questionMessage.textContent = '';
+  questionOptions.replaceChildren();
+  questionInput.value = '';
+  questionInput.placeholder = '';
+  questionSecretInput.value = '';
+  questionSecretInput.placeholder = '';
+  setQuestionBusy(false);
+}
+
+function showApprovalRequest(request) {
+  if (request?.runtimeTargetId && request.runtimeTargetId !== activeRuntimeTargetId) return;
+  pendingApproval = request;
+  approvalDetail.textContent = approvalRequestText(request);
+  approvalOptions.replaceChildren();
+  for (const option of request.options || []) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `approval-option ${String(option.kind || '').startsWith('allow') ? 'allow' : 'reject'}`;
+    button.textContent = option.name || option.optionId;
+    button.addEventListener('click', () => resolveApproval(option.optionId));
+    approvalOptions.append(button);
+  }
+  if (!(request.options || []).some((option) => String(option.kind || '').startsWith('reject'))) {
+    const deny = document.createElement('button');
+    deny.type = 'button';
+    deny.className = 'approval-option reject';
+    deny.textContent = 'Deny';
+    deny.addEventListener('click', () => resolveApproval(null));
+    approvalOptions.append(deny);
+  }
+  approvalPanel.hidden = false;
+  approvalOptions.querySelector('button')?.focus({ preventScroll: true });
+}
+
+async function resolveApproval(optionId) {
+  if (!pendingApproval) return;
+  const request = pendingApproval;
+  for (const button of approvalOptions.querySelectorAll('button')) button.disabled = true;
+  try {
+    await window.zommi.resolveApproval({
+      approvalId: request.approvalId,
+      optionId,
+      runtimeTargetId: request.runtimeTargetId,
+      sessionId: request.sessionId || request.threadId,
+    });
+    dismissApproval();
+    renderStatus(optionId ? 'Permission response sent' : 'Permission denied');
+  } catch (error) {
+    renderStatus(`Could not answer permission: ${error.message}`, true);
+    for (const button of approvalOptions.querySelectorAll('button')) button.disabled = false;
+  }
+}
+
+function dismissApproval() {
+  pendingApproval = null;
+  approvalPanel.hidden = true;
+  approvalDetail.textContent = '';
+  approvalOptions.replaceChildren();
+}
+
+function approvalRequestText(request) {
+  const toolCall = request?.toolCall || {};
+  const values = [toolCall.title || 'Agent tool'];
+  if (toolCall.rawInput) values.push(typeof toolCall.rawInput === 'string' ? toolCall.rawInput : JSON.stringify(toolCall.rawInput, null, 2));
+  return values.join('\n');
 }
 
 function setSessionSidebarOpen(open) {
@@ -391,8 +1054,21 @@ function scheduleSessionSidebarClose() {
   }, 220);
 }
 
+function renderOrbActivity() {
+  const working = activeTurns.size > 0;
+  compactOrb.classList.toggle('is-working', working);
+  compactOrb.dataset.activity = working ? 'working' : 'idle';
+  compactOrb.setAttribute('aria-label', working ? 'Open Zommi chat — agent working' : 'Open Zommi chat');
+}
+
 function renderSessions() {
+  renderOrbActivity();
   sessionList.replaceChildren();
+  const supportsSessionNavigation = activeCapabilities.has('session.list.v1')
+    || activeCapabilities.has('session.create.v1')
+    || activeCapabilities.has('session.resume.v1');
+  toggleSessions.hidden = !runtimeState.activeTargetId || !supportsSessionNavigation;
+  if (toggleSessions.hidden) setSessionSidebarOpen(false);
   const ordered = [...sessions];
   const runningThreadIds = new Set(activeTurns.keys());
   if (activeThreadId && !ordered.some((session) => session.id === activeThreadId)) {
@@ -421,7 +1097,8 @@ function renderSessions() {
     button.addEventListener('click', () => switchSession(session.id));
     sessionList.append(button);
   }
-  newSession.disabled = sessionBusy;
+  newSession.hidden = !activeCapabilities.has('session.create.v1');
+  newSession.disabled = sessionBusy || runtimeBusy;
 }
 
 function sessionStatusLabel(value) {
@@ -474,7 +1151,7 @@ async function switchSession(threadId) {
 
 function setSessionBusy(busy) {
   sessionBusy = busy;
-  composer.disabled = busy || turnActive;
+  composer.disabled = busy;
   renderSessions();
   renderModelControls();
 }
@@ -484,15 +1161,24 @@ async function sendMessage() {
   const message = composer.value.trim();
   if (!message) return;
   const sendingThreadId = activeThreadId;
-  if (!sendingThreadId) return;
+  if (!sendingThreadId) {
+    renderStatus('No agent session is ready. Choose or refresh an agent, then send again.', true);
+    return;
+  }
   const sendingAttachments = attachments.map(({ snapshot, imageDataUrl }) => ({ snapshot, imageDataUrl }));
   const sendingTokens = attachments.map((item) => item.token);
+  const clientOperationId = `zommi:${crypto.randomUUID()}`;
+  terminalTurnStatus = false;
+  // Acknowledge the local submit before constructing the new transcript and
+  // its accessibility tree. The original text is retained above and restored
+  // if the runtime rejects the turn.
+  composer.value = '';
+  resizeComposer();
   closeModelPanel();
   activeTurns.set(sendingThreadId, 'starting');
   syncActiveTurnState();
   interruptRequested = false;
   renderPrimaryAction();
-  composer.disabled = true;
   renderSessions();
   renderModelControls();
   removeWelcome();
@@ -501,15 +1187,15 @@ async function sendMessage() {
   assistantTextNode = null;
   activityElements = new Map();
   attachments.splice(0);
-  composer.value = '';
   renderAttachments();
-  resizeComposer();
   try {
     const result = await window.zommi.send({
       message,
       attachments: sendingAttachments,
       model: selectedModel,
       effort: selectedEffort,
+      clientOperationId,
+      rendererSubmittedAtEpochMs: Date.now(),
     });
     activeTurns.set(sendingThreadId, result?.turnId || activeTurns.get(sendingThreadId) || 'running');
     updateSessionTitle(sendingThreadId, message);
@@ -537,12 +1223,17 @@ function handlePrimaryAction() {
 }
 
 async function stopTurn() {
-  if (!turnActive || interruptRequested) return;
+  if (!turnActive || interruptRequested || !activeCapabilities.has('turn.interrupt.v1')) return;
   interruptRequested = true;
   renderPrimaryAction();
   renderStatus('stopping…');
   try {
-    await window.zommi.interrupt();
+    const activeTurnId = activeTurns.get(activeThreadId);
+    await window.zommi.interrupt({
+      runtimeTargetId: activeRuntimeTargetId,
+      sessionId: activeThreadId,
+      ...(!['starting', 'running'].includes(String(activeTurnId)) ? { turnId: activeTurnId } : {}),
+    });
   } catch (error) {
     if (!turnActive) return;
     interruptRequested = false;
@@ -552,11 +1243,12 @@ async function stopTurn() {
 }
 
 function renderPrimaryAction() {
+  const canInterrupt = activeCapabilities.has('turn.interrupt.v1');
   sendButton.classList.toggle('is-stop', turnActive);
   sendButton.classList.toggle('stop-requested', interruptRequested);
-  sendButton.disabled = turnActive && interruptRequested;
-  sendButton.setAttribute('aria-label', turnActive ? 'Stop response' : 'Send message');
-  sendButton.title = turnActive ? (interruptRequested ? 'Stopping…' : 'Stop') : 'Send';
+  sendButton.disabled = runtimeBusy || (!turnActive && !chatControlsReady) || (turnActive && (!canInterrupt || interruptRequested));
+  sendButton.setAttribute('aria-label', turnActive ? (canInterrupt ? 'Stop response' : 'Response running') : 'Send message');
+  sendButton.title = turnActive ? (canInterrupt ? (interruptRequested ? 'Stopping…' : 'Stop') : 'This agent cannot be interrupted') : 'Send';
 }
 
 function updateSessionTitle(threadId, message) {
@@ -570,6 +1262,7 @@ function updateSessionTitle(threadId, message) {
 }
 
 function queueStreamUpdate(update) {
+  if (update?.runtimeTargetId && update.runtimeTargetId !== activeRuntimeTargetId) return;
   const threadId = String(update?.threadId || activeThreadId || '');
   if (!threadId) return;
   const wasRunning = activeTurns.has(threadId);
@@ -592,7 +1285,7 @@ function flushStreamUpdates() {
   scrollTranscript();
 }
 
-function renderStreamUpdate(update, { deferScroll = false } = {}) {
+function renderStreamUpdate(update, { deferScroll = false, turnCompleted = false } = {}) {
   removeWelcome();
   const kind = normalizeKind(update.kind);
   const lifecycle = normalizeLifecycle(update.lifecycle);
@@ -601,7 +1294,7 @@ function renderStreamUpdate(update, { deferScroll = false } = {}) {
     if (!assistantElement) {
       const row = document.createElement('article');
       row.className = 'message-row assistant';
-      row.setAttribute('aria-label', `Codex response turn ${turnNumber}`);
+      row.setAttribute('aria-label', `${activeRuntimeName} response turn ${turnNumber}`);
       const avatar = document.createElement('span');
       avatar.className = 'assistant-mark';
       avatar.setAttribute('aria-hidden', 'true');
@@ -613,7 +1306,7 @@ function renderStreamUpdate(update, { deferScroll = false } = {}) {
       row.append(avatar, assistantElement);
       currentTurnBody.append(row);
     }
-    if (update.text) assistantTextNode.data += update.text;
+    if (update.text) assistantTextNode.data = update.replace ? update.text : `${assistantTextNode.data}${update.text}`;
     if (!deferScroll) scrollTranscript();
     return;
   }
@@ -624,7 +1317,7 @@ function renderStreamUpdate(update, { deferScroll = false } = {}) {
     activityElements.set(key, activity);
     currentTurnBody.append(activity.element);
   }
-  updateActivity(activity, update, lifecycle);
+  updateActivity(activity, update, lifecycle, { turnCompleted });
   if (!deferScroll) scrollTranscript();
 }
 
@@ -632,7 +1325,6 @@ function createActivity(kind, title) {
   const element = document.createElement('details');
   element.className = `activity-card ${kind}`;
   element.setAttribute('aria-label', `${kind === 'thinking' ? 'Thinking' : title || 'Activity'} activity`);
-  element.open = true;
   const summary = document.createElement('summary');
   const icon = document.createElement('span');
   icon.className = 'activity-icon';
@@ -650,10 +1342,32 @@ function createActivity(kind, title) {
   const content = document.createElement('pre');
   content.className = 'activity-content';
   element.append(summary, content);
-  return { element, subtitle, state, content, text: '', hasText: false, sourceTexts: new Map() };
+  const activity = {
+    element,
+    subtitle,
+    state,
+    content,
+    kind,
+    text: '',
+    hasText: false,
+    pointerInside: false,
+    userControlled: false,
+    sourceTexts: new Map(),
+  };
+  element.open = true;
+  summary.addEventListener('click', () => {
+    activity.userControlled = true;
+    if (!element.open) {
+      autoFollow = false;
+      updateLatestButton();
+    }
+  });
+  element.addEventListener('pointerenter', () => { activity.pointerInside = true; });
+  element.addEventListener('pointerleave', () => { activity.pointerInside = false; });
+  return activity;
 }
 
-function updateActivity(activity, update, lifecycle) {
+function updateActivity(activity, update, lifecycle, { turnCompleted = false } = {}) {
   const text = String(update.text || '');
   const kind = normalizeKind(update.kind);
   const sourceId = String(update.itemId || `${kind}:${update.title || ''}`);
@@ -679,12 +1393,17 @@ function updateActivity(activity, update, lifecycle) {
   if (lifecycle === 'completed') {
     activity.element.classList.add('completed');
     setActivityState(activity.state, true);
-    activity.element.open = false;
   } else {
     activity.element.classList.remove('completed');
-    activity.element.open = true;
     setActivityState(activity.state, false);
   }
+  activity.element.open = activityOpenState({
+    currentOpen: activity.element.open,
+    userControlled: activity.userControlled,
+    kind: activity.kind,
+    lifecycle,
+    turnCompleted,
+  });
 }
 
 function setActivityState(element, completed) {
@@ -775,6 +1494,7 @@ function appendError(message) {
 }
 
 function completeTurn(completion) {
+  if (completion?.runtimeTargetId && completion.runtimeTargetId !== activeRuntimeTargetId) return;
   const threadId = typeof completion === 'object' && completion
     ? String(completion.threadId || activeThreadId || '')
     : String(activeThreadId || '');
@@ -786,13 +1506,21 @@ function completeTurn(completion) {
     return;
   }
   flushStreamUpdates();
+  terminalTurnStatus = true;
   syncActiveTurnState();
   interruptRequested = false;
   for (const activity of activityElements.values()) {
-    if (activity.element.classList.contains('completed')) continue;
-    activity.element.classList.add('completed');
-    setActivityState(activity.state, true);
-    activity.element.open = false;
+    if (!activity.element.classList.contains('completed')) {
+      activity.element.classList.add('completed');
+      setActivityState(activity.state, true);
+    }
+    activity.element.open = activityOpenState({
+      currentOpen: activity.element.open,
+      userControlled: activity.userControlled || activity.pointerInside || activity.element.matches(':focus-within'),
+      kind: activity.kind,
+      lifecycle: 'completed',
+      turnCompleted: true,
+    });
   }
   renderPrimaryAction();
   composer.disabled = sessionBusy;
@@ -808,7 +1536,7 @@ function completeTurn(completion) {
 function renderStatus(message, warning = false) {
   status.textContent = message;
   status.classList.toggle('warning', Boolean(warning));
-  status.setAttribute('aria-label', `Codex status: ${message}`);
+  status.setAttribute('aria-label', `Agent status: ${message}`);
 }
 
 function resizeComposer() {
@@ -839,6 +1567,11 @@ function handleTranscriptWheel(event) {
 }
 
 function scrollTranscript({ force = false } = {}) {
+  if (!force && isReadingExpandedThinking()) {
+    autoFollow = false;
+    updateLatestButton();
+    return;
+  }
   if (!force && !autoFollow) {
     updateLatestButton();
     return;
@@ -851,6 +1584,12 @@ function scrollTranscript({ force = false } = {}) {
     autoFollow = isNearBottom(transcript);
     updateLatestButton();
   });
+}
+
+function isReadingExpandedThinking() {
+  return [...activityElements.values()].some((activity) => activity.kind === 'thinking'
+    && activity.element.open
+    && (activity.userControlled || activity.pointerInside || activity.element.matches(':focus-within')));
 }
 
 function updateLatestButton() {
@@ -891,7 +1630,8 @@ function renderHistoryRange(start, end, parent) {
     assistantTextNode = null;
     activityElements = new Map();
     beginTurn(userText || 'Continue', [], { number: index + 1, parent, scroll: false });
-    for (const item of items) renderHistoryItem(item, { deferScroll: true });
+    const turnCompleted = activeTurns.get(activeThreadId) !== turn?.id;
+    for (const item of items) renderHistoryItem(item, { deferScroll: true, turnCompleted });
   }
 }
 
@@ -924,28 +1664,28 @@ function displayUserItem(item) {
   return extractDisplayUserText(text);
 }
 
-function renderHistoryItem(item, { deferScroll = false } = {}) {
+function renderHistoryItem(item, { deferScroll = false, turnCompleted = true } = {}) {
   if (!item || item.type === 'userMessage') return;
   const lifecycle = isCompletedHistoryItem(item) ? 'completed' : 'delta';
   if (item.type === 'agentMessage') {
     if (item.phase === 'commentary') {
-      renderStreamUpdate({ kind: 'thinking', lifecycle, title: 'Thinking', text: item.text || '', itemId: item.id, status: item.status }, { deferScroll });
+      renderStreamUpdate({ kind: 'thinking', lifecycle, title: 'Thinking', text: item.text || '', itemId: item.id, status: item.status }, { deferScroll, turnCompleted });
     } else {
-      renderStreamUpdate({ kind: 'assistant', lifecycle, title: 'Codex', text: item.text || '', itemId: item.id }, { deferScroll });
+      renderStreamUpdate({ kind: 'assistant', lifecycle, title: activeRuntimeName, text: item.text || '', itemId: item.id }, { deferScroll, turnCompleted });
     }
     return;
   }
   if (item.type === 'reasoning') {
     const text = mergeDistinctTextSections([...(item.summary || []), ...(item.content || [])]);
-    renderStreamUpdate({ kind: 'thinking', lifecycle, title: 'Thinking', text, itemId: item.id, status: item.status }, { deferScroll });
+    renderStreamUpdate({ kind: 'thinking', lifecycle, title: 'Thinking', text, itemId: item.id, status: item.status }, { deferScroll, turnCompleted });
     return;
   }
   if (item.type === 'plan') {
-    renderStreamUpdate({ kind: 'plan', lifecycle, title: 'Plan', text: item.text || '', itemId: item.id, status: item.status }, { deferScroll });
+    renderStreamUpdate({ kind: 'plan', lifecycle, title: 'Plan', text: item.text || '', itemId: item.id, status: item.status }, { deferScroll, turnCompleted });
     return;
   }
   const history = historyTool(item);
-  if (history) renderStreamUpdate({ ...history, lifecycle, itemId: item.id, status: item.status || 'done' }, { deferScroll });
+  if (history) renderStreamUpdate({ ...history, lifecycle, itemId: item.id, status: item.status || 'done' }, { deferScroll, turnCompleted });
 }
 
 function isCompletedHistoryItem(item) {

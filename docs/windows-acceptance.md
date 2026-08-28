@@ -12,26 +12,42 @@ SHA-256, browser version, and any failed check.
 1. Extract the complete `zommi-win-x64.zip` into a local Windows directory.
 2. Verify the root Electron `Zommi.exe` and
    `resources\native\Zommi.exe` against `SHA256SUMS.txt`.
-3. Start the root `Zommi.exe`. It should remain tray-resident until invoked.
+3. Start the root `Zommi.exe`. It should show a small orb centered just above
+   the taskbar and also remain available from the tray.
 4. Confirm Codex CLI is installed, signed in, and available in the default WSL
    distribution.
 
 ## Structured Alt+A context
 
 1. Open a browser page with selectable text and a semantic table or list.
-2. Select a distinctive text fragment, place the pointer over a named control,
+2. Select a distinctive text fragment or exposed grid range, place the pointer over a named control,
    and press **Alt+A**.
-3. Verify the rounded translucent Electron window opens beside, not under, the
-   unchanged pointer and focuses the composer.
+3. Verify the rounded translucent Electron window expands at its fixed
+   bottom-center anchor, does not move beside the pointer, and focuses the
+   composer.
 4. Verify a compact host token is added. The composer must not contain the raw
    page text and Alt+A must not add an image.
-5. Hover the token. Verify `PRIMARY SELECTION` contains the selected text and
-   `Mouse pointer` identifies the hovered control separately.
+5. Hover the token. Verify `PRIMARY SURFACE SELECTION` contains the selected
+   text/range before `Mouse pointer`, which identifies the hovered control
+   separately.
 6. Move the pointer into the preview and scroll it. The preview must stay open,
    its content must move, and no scrollbar should be visible.
 7. For a semantic table, inspect the preview JSON and verify it preserves the
    provider's nested roles/coordinates. Do not accept inferred Markdown or a
    model-constructed table as capture proof.
+8. In PowerPoint, select one text box and then multiple shapes. For each Alt+A
+   capture, verify the preview identifies the active slide and selected shape
+   count, names, text where present, and screen-space bounds. This requires a
+   real unlocked Office session; source/build checks do not prove it.
+9. Move the pointer away from the chat. Verify it smoothly returns to the orb
+   after a short delay. Hovering the expanded panel must not change its
+   translucency.
+
+The packaged runtime enforces a 1,500 ms budget from Alt+A to a visible context
+token for both cold and warm capture. The response walkthrough enforces 1,000
+ms for local send acceptance, 10,000 ms to first visible agent output in the
+prestarted runtime, and 30,000 ms for a short exact response. Report the raw
+measurements; external model latency is not evidence of local capture speed.
 
 ## Multiple contexts and explicit images
 
@@ -39,6 +55,7 @@ SHA-256, browser version, and any failed check.
    accumulated in the same composer.
 2. Press **Alt+Shift+A**, drag a region, and release. Verify exactly one image
    token is appended and its hover preview shows the selected pixels.
+   Alt+A alone must never append image data, including on ambiguous canvases.
 3. Remove a token and verify it no longer participates in the next turn.
 
 ## Codex streaming

@@ -26,8 +26,6 @@ if (-not $SkipPublish) {
             --configuration Release `
             --runtime $Runtime `
             --self-contained true `
-            -p:PublishSingleFile=true `
-            -p:IncludeNativeLibrariesForSelfExtract=true `
             --artifacts-path $dotnetArtifactsDirectory `
             --output $nativeOutputDirectory
         if ($LASTEXITCODE -ne 0) {
@@ -38,8 +36,6 @@ if (-not $SkipPublish) {
             --configuration Release `
             --runtime $Runtime `
             --self-contained true `
-            -p:PublishSingleFile=true `
-            -p:IncludeNativeLibrariesForSelfExtract=true `
             --artifacts-path $dotnetArtifactsDirectory `
             --output $nativeOutputDirectory
         if ($LASTEXITCODE -ne 0) {
@@ -117,16 +113,54 @@ $executablePath = Join-Path $outputDirectory 'Zommi.exe'
 $nativeHostPath = Join-Path $outputDirectory 'resources/native/Zommi.exe'
 $hookExecutablePath = Join-Path $outputDirectory 'resources/native/Zommi.Hook.exe'
 $codexBridgePath = Join-Path $outputDirectory 'resources/app/codex-bridge.mjs'
+$runtimeCatalogPath = Join-Path $outputDirectory 'resources/app/runtime-catalog.mjs'
+$runtimeDiscoveryPath = Join-Path $outputDirectory 'resources/app/runtime-discovery.mjs'
+$runtimeSettingsPath = Join-Path $outputDirectory 'resources/app/runtime-settings.mjs'
+$runtimeBrokerPath = Join-Path $outputDirectory 'resources/app/runtime-broker.mjs'
+$brokerProtocolPath = Join-Path $outputDirectory 'resources/app/broker-protocol.mjs'
+$contextHandoffPath = Join-Path $outputDirectory 'resources/app/context-handoff.mjs'
+$protocolFramingPath = Join-Path $outputDirectory 'resources/app/protocol-framing.mjs'
+$adapterDiagnosticsPath = Join-Path $outputDirectory 'resources/app/adapter-diagnostics.mjs'
+$transportMetricsPath = Join-Path $outputDirectory 'resources/app/transport-metrics.mjs'
+$hermesGatewayAdapterPath = Join-Path $outputDirectory 'resources/app/hermes-gateway-adapter.mjs'
+$openClawGatewayAdapterPath = Join-Path $outputDirectory 'resources/app/openclaw-gateway-adapter.mjs'
+$ptyCompatibilityAdapterPath = Join-Path $outputDirectory 'resources/app/pty-compatibility-adapter.mjs'
+$ptyProfilesPath = Join-Path $outputDirectory 'resources/app/pty-profiles.mjs'
+$acpAdapterPath = Join-Path $outputDirectory 'resources/app/acp-adapter.mjs'
+$piRpcAdapterPath = Join-Path $outputDirectory 'resources/app/pi-rpc-adapter.mjs'
 $electronMainPath = Join-Path $outputDirectory 'resources/app/main.mjs'
+$preloadPath = Join-Path $outputDirectory 'resources/app/preload.cjs'
+$windowLayoutPath = Join-Path $outputDirectory 'resources/app/window-layout.mjs'
+$rendererHtmlPath = Join-Path $outputDirectory 'resources/app/renderer/index.html'
 $rendererPath = Join-Path $outputDirectory 'resources/app/renderer/renderer.mjs'
+$rendererStylesPath = Join-Path $outputDirectory 'resources/app/renderer/styles.css'
 $wslHookPath = Join-Path $outputDirectory 'Zommi.WslHook.ps1'
 $hashPath = Join-Path $outputDirectory 'SHA256SUMS.txt'
 if (-not (Test-Path -LiteralPath $executablePath) -or
     -not (Test-Path -LiteralPath $nativeHostPath) -or
     -not (Test-Path -LiteralPath $hookExecutablePath) -or
     -not (Test-Path -LiteralPath $codexBridgePath) -or
+    -not (Test-Path -LiteralPath $runtimeCatalogPath) -or
+    -not (Test-Path -LiteralPath $runtimeDiscoveryPath) -or
+    -not (Test-Path -LiteralPath $runtimeSettingsPath) -or
+    -not (Test-Path -LiteralPath $runtimeBrokerPath) -or
+    -not (Test-Path -LiteralPath $brokerProtocolPath) -or
+    -not (Test-Path -LiteralPath $contextHandoffPath) -or
+    -not (Test-Path -LiteralPath $protocolFramingPath) -or
+    -not (Test-Path -LiteralPath $adapterDiagnosticsPath) -or
+    -not (Test-Path -LiteralPath $transportMetricsPath) -or
+    -not (Test-Path -LiteralPath $hermesGatewayAdapterPath) -or
+    -not (Test-Path -LiteralPath $openClawGatewayAdapterPath) -or
+    -not (Test-Path -LiteralPath $ptyCompatibilityAdapterPath) -or
+    -not (Test-Path -LiteralPath $ptyProfilesPath) -or
+    -not (Test-Path -LiteralPath $acpAdapterPath) -or
+    -not (Test-Path -LiteralPath $piRpcAdapterPath) -or
     -not (Test-Path -LiteralPath $electronMainPath) -or
+    -not (Test-Path -LiteralPath $preloadPath) -or
+    -not (Test-Path -LiteralPath $windowLayoutPath) -or
+    -not (Test-Path -LiteralPath $rendererHtmlPath) -or
     -not (Test-Path -LiteralPath $rendererPath) -or
+    -not (Test-Path -LiteralPath $rendererStylesPath) -or
     -not (Test-Path -LiteralPath $wslHookPath)) {
     throw "The package is incomplete; required runtime files are missing from $outputDirectory."
 }
@@ -134,16 +168,54 @@ $hash = (Get-FileHash -Algorithm SHA256 $executablePath).Hash.ToLowerInvariant()
 $nativeHostHash = (Get-FileHash -Algorithm SHA256 $nativeHostPath).Hash.ToLowerInvariant()
 $hookHash = (Get-FileHash -Algorithm SHA256 $hookExecutablePath).Hash.ToLowerInvariant()
 $codexBridgeHash = (Get-FileHash -Algorithm SHA256 $codexBridgePath).Hash.ToLowerInvariant()
+$runtimeCatalogHash = (Get-FileHash -Algorithm SHA256 $runtimeCatalogPath).Hash.ToLowerInvariant()
+$runtimeDiscoveryHash = (Get-FileHash -Algorithm SHA256 $runtimeDiscoveryPath).Hash.ToLowerInvariant()
+$runtimeSettingsHash = (Get-FileHash -Algorithm SHA256 $runtimeSettingsPath).Hash.ToLowerInvariant()
+$runtimeBrokerHash = (Get-FileHash -Algorithm SHA256 $runtimeBrokerPath).Hash.ToLowerInvariant()
+$brokerProtocolHash = (Get-FileHash -Algorithm SHA256 $brokerProtocolPath).Hash.ToLowerInvariant()
+$contextHandoffHash = (Get-FileHash -Algorithm SHA256 $contextHandoffPath).Hash.ToLowerInvariant()
+$protocolFramingHash = (Get-FileHash -Algorithm SHA256 $protocolFramingPath).Hash.ToLowerInvariant()
+$adapterDiagnosticsHash = (Get-FileHash -Algorithm SHA256 $adapterDiagnosticsPath).Hash.ToLowerInvariant()
+$transportMetricsHash = (Get-FileHash -Algorithm SHA256 $transportMetricsPath).Hash.ToLowerInvariant()
+$hermesGatewayAdapterHash = (Get-FileHash -Algorithm SHA256 $hermesGatewayAdapterPath).Hash.ToLowerInvariant()
+$openClawGatewayAdapterHash = (Get-FileHash -Algorithm SHA256 $openClawGatewayAdapterPath).Hash.ToLowerInvariant()
+$ptyCompatibilityAdapterHash = (Get-FileHash -Algorithm SHA256 $ptyCompatibilityAdapterPath).Hash.ToLowerInvariant()
+$ptyProfilesHash = (Get-FileHash -Algorithm SHA256 $ptyProfilesPath).Hash.ToLowerInvariant()
+$acpAdapterHash = (Get-FileHash -Algorithm SHA256 $acpAdapterPath).Hash.ToLowerInvariant()
+$piRpcAdapterHash = (Get-FileHash -Algorithm SHA256 $piRpcAdapterPath).Hash.ToLowerInvariant()
 $electronMainHash = (Get-FileHash -Algorithm SHA256 $electronMainPath).Hash.ToLowerInvariant()
+$preloadHash = (Get-FileHash -Algorithm SHA256 $preloadPath).Hash.ToLowerInvariant()
+$windowLayoutHash = (Get-FileHash -Algorithm SHA256 $windowLayoutPath).Hash.ToLowerInvariant()
+$rendererHtmlHash = (Get-FileHash -Algorithm SHA256 $rendererHtmlPath).Hash.ToLowerInvariant()
 $rendererHash = (Get-FileHash -Algorithm SHA256 $rendererPath).Hash.ToLowerInvariant()
+$rendererStylesHash = (Get-FileHash -Algorithm SHA256 $rendererStylesPath).Hash.ToLowerInvariant()
 $wslHookHash = (Get-FileHash -Algorithm SHA256 $wslHookPath).Hash.ToLowerInvariant()
 Set-Content -Path $hashPath -Encoding ascii -Value `
     "$hash  Zommi.exe", `
     "$nativeHostHash  resources/native/Zommi.exe", `
     "$hookHash  resources/native/Zommi.Hook.exe", `
     "$codexBridgeHash  resources/app/codex-bridge.mjs", `
+    "$runtimeCatalogHash  resources/app/runtime-catalog.mjs", `
+    "$runtimeDiscoveryHash  resources/app/runtime-discovery.mjs", `
+    "$runtimeSettingsHash  resources/app/runtime-settings.mjs", `
+    "$runtimeBrokerHash  resources/app/runtime-broker.mjs", `
+    "$brokerProtocolHash  resources/app/broker-protocol.mjs", `
+    "$contextHandoffHash  resources/app/context-handoff.mjs", `
+    "$protocolFramingHash  resources/app/protocol-framing.mjs", `
+    "$adapterDiagnosticsHash  resources/app/adapter-diagnostics.mjs", `
+    "$transportMetricsHash  resources/app/transport-metrics.mjs", `
+    "$hermesGatewayAdapterHash  resources/app/hermes-gateway-adapter.mjs", `
+    "$openClawGatewayAdapterHash  resources/app/openclaw-gateway-adapter.mjs", `
+    "$ptyCompatibilityAdapterHash  resources/app/pty-compatibility-adapter.mjs", `
+    "$ptyProfilesHash  resources/app/pty-profiles.mjs", `
+    "$acpAdapterHash  resources/app/acp-adapter.mjs", `
+    "$piRpcAdapterHash  resources/app/pi-rpc-adapter.mjs", `
     "$electronMainHash  resources/app/main.mjs", `
+    "$preloadHash  resources/app/preload.cjs", `
+    "$windowLayoutHash  resources/app/window-layout.mjs", `
+    "$rendererHtmlHash  resources/app/renderer/index.html", `
     "$rendererHash  resources/app/renderer/renderer.mjs", `
+    "$rendererStylesHash  resources/app/renderer/styles.css", `
     "$wslHookHash  Zommi.WslHook.ps1"
 
 $archivePath = "$outputDirectory.zip"

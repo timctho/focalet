@@ -14,5 +14,9 @@
   "devDependencies": {
     "@electron/get": "4.0.2",
     "electron": "44.0.0"
+  },
+  "dependencies": {
+    "@openclaw/gateway-client": "2026.8.1-beta.3",
+    "@openclaw/gateway-protocol": "2026.8.1-beta.3"
   }
 }

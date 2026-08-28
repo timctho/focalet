@@ -12,12 +12,25 @@ test('Electron startup does not await readiness from top-level module evaluation
   assert.match(main, /void\s+startApplication\(\)\.catch/);
 });
 
+test('application resume triggers TTL-aware runtime rediscovery without blocking capture', async () => {
+  const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
+  const broker = await readFile(join(appDirectory, 'runtime-broker.mjs'), 'utf8');
+  assert.match(main, /powerMonitor\.on\('resume', powerResumeHandler\)/);
+  assert.match(main, /backend\.rediscoverTargets\(\)/);
+  assert.match(broker, /discovery\.discover\(\{ force: false \}\)/);
+});
+
 test('packaged acceptance scripts separate Electron options from application flags', async () => {
   const repositoryRoot = join(appDirectory, '..', '..');
   const uiContract = await readFile(join(repositoryRoot, 'scripts', 'test-windows-ui-contract.ps1'), 'utf8');
   const sendAcceptance = await readFile(join(repositoryRoot, 'scripts', 'test-windows-send-acceptance.ps1'), 'utf8');
+  const runtimeAcceptance = await readFile(join(repositoryRoot, 'scripts', 'test-windows-electron-runtime.ps1'), 'utf8');
   assert.match(uiContract, /'--force-renderer-accessibility',\s*'--',\s*'--acceptance-ui-seeded'/);
-  assert.match(sendAcceptance, /'--',\s*'--no-auto-launch'/);
+  assert.match(sendAcceptance, /'--force-renderer-accessibility'/);
+  assert.doesNotMatch(sendAcceptance, /--no-auto-launch/);
+  assert.match(sendAcceptance, /single-instance activation/);
+  assert.match(runtimeAcceptance, /--user-data-dir=\$zommiProfile/);
+  assert.match(runtimeAcceptance, /zeroConfigCodexDiscovery/);
 });
 
 test('Windows verification and deployment do not inherit Electron host node mode', async () => {
@@ -29,6 +42,16 @@ test('Windows verification and deployment do not inherit Electron host node mode
   }
 });
 
+test('Windows deployment stops the capture host before replacing its package directory', async () => {
+  const repositoryRoot = join(appDirectory, '..', '..');
+  const deploy = await readFile(join(repositoryRoot, 'scripts', 'deploy-windows-downloads.ps1'), 'utf8');
+  assert.match(deploy, /function Get-TargetDirectoryProcesses/);
+  assert.match(deploy, /\.StartsWith\(\s*\$directoryPrefix,\s*\[StringComparison\]::OrdinalIgnoreCase\)/);
+  assert.match(deploy, /\$targetProcesses = @\(Get-TargetDirectoryProcesses \$targetDirectory\)/);
+  assert.match(deploy, /if \(@\(Get-TargetDirectoryProcesses \$targetDirectory\)\.Count -ne 0\)/);
+  assert.match(deploy, /foreach \(\$process in \(Get-TargetDirectoryProcesses \$targetDirectory\)\)/);
+});
+
 test('sandboxed windows use packaged CommonJS preload bridges', async () => {
   const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
   const selector = await readFile(join(appDirectory, 'image-selector.mjs'), 'utf8');
@@ -38,17 +61,36 @@ test('sandboxed windows use packaged CommonJS preload bridges', async () => {
   assert.match(packager, /preload\.cjs/);
 });
 
+test('structured runtime questions cross the main and renderer boundary without losing target identity', async () => {
+  const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
+  const preload = await readFile(join(appDirectory, 'preload.cjs'), 'utf8');
+  const html = await readFile(join(appDirectory, 'renderer', 'index.html'), 'utf8');
+  const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
+  assert.match(main, /backend\.on\('questionRequested'.*question:requested/);
+  assert.match(main, /ipcMain\.handle\('question:resolve'/);
+  assert.match(preload, /resolveQuestion:.*question:resolve/);
+  assert.match(preload, /onQuestionRequested:.*question:requested/);
+  assert.match(html, /id="QuestionPanel"[\s\S]*id="QuestionInput"/);
+  assert.match(html, /id="QuestionSecretInput"[\s\S]*type="password"/);
+  assert.match(renderer, /runtimeTargetId: request\.runtimeTargetId/);
+  assert.match(renderer, /method === 'confirm'[\s\S]*method === 'select'/);
+  assert.match(renderer, /renderStructuredQuestions/);
+  assert.match(renderer, /update\.replace \? update\.text/);
+});
+
 test('Zommi launches Codex without overriding agent tools, providers, or permissions', async () => {
   const portableBridge = await readFile(join(appDirectory, 'codex-bridge.mjs'), 'utf8');
-  const windowsBridge = await readFile(join(appDirectory, '..', 'Zommi.Windows', 'CodexAppServerClient.cs'), 'utf8');
-  for (const source of [portableBridge, windowsBridge]) {
+  const runtimeCatalog = await readFile(join(appDirectory, 'runtime-catalog.mjs'), 'utf8');
+  const runtimeBroker = await readFile(join(appDirectory, 'runtime-broker.mjs'), 'utf8');
+  for (const source of [portableBridge, runtimeCatalog, runtimeBroker]) {
     assert.doesNotMatch(source, /approvalPolicy\s*[:=]\s*['"]never/);
     assert.doesNotMatch(source, /sandbox\s*[:=]\s*['"]read-only/);
     assert.doesNotMatch(source, /mcp_servers\.|model_providers\.|zommiChrome|ChromeDevToolsBrowser/);
   }
-  assert.match(portableBridge, /spawnProcess\(command, \['app-server'\]/);
-  assert.match(windowsBridge, /CODEX_INTERNAL_ORIGINATOR_OVERRIDE=codex_cli_rs exec codex app-server/);
-  assert.match(portableBridge, /CODEX_INTERNAL_ORIGINATOR_OVERRIDE:[\s\S]*codex_cli_rs/);
+  assert.match(runtimeCatalog, /id: 'codex-app-server'[\s\S]*launchArgs: Object\.freeze\(\['app-server'\]\)/);
+  assert.match(runtimeBroker, /commandForTarget\(target, entry\)/);
+  assert.match(portableBridge, /CODEX_INTERNAL_ORIGINATOR_OVERRIDE:[\s\S]*codex_exec/);
+  assert.doesNotMatch(portableBridge, /codex_cli_rs/);
 });
 
 test('Zommi source and packager do not contain a product-owned browser tool runtime', async () => {
@@ -58,9 +100,41 @@ test('Zommi source and packager do not contain a product-owned browser tool runt
   assert.doesNotMatch(packager, /browser-mcp|chrome-devtools-mcp/i);
   assert.doesNotMatch(windowsPackager, /browser-mcp|chrome-devtools-mcp|Zommi\.ChromeMcp/i);
   assert.match(windowsPackager, /resources\/app\/main\.mjs/);
+  assert.match(windowsPackager, /resources\/app\/window-layout\.mjs/);
+  assert.match(windowsPackager, /resources\/app\/renderer\/styles\.css/);
   assert.match(windowsPackager, /resources\/app\/renderer\/renderer\.mjs/);
+  assert.match(packager, /runtime-catalog\.mjs/);
+  assert.match(packager, /runtime-discovery\.mjs/);
+  assert.match(packager, /runtime-settings\.mjs/);
+  assert.match(packager, /runtime-broker\.mjs/);
+  assert.match(packager, /broker-protocol\.mjs/);
+  assert.match(packager, /context-handoff\.mjs/);
+  assert.match(packager, /protocol-framing\.mjs/);
+  assert.match(packager, /adapter-diagnostics\.mjs/);
+  assert.match(packager, /transport-metrics\.mjs/);
+  assert.match(packager, /hermes-gateway-adapter\.mjs/);
+  assert.match(packager, /openclaw-gateway-adapter\.mjs/);
+  assert.match(packager, /pty-compatibility-adapter\.mjs/);
+  assert.match(packager, /pty-profiles\.mjs/);
+  assert.match(packager, /copyRuntimeDependencies/);
+  assert.doesNotMatch(packager, /WSL_DISTRO_NAME|wsl-distro\.txt/);
   assert.match(windowsPackager, /--artifacts-path \$dotnetArtifactsDirectory/);
+  assert.doesNotMatch(windowsPackager, /IncludeNativeLibrariesForSelfExtract=true/);
+  assert.doesNotMatch(windowsPackager, /PublishSingleFile=true/);
   assert.match(windowsPackager, /wsl\.exe -d \$wslDistro -e sh -lc/);
+  assert.match(windowsPackager, /resources\/app\/runtime-catalog\.mjs/);
+  assert.match(windowsPackager, /resources\/app\/runtime-discovery\.mjs/);
+  assert.match(windowsPackager, /resources\/app\/runtime-settings\.mjs/);
+  assert.match(windowsPackager, /resources\/app\/runtime-broker\.mjs/);
+  assert.match(windowsPackager, /resources\/app\/broker-protocol\.mjs/);
+  assert.match(windowsPackager, /resources\/app\/context-handoff\.mjs/);
+  assert.match(windowsPackager, /resources\/app\/protocol-framing\.mjs/);
+  assert.match(windowsPackager, /resources\/app\/adapter-diagnostics\.mjs/);
+  assert.match(windowsPackager, /resources\/app\/transport-metrics\.mjs/);
+  assert.match(windowsPackager, /resources\/app\/hermes-gateway-adapter\.mjs/);
+  assert.match(windowsPackager, /resources\/app\/openclaw-gateway-adapter\.mjs/);
+  assert.match(windowsPackager, /resources\/app\/pty-compatibility-adapter\.mjs/);
+  assert.match(windowsPackager, /resources\/app\/pty-profiles\.mjs/);
   await assert.rejects(access(join(appDirectory, 'browser-mcp', 'package.json')));
   await assert.rejects(access(join(repositoryRoot, 'scripts', 'Zommi.ChromeMcp.sh')));
   await assert.rejects(access(join(appDirectory, '..', 'Zommi.Windows', 'ChromeDevToolsBrowser.cs')));
@@ -68,12 +142,31 @@ test('Zommi source and packager do not contain a product-owned browser tool runt
 
 test('Codex startup timeouts reset the connection and preserve actionable errors', async () => {
   const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
+  const nativeHost = await readFile(join(appDirectory, 'native-host.mjs'), 'utf8');
   const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
-  const windowsBridge = await readFile(join(appDirectory, '..', 'Zommi.Windows', 'CodexAppServerClient.cs'), 'utf8');
-  assert.match(windowsBridge, /StartupRequestTimeout\s*=\s*TimeSpan\.FromSeconds\(120\)/);
-  assert.match(windowsBridge, /ResetConnection\(candidate\)/);
-  assert.match(windowsBridge, /did not respond to '\{method\}'/);
-  assert.match(main, /isWarningStatus\(status\)/);
+  const portableBridge = await readFile(join(appDirectory, 'codex-bridge.mjs'), 'utf8');
+  const runtimeBroker = await readFile(join(appDirectory, 'runtime-broker.mjs'), 'utf8');
+  assert.match(portableBridge, /DEFAULT_REQUEST_TIMEOUT_MS\s*=\s*30_000/);
+  assert.match(portableBridge, /did not respond to '\$\{method\}'/);
+  assert.match(portableBridge, /this\.startPromise = null/);
+  assert.match(runtimeBroker, /classifyRuntimeError\(error\)/);
+  assert.match(runtimeBroker, /discovery\.invalidateTarget\(target\)/);
+  assert.match(nativeHost, /DEFAULT_REQUEST_TIMEOUT_MS\s*=\s*30_000/);
+  assert.match(nativeHost, /did not respond to '\$\{method\}'/);
+  assert.match(main, /runtime-status/);
+  assert.match(main, /chatControlsLeaveLoading/);
+  assert.match(main, /zommi-runtime\.log/);
+  assert.match(main, /writeRuntimeLog\('chat-state'/);
+  assert.match(main, /writeRuntimeLog\('chat-send'/);
+  assert.match(main, /writeRuntimeLog\('turn-completed'/);
+  assert.match(renderer, /modelSummaryLabel\.textContent = chatControlsLoading \? 'Connecting…' : 'Retry'/);
+  const initializeControls = renderer.match(/async function initializeChatControls\(\)[\s\S]*?\n\}/)?.[0] || '';
+  assert.doesNotMatch(initializeControls, /composer\.disabled\s*=\s*true/);
+  assert.doesNotMatch(renderer, /composer\.disabled\s*=\s*(?:true|[^;]*turnActive)/);
+  assert.match(main, /composerEditableWhileStreaming/);
+  assert.match(main, /composerAcceptsDraftWhileStreaming/);
+  assert.match(renderer, /No agent session is ready\. Choose or refresh an agent/);
+  assert.match(renderer, /\\bready\\b/);
   assert.match(renderer, /!status\.classList\.contains\('warning'\)/);
 });
 
@@ -83,9 +176,12 @@ test('light liquid glass adapts to each display and uses inset alpha-antialiased
   assert.match(main, /nativeTheme\.themeSource\s*=\s*'light'/);
   assert.match(main, /useContentSize:\s*true/);
   assert.match(main, /zoomFactor:\s*1/);
-  assert.match(main, /calculateAdaptiveWindowSize\(display\.workArea, expanded\)/);
+  assert.match(main, /calculateAdaptiveWindowSize\(display\.workArea, largePanel\)/);
+  assert.match(main, /calculateAnchoredWindowBounds\(initialDisplay\.workArea, initialSize\)/);
+  assert.match(main, /setIgnoreMouseEvents\(true, \{ forward: true \}\)/);
+  assert.match(main, /calculateAnchoredWindowBounds\(display\.workArea, size\)/);
   assert.match(main, /screen\.on\('display-metrics-changed'/);
-  assert.match(main, /setContentSize\(size\.width, size\.height/);
+  assert.match(main, /mainWindow\.setBounds\(interpolateWindowBounds\(start, target, eased\), false\)/);
   assert.match(main, /roundedCorners:\s*true/);
   assert.match(main, /hasShadow:\s*false/);
   assert.match(main, /backgroundColor:\s*'#00000000'/);
@@ -127,7 +223,6 @@ test('model and session controls use Codex app-server catalogs and resumable thr
   const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
   const styles = await readFile(join(appDirectory, 'renderer', 'styles.css'), 'utf8');
   const portableBridge = await readFile(join(appDirectory, 'codex-bridge.mjs'), 'utf8');
-  const windowsBridge = await readFile(join(appDirectory, '..', 'Zommi.Windows', 'CodexAppServerClient.cs'), 'utf8');
   assert.match(html, /id="SessionSidebar"/);
   assert.match(html, /id="ModelPanel"/);
   assert.match(html, /id="ModelSearch"/);
@@ -142,7 +237,7 @@ test('model and session controls use Codex app-server catalogs and resumable thr
   assert.doesNotMatch(renderer, /sessionBusy \|\| turnActive \|\| threadId === activeThreadId/);
   assert.match(renderer, /model:\s*selectedModel/);
   assert.match(renderer, /effort:\s*selectedEffort/);
-  for (const source of [portableBridge, windowsBridge]) {
+  for (const source of [portableBridge]) {
     assert.match(source, /model\/list/);
     assert.match(source, /thread\/list/);
     assert.match(source, /thread\/resume/);
@@ -152,28 +247,114 @@ test('model and session controls use Codex app-server catalogs and resumable thr
   assert.match(styles, /height:\s*min\(50%, 410px\)/);
 });
 
-test('blank glass regions use native dragging without move-time renderer work', async () => {
+test('zero-config runtime UX exposes discovery, deterministic selection, refresh, and sign-in recovery without a wizard', async () => {
+  const html = await readFile(join(appDirectory, 'renderer', 'index.html'), 'utf8');
+  const preload = await readFile(join(appDirectory, 'preload.cjs'), 'utf8');
+  const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
+  const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
+  for (const id of ['RuntimeSummary', 'RuntimePanel', 'RuntimeList', 'RefreshRuntimes', 'RuntimeSignIn']) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
+  assert.match(preload, /getRuntimeState:[\s\S]*runtime:state/);
+  assert.match(preload, /refreshRuntimes:[\s\S]*runtime:refresh/);
+  assert.match(preload, /selectRuntime:[\s\S]*runtime:select/);
+  assert.match(preload, /signInRuntime:[\s\S]*runtime:sign-in/);
+  assert.match(preload, /saveRuntimeOverride:[\s\S]*runtime:override-save/);
+  assert.match(preload, /removeRuntimeOverride:[\s\S]*runtime:override-remove/);
+  assert.match(preload, /probeTransport:[\s\S]*runtime:transport-probe/);
+  assert.match(renderer, /window\.zommi\.getRuntimeState\(\)/);
+  assert.match(renderer, /window\.zommi\.selectRuntime\(targetId\)/);
+  assert.match(renderer, /target\.classification === 'compatible'/);
+  assert.match(renderer, /activeCapabilities\.has\('model\.select\.v1'\)/);
+  assert.match(renderer, /No supported agent found\. Capture remains available/);
+  assert.match(renderer, /saveRuntimeTargetOverride/);
+  assert.match(renderer, /removeRuntimeTargetOverride/);
+  assert.match(main, /acceptance-transport-evidence/);
+  assert.match(main, /rendererToProtocolWriteMilliseconds/);
+  assert.doesNotMatch(`${html}\n${renderer}`, /setup wizard|first[- ]run wizard/i);
+  assert.match(main, /new RuntimeDiscovery/);
+  assert.match(main, /new RuntimeBroker/);
+  assert.match(main, /runtime-preferences\.json/);
+});
+
+test('Windows capture binds the exact shortcut-time pointer before showing the panel', async () => {
+  const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
+  assert.match(main, /globalShortcut\.register\('Alt\+A', \(\) => captureContext\(\{ point: screen\.getCursorScreenPoint\(\) \}\)\)/);
+  assert.match(main, /async function captureContext\(\{ point = screen\.getCursorScreenPoint\(\) \} = \{\}\)/);
+  assert.match(main, /captureHost\.request\('capture', point \? \{ point \} : \{\}\)/);
+  assert.match(main, /captureHost\.start\(\)/);
+  assert.match(main, /captureHost\.request\('ping'\)/);
+});
+
+test('fixed translucent panel has reliable native drag rails without hover opacity changes', async () => {
+  const html = await readFile(join(appDirectory, 'renderer', 'index.html'), 'utf8');
   const styles = await readFile(join(appDirectory, 'renderer', 'styles.css'), 'utf8');
   const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
   const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
   const glassRule = styles.match(/\.glass\s*\{([^}]*)\}/)?.[1];
   assert.ok(glassRule, 'The root glass rule is missing.');
   assert.doesNotMatch(glassRule, /-webkit-app-region/);
-  assert.match(styles, /\.titlebar\s*\{[\s\S]*?-webkit-app-region:\s*drag/);
-  assert.match(styles, /\.background-drag\s*\{[\s\S]*?inset:\s*0;[\s\S]*?-webkit-app-region:\s*drag/);
-  assert.doesNotMatch(styles, /\.edge-drag\s*\{/);
+  assert.match(styles, /\.background-drag\s*\{[\s\S]*-webkit-app-region:\s*drag/);
+  assert.match(styles, /\.titlebar\s*\{[\s\S]*position:\s*absolute/);
+  assert.match(html, /class="panel-shell"/);
+  assert.match(html, /id="ZommiOrb"/);
+  assert.match(styles, /\.edge-drag\s*\{[\s\S]*-webkit-app-region:\s*drag/);
+  assert.match(styles, /\.edge-drag-right\s*\{[^}]*width:\s*14px/);
+  assert.match(styles, /\.edge-drag-left\s*\{[^}]*width:\s*14px/);
+  assert.match(styles, /\.edge-drag-top\s*\{[\s\S]*-webkit-app-region:\s*no-drag/);
   assert.doesNotMatch(styles, /\.transcript::after/);
   for (const selector of ['.welcome', '.conversation-turn', '.turn-body', '.message-row']) {
     const escaped = selector.replace('.', '\\.');
     const rule = styles.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))?.[1] || '';
     assert.doesNotMatch(rule, /-webkit-app-region:\s*drag/, `${selector} must remain interactive.`);
   }
-  assert.match(styles, /transition:\s*opacity 460ms cubic-bezier/);
-  assert.match(styles, /\.glass:hover::after,\s*\.glass\.pointer-over::after\s*\{\s*opacity:\s*0\.58/);
-  assert.match(renderer, /glass\.classList\.toggle\('pointer-over', pointerOver\)/);
+  assert.match(styles, /\.panel-surface::after\s*\{[\s\S]*?opacity:\s*0\.24/);
+  assert.doesNotMatch(styles, /\.(?:glass|panel-surface):hover::(?:before|after)/);
+  assert.match(main, /setInterval\(\(\) => \{[\s\S]*screen\.getCursorScreenPoint\(\)[\s\S]*setWindowHovered\(inside\)[\s\S]*\}, 100\)/);
+  assert.match(main, /send\('window:bounds-settled', \{ open: panelOpen \}\)/);
+  assert.match(main, /ipcMain\.on\('window:drag-start'/);
+  assert.match(renderer, /requestAnimationFrame\(\(\) => \{[\s\S]*window\.zommi\.moveWindowDrag/);
+  assert.doesNotMatch(renderer, /window\.zommi\.setWindowHovered\(pointerOver\)/);
+  assert.match(renderer, /glass\.classList\.toggle\('is-compact', !open\)/);
   assert.doesNotMatch(styles, /window-moving/);
-  assert.doesNotMatch(renderer, /updateBackgroundDragSurface|drag-ready/);
+  assert.doesNotMatch(renderer, /updateBackgroundDragSurface/);
   assert.doesNotMatch(main, /mainWindow\.on\('will-move'|mainWindow\.on\('move'/);
+});
+
+test('Alt+A expands the anchored panel without cursor-relative window movement', async () => {
+  const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
+  assert.match(main, /showWindow\(\{ openPanel: true, focusComposer: true \}\)/);
+  const showWindowBody = main.match(/function showWindow\([^]*?\n\}/)?.[0] || '';
+  assert.doesNotMatch(showWindowBody, /getCursorScreenPoint|setPosition/);
+  assert.match(main, /HOVER_COLLAPSE_DELAY_MS\s*=\s*500/);
+  assert.match(main, /setTimeout\(\(\) => setPanelOpen\(false\), HOVER_COLLAPSE_DELAY_MS\)/);
+  assert.match(main, /const hitBounds = panelOpen \? bounds : compactHitBounds\(bounds\)/);
+});
+
+test('compact orb is a small antialiased vector and panel morphs from its bottom-center anchor', async () => {
+  const html = await readFile(join(appDirectory, 'renderer', 'index.html'), 'utf8');
+  const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
+  const styles = await readFile(join(appDirectory, 'renderer', 'styles.css'), 'utf8');
+  const layout = await readFile(join(appDirectory, 'window-layout.mjs'), 'utf8');
+  assert.match(html, /class="panel-surface"/);
+  assert.match(html, /class="orb-art"[\s\S]*linearGradient id="orb-spectrum"[\s\S]*radialGradient id="orb-glass"/);
+  assert.match(html, /class="orb-nebula orb-nebula-a"[\s\S]*class="orb-nebula orb-nebula-b"/);
+  assert.match(html, /filter id="orb-nebula-soft"[\s\S]*feGaussianBlur/);
+  assert.doesNotMatch(html, /M22 13\.1c\.72 5\.25/);
+  assert.doesNotMatch(html, /orb-aura/);
+  assert.match(styles, /\.compact-orb\s*\{[\s\S]*?width:\s*42px;[\s\S]*?height:\s*42px/);
+  assert.match(styles, /\.compact-orb \.orb-art\s*\{[\s\S]*?shape-rendering:\s*geometricPrecision/);
+  assert.doesNotMatch(styles, /\.compact-orb[^{]*\{[^}]*filter:/);
+  assert.match(styles, /\.compact-orb\s*\{[\s\S]*?box-shadow:\s*none/);
+  assert.match(styles, /\.panel-shell\s*\{[\s\S]*?transform-origin:\s*50% 100%/);
+  assert.match(styles, /\.glass\.is-compact \.panel-shell\s*\{[\s\S]*?scale\(var\(--orb-scale-x\), var\(--orb-scale-y\)\)/);
+  assert.match(renderer, /orbSize \/ panelWidth/);
+  assert.match(renderer, /const working = activeTurns\.size > 0/);
+  assert.match(renderer, /compactOrb\.classList\.toggle\('is-working', working\)/);
+  assert.match(styles, /\.compact-orb\.is-working::before\s*\{[^}]*animation:\s*orb-halo-tempo 4\.55s/);
+  assert.match(styles, /@keyframes orb-nebula-drift-a/);
+  assert.match(renderer, /new ResizeObserver\(syncPanelMorphGeometry\)\.observe\(glass\)/);
+  assert.match(layout, /COMPACT_WINDOW_SIZE\s*=\s*56/);
 });
 
 test('stream updates are frame-batched and thinking changes one status icon in place', async () => {
@@ -185,6 +366,8 @@ test('stream updates are frame-batched and thinking changes one status icon in p
   assert.match(renderer, /activityKey\(kind, update\.itemId, update\.title\)/);
   assert.match(renderer, /setActivityState\(activity\.state, true\)/);
   assert.match(renderer, /replaceChildren\(createUiIcon\(completed \? 'check' : 'spinner'\)\)/);
+  assert.match(renderer, /activityOpenState\(\{/);
+  assert.match(renderer, /isReadingExpandedThinking\(\)/);
   assert.doesNotMatch(renderer, /activity\.state\.textContent\s*=/);
 });
 
@@ -203,14 +386,12 @@ test('streaming send control becomes a stop control backed by Codex turn interru
   const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
   const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
   const portableBridge = await readFile(join(appDirectory, 'codex-bridge.mjs'), 'utf8');
-  const windowsBridge = await readFile(join(appDirectory, '..', 'Zommi.Windows', 'CodexAppServerClient.cs'), 'utf8');
   assert.match(html, /class="ui-icon stop-icon"/);
-  assert.match(preload, /interrupt:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('chat:interrupt'\)/);
-  assert.match(renderer, /window\.zommi\.interrupt\(\)/);
-  assert.match(renderer, /setAttribute\('aria-label', turnActive \? 'Stop response' : 'Send message'\)/);
+  assert.match(preload, /interrupt:\s*\(identity\)\s*=>\s*ipcRenderer\.invoke\('chat:interrupt', identity\)/);
+  assert.match(renderer, /window\.zommi\.interrupt\(\{[\s\S]*runtimeTargetId:\s*activeRuntimeTargetId,[\s\S]*sessionId:\s*activeThreadId,[\s\S]*turnId:\s*activeTurnId/);
+  assert.match(renderer, /canInterrupt \? 'Stop response' : 'Response running'/);
   assert.match(main, /ipcMain\.handle\('chat:interrupt'/);
   assert.match(portableBridge, /#request\('turn\/interrupt', \{ threadId, turnId \}\)/);
-  assert.match(windowsBridge, /"turn\/interrupt"[\s\S]*new \{ threadId, turnId \}/);
 });
 
 test('streaming preserves manual scroll position and exposes a latest-message control', async () => {
@@ -232,4 +413,19 @@ test('Alt+Shift+A combines the selected image with shortcut-time pointer context
   assert.match(main, /snapshot:\s*pointerContext\?\.snapshot \|\| null/);
   assert.match(renderer, /attachment\.snapshot && !attachment\.imageDataUrl/);
   assert.match(renderer, /previewText\.hidden = !attachment\.previewText/);
+});
+
+test('Windows native host is capture-only and cannot queue capture behind an agent runtime', async () => {
+  const repositoryRoot = join(appDirectory, '..', '..');
+  const nativeHost = await readFile(join(repositoryRoot, 'src/Zommi.Windows/ElectronNativeHost.cs'), 'utf8');
+  const nativeProgram = await readFile(join(repositoryRoot, 'src/Zommi.Windows/Program.cs'), 'utf8');
+  const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
+  assert.match(nativeHost, /case "capture"/);
+  assert.match(nativeHost, /case "selectImage"/);
+  assert.doesNotMatch(nativeHost, /CodexAppServerClient|startCodex|startTurn|interruptTurn|getChatState/);
+  assert.doesNotMatch(nativeProgram, /CodexAppServerClient|thread\/start|turn\/start|MainForm/);
+  await assert.rejects(access(join(repositoryRoot, 'src/Zommi.Windows/CodexAppServerClient.cs')));
+  await assert.rejects(access(join(repositoryRoot, 'src/Zommi.Core/CodexStreamProtocol.cs')));
+  assert.match(main, /captureHost\.request\('capture', point \? \{ point \} : \{\}\)/);
+  assert.match(main, /backend\.startTurn/);
 });

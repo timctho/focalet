@@ -70,3 +70,10 @@ export function activityKey(kind, itemId, title) {
     ? 'turn-thinking'
     : itemId || `${kind}:${title}`;
 }
+
+export function activityOpenState({ currentOpen, userControlled, kind, lifecycle, turnCompleted = false }) {
+  if (userControlled) return Boolean(currentOpen);
+  if (turnCompleted) return false;
+  if (String(kind || '').toLowerCase() === 'thinking') return true;
+  return String(lifecycle || '').toLowerCase() !== 'completed';
+}

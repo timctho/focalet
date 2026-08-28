@@ -7,7 +7,13 @@ param(
 
     [switch] $RequireChromeTool,
 
-    [switch] $InterruptStreaming
+    [switch] $InterruptStreaming,
+
+    [int] $MaxSendAcceptedMilliseconds = 1000,
+
+    [int] $MaxFirstAgentOutputMilliseconds = 15000,
+
+    [int] $MaxTurnCompletedMilliseconds = 30000
 )
 
 Set-StrictMode -Version Latest
@@ -77,6 +83,15 @@ function Get-ElementText {
 function Invoke-PhysicalClick {
     param([System.Windows.Automation.AutomationElement] $Element)
 
+    $invokePattern = $null
+    if ($Element.TryGetCurrentPattern(
+        [System.Windows.Automation.InvokePattern]::Pattern,
+        [ref] $invokePattern)) {
+        ([System.Windows.Automation.InvokePattern] $invokePattern).Invoke()
+        Start-Sleep -Milliseconds 100
+        return
+    }
+
     $bounds = $Element.Current.BoundingRectangle
     Assert-True ($bounds.Width -gt 0 -and $bounds.Height -gt 0) 'Cannot click an element without visible bounds.'
     [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(
@@ -125,7 +140,7 @@ function Find-ZommiWindow {
     foreach ($window in $windows) {
         try {
             if ($processIds -contains $window.Current.ProcessId -and
-                $window.Current.Name -like 'Zommi*floating Codex chat' -and
+                $window.Current.Name -like 'Zommi*floating*chat' -and
                 -not $window.Current.IsOffscreen) {
                 return $window
             }
@@ -188,7 +203,7 @@ else {
 Start-Process `
     -FilePath $resolvedExecutable `
     -WorkingDirectory (Split-Path -Parent $resolvedExecutable) `
-    -ArgumentList @('--', '--no-auto-launch') | Out-Null
+    -ArgumentList @('--force-renderer-accessibility') | Out-Null
 $deadline = [DateTime]::UtcNow.AddSeconds(15)
 $window = $null
 while ($null -eq $window -and [DateTime]::UtcNow -lt $deadline) {
@@ -197,16 +212,64 @@ while ($null -eq $window -and [DateTime]::UtcNow -lt $deadline) {
 }
 Assert-True ($null -ne $window) 'Zommi did not expose its floating window.'
 
+# A normal first launch intentionally remains the compact orb. Starting the
+# exact executable again exercises the product's single-instance activation
+# path, which opens and focuses the existing floating chat without synthetic
+# keyboard or pointer input.
+Start-Process `
+    -FilePath $resolvedExecutable `
+    -WorkingDirectory (Split-Path -Parent $resolvedExecutable) | Out-Null
+
 $windowProvider = { Find-ZommiWindow $resolvedExecutable }
-$composer = Wait-ElementById $windowProvider 'ZommiComposer'
-$send = Wait-ElementById $windowProvider 'SendMessage'
+$composer = $null
+$send = $null
+$readyStatusText = '<missing>'
+$readyDeadline = [DateTime]::UtcNow.AddSeconds(30)
+while ([DateTime]::UtcNow -lt $readyDeadline) {
+    $window = & $windowProvider
+    if ($null -ne $window) {
+        $composer = Find-ElementById $window 'ZommiComposer'
+        $send = Find-ElementById $window 'SendMessage'
+        $readyStatus = Find-ElementById $window 'CodexStatus'
+        if ($null -ne $readyStatus) { $readyStatusText = [string] $readyStatus.Current.Name }
+        if ($null -ne $composer -and $null -ne $send -and $send.Current.IsEnabled) { break }
+    }
+    Start-Sleep -Milliseconds 100
+}
 Assert-True ($null -ne $composer) 'The composer was not exposed through UI Automation.'
-Assert-True ($null -ne $send) 'The Send button was not exposed through UI Automation.'
+Assert-True ($null -ne $send -and $send.Current.IsEnabled) "The Send button did not become ready. Status: $readyStatusText"
+
+if ($RequireChromeTool) {
+    $chromeReady = $false
+    $chromeReadyDeadline = [DateTime]::UtcNow.AddSeconds(30)
+    while ([DateTime]::UtcNow -lt $chromeReadyDeadline) {
+        $window = & $windowProvider
+        if ($null -ne $window) {
+            $readyStatus = Find-ElementById $window 'CodexStatus'
+            if ($null -ne $readyStatus) {
+                $readyStatusText = [string] $readyStatus.Current.Name
+                if ($readyStatusText -like '*Chrome control ready*') {
+                    $chromeReady = $true
+                    break
+                }
+            }
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    Assert-True $chromeReady "Chrome MCP did not become ready before its required-tool turn. Status: $readyStatusText"
+    $composer = Find-ElementById $window 'ZommiComposer'
+    $send = Find-ElementById $window 'SendMessage'
+}
 
 $valuePattern = $composer.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
 ([System.Windows.Automation.ValuePattern] $valuePattern).SetValue($prompt)
-$stopwatch = [Diagnostics.Stopwatch]::StartNew()
+$inputDispatchStopwatch = [Diagnostics.Stopwatch]::StartNew()
 Invoke-PhysicalClick $send
+$inputDispatchStopwatch.Stop()
+# UIA Invoke is synchronous and can block the acceptance process while Chromium
+# updates its accessibility tree. Start the product-response clock only after
+# Windows has returned from dispatching the input; report dispatch separately.
+$stopwatch = [Diagnostics.Stopwatch]::StartNew()
 
 if ($InterruptStreaming) {
     $accepted = $false
@@ -245,7 +308,7 @@ if ($InterruptStreaming) {
         $transcript = Find-ElementById $window 'CodexTranscript'
         if ($null -ne $status) { $statusText = [string] $status.Current.Name }
         if ($null -ne $transcript) { $transcriptText = Get-ElementText $transcript }
-        if ($null -ne $send -and $send.Current.IsEnabled -and $statusText -eq 'Codex status: stopped') {
+        if ($null -ne $send -and $send.Current.IsEnabled -and $statusText -eq 'Agent status: stopped') {
             $stopped = $true
             break
         }
@@ -261,6 +324,7 @@ if ($InterruptStreaming) {
         stopButton = 'passed'
         turnInterrupt = 'passed'
         interruptedStatus = 'passed'
+        inputDispatchMilliseconds = $inputDispatchStopwatch.ElapsedMilliseconds
         elapsedMilliseconds = $stopwatch.ElapsedMilliseconds
         status = $statusText
     } | ConvertTo-Json
@@ -270,6 +334,7 @@ if ($InterruptStreaming) {
 $accepted = $false
 $completed = $false
 $acceptedMilliseconds = $null
+$firstAgentOutputMilliseconds = $null
 $statusText = ''
 $transcriptText = ''
 $responseText = ''
@@ -288,6 +353,10 @@ while ([DateTime]::UtcNow -lt $deadline) {
     if ($null -ne $transcript) { $transcriptText = Get-ElementText $transcript }
     if ($null -ne $response) { $responseText = Get-ElementText $response }
     if ($RequireChromeTool -and -not $sawChromeMcp) { $sawChromeMcp = Test-ChromeMcpLifecycle $window }
+    if ($null -eq $firstAgentOutputMilliseconds -and
+        ($transcriptText -match '(?i)thinking' -or $null -ne $response -or $sawChromeMcp)) {
+        $firstAgentOutputMilliseconds = $stopwatch.ElapsedMilliseconds
+    }
     if ($transcriptText -match 'Error invoking remote method|operation has timed out' -or
         $statusText -match 'turn failed|Codex error') { break }
     if ($null -ne $composer) {
@@ -310,6 +379,9 @@ Assert-True ($transcriptText -notmatch 'Error invoking remote method|operation h
 Assert-True $accepted "chat:send was not accepted within $TimeoutSeconds seconds. Status: $statusText Transcript: $transcriptText"
 Assert-True ($statusText -notmatch 'turn failed|Codex error') "The Codex turn failed. Status: $statusText Transcript: $transcriptText"
 Assert-True $completed "Codex did not complete with the expected response within $TimeoutSeconds seconds. Expected: $expectedToken Status: $statusText Response: $responseText"
+Assert-True ($acceptedMilliseconds -le $MaxSendAcceptedMilliseconds) "The UI took $acceptedMilliseconds ms to accept send; budget is $MaxSendAcceptedMilliseconds ms."
+Assert-True ($null -ne $firstAgentOutputMilliseconds -and $firstAgentOutputMilliseconds -le $MaxFirstAgentOutputMilliseconds) "First visible agent output took $firstAgentOutputMilliseconds ms; budget is $MaxFirstAgentOutputMilliseconds ms."
+Assert-True ($stopwatch.ElapsedMilliseconds -le $MaxTurnCompletedMilliseconds) "The short response took $($stopwatch.ElapsedMilliseconds) ms; budget is $MaxTurnCompletedMilliseconds ms."
 if ($RequireChromeTool) {
     Assert-True $sawChromeMcp 'The packaged UI did not expose a Chrome MCP tool lifecycle.'
 }
@@ -317,7 +389,9 @@ if ($RequireChromeTool) {
 [ordered]@{
     executablePath = $resolvedExecutable
     sendAccepted = 'passed'
+    inputDispatchMilliseconds = $inputDispatchStopwatch.ElapsedMilliseconds
     acceptedMilliseconds = $acceptedMilliseconds
+    firstAgentOutputMilliseconds = $firstAgentOutputMilliseconds
     turnCompleted = 'passed'
     completedMilliseconds = $stopwatch.ElapsedMilliseconds
     response = $responseText

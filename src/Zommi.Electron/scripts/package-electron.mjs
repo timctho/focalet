@@ -74,25 +74,50 @@ async function assemblePlatformPackage(extracted, output, targetPlatform, native
   await copyApplication(join(output, 'resources', 'app'));
   if (targetPlatform === 'win32') {
     if (!nativeDirectory || !existsSync(nativeDirectory)) throw new Error('Windows Electron packages require --native-dir.');
-    await cp(resolve(nativeDirectory), join(output, 'resources', 'native'), { recursive: true });
+    const packagedNative = join(output, 'resources', 'native');
+    await cp(resolve(nativeDirectory), packagedNative, { recursive: true });
   }
 }
 
 async function copyApplication(destination) {
   await mkdir(destination, { recursive: true });
   const files = [
-    'main.mjs', 'preload.cjs', 'native-host.mjs', 'codex-bridge.mjs', 'platform-capture.mjs',
-    'image-selector.mjs', 'selection-geometry.mjs', 'renderer', 'selection',
+    'main.mjs', 'preload.cjs', 'native-host.mjs', 'codex-bridge.mjs', 'runtime-catalog.mjs',
+    'runtime-discovery.mjs', 'runtime-settings.mjs', 'runtime-broker.mjs', 'broker-protocol.mjs', 'context-handoff.mjs',
+    'protocol-framing.mjs', 'adapter-diagnostics.mjs', 'transport-metrics.mjs',
+    'acp-adapter.mjs', 'pi-rpc-adapter.mjs',
+    'hermes-gateway-adapter.mjs',
+    'openclaw-gateway-adapter.mjs',
+    'pty-compatibility-adapter.mjs', 'pty-profiles.mjs',
+    'platform-capture.mjs',
+    'image-selector.mjs', 'selection-geometry.mjs', 'window-layout.mjs', 'renderer', 'selection',
   ];
   for (const file of files) await cp(join(appDirectory, file), join(destination, file), { recursive: true });
   const sourcePackage = JSON.parse(await readFile(join(appDirectory, 'package.json'), 'utf8'));
+  await copyRuntimeDependencies(destination, sourcePackage.dependencies || {});
   await writeFile(join(destination, 'package.json'), `${JSON.stringify({
     name: sourcePackage.name,
     version: sourcePackage.version,
     private: true,
     type: 'module',
     main: 'main.mjs',
+    dependencies: sourcePackage.dependencies || {},
   }, null, 2)}\n`);
+}
+
+async function copyRuntimeDependencies(destination, rootDependencies) {
+  const copied = new Set();
+  const copyDependency = async (name) => {
+    if (copied.has(name)) return;
+    copied.add(name);
+    const segments = name.split('/');
+    const source = join(appDirectory, 'node_modules', ...segments);
+    if (!existsSync(join(source, 'package.json'))) throw new Error(`Runtime dependency '${name}' is not installed.`);
+    await cp(source, join(destination, 'node_modules', ...segments), { recursive: true });
+    const manifest = JSON.parse(await readFile(join(source, 'package.json'), 'utf8'));
+    for (const dependency of Object.keys(manifest.dependencies || {})) await copyDependency(dependency);
+  };
+  for (const dependency of Object.keys(rootDependencies)) await copyDependency(dependency);
 }
 
 function parseArguments(args) {

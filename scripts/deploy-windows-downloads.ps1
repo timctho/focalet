@@ -78,6 +78,22 @@ function Get-ExactTargetProcesses {
     )
 }
 
+function Get-TargetDirectoryProcesses {
+    param([string] $Directory)
+
+    $normalizedDirectory = [IO.Path]::GetFullPath($Directory).TrimEnd('\')
+    $directoryPrefix = $normalizedDirectory + '\'
+    return @(
+        Get-CimInstance Win32_Process | Where-Object {
+            $_.Name -eq 'Zommi.exe' -and
+            $_.ExecutablePath -and
+            [IO.Path]::GetFullPath($_.ExecutablePath).StartsWith(
+                $directoryPrefix,
+                [StringComparison]::OrdinalIgnoreCase)
+        }
+    )
+}
+
 if (-not (Test-Path -LiteralPath $sourceDirectory -PathType Container) -or
     -not (Test-Path -LiteralPath $sourceArchive -PathType Leaf)) {
     throw "Build the package before deploying: $sourceDirectory"
@@ -105,14 +121,17 @@ try {
     }
 
     $targetExecutable = Join-Path $targetDirectory 'Zommi.exe'
-    $targetProcesses = @(Get-ExactTargetProcesses $targetExecutable)
+    # The Electron process tree and the capture-only native host use separate
+    # executables inside the deployed directory. Stop the whole exact package
+    # tree so the native host cannot retain a file lock during atomic replace.
+    $targetProcesses = @(Get-TargetDirectoryProcesses $targetDirectory)
     $stoppedProcessCount = $targetProcesses.Count
     foreach ($process in $targetProcesses) {
         Stop-Process -Id $process.ProcessId -Force
     }
     Start-Sleep -Milliseconds 500
-    if (@(Get-ExactTargetProcesses $targetExecutable).Count -ne 0) {
-        throw 'An exact-path deployed Zommi process remained running.'
+    if (@(Get-TargetDirectoryProcesses $targetDirectory).Count -ne 0) {
+        throw 'A Zommi process inside the exact deployment directory remained running.'
     }
 
     if (Test-Path -LiteralPath $targetDirectory) {
@@ -194,7 +213,7 @@ try {
 }
 catch {
     if ($directoryReplaced) {
-        foreach ($process in (Get-ExactTargetProcesses (Join-Path $targetDirectory 'Zommi.exe'))) {
+        foreach ($process in (Get-TargetDirectoryProcesses $targetDirectory)) {
             Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
         }
         Remove-Item -LiteralPath $targetDirectory -Recurse -Force -ErrorAction SilentlyContinue

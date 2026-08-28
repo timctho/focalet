@@ -48,7 +48,36 @@ public sealed record IndicatedTargetInfo
 
     public string? Bounds { get; init; }
 
+    public int? Row { get; init; }
+
+    public int? Column { get; init; }
+
+    public int? RowSpan { get; init; }
+
+    public int? ColumnSpan { get; init; }
+
     public required string Confidence { get; init; }
+}
+
+public sealed record SelectedElementInfo
+{
+    public required string ControlType { get; init; }
+
+    public string? Name { get; init; }
+
+    public string? Value { get; init; }
+
+    public string? Formula { get; init; }
+
+    public string? Bounds { get; init; }
+
+    public int? Row { get; init; }
+
+    public int? Column { get; init; }
+
+    public int? RowSpan { get; init; }
+
+    public int? ColumnSpan { get; init; }
 }
 
 public sealed record AccessibilityTreeInfo
@@ -75,6 +104,8 @@ public sealed record AccessibilityNodeInfo
     public string? Bounds { get; init; }
 
     public bool? IsOffscreen { get; init; }
+
+    public bool? IsSelected { get; init; }
 
     public int? RowCount { get; init; }
 
@@ -114,6 +145,10 @@ public sealed record ContextSnapshot
     public LocatorInfo? Locator { get; init; }
 
     public IReadOnlyList<string> Selection { get; init; } = [];
+
+    public IReadOnlyList<SelectedElementInfo> SelectionElements { get; init; } = [];
+
+    public int? SelectionElementCount { get; init; }
 
     public IReadOnlyList<string> VisibleText { get; init; } = [];
 
