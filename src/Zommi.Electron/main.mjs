@@ -169,29 +169,39 @@ function startAcceptanceCaptureTrigger() {
 async function runAcceptanceInputProbe(path) {
   const result = { inputPath: 'webContents.sendInputEvent' };
   try {
-    result.dragRegionStyles = await evaluateRenderer(`['.glass', '.panel-content', '.edge-drag-top', '.titlebar', '.drag-region', '.background-drag', '#ToggleSessions'].map((selector) => { const element = document.querySelector(selector); const rectangle = element?.getBoundingClientRect(); const style = element ? getComputedStyle(element) : null; const center = rectangle ? document.elementFromPoint(rectangle.left + rectangle.width / 2, rectangle.top + rectangle.height / 2) : null; return { selector, bodyClass: document.body.className, className: element?.className || '', display: style?.display || '', appRegion: style?.webkitAppRegion || '', pointerEvents: style?.pointerEvents || '', rectangle: rectangle ? { x: rectangle.x, y: rectangle.y, width: rectangle.width, height: rectangle.height } : null, centerElement: center?.id || center?.className || center?.tagName || '' }; })`);
-    const beforeManualDrag = mainWindow.getBounds();
-    await evaluateRenderer(`window.zommi.beginWindowDrag({ x: 400, y: 300 })`);
-    await evaluateRenderer(`window.zommi.moveWindowDrag({ x: 454, y: 326 })`);
-    await delay(120);
-    const afterManualDrag = mainWindow.getBounds();
-    await evaluateRenderer(`window.zommi.endWindowDrag()`);
-    result.manualTopDragDiagnostics = { before: beforeManualDrag, after: afterManualDrag };
-    result.manualTopDrag = afterManualDrag.x - beforeManualDrag.x === 54 && afterManualDrag.y - beforeManualDrag.y === 26;
-    const draggedOrbBounds = compactHitBounds(afterManualDrag);
+    result.reducedMotion = await evaluateRenderer(`matchMedia('(prefers-reduced-motion: reduce)').matches`);
+    result.dragRegionStyles = await evaluateRenderer(`['.glass', '.panel-content', '.titlebar', '.drag-region', '.background-drag', '.transcript', '.composer-shell', '.session-sidebar', '#ToggleSessions'].map((selector) => { const element = document.querySelector(selector); const rectangle = element?.getBoundingClientRect(); const style = element ? getComputedStyle(element) : null; const center = rectangle ? document.elementFromPoint(rectangle.left + rectangle.width / 2, rectangle.top + rectangle.height / 2) : null; return { selector, bodyClass: document.body.className, className: element?.className || '', display: style?.display || '', appRegion: style?.webkitAppRegion || '', pointerEvents: style?.pointerEvents || '', rectangle: rectangle ? { x: rectangle.x, y: rectangle.y, width: rectangle.width, height: rectangle.height } : null, centerElement: center?.id || center?.className || center?.tagName || '' }; })`);
+    const dragRegionBySelector = Object.fromEntries(result.dragRegionStyles.map((entry) => [entry.selector, entry]));
+    const whitespaceDragPoint = await evaluateRenderer(`{ const panel = document.querySelector('.panel-content'); const rectangle = panel.getBoundingClientRect(); const x = Math.floor(rectangle.right - 22); const y = Math.floor(rectangle.top + rectangle.height / 2); const hit = document.elementFromPoint(x, y); return { x, y, hit: hit?.className || hit?.id || hit?.tagName || '' }; }`);
+    result.whitespaceDragRegions = dragRegionBySelector['.panel-content']?.appRegion === 'none'
+      && whitespaceDragPoint.hit === 'panel-content'
+      && dragRegionBySelector['.titlebar']?.appRegion === 'drag'
+      && dragRegionBySelector['.transcript']?.appRegion === 'no-drag'
+      && dragRegionBySelector['.composer-shell']?.appRegion === 'no-drag'
+      && dragRegionBySelector['.session-sidebar']?.appRegion === 'no-drag';
+    const beforeWhitespaceDrag = mainWindow.getBounds();
+    await evaluateRenderer(`(() => { const panel = document.querySelector('.panel-content'); panel.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, buttons: 1, screenX: 400, screenY: 300 })); return true; })()`);
+    await delay(40);
+    await evaluateRenderer(`(() => { document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 0, buttons: 1, screenX: 346, screenY: 274 })); return true; })()`);
+    await delay(140);
+    await evaluateRenderer(`(() => { document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, screenX: 346, screenY: 274 })); return true; })()`);
+    const afterWhitespaceDrag = mainWindow.getBounds();
+    result.whitespaceDragDiagnostics = { point: whitespaceDragPoint, before: beforeWhitespaceDrag, after: afterWhitespaceDrag };
+    result.whitespaceDragMovesWindow = afterWhitespaceDrag.x - beforeWhitespaceDrag.x === -54
+      && afterWhitespaceDrag.y - beforeWhitespaceDrag.y === -26;
+    mainWindow.setBounds(beforeWhitespaceDrag, false);
     setPanelOpen(false, { animate: false });
-    const collapsedAfterDrag = compactHitBounds(mainWindow.getBounds());
-    result.collapsedOrbFollowsDraggedWindow = collapsedAfterDrag.x === draggedOrbBounds.x && collapsedAfterDrag.y === draggedOrbBounds.y;
     await delay(540);
-    const compactAnimationBefore = await evaluateRenderer(`{ const orb = document.querySelector('#ZommiOrb'); const animations = orb?.getAnimations({ subtree: true }) || []; return { times: animations.map((animation) => Number(animation.currentTime) || 0), panelVisibility: getComputedStyle(document.querySelector('.panel-shell')).visibility, rimCount: orb?.querySelectorAll('.orb-spectrum-rim, .orb-glass-rim').length || 0 }; }`);
+    const compactIdleBefore = await evaluateRenderer(`{ const orb = document.querySelector('#ZommiOrb'); const canvas = document.querySelector('#ZommiOrbCanvas'); return { frameCount: Number(canvas?.dataset.frameCount || 0), image: canvas?.toDataURL() || '', material: canvas?.dataset.material || '', panelVisibility: getComputedStyle(document.querySelector('.panel-shell')).visibility, svgCount: orb?.querySelectorAll('svg').length || 0 }; }`);
     await delay(180);
-    const compactAnimationAfter = await evaluateRenderer(`(document.querySelector('#ZommiOrb')?.getAnimations({ subtree: true }) || []).map((animation) => Number(animation.currentTime) || 0)`);
-    result.compactOrbIdleAnimationRuns = compactAnimationBefore.times.length >= 3
-      && compactAnimationAfter.some((time, index) => time > compactAnimationBefore.times[index]);
-    result.compactOrbHasNoLegacySurfaceOrGrayRim = compactAnimationBefore.panelVisibility === 'hidden'
-      && compactAnimationBefore.rimCount === 0;
+    const compactIdleAfter = await evaluateRenderer(`{ const canvas = document.querySelector('#ZommiOrbCanvas'); return { frameCount: Number(canvas?.dataset.frameCount || 0), image: canvas?.toDataURL() || '' }; }`);
+    result.compactOrbIdleIsStill = compactIdleBefore.frameCount > 0
+      && compactIdleAfter.frameCount === compactIdleBefore.frameCount
+      && compactIdleAfter.image === compactIdleBefore.image;
+    result.compactOrbHasNoLegacySurfaceOrGrayRim = compactIdleBefore.panelVisibility === 'hidden'
+      && compactIdleBefore.material.startsWith('05-nebula-liquid-glass')
+      && compactIdleBefore.svgCount === 0;
     setPanelOpen(true, { animate: false });
-    mainWindow.setBounds(beforeManualDrag, false);
     mainWindow.focus();
     await delay(160);
     const initialSessionAwayPoint = await rendererElementCenter('#CodexTranscript');
@@ -291,6 +301,19 @@ async function runAcceptanceInputProbe(path) {
     await delay(100);
     result.composerAcceptsDraftWhileStreaming = await evaluateRenderer(`document.querySelector('#ZommiComposer')?.value === 'draft while streaming'`);
     result.thinkingSurvivesToolActivity = await evaluateRenderer(`Boolean(document.querySelector('#CodexTranscript .conversation-turn:last-child .activity-card.thinking[open]') && document.querySelector('#CodexTranscript .conversation-turn:last-child .activity-card.tool.completed'))`);
+    setPanelOpen(false, { animate: false });
+    await delay(540);
+    const workingOrbBefore = await evaluateRenderer(`{ const orb = document.querySelector('#ZommiOrb'); const canvas = document.querySelector('#ZommiOrbCanvas'); return { working: orb?.classList.contains('is-working') === true, activity: orb?.dataset.activity, opacity: Number(getComputedStyle(orb).opacity), frameCount: Number(canvas?.dataset.frameCount || 0), renderState: canvas?.dataset.renderState, image: canvas?.toDataURL() || '' }; }`);
+    await delay(180);
+    const workingOrbAfter = await evaluateRenderer(`{ const canvas = document.querySelector('#ZommiOrbCanvas'); return { frameCount: Number(canvas?.dataset.frameCount || 0), image: canvas?.toDataURL() || '' }; }`);
+    result.compactOrbWorkingAnimationRuns = workingOrbBefore.working
+      && workingOrbBefore.activity === 'working'
+      && workingOrbBefore.opacity > 0.99
+      && workingOrbBefore.renderState === 'working'
+      && workingOrbAfter.frameCount > workingOrbBefore.frameCount
+      && workingOrbAfter.image !== workingOrbBefore.image;
+    setPanelOpen(true, { animate: false });
+    await delay(540);
     await clickRendererElement('#ToggleSessions');
     await clickRendererElement('#SessionList .session-item[data-thread-id="seeded-secondary-thread"]');
     await delay(260);
@@ -303,6 +326,18 @@ async function runAcceptanceInputProbe(path) {
     await delay(2500);
     const transcriptPoint = await rendererElementCenter('#CodexTranscript');
     mainWindow.webContents.sendInputEvent({ type: 'mouseMove', x: transcriptPoint.x, y: transcriptPoint.y });
+    mainWindow.webContents.sendInputEvent({ type: 'mouseWheel', x: transcriptPoint.x, y: transcriptPoint.y, deltaY: 720, canScroll: true });
+    await delay(250);
+    const wheelUpState = await evaluateRenderer(`{ const e = document.querySelector('#CodexTranscript'); return e ? { top: e.scrollTop, distance: e.scrollHeight - e.scrollTop - e.clientHeight } : null; }`);
+    mainWindow.webContents.sendInputEvent({ type: 'mouseWheel', x: transcriptPoint.x, y: transcriptPoint.y, deltaY: -10000, canScroll: true });
+    await delay(250);
+    const wheelDownState = await evaluateRenderer(`{ const e = document.querySelector('#CodexTranscript'); return e ? { top: e.scrollTop, distance: e.scrollHeight - e.scrollTop - e.clientHeight, latestHidden: document.querySelector('#ScrollToLatest')?.hidden } : null; }`);
+    result.bidirectionalWheelDiagnostics = { up: wheelUpState, down: wheelDownState };
+    result.wheelDownAfterUpReturnsToBottom = Boolean(wheelUpState && wheelDownState
+      && wheelUpState.distance > 40
+      && wheelDownState.top > wheelUpState.top
+      && wheelDownState.distance <= 40
+      && wheelDownState.latestHidden === true);
     mainWindow.webContents.sendInputEvent({ type: 'mouseWheel', x: transcriptPoint.x, y: transcriptPoint.y, deltaY: 720, canScroll: true });
     await delay(250);
     const manualScrollState = await evaluateRenderer(`{ const e = document.querySelector('#CodexTranscript'); return e ? { top: e.scrollTop, distance: e.scrollHeight - e.scrollTop - e.clientHeight } : null; }`);
@@ -327,7 +362,7 @@ async function runAcceptanceInputProbe(path) {
     await delay(180);
     result.backgroundCompletionShowsUnread = await evaluateRenderer(`document.querySelector('#SessionList .session-item[data-thread-id="seeded-zommi-thread"]')?.dataset.status === 'unread'`);
     result.passed = Object.entries(result)
-      .filter(([key]) => !['inputPath', 'dragRegionStyles', 'manualTopDragDiagnostics', 'sessionSidebarHoverDiagnostics', 'modelPanelDiagnostics', 'manualScrollDiagnostics', 'thinkingCardsPerTurn'].includes(key))
+      .filter(([key]) => !['inputPath', 'reducedMotion', 'dragRegionStyles', 'whitespaceDragDiagnostics', 'sessionSidebarHoverDiagnostics', 'modelPanelDiagnostics', 'bidirectionalWheelDiagnostics', 'manualScrollDiagnostics', 'thinkingCardsPerTurn'].includes(key))
       .every(([, value]) => value === true);
   } catch (error) {
     result.passed = false;
@@ -784,9 +819,7 @@ async function selectImageContext({ includePointerContext = false } = {}) {
   }
   mainWindow?.hide();
   try {
-    const result = process.platform === 'win32'
-      ? await captureHost.request('selectImage')
-      : await selectImageRegion();
+    const result = await selectImageWithNativeFallback();
     if (!result?.cancelled && result?.dataUrl) {
       send('context:added', {
         id: randomUUID(),
@@ -805,6 +838,18 @@ async function selectImageContext({ includePointerContext = false } = {}) {
   }
   if (wasVisible) showWindow();
   return { cancelled: true };
+}
+
+async function selectImageWithNativeFallback() {
+  try {
+    // Chromium's desktop capture path handles hardware-composited Chrome
+    // surfaces that can appear blank through the native GDI BitBlt fallback.
+    return await selectImageRegion();
+  } catch (error) {
+    if (process.platform !== 'win32') throw error;
+    writeRuntimeLog('image-selector-fallback', error.message);
+    return captureHost.request('selectImage');
+  }
 }
 
 function showWindow({ openPanel: shouldOpenPanel = false, focusComposer = false, animate = true, position = null } = {}) {

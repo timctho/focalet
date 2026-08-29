@@ -13,6 +13,7 @@ import {
 } from './renderer-logic.mjs';
 import { artifactsFromText, artifactsFromThreadItem, sandboxHtmlDocument } from '../artifacts.mjs';
 import { renderMarkdown } from './markdown.mjs';
+import { createNebulaOrbRenderer } from './orb-renderer.mjs';
 
 const HISTORY_PAGE_SIZE = 18;
 const HISTORY_LOAD_THRESHOLD_PX = 96;
@@ -21,7 +22,8 @@ const glass = document.querySelector('.glass');
 const panelShell = document.querySelector('.panel-shell');
 const panelContent = document.querySelector('.panel-content');
 const compactOrb = document.querySelector('#ZommiOrb');
-const topDragHandle = document.querySelector('.edge-drag-top');
+const compactOrbCanvas = document.querySelector('#ZommiOrbCanvas');
+const compactOrbRenderer = createNebulaOrbRenderer(compactOrbCanvas);
 const transcript = document.querySelector('#CodexTranscript');
 const composer = document.querySelector('#ZommiComposer');
 const chips = document.querySelector('#ContextChips');
@@ -101,8 +103,9 @@ let historyTurns = [];
 let historyStartIndex = 0;
 let historyLoading = false;
 let historyLoadFrame = 0;
-let manualDragFrame = 0;
-let pendingManualDragPoint = null;
+let whitespaceDragFrame = 0;
+let pendingWhitespaceDragPoint = null;
+let whitespaceDragActive = false;
 let chatControlsLoading = false;
 let chatControlsReady = false;
 let runtimeBusy = false;
@@ -119,10 +122,9 @@ let pendingQuestion = null;
 
 document.querySelector('#HideZommi').addEventListener('click', () => window.zommi.hide());
 compactOrb.addEventListener('click', () => window.zommi.openPanel());
-topDragHandle.addEventListener('pointerdown', startManualWindowDrag);
-topDragHandle.addEventListener('pointermove', queueManualWindowDrag);
-topDragHandle.addEventListener('pointerup', endManualWindowDrag);
-topDragHandle.addEventListener('pointercancel', endManualWindowDrag);
+panelContent.addEventListener('mousedown', startWhitespaceWindowDrag);
+document.addEventListener('mousemove', queueWhitespaceWindowDrag);
+document.addEventListener('mouseup', endWhitespaceWindowDrag);
 document.querySelector('#ExpandZommi').addEventListener('click', () => window.zommi.toggleExpanded());
 selectImage.addEventListener('click', () => window.zommi.selectImage());
 document.querySelector('#ClosePreview').addEventListener('click', hidePreview);
@@ -146,7 +148,7 @@ document.addEventListener('pointerdown', closeModelPanelFromOutside);
 document.addEventListener('keydown', handleGlobalKeydown);
 scrollToLatest.addEventListener('click', () => scrollTranscript({ force: true }));
 transcript.addEventListener('scroll', handleTranscriptScroll, { passive: true });
-transcript.addEventListener('wheel', handleTranscriptWheel, { passive: true });
+transcript.addEventListener('wheel', handleTranscriptWheel, { passive: false });
 sendButton.addEventListener('click', handlePrimaryAction);
 composer.addEventListener('input', resizeComposer);
 composer.addEventListener('keydown', (event) => {
@@ -203,29 +205,30 @@ function setPointerOverGlass(pointerOver) {
   requestAnimationFrame(() => window.zommi.reportAcceptanceHover?.(pointerOver));
 }
 
-function startManualWindowDrag(event) {
-  if (event.button !== 0) return;
+function startWhitespaceWindowDrag(event) {
+  if (event.button !== 0 || event.target !== panelContent) return;
   event.preventDefault();
-  topDragHandle.setPointerCapture(event.pointerId);
+  whitespaceDragActive = true;
   window.zommi.beginWindowDrag({ x: event.screenX, y: event.screenY });
 }
 
-function queueManualWindowDrag(event) {
-  if (!topDragHandle.hasPointerCapture(event.pointerId)) return;
-  pendingManualDragPoint = { x: event.screenX, y: event.screenY };
-  if (manualDragFrame) return;
-  manualDragFrame = requestAnimationFrame(() => {
-    manualDragFrame = 0;
-    if (pendingManualDragPoint) window.zommi.moveWindowDrag(pendingManualDragPoint);
-    pendingManualDragPoint = null;
+function queueWhitespaceWindowDrag(event) {
+  if (!whitespaceDragActive) return;
+  pendingWhitespaceDragPoint = { x: event.screenX, y: event.screenY };
+  if (whitespaceDragFrame) return;
+  whitespaceDragFrame = requestAnimationFrame(() => {
+    whitespaceDragFrame = 0;
+    if (pendingWhitespaceDragPoint) window.zommi.moveWindowDrag(pendingWhitespaceDragPoint);
+    pendingWhitespaceDragPoint = null;
   });
 }
 
-function endManualWindowDrag(event) {
-  if (topDragHandle.hasPointerCapture(event.pointerId)) topDragHandle.releasePointerCapture(event.pointerId);
-  if (manualDragFrame) cancelAnimationFrame(manualDragFrame);
-  manualDragFrame = 0;
-  pendingManualDragPoint = null;
+function endWhitespaceWindowDrag() {
+  if (!whitespaceDragActive) return;
+  whitespaceDragActive = false;
+  if (whitespaceDragFrame) cancelAnimationFrame(whitespaceDragFrame);
+  whitespaceDragFrame = 0;
+  pendingWhitespaceDragPoint = null;
   window.zommi.endWindowDrag();
 }
 
@@ -1061,6 +1064,7 @@ function scheduleSessionSidebarClose() {
 function renderOrbActivity() {
   const working = activeTurns.size > 0;
   compactOrb.classList.toggle('is-working', working);
+  compactOrbRenderer.setWorking(working);
   compactOrb.dataset.activity = working ? 'working' : 'idle';
   compactOrb.setAttribute('aria-label', working ? 'Open Zommi chat — agent working' : 'Open Zommi chat');
 }
@@ -1661,8 +1665,11 @@ function handleTranscriptScroll() {
 
 function handleTranscriptWheel(event) {
   if (!event.deltaY) return;
+  event.preventDefault();
   programmaticScroll = false;
-  autoFollow = false;
+  const maximumScrollTop = Math.max(0, transcript.scrollHeight - transcript.clientHeight);
+  transcript.scrollTop = Math.max(0, Math.min(maximumScrollTop, transcript.scrollTop + event.deltaY));
+  autoFollow = event.deltaY > 0 && isNearBottom(transcript);
   updateLatestButton();
 }
 

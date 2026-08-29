@@ -350,6 +350,7 @@ test('slow Chrome MCP startup does not block the first thread and turn', async (
     requests.findIndex((request) => request.method === 'thread/start'));
   assert.ok(requests.findIndex((request) => request.method === 'thread/start') <
     requests.findIndex((request) => request.method === 'turn/start'));
+  assert.equal(requests.some((request) => request.method === 'config/mcpServer/reload'), false);
 
   const chromeReady = once(bridge, 'status');
   stdout.write(`${JSON.stringify({

@@ -259,7 +259,6 @@ export class CodexAppServerAdapter extends EventEmitter {
 
   async #prepareMcpServers() {
     this.emit('status', 'Loading Codex tools…');
-    await this.#request('config/mcpServer/reload', {});
     const result = await this.#request('mcpServerStatus/list', {
       detail: 'toolsAndAuthOnly',
       limit: 100,

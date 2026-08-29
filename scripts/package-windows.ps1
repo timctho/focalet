@@ -134,6 +134,7 @@ $windowLayoutPath = Join-Path $outputDirectory 'resources/app/window-layout.mjs'
 $rendererHtmlPath = Join-Path $outputDirectory 'resources/app/renderer/index.html'
 $rendererPath = Join-Path $outputDirectory 'resources/app/renderer/renderer.mjs'
 $rendererMarkdownPath = Join-Path $outputDirectory 'resources/app/renderer/markdown.mjs'
+$rendererOrbPath = Join-Path $outputDirectory 'resources/app/renderer/orb-renderer.mjs'
 $rendererStylesPath = Join-Path $outputDirectory 'resources/app/renderer/styles.css'
 $markedRuntimePath = Join-Path $outputDirectory 'resources/app/node_modules/marked/lib/marked.esm.js'
 $wslHookPath = Join-Path $outputDirectory 'Zommi.WslHook.ps1'
@@ -163,6 +164,7 @@ if (-not (Test-Path -LiteralPath $executablePath) -or
     -not (Test-Path -LiteralPath $rendererHtmlPath) -or
     -not (Test-Path -LiteralPath $rendererPath) -or
     -not (Test-Path -LiteralPath $rendererMarkdownPath) -or
+    -not (Test-Path -LiteralPath $rendererOrbPath) -or
     -not (Test-Path -LiteralPath $rendererStylesPath) -or
     -not (Test-Path -LiteralPath $markedRuntimePath) -or
     -not (Test-Path -LiteralPath $wslHookPath)) {
@@ -193,6 +195,7 @@ $windowLayoutHash = (Get-FileHash -Algorithm SHA256 $windowLayoutPath).Hash.ToLo
 $rendererHtmlHash = (Get-FileHash -Algorithm SHA256 $rendererHtmlPath).Hash.ToLowerInvariant()
 $rendererHash = (Get-FileHash -Algorithm SHA256 $rendererPath).Hash.ToLowerInvariant()
 $rendererMarkdownHash = (Get-FileHash -Algorithm SHA256 $rendererMarkdownPath).Hash.ToLowerInvariant()
+$rendererOrbHash = (Get-FileHash -Algorithm SHA256 $rendererOrbPath).Hash.ToLowerInvariant()
 $rendererStylesHash = (Get-FileHash -Algorithm SHA256 $rendererStylesPath).Hash.ToLowerInvariant()
 $markedRuntimeHash = (Get-FileHash -Algorithm SHA256 $markedRuntimePath).Hash.ToLowerInvariant()
 $wslHookHash = (Get-FileHash -Algorithm SHA256 $wslHookPath).Hash.ToLowerInvariant()
@@ -222,6 +225,7 @@ Set-Content -Path $hashPath -Encoding ascii -Value `
     "$rendererHtmlHash  resources/app/renderer/index.html", `
     "$rendererHash  resources/app/renderer/renderer.mjs", `
     "$rendererMarkdownHash  resources/app/renderer/markdown.mjs", `
+    "$rendererOrbHash  resources/app/renderer/orb-renderer.mjs", `
     "$rendererStylesHash  resources/app/renderer/styles.css", `
     "$markedRuntimeHash  resources/app/node_modules/marked/lib/marked.esm.js", `
     "$wslHookHash  Zommi.WslHook.ps1"

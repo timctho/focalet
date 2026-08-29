@@ -27,6 +27,7 @@ export async function selectImageRegion() {
     width: display.bounds.width,
     height: display.bounds.height,
     frame: false,
+    show: false,
     transparent: false,
     backgroundColor: '#111111',
     alwaysOnTop: true,
@@ -46,6 +47,7 @@ export async function selectImageRegion() {
   await selector.loadFile(join(moduleDirectory, 'selection', 'index.html'));
   selector.webContents.send('selection:init', { imageDataUrl: source.thumbnail.toDataURL() });
   selector.show();
+  selector.setAlwaysOnTop(true, 'screen-saver');
   selector.focus();
 
   return new Promise((resolve) => {

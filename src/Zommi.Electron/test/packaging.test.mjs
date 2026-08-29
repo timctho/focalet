@@ -58,6 +58,8 @@ test('sandboxed windows use packaged CommonJS preload bridges', async () => {
   const packager = await readFile(join(appDirectory, 'scripts', 'package-electron.mjs'), 'utf8');
   assert.match(main, /preload\.cjs/);
   assert.match(selector, /selection.*preload\.cjs/);
+  assert.match(selector, /show:\s*false/);
+  assert.match(selector, /setAlwaysOnTop\(true, 'screen-saver'\)/);
   assert.match(packager, /preload\.cjs/);
 });
 
@@ -291,14 +293,18 @@ test('Windows capture binds the exact shortcut-time pointer before showing the p
   assert.match(main, /captureHost\.request\('ping'\)/);
 });
 
-test('fixed translucent panel has reliable native drag rails without hover opacity changes', async () => {
+test('fixed translucent panel drags from whitespace without a visible handle or interactive regressions', async () => {
   const html = await readFile(join(appDirectory, 'renderer', 'index.html'), 'utf8');
   const styles = await readFile(join(appDirectory, 'renderer', 'styles.css'), 'utf8');
   const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
   const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
+  const preload = await readFile(join(appDirectory, 'preload.cjs'), 'utf8');
   const glassRule = styles.match(/\.glass\s*\{([^}]*)\}/)?.[1];
+  const panelContentRule = styles.match(/\.panel-content\s*\{([^}]*)\}/)?.[1];
   assert.ok(glassRule, 'The root glass rule is missing.');
+  assert.ok(panelContentRule, 'The panel content rule is missing.');
   assert.doesNotMatch(glassRule, /-webkit-app-region/);
+  assert.doesNotMatch(panelContentRule, /-webkit-app-region/);
   assert.match(styles, /\.background-drag\s*\{[\s\S]*-webkit-app-region:\s*drag/);
   assert.match(styles, /\.titlebar\s*\{[\s\S]*position:\s*absolute/);
   assert.match(html, /class="panel-shell"/);
@@ -306,7 +312,9 @@ test('fixed translucent panel has reliable native drag rails without hover opaci
   assert.match(styles, /\.edge-drag\s*\{[\s\S]*-webkit-app-region:\s*drag/);
   assert.match(styles, /\.edge-drag-right\s*\{[^}]*width:\s*14px/);
   assert.match(styles, /\.edge-drag-left\s*\{[^}]*width:\s*14px/);
-  assert.match(styles, /\.edge-drag-top\s*\{[\s\S]*-webkit-app-region:\s*no-drag/);
+  assert.doesNotMatch(html, /edge-drag-top/);
+  assert.doesNotMatch(styles, /\.edge-drag-top/);
+  assert.match(html, /id="SessionSidebar" class="session-sidebar no-drag"/);
   assert.doesNotMatch(styles, /\.transcript::after/);
   for (const selector of ['.welcome', '.conversation-turn', '.turn-body', '.message-row']) {
     const escaped = selector.replace('.', '\\.');
@@ -317,8 +325,14 @@ test('fixed translucent panel has reliable native drag rails without hover opaci
   assert.doesNotMatch(styles, /\.(?:glass|panel-surface):hover::(?:before|after)/);
   assert.match(main, /setInterval\(\(\) => \{[\s\S]*screen\.getCursorScreenPoint\(\)[\s\S]*setWindowHovered\(inside\)[\s\S]*\}, 100\)/);
   assert.match(main, /send\('window:bounds-settled', \{ open: panelOpen \}\)/);
-  assert.match(main, /ipcMain\.on\('window:drag-start'/);
-  assert.match(renderer, /requestAnimationFrame\(\(\) => \{[\s\S]*window\.zommi\.moveWindowDrag/);
+  assert.match(renderer, /panelContent\.addEventListener\('mousedown', startWhitespaceWindowDrag\)/);
+  assert.match(renderer, /document\.addEventListener\('mousemove', queueWhitespaceWindowDrag\)/);
+  assert.match(renderer, /event\.button !== 0 \|\| event\.target !== panelContent/);
+  assert.match(renderer, /window\.zommi\.moveWindowDrag\(pendingWhitespaceDragPoint\)/);
+  assert.doesNotMatch(renderer, /topDragHandle|edge-drag-top/);
+  assert.match(preload, /beginWindowDrag:[\s\S]*window:drag-start/);
+  assert.match(main, /ipcMain\.on\('window:drag-start'[\s\S]*beginManualWindowDrag/);
+  assert.match(main, /whitespaceDragMovesWindow/);
   assert.doesNotMatch(renderer, /window\.zommi\.setWindowHovered\(pointerOver\)/);
   assert.match(renderer, /glass\.classList\.toggle\('is-compact', !open\)/);
   assert.doesNotMatch(styles, /window-moving/);
@@ -377,20 +391,18 @@ test('assistant messages render safe Markdown from the packaged renderer depende
   assert.match(packager, /copyRuntimeDependencies/);
 });
 
-test('compact orb is a small antialiased vector and panel morphs from its bottom-center anchor', async () => {
+test('compact orb uses the selected 05 WebGL material and panel morphs from its bottom-center anchor', async () => {
   const html = await readFile(join(appDirectory, 'renderer', 'index.html'), 'utf8');
   const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
   const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
+  const orbRenderer = await readFile(join(appDirectory, 'renderer', 'orb-renderer.mjs'), 'utf8');
   const styles = await readFile(join(appDirectory, 'renderer', 'styles.css'), 'utf8');
   const layout = await readFile(join(appDirectory, 'window-layout.mjs'), 'utf8');
   assert.match(html, /class="panel-surface"/);
-  assert.match(html, /class="orb-art"[\s\S]*linearGradient id="orb-spectrum"[\s\S]*radialGradient id="orb-glass"/);
-  assert.match(html, /class="orb-nebula orb-nebula-a"[\s\S]*class="orb-nebula orb-nebula-b"/);
-  assert.match(html, /filter id="orb-nebula-soft"[\s\S]*feGaussianBlur/);
-  assert.doesNotMatch(html, /M22 13\.1c\.72 5\.25/);
-  assert.doesNotMatch(html, /orb-aura/);
+  assert.match(html, /canvas id="ZommiOrbCanvas" class="orb-art" width="126" height="126"/);
+  assert.doesNotMatch(html, /<svg class="orb-art"|orb-aura|orb-spectrum-rim|orb-glass-rim/);
   assert.match(styles, /\.compact-orb\s*\{[\s\S]*?width:\s*42px;[\s\S]*?height:\s*42px/);
-  assert.match(styles, /\.compact-orb \.orb-art\s*\{[\s\S]*?shape-rendering:\s*geometricPrecision/);
+  assert.match(styles, /\.compact-orb \.orb-art\s*\{[\s\S]*?image-rendering:\s*auto/);
   assert.doesNotMatch(styles, /\.compact-orb[^{]*\{[^}]*filter:/);
   assert.match(styles, /\.compact-orb\s*\{[\s\S]*?box-shadow:\s*none/);
   assert.match(styles, /\.panel-shell\s*\{[\s\S]*?transform-origin:\s*50% 100%/);
@@ -398,12 +410,15 @@ test('compact orb is a small antialiased vector and panel morphs from its bottom
   assert.match(renderer, /orbSize \/ panelWidth/);
   assert.match(renderer, /const working = activeTurns\.size > 0/);
   assert.match(renderer, /compactOrb\.classList\.toggle\('is-working', working\)/);
-  assert.match(styles, /\.compact-orb::before\s*\{[\s\S]*?animation:\s*orb-idle-halo 6\.8s/);
-  assert.match(styles, /\.compact-orb\.is-working::before\s*\{[^}]*animation:\s*orb-halo-tempo 2\.8s/);
-  assert.match(styles, /\.compact-orb \.orb-core\s*\{[^}]*animation:\s*orb-idle-breathe 7\.2s/);
-  assert.match(styles, /@keyframes orb-nebula-drift-a/);
-  assert.doesNotMatch(html, /orb-spectrum-rim|orb-glass-rim/);
-  assert.match(main, /compactOrbIdleAnimationRuns/);
+  assert.match(renderer, /compactOrbRenderer\.setWorking\(working\)/);
+  assert.match(orbRenderer, /05 \/ Nebula Liquid Glass/);
+  assert.match(orbRenderer, /canvas\.dataset\.material = '05-nebula-liquid-glass'/);
+  assert.match(orbRenderer, /float nebulaWarp = nebulaNoise/);
+  assert.match(orbRenderer, /float workingHalo = exp/);
+  assert.match(orbRenderer, /if \(working\) frameRequest = requestAnimationFrame\(draw\)/);
+  assert.doesNotMatch(styles, /orb-working-orbit|orb-nebula-drift|orb-halo-tempo/);
+  assert.match(main, /compactOrbIdleIsStill/);
+  assert.match(main, /compactOrbWorkingAnimationRuns/);
   assert.match(main, /compactOrbHasNoLegacySurfaceOrGrayRim/);
   assert.match(renderer, /new ResizeObserver\(syncPanelMorphGeometry\)\.observe\(glass\)/);
   assert.match(layout, /COMPACT_WINDOW_SIZE\s*=\s*56/);
@@ -448,12 +463,16 @@ test('streaming send control becomes a stop control backed by Codex turn interru
 
 test('streaming preserves manual scroll position and exposes a latest-message control', async () => {
   const html = await readFile(join(appDirectory, 'renderer', 'index.html'), 'utf8');
+  const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
   const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
   assert.match(html, /id="ScrollToLatest"/);
   assert.match(renderer, /if \(!force && !autoFollow\)/);
-  assert.match(renderer, /transcript\.addEventListener\('wheel', handleTranscriptWheel/);
+  assert.match(renderer, /transcript\.addEventListener\('wheel', handleTranscriptWheel, \{ passive: false \}\)/);
   assert.match(renderer, /if \(programmaticScroll && nearBottom\) return/);
-  assert.match(renderer, /if \(!event\.deltaY\) return;[\s\S]*autoFollow = false/);
+  assert.match(renderer, /event\.preventDefault\(\)/);
+  assert.match(renderer, /transcript\.scrollTop = Math\.max\(0, Math\.min\(maximumScrollTop, transcript\.scrollTop \+ event\.deltaY\)\)/);
+  assert.match(renderer, /autoFollow = event\.deltaY > 0 && isNearBottom\(transcript\)/);
+  assert.match(main, /wheelDownAfterUpReturnsToBottom/);
   assert.match(renderer, /isNearBottom\(transcript\)/);
 });
 
@@ -462,6 +481,9 @@ test('Alt+Shift+A combines the selected image with shortcut-time pointer context
   const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
   assert.match(main, /Alt\+Shift\+A[\s\S]*includePointerContext:\s*true/);
   assert.match(main, /pointerContext = await capturePointerContext\(\)/);
+  assert.match(main, /return await selectImageRegion\(\)/);
+  assert.match(main, /image-selector-fallback/);
+  assert.match(main, /return captureHost\.request\('selectImage'\)/);
   assert.match(main, /snapshot:\s*pointerContext\?\.snapshot \|\| null/);
   assert.match(renderer, /attachment\.snapshot && !attachment\.imageDataUrl/);
   assert.match(renderer, /previewText\.hidden = !attachment\.previewText/);

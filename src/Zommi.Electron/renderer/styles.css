@@ -178,85 +178,18 @@ button { color: inherit; }
 }
 
 .compact-orb:focus-visible { outline: 3px solid rgba(73, 126, 246, 0.3); outline-offset: 2px; }
-.compact-orb::before {
-  content: "";
-  position: absolute;
-  z-index: 0;
-  inset: -6px;
-  border-radius: 50%;
-  pointer-events: none;
-  background: radial-gradient(circle, transparent 0 68%, rgba(84, 222, 232, 0.2) 77%, rgba(112, 105, 244, 0.16) 87%, transparent 100%);
-  opacity: 0.12;
-  transform: scale(0.98);
-  will-change: opacity, transform;
-  animation: orb-idle-halo 6.8s ease-in-out infinite;
-}
-
-.compact-orb.is-working::before { animation: orb-halo-tempo 2.8s ease-in-out infinite; }
-
 .compact-orb .orb-art {
-  position: relative;
-  z-index: 1;
   display: block;
   width: 42px;
   height: 42px;
-  overflow: visible;
-  shape-rendering: geometricPrecision;
+  image-rendering: auto;
 }
 
-.compact-orb .orb-core,
-.compact-orb .orb-nebula {
-  transform-box: fill-box;
-  transform-origin: center;
-}
-
-.compact-orb .orb-core { animation: orb-idle-breathe 7.2s ease-in-out infinite; }
-.compact-orb .orb-nebula-a { animation: orb-nebula-drift-a 9.6s ease-in-out infinite alternate; }
-.compact-orb .orb-nebula-b { animation: orb-nebula-drift-b 11.8s ease-in-out infinite alternate; }
-.compact-orb .orb-glint { animation: orb-glint-idle 6.8s ease-in-out infinite; }
-.compact-orb.is-working .orb-core { animation: orb-working-breathe 2.8s ease-in-out infinite; }
-.compact-orb.is-working .orb-nebula-a { animation-duration: 4.4s; }
-.compact-orb.is-working .orb-nebula-b { animation-duration: 5.3s; }
-.compact-orb.is-working .orb-glint { animation: orb-glint-tempo 2.8s ease-in-out infinite; }
-
-@keyframes orb-idle-halo {
-  0%, 100% { opacity: 0.09; transform: scale(0.98); }
-  50% { opacity: 0.2; transform: scale(1.025); }
-}
-
-@keyframes orb-idle-breathe {
-  0%, 100% { transform: translateY(0) scale(1); }
-  50% { transform: translateY(-0.45px) scale(1.012); }
-}
-
-@keyframes orb-working-breathe {
-  0%, 100% { transform: scale(0.99); }
-  50% { transform: scale(1.025); }
-}
-
-@keyframes orb-halo-tempo {
-  0%, 100% { opacity: 0.1; transform: scale(0.98); }
-  50% { opacity: 0.26; transform: scale(1.035); }
-}
-
-@keyframes orb-nebula-drift-a {
-  from { transform: translate(-0.7px, -0.25px) rotate(-2deg) scale(1); }
-  to { transform: translate(1.1px, 0.7px) rotate(5deg) scale(1.045); }
-}
-
-@keyframes orb-nebula-drift-b {
-  from { transform: translate(0.8px, 0.5px) rotate(3deg) scale(1.035); }
-  to { transform: translate(-1px, -0.65px) rotate(-4deg) scale(0.985); }
-}
-
-@keyframes orb-glint-tempo {
-  0%, 100% { opacity: 0.68; }
-  50% { opacity: 0.92; }
-}
-
-@keyframes orb-glint-idle {
-  0%, 100% { opacity: 0.62; }
-  50% { opacity: 0.82; }
+.compact-orb .orb-art.fallback-orb {
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 31% 24%, rgba(255, 255, 255, 0.88), transparent 5%),
+    radial-gradient(circle at 36% 30%, #8795a6, #6571a8 42%, #72558d 76%);
 }
 
 button,
@@ -293,21 +226,6 @@ details,
 
 .is-compact > .edge-drag { display: none; }
 
-.edge-drag-top {
-  top: 35px;
-  left: calc(50% - 120px);
-  width: 240px;
-  height: 10px;
-  border-radius: 999px;
-  background: rgba(82, 103, 132, 0.16);
-  cursor: grab;
-  opacity: 1;
-  -webkit-app-region: no-drag;
-  transition: opacity 150ms ease 160ms;
-}
-
-.glass.is-compact .edge-drag-top { opacity: 0; pointer-events: none; transition-delay: 0ms; }
-.edge-drag-top:active { cursor: grabbing; }
 .edge-drag-right { top: 24px; right: 8px; bottom: 24px; width: 14px; }
 .edge-drag-bottom { right: 72px; bottom: 8px; left: 72px; height: 14px; }
 .edge-drag-left { top: 24px; bottom: 24px; left: 8px; width: 14px; }
