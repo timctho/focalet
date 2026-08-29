@@ -10,6 +10,7 @@ import {
   previousHistoryStart,
   sessionStatus,
   sessionTitle,
+  wheelScrollContainer,
 } from './renderer-logic.mjs';
 import { artifactsFromText, artifactsFromThreadItem, sandboxHtmlDocument } from '../artifacts.mjs';
 import { renderMarkdown } from './markdown.mjs';
@@ -25,6 +26,9 @@ const compactOrb = document.querySelector('#ZommiOrb');
 const compactOrbCanvas = document.querySelector('#ZommiOrbCanvas');
 const compactOrbRenderer = createNebulaOrbRenderer(compactOrbCanvas);
 const transcript = document.querySelector('#CodexTranscript');
+const transcriptContentResizeObserver = new ResizeObserver(() => {
+  if (autoFollow) scrollTranscript();
+});
 const composer = document.querySelector('#ZommiComposer');
 const chips = document.querySelector('#ContextChips');
 const sendButton = document.querySelector('#SendMessage');
@@ -1314,7 +1318,7 @@ function renderStreamUpdate(update, { deferScroll = false, turnCompleted = false
     }
     if (update.text) {
       assistantText = update.replace ? update.text : `${assistantText}${update.text}`;
-      assistantElement.innerHTML = renderMarkdown(assistantText);
+      renderAssistantMarkdown(assistantElement, assistantText);
     }
     renderArtifacts(update.artifacts, update.runtimeTargetId);
     if (!deferScroll) scrollTranscript();
@@ -1427,6 +1431,36 @@ function setActivityState(element, completed) {
 function compactLabel(value) {
   const line = String(value).split(/\r?\n/, 1)[0].replace(/\s+/g, ' ').trim();
   return line.length <= 70 ? line : `${line.slice(0, 69)}…`;
+}
+
+function renderAssistantMarkdown(element, markdown) {
+  element.innerHTML = renderMarkdown(markdown);
+  if (!element.querySelector('h1, h2, h3, h4, h5, h6, pre, table')) return;
+  const actions = document.createElement('div');
+  actions.className = 'response-actions';
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.className = 'response-copy-button';
+  copy.textContent = 'Copy';
+  copy.setAttribute('aria-label', 'Copy formatted response');
+  copy.addEventListener('click', () => copyFormattedResponse(copy, markdown));
+  actions.append(copy);
+  element.prepend(actions);
+}
+
+async function copyFormattedResponse(button, markdown) {
+  button.disabled = true;
+  try {
+    await window.zommi.copy(markdown);
+    button.textContent = 'Copied';
+  } catch {
+    button.textContent = 'Copy failed';
+  }
+  setTimeout(() => {
+    if (!button.isConnected) return;
+    button.disabled = false;
+    button.textContent = 'Copy';
+  }, 1400);
 }
 
 function renderArtifacts(values, runtimeTargetId = activeRuntimeTargetId) {
@@ -1579,6 +1613,7 @@ function beginTurn(message, tokens, options = {}) {
   currentTurnBody.className = 'turn-body';
   turn.append(row, currentTurnBody);
   (options.parent || transcript).append(turn);
+  transcriptContentResizeObserver.observe(turn);
   if (options.scroll !== false) scrollTranscript({ force: true });
   return turn;
 }
@@ -1665,6 +1700,12 @@ function handleTranscriptScroll() {
 
 function handleTranscriptWheel(event) {
   if (!event.deltaY) return;
+  if (wheelScrollContainer(event.target, transcript) !== transcript) {
+    programmaticScroll = false;
+    autoFollow = false;
+    updateLatestButton();
+    return;
+  }
   event.preventDefault();
   programmaticScroll = false;
   const maximumScrollTop = Math.max(0, transcript.scrollHeight - transcript.clientHeight);
@@ -1673,7 +1714,7 @@ function handleTranscriptWheel(event) {
   updateLatestButton();
 }
 
-function scrollTranscript({ force = false } = {}) {
+function scrollTranscript({ force = false, settle = false } = {}) {
   if (!force && isReadingExpandedThinking()) {
     autoFollow = false;
     updateLatestButton();
@@ -1687,6 +1728,7 @@ function scrollTranscript({ force = false } = {}) {
   programmaticScroll = true;
   transcript.scrollTop = transcript.scrollHeight;
   requestAnimationFrame(() => {
+    if (settle) transcript.scrollTop = transcript.scrollHeight;
     programmaticScroll = false;
     autoFollow = isNearBottom(transcript);
     updateLatestButton();
@@ -1713,6 +1755,7 @@ function renderThreadHistory(thread) {
   streamFrame = 0;
   if (historyLoadFrame) cancelAnimationFrame(historyLoadFrame);
   historyLoadFrame = 0;
+  transcriptContentResizeObserver.disconnect();
   transcript.replaceChildren();
   assistantElement = null;
   assistantText = '';
@@ -1726,7 +1769,7 @@ function renderThreadHistory(thread) {
   renderHistoryRange(historyStartIndex, historyTurns.length, transcript);
   if (!historyTurns.length) appendWelcome();
   autoFollow = true;
-  scrollTranscript({ force: true });
+  scrollTranscript({ force: true, settle: true });
 }
 
 function renderHistoryRange(start, end, parent) {

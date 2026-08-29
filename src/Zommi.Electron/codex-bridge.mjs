@@ -29,6 +29,7 @@ export class CodexAppServerAdapter extends EventEmitter {
     this.threadModels = new Map();
     this.threadEfforts = new Map();
     this.materializedThreads = new Set();
+    this.localSessions = new Map();
     this.models = [];
     this.pendingSessionNames = new Map();
     this.pendingSessionPreviews = new Map();
@@ -82,6 +83,7 @@ export class CodexAppServerAdapter extends EventEmitter {
     if (shouldNameThread) {
       this.pendingSessionNames.set(threadId, buildSessionName(message));
       this.pendingSessionPreviews.set(threadId, String(message).trim());
+      this.#rememberLocalSession({ id: threadId, preview: String(message).trim() });
     }
     let result;
     try {
@@ -282,6 +284,7 @@ export class CodexAppServerAdapter extends EventEmitter {
     if (model) params.model = String(model);
     const result = await this.#request('thread/start', params);
     this.#setActiveThread(result);
+    this.#rememberLocalSession(result.thread);
     return result;
   }
 
@@ -315,8 +318,39 @@ export class CodexAppServerAdapter extends EventEmitter {
       archived: false,
       useStateDbOnly: true,
     });
-    return (result?.data || []).filter((thread) =>
-      thread.threadSource === 'zommi' || String(thread.name || '').startsWith('Zommi · '));
+    const listed = (result?.data || []).filter((thread) =>
+      thread.threadSource === 'zommi'
+      || String(thread.name || '').startsWith('Zommi · ')
+      || this.localSessions.has(String(thread.id || '')));
+    const merged = new Map();
+    for (const thread of listed) {
+      const id = String(thread.id || '');
+      if (!id) continue;
+      const local = this.localSessions.get(id);
+      const session = this.#rememberLocalSession(local ? { ...local, ...thread } : thread);
+      merged.set(id, session);
+    }
+    for (const [id, session] of this.localSessions) {
+      if (!merged.has(id)) merged.set(id, session);
+    }
+    return [...merged.values()].sort((left, right) =>
+      sessionUpdatedAt(right) - sessionUpdatedAt(left));
+  }
+
+  #rememberLocalSession(thread) {
+    const id = String(thread?.id || '');
+    if (!id) return null;
+    const current = this.localSessions.get(id) || {};
+    const session = {
+      ...current,
+      ...thread,
+      id,
+      name: thread?.name || current.name,
+      preview: thread?.preview || current.preview || 'New chat',
+      updatedAt: thread?.updatedAt || current.updatedAt || Math.floor(Date.now() / 1000),
+    };
+    this.localSessions.set(id, session);
+    return session;
   }
 
   #chatState(models, sessions, thread) {
@@ -436,6 +470,7 @@ export class CodexAppServerAdapter extends EventEmitter {
     this.pendingSessionNames.delete(threadId);
     this.pendingSessionPreviews.delete(threadId);
     this.materializedThreads.add(threadId);
+    this.#rememberLocalSession({ id: threadId, name, preview });
     if (this.threadId === threadId && this.activeThread && preview) this.activeThread.preview = preview;
     if (name) {
       try {
@@ -465,6 +500,13 @@ export class CodexAppServerAdapter extends EventEmitter {
 export function codexRuntimeVersion(initialized) {
   const userAgent = String(initialized?.userAgent || '');
   return /\/([0-9]+(?:\.[0-9]+){1,3}(?:[-+][a-z0-9.-]+)?)/i.exec(userAgent)?.[1] || null;
+}
+
+function sessionUpdatedAt(session) {
+  const numeric = Number(session?.updatedAt);
+  if (Number.isFinite(numeric)) return numeric;
+  const parsed = Date.parse(String(session?.updatedAt || ''));
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 // Compatibility export for local probes built before the runtime broker name was finalized.

@@ -1,7 +1,7 @@
 import { BrowserWindow, desktopCapturer, ipcMain, screen } from 'electron';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { normalizeRectangle, scaleCropRectangle } from './selection-geometry.mjs';
+import { normalizeRectangle, scaleCropRectangle, selectorPreviewSize } from './selection-geometry.mjs';
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
 
@@ -12,14 +12,6 @@ export async function selectImageRegion() {
     width: Math.max(1, Math.round(display.bounds.width * display.scaleFactor)),
     height: Math.max(1, Math.round(display.bounds.height * display.scaleFactor)),
   };
-  const sources = await desktopCapturer.getSources({
-    types: ['screen'],
-    thumbnailSize: requestedSize,
-    fetchWindowIcons: false,
-  });
-  const source = sources.find((candidate) => String(candidate.display_id) === String(display.id)) || sources[0];
-  if (!source || source.thumbnail.isEmpty()) throw new Error('Electron could not capture the current display.');
-
   const selector = new BrowserWindow({
     title: 'Zommi image selection',
     x: display.bounds.x,
@@ -44,8 +36,28 @@ export async function selectImageRegion() {
   });
   selector.setMenuBarVisibility(false);
   selector.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  await selector.loadFile(join(moduleDirectory, 'selection', 'index.html'));
-  selector.webContents.send('selection:init', { imageDataUrl: source.thumbnail.toDataURL() });
+  let source;
+  try {
+    const [sources] = await Promise.all([
+      desktopCapturer.getSources({
+        types: ['screen'],
+        thumbnailSize: requestedSize,
+        fetchWindowIcons: false,
+      }),
+      selector.loadFile(join(moduleDirectory, 'selection', 'index.html')),
+    ]);
+    source = sources.find((candidate) => String(candidate.display_id) === String(display.id)) || sources[0];
+    if (!source || source.thumbnail.isEmpty()) throw new Error('Electron could not capture the current display.');
+    const capturedSize = source.thumbnail.getSize();
+    const previewSize = selectorPreviewSize(display.bounds, capturedSize);
+    const preview = previewSize.width === capturedSize.width && previewSize.height === capturedSize.height
+      ? source.thumbnail
+      : source.thumbnail.resize({ ...previewSize, quality: 'good' });
+    selector.webContents.send('selection:init', { imageDataUrl: preview.toDataURL() });
+  } catch (error) {
+    if (!selector.isDestroyed()) selector.destroy();
+    throw error;
+  }
   selector.show();
   selector.setAlwaysOnTop(true, 'screen-saver');
   selector.focus();

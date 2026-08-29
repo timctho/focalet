@@ -852,6 +852,34 @@ textarea:focus::-webkit-scrollbar-thumb,
   white-space: normal;
 }
 
+.response-actions {
+  display: flex;
+  justify-content: flex-end;
+  min-height: 24px;
+  margin: 0 0 4px;
+}
+
+.response-copy-button {
+  border: 1px solid rgba(75, 105, 150, 0.15);
+  border-radius: 8px;
+  padding: 4px 8px;
+  cursor: pointer;
+  background: rgba(230, 238, 249, 0.72);
+  color: rgba(42, 65, 99, 0.66);
+  font-size: 9.5px;
+  font-weight: 650;
+}
+
+.response-copy-button:hover,
+.response-copy-button:focus-visible { outline: 0; background: rgba(210, 225, 247, 0.84); color: rgba(34, 75, 139, 0.82); }
+.response-copy-button:disabled { cursor: default; opacity: 0.68; }
+.response-actions + h1,
+.response-actions + h2,
+.response-actions + h3,
+.response-actions + h4,
+.response-actions + pre,
+.response-actions + table { margin-top: 0; }
+
 .markdown-content > :first-child { margin-top: 0; }
 .markdown-content > :last-child { margin-bottom: 0; }
 .markdown-content p { margin: 0 0 0.72em; }
@@ -942,6 +970,7 @@ textarea:focus::-webkit-scrollbar-thumb,
   max-height: 150px;
   margin: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   border-top: 1px solid rgba(101, 124, 153, 0.11);
   padding: 8px 12px 10px 34px;
   color: rgba(44, 57, 76, 0.62);
@@ -949,6 +978,15 @@ textarea:focus::-webkit-scrollbar-thumb,
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+.activity-content { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+.activity-content:hover,
+.activity-content:focus { scrollbar-color: var(--scroll-thumb) transparent; }
+.activity-content::-webkit-scrollbar { width: 7px; height: 7px; }
+.activity-content::-webkit-scrollbar-track { background: transparent; }
+.activity-content::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 999px; background: transparent; background-clip: padding-box; }
+.activity-content:hover::-webkit-scrollbar-thumb,
+.activity-content:focus::-webkit-scrollbar-thumb { background: var(--scroll-thumb); background-clip: padding-box; }
 
 .activity-content[hidden] { display: none; }
 

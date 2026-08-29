@@ -10,6 +10,7 @@ import { RuntimeBroker } from './runtime-broker.mjs';
 import { RuntimeDiscovery } from './runtime-discovery.mjs';
 import { capturePortableContext } from './platform-capture.mjs';
 import { selectImageRegion } from './image-selector.mjs';
+import { collectImageSelection } from './image-selection-flow.mjs';
 import {
   COMPACT_WINDOW_SIZE,
   calculateAdaptiveWindowSize,
@@ -260,7 +261,17 @@ async function runAcceptanceInputProbe(path) {
     result.modelPanelDiagnostics = await evaluateRenderer(`{ const e = document.querySelector('#ModelPanel'); const r = e?.getBoundingClientRect(); const s = e ? getComputedStyle(e) : null; return r && s ? { x: r.x, y: r.y, width: r.width, height: r.height, display: s.display, opacity: s.opacity, visibility: s.visibility } : null; }`);
     result.modelPanelOpensBelowTopControl = await evaluateRenderer(`{ const p = document.querySelector('#ModelPanel')?.getBoundingClientRect(); const s = document.querySelector('#ModelSummary')?.getBoundingClientRect(); return Boolean(p && s && p.top > s.bottom); }`);
     result.modelSelectionBesideAgentAtTop = await evaluateRenderer(`{ const m = document.querySelector('#ModelSummary')?.getBoundingClientRect(); const r = document.querySelector('#RuntimeSummary')?.getBoundingClientRect(); const c = document.querySelector('.composer-shell')?.getBoundingClientRect(); return Boolean(m && r && c && m.left >= r.right && Math.abs((m.top + m.height / 2) - (r.top + r.height / 2)) <= 2 && m.bottom < c.top); }`);
-    result.markdownDisplayed = await evaluateRenderer(`Boolean(document.querySelector('#CodexTranscript .message.user strong') && document.querySelector('#CodexTranscript .message.assistant strong') && document.querySelector('#CodexTranscript .message.assistant ul') && document.querySelector('#CodexTranscript .message.assistant code'))`);
+    result.markdownDisplayed = await evaluateRenderer(`Boolean(document.querySelector('#CodexTranscript .message.user strong') && document.querySelector('#CodexTranscript .message.assistant strong') && document.querySelector('#CodexTranscript .message.assistant ul') && document.querySelector('#CodexTranscript .message.assistant code') && document.querySelector('#CodexTranscript .message.assistant table'))`);
+    result.formattedResponseHasCopyButton = await evaluateRenderer(`document.querySelectorAll('#CodexTranscript .response-copy-button').length === 1`);
+    clipboard.clear();
+    await evaluateRenderer(`{ document.querySelector('#CodexTranscript .conversation-turn:last-child .response-copy-button')?.click(); return true; }`);
+    await delay(120);
+    const copiedFormattedResponse = await clipboard.readText();
+    result.formattedResponseCopyDiagnostics = {
+      text: copiedFormattedResponse,
+      button: await evaluateRenderer(`{ const button = document.querySelector('#CodexTranscript .conversation-turn:last-child .response-copy-button'); return button ? { text: button.textContent, disabled: button.disabled } : null; }`),
+    };
+    result.formattedResponseCopyWorks = /## History answer 42[\s\S]*\| Column \| Value \|/.test(copiedFormattedResponse);
     result.generatedImageDisplayed = await evaluateRenderer(`Boolean(document.querySelector('#CodexTranscript .artifact-card.image img'))`);
     result.generatedHtmlPreviewDisplayed = await evaluateRenderer(`Boolean(document.querySelector('#CodexTranscript .artifact-card.html iframe')?.srcdoc.includes('ZOMMI_HTML_PREVIEW'))`);
     if (acceptanceModelEvidencePath) await captureAcceptanceEvidence(acceptanceModelEvidencePath);
@@ -290,6 +301,18 @@ async function runAcceptanceInputProbe(path) {
       await delay(180);
     }
     result.historyReachesFirstTurn = await evaluateRenderer(`{ const e = document.querySelector('#CodexTranscript'); e.scrollTop = 0; return e.querySelector('.conversation-turn')?.getAttribute('aria-label') === 'Conversation turn 1'; }`);
+
+    const thinkingWheelStart = await evaluateRenderer(`{ const transcript = document.querySelector('#CodexTranscript'); const content = transcript?.querySelector('.conversation-turn:last-child .activity-card.thinking .activity-content'); if (!content) return null; content.parentElement.open = true; content.scrollTop = 0; content.scrollIntoView({ block: 'center' }); const r = content.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), nestedTop: content.scrollTop, transcriptTop: transcript.scrollTop }; }`);
+    if (thinkingWheelStart) {
+      mainWindow.webContents.sendInputEvent({ type: 'mouseMove', x: thinkingWheelStart.x, y: thinkingWheelStart.y });
+      mainWindow.webContents.sendInputEvent({ type: 'mouseWheel', x: thinkingWheelStart.x, y: thinkingWheelStart.y, deltaY: -480, canScroll: true });
+      await delay(220);
+    }
+    const thinkingWheelEnd = await evaluateRenderer(`{ const transcript = document.querySelector('#CodexTranscript'); const content = transcript?.querySelector('.conversation-turn:last-child .activity-card.thinking .activity-content'); return content ? { nestedTop: content.scrollTop, transcriptTop: transcript.scrollTop } : null; }`);
+    result.thinkingWheelDiagnostics = { before: thinkingWheelStart, after: thinkingWheelEnd };
+    result.thinkingWheelStaysInsideThinking = Boolean(thinkingWheelStart && thinkingWheelEnd
+      && thinkingWheelEnd.nestedTop > thinkingWheelStart.nestedTop
+      && Math.abs(thinkingWheelEnd.transcriptTop - thinkingWheelStart.transcriptTop) <= 2);
 
     await clickRendererElement('#ZommiComposer');
     mainWindow.webContents.insertText('seeded streaming input acceptance');
@@ -325,6 +348,7 @@ async function runAcceptanceInputProbe(path) {
     await clickRendererElement('#SessionList .session-item[data-thread-id="seeded-zommi-thread"]');
     await delay(260);
     result.returnedToRunningSession = await evaluateRenderer(`document.querySelector('#SendMessage')?.getAttribute('aria-label') === 'Stop response'`);
+    result.sessionSwitchScrollsToLatest = await evaluateRenderer(`{ const e = document.querySelector('#CodexTranscript'); return Boolean(e && e.scrollHeight - e.scrollTop - e.clientHeight <= 40); }`);
     await delay(2500);
     const transcriptPoint = await rendererElementCenter('#CodexTranscript');
     mainWindow.webContents.sendInputEvent({ type: 'mouseMove', x: transcriptPoint.x, y: transcriptPoint.y });
@@ -364,7 +388,7 @@ async function runAcceptanceInputProbe(path) {
     await delay(180);
     result.backgroundCompletionShowsUnread = await evaluateRenderer(`document.querySelector('#SessionList .session-item[data-thread-id="seeded-zommi-thread"]')?.dataset.status === 'unread'`);
     result.passed = Object.entries(result)
-      .filter(([key]) => !['inputPath', 'reducedMotion', 'dragRegionStyles', 'whitespaceDragDiagnostics', 'sessionSidebarHoverDiagnostics', 'modelPanelDiagnostics', 'bidirectionalWheelDiagnostics', 'manualScrollDiagnostics', 'thinkingCardsPerTurn'].includes(key))
+      .filter(([key]) => !['inputPath', 'reducedMotion', 'dragRegionStyles', 'whitespaceDragDiagnostics', 'sessionSidebarHoverDiagnostics', 'modelPanelDiagnostics', 'formattedResponseCopyDiagnostics', 'bidirectionalWheelDiagnostics', 'manualScrollDiagnostics', 'thinkingWheelDiagnostics', 'thinkingCardsPerTurn'].includes(key))
       .every(([, value]) => value === true);
   } catch (error) {
     result.passed = false;
@@ -812,17 +836,16 @@ async function capturePointerContext(point = null) {
 
 async function selectImageContext({ includePointerContext = false } = {}) {
   const wasVisible = mainWindow?.isVisible();
-  let pointerContext = null;
-  if (includePointerContext) {
-    try {
-      pointerContext = await capturePointerContext();
-    } catch (error) {
-      sendStatus(`Pointer context capture failed; image selection remains available: ${error.message}`, true);
-    }
-  }
   mainWindow?.hide();
   try {
-    const result = await selectImageWithNativeFallback();
+    const { selection: result, pointerContext, pointerTimedOut } = await collectImageSelection({
+      selectImage: selectImageWithNativeFallback,
+      capturePointerContext: includePointerContext ? capturePointerContext : null,
+      onPointerError: (error) => {
+        sendStatus(`Pointer context capture failed; image selection remains available: ${error.message}`, true);
+      },
+    });
+    if (pointerTimedOut) writeRuntimeLog('image-pointer-context', 'capture exceeded the image-selection grace period');
     if (!result?.cancelled && result?.dataUrl) {
       send('context:added', {
         id: randomUUID(),
@@ -1042,9 +1065,14 @@ function seededHistory(threadId) {
   const turns = Array.from({ length: 42 }, (_value, index) => {
     const items = [
       { id: `history-user-${index + 1}`, type: 'userMessage', content: [{ type: 'text', text: index === 41 ? 'History **question 42**' : `History question ${index + 1}` }] },
-      { id: `history-agent-${index + 1}`, type: 'agentMessage', phase: 'final', status: 'completed', text: index === 41 ? '**History answer 42**\n\n- Markdown list\n- `inline code`' : `History answer ${index + 1}` },
+      { id: `history-agent-${index + 1}`, type: 'agentMessage', phase: 'final', status: 'completed', text: index === 41 ? '## History answer 42\n\n- **Markdown list**\n- `inline code`\n\n| Column | Value |\n| --- | --- |\n| Status | Ready |' : `History answer ${index + 1}` },
     ];
     if (index === 41) {
+      items.splice(1, 0, {
+        id: 'history-thinking-42', type: 'reasoning', status: 'completed',
+        summary: ['Reviewing the structured response.'],
+        content: [Array.from({ length: 48 }, (_line, lineIndex) => `Thinking detail ${lineIndex + 1}`).join('\n')],
+      });
       const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#edf4ff"/><circle cx="320" cy="170" r="90" fill="#779cff"/><text x="320" y="310" text-anchor="middle" font-family="sans-serif" font-size="28" fill="#253b68">ZOMMI IMAGE PREVIEW</text></svg>';
       items.push(
         { id: 'history-generated-image', type: 'imageGeneration', status: 'completed', revisedPrompt: 'Zommi preview', result: Buffer.from(svg).toString('base64'), savedPath: '/tmp/zommi-preview.svg', failure: null },

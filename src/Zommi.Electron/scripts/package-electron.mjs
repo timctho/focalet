@@ -90,7 +90,7 @@ async function copyApplication(destination) {
     'openclaw-gateway-adapter.mjs',
     'pty-compatibility-adapter.mjs', 'pty-profiles.mjs',
     'platform-capture.mjs',
-    'image-selector.mjs', 'selection-geometry.mjs', 'window-layout.mjs', 'renderer', 'selection',
+    'image-selector.mjs', 'image-selection-flow.mjs', 'selection-geometry.mjs', 'window-layout.mjs', 'renderer', 'selection',
   ];
   for (const file of files) await cp(join(appDirectory, file), join(destination, file), { recursive: true });
   const sourcePackage = JSON.parse(await readFile(join(appDirectory, 'package.json'), 'utf8'));

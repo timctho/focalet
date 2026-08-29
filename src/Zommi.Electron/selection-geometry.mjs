@@ -23,3 +23,21 @@ export function scaleCropRectangle(rectangle, displayBounds, imageSize) {
     height: Math.max(1, Math.min(imageSize.height - y, Math.round(rectangle.height * scaleY))),
   };
 }
+
+export function selectorPreviewSize(displayBounds, imageSize, maximumDimension = 2560) {
+  const displayWidth = Math.max(1, Number(displayBounds?.width) || 1);
+  const displayHeight = Math.max(1, Number(displayBounds?.height) || 1);
+  const imageWidth = Math.max(1, Number(imageSize?.width) || 1);
+  const imageHeight = Math.max(1, Number(imageSize?.height) || 1);
+  const limit = Math.max(1, Number(maximumDimension) || 1);
+  const scale = Math.min(
+    1,
+    displayWidth / imageWidth,
+    displayHeight / imageHeight,
+    limit / Math.max(imageWidth, imageHeight),
+  );
+  return {
+    width: Math.max(1, Math.round(imageWidth * scale)),
+    height: Math.max(1, Math.round(imageHeight * scale)),
+  };
+}

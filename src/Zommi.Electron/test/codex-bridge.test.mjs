@@ -266,6 +266,47 @@ test('running turns remain routed to their session while another session is acti
   bridge.stop();
 });
 
+test('fresh image sessions remain listed before Codex persists Zommi naming metadata', async () => {
+  const requests = [];
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  let startedThreads = 0;
+  const child = Object.assign(new EventEmitter(), {
+    stdout, stderr, killed: false,
+    kill() { this.killed = true; },
+  });
+  child.stdin = {
+    write(line) {
+      const message = JSON.parse(line);
+      if (!message.id) return true;
+      requests.push(message);
+      let result = {};
+      if (message.method === 'model/list' || message.method === 'mcpServerStatus/list') result = { data: [] };
+      if (message.method === 'thread/list') {
+        result = { data: startedThreads > 0
+          ? [{ id: 'thread-image', preview: 'Inspect this image', updatedAt: 10 }]
+          : [] };
+      }
+      if (message.method === 'thread/start') {
+        startedThreads += 1;
+        result = { thread: { id: startedThreads === 1 ? 'thread-image' : 'thread-next', turns: [] } };
+      }
+      if (message.method === 'turn/start') result = { turn: { id: 'turn-image' } };
+      queueMicrotask(() => stdout.write(`${JSON.stringify({ id: message.id, result })}\n`));
+      return true;
+    },
+  };
+
+  const bridge = new PortableCodexBridge({ spawnProcess: () => child, cwd: '/tmp/zommi-test' });
+  await bridge.startTurn('Inspect this image', [], ['data:image/png;base64,aGVsbG8=']);
+  const nextState = await bridge.createSession();
+  assert.deepEqual(new Set(nextState.sessions.map((session) => session.id)), new Set(['thread-image', 'thread-next']));
+  const turnRequest = requests.find((request) => request.method === 'turn/start');
+  assert.equal(turnRequest.params.input.at(-1).type, 'image');
+  assert.equal(turnRequest.params.input.at(-1).url, 'data:image/png;base64,aGVsbG8=');
+  bridge.stop();
+});
+
 test('startup resumes only the exact bound session and creates fresh when it has another writer', async () => {
   const stdout = new PassThrough();
   const stderr = new PassThrough();

@@ -44,6 +44,11 @@ export function isNearBottom({ scrollHeight, scrollTop, clientHeight }, toleranc
   return scrollHeight - scrollTop - clientHeight <= tolerance;
 }
 
+export function wheelScrollContainer(target, transcript) {
+  const nested = target?.closest?.('.activity-content');
+  return nested && transcript?.contains?.(nested) ? nested : transcript;
+}
+
 export function initialHistoryStart(turnCount, pageSize) {
   return Math.max(0, Number(turnCount) - Math.max(1, Number(pageSize)));
 }

@@ -408,7 +408,7 @@ test('assistant messages render safe Markdown from the packaged renderer depende
   const styles = await readFile(join(appDirectory, 'renderer', 'styles.css'), 'utf8');
   const packager = await readFile(join(appDirectory, 'scripts', 'package-electron.mjs'), 'utf8');
   assert.match(renderer, /import \{ renderMarkdown \} from '\.\/markdown\.mjs'/);
-  assert.match(renderer, /assistantElement\.innerHTML = renderMarkdown\(assistantText\)/);
+  assert.match(renderer, /renderAssistantMarkdown\(assistantElement, assistantText\)/);
   assert.match(renderer, /text\.innerHTML = renderMarkdown\(message\)/);
   assert.match(markdown, /marked\.esm\.js/);
   assert.match(markdown, /html\(\{ text \}\)[\s\S]*escapeHtml\(text\)/);
@@ -491,26 +491,54 @@ test('streaming preserves manual scroll position and exposes a latest-message co
   const html = await readFile(join(appDirectory, 'renderer', 'index.html'), 'utf8');
   const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
   const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
+  const styles = await readFile(join(appDirectory, 'renderer', 'styles.css'), 'utf8');
   assert.match(html, /id="ScrollToLatest"/);
   assert.match(renderer, /if \(!force && !autoFollow\)/);
   assert.match(renderer, /transcript\.addEventListener\('wheel', handleTranscriptWheel, \{ passive: false \}\)/);
+  assert.match(renderer, /wheelScrollContainer\(event\.target, transcript\) !== transcript/);
   assert.match(renderer, /if \(programmaticScroll && nearBottom\) return/);
   assert.match(renderer, /event\.preventDefault\(\)/);
   assert.match(renderer, /transcript\.scrollTop = Math\.max\(0, Math\.min\(maximumScrollTop, transcript\.scrollTop \+ event\.deltaY\)\)/);
   assert.match(renderer, /autoFollow = event\.deltaY > 0 && isNearBottom\(transcript\)/);
+  assert.match(renderer, /scrollTranscript\(\{ force: true, settle: true \}\)/);
+  assert.match(renderer, /transcriptContentResizeObserver\.observe\(turn\)/);
+  assert.match(renderer, /if \(autoFollow\) scrollTranscript\(\)/);
+  assert.match(styles, /\.activity-content\s*\{[\s\S]*overscroll-behavior:\s*contain/);
   assert.match(main, /wheelDownAfterUpReturnsToBottom/);
+  assert.match(main, /thinkingWheelStaysInsideThinking/);
+  assert.match(main, /sessionSwitchScrollsToLatest/);
   assert.match(renderer, /isNearBottom\(transcript\)/);
+});
+
+test('formatted assistant sections and tables expose a clipboard copy action', async () => {
+  const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
+  const preload = await readFile(join(appDirectory, 'preload.cjs'), 'utf8');
+  const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
+  const styles = await readFile(join(appDirectory, 'renderer', 'styles.css'), 'utf8');
+  assert.match(main, /ipcMain\.handle\('clipboard:write'/);
+  assert.match(preload, /copy:\s*\(text\)\s*=>\s*ipcRenderer\.invoke\('clipboard:write', text\)/);
+  assert.match(renderer, /element\.querySelector\('h1, h2, h3, h4, h5, h6, pre, table'\)/);
+  assert.match(renderer, /className = 'response-copy-button'/);
+  assert.match(renderer, /window\.zommi\.copy\(markdown\)/);
+  assert.match(styles, /\.response-copy-button/);
+  assert.match(main, /formattedResponseCopyWorks/);
 });
 
 test('Alt+Shift+A combines the selected image with shortcut-time pointer context', async () => {
   const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
+  const selector = await readFile(join(appDirectory, 'image-selector.mjs'), 'utf8');
+  const packager = await readFile(join(appDirectory, 'scripts', 'package-electron.mjs'), 'utf8');
   const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
   assert.match(main, /Alt\+Shift\+A[\s\S]*includePointerContext:\s*true/);
-  assert.match(main, /pointerContext = await capturePointerContext\(\)/);
+  assert.match(main, /collectImageSelection\(\{/);
+  assert.match(main, /capturePointerContext:\s*includePointerContext \? capturePointerContext : null/);
   assert.match(main, /return await selectImageRegion\(\)/);
   assert.match(main, /image-selector-fallback/);
   assert.match(main, /return captureHost\.request\('selectImage'\)/);
   assert.match(main, /snapshot:\s*pointerContext\?\.snapshot \|\| null/);
+  assert.match(selector, /Promise\.all\(\[/);
+  assert.match(selector, /selectorPreviewSize\(display\.bounds, capturedSize\)/);
+  assert.match(packager, /image-selection-flow\.mjs/);
   assert.match(renderer, /attachment\.snapshot && !attachment\.imageDataUrl/);
   assert.match(renderer, /previewText\.hidden = !attachment\.previewText/);
 });

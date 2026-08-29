@@ -12,6 +12,7 @@ import {
   previousHistoryStart,
   sessionStatus,
   sessionTitle,
+  wheelScrollContainer,
 } from '../renderer/renderer-logic.mjs';
 
 test('reasoning and commentary share one thinking card per turn', () => {
@@ -76,6 +77,16 @@ test('user-facing session labels exclude Zommi context envelopes', () => {
 test('stream following only considers a transcript near its bottom', () => {
   assert.equal(isNearBottom({ scrollHeight: 1000, scrollTop: 650, clientHeight: 300 }), false);
   assert.equal(isNearBottom({ scrollHeight: 1000, scrollTop: 675, clientHeight: 300 }), true);
+});
+
+test('wheel input follows the hovered thinking body instead of the outer chat', () => {
+  const thinking = {};
+  const transcript = { contains: (candidate) => candidate === thinking };
+  const thinkingChild = { closest: (selector) => selector === '.activity-content' ? thinking : null };
+  const chatChild = { closest: () => null };
+  assert.equal(wheelScrollContainer(thinkingChild, transcript), thinking);
+  assert.equal(wheelScrollContainer(chatChild, transcript), transcript);
+  assert.equal(wheelScrollContainer({ closest: () => ({}) }, transcript), transcript);
 });
 
 test('long histories reveal older turns in bounded pages', () => {
