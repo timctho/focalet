@@ -10,6 +10,9 @@ on:
 permissions:
   contents: read
 
+env:
+  NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -17,21 +20,22 @@ concurrency:
 jobs:
   test:
     name: Tests and Release build
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, zommi-ci]
     timeout-minutes: 20
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: src/Zommi.Electron/package-lock.json
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.tool_cache }}/dotnet
         with:
           dotnet-version: 8.0.x
 
@@ -55,53 +59,52 @@ jobs:
   windows-release:
     name: Windows release package
     needs: test
-    runs-on: windows-latest
+    runs-on: [self-hosted, Linux, X64, zommi-ci]
     timeout-minutes: 30
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: src/Zommi.Electron/package-lock.json
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.tool_cache }}/dotnet
         with:
           dotnet-version: 8.0.x
 
       - name: Build portable Windows release
-        shell: pwsh
-        run: ./scripts/package-windows.ps1 -Runtime win-x64
+        shell: bash
+        run: |
+          windows_script="$(wslpath -w "$GITHUB_WORKSPACE/scripts/package-windows.ps1")"
+          /init '/mnt/c/Program Files/PowerShell/7/pwsh.exe' \
+            -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass \
+            -File "$windows_script" -Runtime win-x64
 
       - name: Verify release package
-        shell: pwsh
+        shell: bash
         run: |
-          $archive = 'artifacts/zommi-win-x64.zip'
-          $package = 'artifacts/zommi-win-x64'
-          $required = @(
-            "$package/Zommi.exe",
-            "$package/resources/native/Zommi.exe",
-            "$package/resources/native/Zommi.Hook.exe",
+          archive='artifacts/zommi-win-x64.zip'
+          package='artifacts/zommi-win-x64'
+          required=(
+            "$package/Zommi.exe"
+            "$package/resources/native/Zommi.exe"
+            "$package/resources/native/Zommi.Hook.exe"
             "$package/SHA256SUMS.txt"
           )
-          foreach ($path in $required) {
-            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-              throw "Release package is missing $path"
-            }
-          }
-          if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) {
-            throw "Release archive is missing $archive"
-          }
-          $archiveHash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
-          Set-Content -LiteralPath "${archive}.sha256" -Encoding ascii -Value "$archiveHash  zommi-win-x64.zip"
-          Get-Item -LiteralPath $archive, "${archive}.sha256" | Format-Table Name, Length
+          for required_path in "${required[@]}"; do
+            test -f "$required_path" || { echo "Release package is missing $required_path" >&2; exit 1; }
+          done
+          test -f "$archive" || { echo "Release archive is missing $archive" >&2; exit 1; }
+          (cd artifacts && sha256sum zommi-win-x64.zip > zommi-win-x64.zip.sha256)
+          ls -lh "$archive" "${archive}.sha256"
 
       - name: Upload Windows release
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: zommi-win-x64-${{ github.sha }}
           path: |
