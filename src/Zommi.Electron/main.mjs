@@ -51,6 +51,7 @@ const acceptanceTransportEvidencePath = process.argv
   ?.slice('--acceptance-transport-evidence='.length);
 const noAutoLaunch = process.argv.includes('--no-auto-launch');
 const HOVER_COLLAPSE_DELAY_MS = 500;
+const ORB_ALWAYS_ON_TOP_LEVEL = 'screen-saver';
 let mainWindow = null;
 let tray = null;
 let backend = null;
@@ -98,6 +99,7 @@ async function startApplication() {
   createTray();
   createBackend();
   powerResumeHandler = () => {
+    keepOrbOnTop();
     void backend.rediscoverTargets().catch((error) => {
       writeRuntimeLog('runtime-resume-refresh', error.message);
     });
@@ -434,6 +436,7 @@ function createWindow() {
       zoomFactor: 1,
     },
   });
+  keepOrbOnTop({ raise: false });
   mainWindow.setIgnoreMouseEvents(true, { forward: true });
   mainWindow.setMenuBarVisibility(false);
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -863,6 +866,13 @@ function showWindow({ openPanel: shouldOpenPanel = false, focusComposer = false,
   } else {
     mainWindow.showInactive();
   }
+  keepOrbOnTop();
+}
+
+function keepOrbOnTop({ raise = true } = {}) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.setAlwaysOnTop(true, ORB_ALWAYS_ON_TOP_LEVEL);
+  if (raise && mainWindow.isVisible()) mainWindow.moveTop();
 }
 
 function toggleExpanded() {

@@ -16,6 +16,41 @@ $electronDirectory = Join-Path $repositoryRoot 'src/Zommi.Electron'
 $dotnetArtifactsDirectory = Join-Path `
     ([IO.Path]::GetTempPath()) `
     "zommi-dotnet-publish-$([Guid]::NewGuid().ToString('N'))"
+$wslPrefix = if ($repositoryRoot.StartsWith('\\wsl.localhost\', [StringComparison]::OrdinalIgnoreCase)) {
+    '\\wsl.localhost\'
+}
+elseif ($repositoryRoot.StartsWith('\\wsl$\', [StringComparison]::OrdinalIgnoreCase)) {
+    '\\wsl$\'
+}
+else {
+    $null
+}
+$wslDistro = $null
+$linuxRepositoryRoot = $null
+if ($null -ne $wslPrefix) {
+    $wslRelativeRoot = $repositoryRoot.Substring($wslPrefix.Length)
+    $distroSeparator = $wslRelativeRoot.IndexOf('\')
+    if ($distroSeparator -le 0) {
+        throw "Could not resolve the WSL distribution from $repositoryRoot."
+    }
+    $wslDistro = $wslRelativeRoot.Substring(0, $distroSeparator)
+    $linuxRepositoryRoot = $wslRelativeRoot.Substring($distroSeparator).Replace('\', '/')
+}
+
+if ($DeployToDownloads) {
+    if ($null -ne $wslPrefix) {
+        $baselineCommand = 'node "$1"'
+        & wsl.exe -d $wslDistro -e sh -lc $baselineCommand `
+            zommi-release-baseline `
+            "$linuxRepositoryRoot/scripts/assert-release-baseline.mjs"
+    }
+    else {
+        node (Join-Path $repositoryRoot 'scripts/assert-release-baseline.mjs')
+    }
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Refusing Downloads deployment because the release baseline check failed.'
+    }
+}
 
 if (-not $SkipPublish) {
     try {
@@ -46,23 +81,7 @@ if (-not $SkipPublish) {
         Remove-Item -LiteralPath $dotnetArtifactsDirectory -Recurse -Force -ErrorAction SilentlyContinue
     }
 
-    $wslPrefix = if ($repositoryRoot.StartsWith('\\wsl.localhost\', [StringComparison]::OrdinalIgnoreCase)) {
-        '\\wsl.localhost\'
-    }
-    elseif ($repositoryRoot.StartsWith('\\wsl$\', [StringComparison]::OrdinalIgnoreCase)) {
-        '\\wsl$\'
-    }
-    else {
-        $null
-    }
     if ($null -ne $wslPrefix) {
-        $wslRelativeRoot = $repositoryRoot.Substring($wslPrefix.Length)
-        $distroSeparator = $wslRelativeRoot.IndexOf('\')
-        if ($distroSeparator -le 0) {
-            throw "Could not resolve the WSL distribution from $repositoryRoot."
-        }
-        $wslDistro = $wslRelativeRoot.Substring(0, $distroSeparator)
-        $linuxRepositoryRoot = $wslRelativeRoot.Substring($distroSeparator).Replace('\', '/')
         $linuxElectronDirectory = "$linuxRepositoryRoot/src/Zommi.Electron"
         $linuxPackager = "$linuxElectronDirectory/scripts/package-electron.mjs"
         $linuxOutputDirectory = "$linuxRepositoryRoot/artifacts/zommi-$Runtime"

@@ -52,6 +52,18 @@ test('Windows deployment stops the capture host before replacing its package dir
   assert.match(deploy, /foreach \(\$process in \(Get-TargetDirectoryProcesses \$targetDirectory\)\)/);
 });
 
+test('Downloads release refuses stale source and includes the selected orb renderer in its hash manifest', async () => {
+  const repositoryRoot = join(appDirectory, '..', '..');
+  const windowsPackager = await readFile(join(repositoryRoot, 'scripts', 'package-windows.ps1'), 'utf8');
+  const releaseGuard = await readFile(join(repositoryRoot, 'scripts', 'assert-release-baseline.mjs'), 'utf8');
+  assert.match(windowsPackager, /if \(\$DeployToDownloads\) \{[\s\S]*assert-release-baseline\.mjs/);
+  assert.match(windowsPackager, /Refusing Downloads deployment because the release baseline check failed/);
+  assert.match(releaseGuard, /fetch.*--no-tags.*origin.*main/);
+  assert.match(releaseGuard, /merge-base.*--is-ancestor/);
+  assert.match(windowsPackager, /\$rendererOrbPath = .*renderer\/orb-renderer\.mjs/);
+  assert.match(windowsPackager, /\$rendererOrbHash  resources\/app\/renderer\/orb-renderer\.mjs/);
+});
+
 test('sandboxed windows use packaged CommonJS preload bridges', async () => {
   const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
   const selector = await readFile(join(appDirectory, 'image-selector.mjs'), 'utf8');
@@ -351,6 +363,20 @@ test('Alt+A expands the anchored panel without cursor-relative window movement',
   const panelOpenBody = main.match(/function setPanelOpen\([^]*?\n\}/)?.[0] || '';
   assert.match(panelOpenBody, /if \(position\) mainWindow\.setBounds\(target, false\)/);
   assert.doesNotMatch(panelOpenBody, /!open\).*setBounds|if \([^)]*!open[^)]*\) mainWindow\.setBounds/);
+});
+
+test('floating orb is restored to the highest window tier whenever it is shown or resumed', async () => {
+  const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
+  assert.match(main, /ORB_ALWAYS_ON_TOP_LEVEL\s*=\s*'screen-saver'/);
+  const keepOnTopBody = main.match(/function keepOrbOnTop\([^]*?\n\}/)?.[0] || '';
+  assert.match(keepOnTopBody, /mainWindow\.setAlwaysOnTop\(true, ORB_ALWAYS_ON_TOP_LEVEL\)/);
+  assert.match(keepOnTopBody, /mainWindow\.isVisible\(\).*mainWindow\.moveTop\(\)/);
+  const createWindowBody = main.match(/function createWindow\([^]*?\n\}/)?.[0] || '';
+  assert.match(createWindowBody, /alwaysOnTop:\s*true/);
+  assert.match(createWindowBody, /keepOrbOnTop\(\{ raise: false \}\)/);
+  const showWindowBody = main.match(/function showWindow\([^]*?\n\}/)?.[0] || '';
+  assert.match(showWindowBody, /keepOrbOnTop\(\)/);
+  assert.match(main, /powerResumeHandler\s*=\s*\(\) => \{\s*keepOrbOnTop\(\)/);
 });
 
 test('generated images and HTML artifacts cross the adapter boundary into sandboxed chat previews', async () => {
