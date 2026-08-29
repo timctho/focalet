@@ -305,6 +305,17 @@ test('Windows capture binds the exact shortcut-time pointer before showing the p
   assert.match(main, /captureHost\.request\('ping'\)/);
 });
 
+test('capture previews and runtime handoff omit banner and observation timestamp metadata', async () => {
+  const contextHandoff = await readFile(join(appDirectory, 'context-handoff.mjs'), 'utf8');
+  const portableCapture = await readFile(join(appDirectory, 'platform-capture.mjs'), 'utf8');
+  const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
+  for (const source of [contextHandoff, portableCapture]) {
+    assert.doesNotMatch(source, /ZOMMI INVOCATION CONTEXT/);
+    assert.doesNotMatch(source, /`Observed:/);
+  }
+  assert.doesNotMatch(main, /return \['ZOMMI INVOCATION CONTEXT'/);
+});
+
 test('fixed translucent panel drags from whitespace without a visible handle or interactive regressions', async () => {
   const html = await readFile(join(appDirectory, 'renderer', 'index.html'), 'utf8');
   const styles = await readFile(join(appDirectory, 'renderer', 'styles.css'), 'utf8');
@@ -426,6 +437,7 @@ test('compact orb uses the selected 05 WebGL material and panel morphs from its 
   const layout = await readFile(join(appDirectory, 'window-layout.mjs'), 'utf8');
   assert.match(html, /class="panel-surface"/);
   assert.match(html, /canvas id="ZommiOrbCanvas" class="orb-art" width="126" height="126"/);
+  assert.match(html, /class="orb-chroma"/);
   assert.doesNotMatch(html, /<svg class="orb-art"|orb-aura|orb-spectrum-rim|orb-glass-rim/);
   assert.match(styles, /\.compact-orb\s*\{[\s\S]*?width:\s*42px;[\s\S]*?height:\s*42px/);
   assert.match(styles, /\.compact-orb \.orb-art\s*\{[\s\S]*?image-rendering:\s*auto/);
@@ -442,9 +454,12 @@ test('compact orb uses the selected 05 WebGL material and panel morphs from its 
   assert.match(orbRenderer, /float nebulaWarp = nebulaNoise/);
   assert.match(orbRenderer, /float workingHalo = exp/);
   assert.match(orbRenderer, /if \(working\) frameRequest = requestAnimationFrame\(draw\)/);
-  assert.doesNotMatch(styles, /orb-working-orbit|orb-nebula-drift|orb-halo-tempo/);
+  assert.match(styles, /\.compact-orb\.is-working \.orb-chroma[\s\S]*animation:\s*orb-chroma-circle/);
+  assert.match(styles, /\.compact-orb\.is-working \.orb-art[\s\S]*animation:\s*orb-working-breathe/);
+  assert.match(styles, /prefers-reduced-motion:[\s\S]*\.compact-orb\.is-working \.orb-chroma[\s\S]*orb-chroma-circle/);
   assert.match(main, /compactOrbIdleIsStill/);
   assert.match(main, /compactOrbWorkingAnimationRuns/);
+  assert.match(main, /compactOrbChromaCircleVisible/);
   assert.match(main, /compactOrbHasNoLegacySurfaceOrGrayRim/);
   assert.match(renderer, /new ResizeObserver\(syncPanelMorphGeometry\)\.observe\(glass\)/);
   assert.match(layout, /COMPACT_WINDOW_SIZE\s*=\s*56/);
@@ -510,23 +525,34 @@ test('streaming preserves manual scroll position and exposes a latest-message co
   assert.match(renderer, /isNearBottom\(transcript\)/);
 });
 
-test('formatted assistant sections and tables expose a clipboard copy action', async () => {
+test('tables, code, and images expose bottom-right icon-only clipboard actions', async () => {
   const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
   const preload = await readFile(join(appDirectory, 'preload.cjs'), 'utf8');
   const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
   const styles = await readFile(join(appDirectory, 'renderer', 'styles.css'), 'utf8');
   assert.match(main, /ipcMain\.handle\('clipboard:write'/);
+  assert.match(main, /ipcMain\.handle\('clipboard:write-image'/);
+  assert.match(main, /new ClipboardItem\(\{ 'image\/png': new Blob/);
   assert.match(preload, /copy:\s*\(text\)\s*=>\s*ipcRenderer\.invoke\('clipboard:write', text\)/);
-  assert.match(renderer, /element\.querySelector\('h1, h2, h3, h4, h5, h6, pre, table'\)/);
-  assert.match(renderer, /className = 'response-copy-button'/);
-  assert.match(renderer, /window\.zommi\.copy\(markdown\)/);
-  assert.match(styles, /\.response-copy-button/);
+  assert.match(preload, /copyImage:\s*\(dataUrl\)\s*=>\s*ipcRenderer\.invoke\('clipboard:write-image', dataUrl\)/);
+  assert.match(renderer, /element\.querySelectorAll\('pre, table, img'\)/);
+  assert.match(renderer, /className = 'content-copy-button'/);
+  assert.match(renderer, /button\.append\(createUiIcon\('copy'\), label\)/);
+  assert.match(renderer, /window\.zommi\.copyImage\(await imageDataUrlForClipboard\(target\)\)/);
+  assert.match(styles, /\.content-copy-button\s*\{[\s\S]*right:\s*2px;[\s\S]*bottom:\s*1px/);
+  assert.match(styles, /\.content-copy-button \.copy-label\s*\{[\s\S]*opacity:\s*0/);
+  assert.match(styles, /\.content-copy-button:hover \.copy-label,[\s\S]*opacity:\s*1/);
+  assert.doesNotMatch(renderer, /className = 'response-copy-button'/);
+  assert.match(main, /formattedBlocksHaveCopyIcons/);
+  assert.match(main, /generatedImageCopyWorks/);
   assert.match(main, /formattedResponseCopyWorks/);
 });
 
-test('Alt+Shift+A combines the selected image with shortcut-time pointer context', async () => {
+test('Alt+Shift+A opens a sharp live selection overlay while capture and pointer context run', async () => {
   const main = await readFile(join(appDirectory, 'main.mjs'), 'utf8');
   const selector = await readFile(join(appDirectory, 'image-selector.mjs'), 'utf8');
+  const selectionHtml = await readFile(join(appDirectory, 'selection', 'index.html'), 'utf8');
+  const selectionStyles = await readFile(join(appDirectory, 'selection', 'selection.css'), 'utf8');
   const packager = await readFile(join(appDirectory, 'scripts', 'package-electron.mjs'), 'utf8');
   const renderer = await readFile(join(appDirectory, 'renderer', 'renderer.mjs'), 'utf8');
   assert.match(main, /Alt\+Shift\+A[\s\S]*includePointerContext:\s*true/);
@@ -536,8 +562,13 @@ test('Alt+Shift+A combines the selected image with shortcut-time pointer context
   assert.match(main, /image-selector-fallback/);
   assert.match(main, /return captureHost\.request\('selectImage'\)/);
   assert.match(main, /snapshot:\s*pointerContext\?\.snapshot \|\| null/);
-  assert.match(selector, /Promise\.all\(\[/);
-  assert.match(selector, /selectorPreviewSize\(display\.bounds, capturedSize\)/);
+  assert.match(selector, /transparent:\s*true/);
+  assert.match(selector, /selector\.setContentProtection\(true\)/);
+  assert.match(selector, /const sourcePromise = desktopCapturer\.getSources/);
+  assert.ok(selector.indexOf('selector.show();') < selector.indexOf('const source = await sourcePromise;'));
+  assert.doesNotMatch(selector, /thumbnail\.resize|preview\.toDataURL/);
+  assert.doesNotMatch(selectionHtml, /id="screen"/);
+  assert.doesNotMatch(selectionStyles, /backdrop-filter|filter:\s*blur/);
   assert.match(packager, /image-selection-flow\.mjs/);
   assert.match(renderer, /attachment\.snapshot && !attachment\.imageDataUrl/);
   assert.match(renderer, /previewText\.hidden = !attachment\.previewText/);

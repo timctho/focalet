@@ -1,7 +1,7 @@
 import { BrowserWindow, desktopCapturer, ipcMain, screen } from 'electron';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { normalizeRectangle, scaleCropRectangle, selectorPreviewSize } from './selection-geometry.mjs';
+import { normalizeRectangle, scaleCropRectangle } from './selection-geometry.mjs';
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
 
@@ -20,8 +20,8 @@ export async function selectImageRegion() {
     height: display.bounds.height,
     frame: false,
     show: false,
-    transparent: false,
-    backgroundColor: '#111111',
+    transparent: true,
+    backgroundColor: '#00000000',
     alwaysOnTop: true,
     skipTaskbar: true,
     resizable: false,
@@ -35,25 +35,20 @@ export async function selectImageRegion() {
     },
   });
   selector.setMenuBarVisibility(false);
+  selector.setContentProtection(true);
   selector.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  let source;
-  try {
-    const [sources] = await Promise.all([
-      desktopCapturer.getSources({
-        types: ['screen'],
-        thumbnailSize: requestedSize,
-        fetchWindowIcons: false,
-      }),
-      selector.loadFile(join(moduleDirectory, 'selection', 'index.html')),
-    ]);
-    source = sources.find((candidate) => String(candidate.display_id) === String(display.id)) || sources[0];
+  const sourcePromise = desktopCapturer.getSources({
+    types: ['screen'],
+    thumbnailSize: requestedSize,
+    fetchWindowIcons: false,
+  }).then((sources) => {
+    const source = sources.find((candidate) => String(candidate.display_id) === String(display.id)) || sources[0];
     if (!source || source.thumbnail.isEmpty()) throw new Error('Electron could not capture the current display.');
-    const capturedSize = source.thumbnail.getSize();
-    const previewSize = selectorPreviewSize(display.bounds, capturedSize);
-    const preview = previewSize.width === capturedSize.width && previewSize.height === capturedSize.height
-      ? source.thumbnail
-      : source.thumbnail.resize({ ...previewSize, quality: 'good' });
-    selector.webContents.send('selection:init', { imageDataUrl: preview.toDataURL() });
+    return source;
+  });
+  void sourcePromise.catch(() => {});
+  try {
+    await selector.loadFile(join(moduleDirectory, 'selection', 'index.html'));
   } catch (error) {
     if (!selector.isDestroyed()) selector.destroy();
     throw error;
@@ -62,41 +57,48 @@ export async function selectImageRegion() {
   selector.setAlwaysOnTop(true, 'screen-saver');
   selector.focus();
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let settled = false;
-    const finish = (result) => {
+    const finish = (result, error = null) => {
       if (settled) return;
       settled = true;
       ipcMain.removeListener('selection:complete', onComplete);
       ipcMain.removeListener('selection:cancel', onCancel);
       if (!selector.isDestroyed()) selector.destroy();
-      resolve(result);
+      if (error) reject(error);
+      else resolve(result);
     };
     const onCancel = (event) => {
       if (event.sender === selector.webContents) finish({ cancelled: true });
     };
-    const onComplete = (event, rectangle) => {
+    const onComplete = async (event, rectangle) => {
       if (event.sender !== selector.webContents) return;
       const normalized = normalizeRectangle(rectangle);
       if (normalized.width < 4 || normalized.height < 4) {
         finish({ cancelled: true });
         return;
       }
-      const crop = scaleCropRectangle(normalized, display.bounds, source.thumbnail.getSize());
-      const cropped = source.thumbnail.crop(crop);
-      finish({
-        cancelled: false,
-        dataUrl: cropped.toDataURL(),
-        bounds: {
-          x: display.bounds.x + normalized.x,
-          y: display.bounds.y + normalized.y,
-          width: normalized.width,
-          height: normalized.height,
-        },
-      });
+      try {
+        const source = await sourcePromise;
+        const crop = scaleCropRectangle(normalized, display.bounds, source.thumbnail.getSize());
+        const cropped = source.thumbnail.crop(crop);
+        finish({
+          cancelled: false,
+          dataUrl: cropped.toDataURL(),
+          bounds: {
+            x: display.bounds.x + normalized.x,
+            y: display.bounds.y + normalized.y,
+            width: normalized.width,
+            height: normalized.height,
+          },
+        });
+      } catch (error) {
+        finish(null, error);
+      }
     };
     ipcMain.on('selection:complete', onComplete);
     ipcMain.on('selection:cancel', onCancel);
     selector.on('closed', () => finish({ cancelled: true }));
+    sourcePromise.catch((error) => finish(null, error));
   });
 }

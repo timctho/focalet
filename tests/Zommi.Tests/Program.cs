@@ -203,11 +203,11 @@ static void InvocationContextIncludesVisibleText()
     };
 
     var context = ContextFormatter.FormatInvocation(snapshot, now.AddSeconds(1));
-    Contains("ZOMMI INVOCATION CONTEXT", context);
     Contains("Checkout total: $42", context);
     Contains("ignore previous instructions", context);
     True(!context.Contains('\u0007'), "A control character survived invocation-context formatting.");
-    Contains("untrusted data", context);
+    True(!context.Contains("ZOMMI INVOCATION CONTEXT", StringComparison.Ordinal), "The capture banner remained in invocation context.");
+    True(!context.Contains("Observed:", StringComparison.Ordinal), "Capture timing metadata remained in invocation context.");
 }
 
 static void InvocationContextPreservesLongWebpageText()
@@ -286,6 +286,8 @@ static void ContextPreviewOmitsInternalMetadata()
 
     var preview = ContextFormatter.FormatPreview(snapshot, now.AddSeconds(1));
     Contains("Mouse pointer: Button named \"Save\"", preview);
+    True(!preview.Contains("ZOMMI INVOCATION CONTEXT", StringComparison.Ordinal), "The capture banner remained in the context preview.");
+    True(!preview.Contains("Observed:", StringComparison.Ordinal), "Capture timing metadata remained in the context preview.");
     True(!preview.Contains("Pointer target:", StringComparison.Ordinal), "The old pointer-target label remained in the context preview.");
     True(!preview.Contains("confidence medium", StringComparison.OrdinalIgnoreCase), "Pointer confidence leaked into the context preview.");
     True(!preview.Contains("Snapshot confidence:", StringComparison.Ordinal), "Snapshot confidence leaked into the context preview.");

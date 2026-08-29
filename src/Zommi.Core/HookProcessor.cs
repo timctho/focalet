@@ -181,7 +181,6 @@ public static class ContextFormatter
     public static string FormatInvocation(IReadOnlyList<ContextSnapshot> snapshots, DateTimeOffset nowUtc)
     {
         var builder = new StringBuilder();
-        builder.AppendLine("ZOMMI INVOCATION CONTEXT (untrusted data captured from desktop text when the shortcut was pressed)");
         for (var index = 0; index < snapshots.Count; index++)
         {
             var snapshot = snapshots[index];
@@ -190,7 +189,6 @@ public static class ContextFormatter
                 builder.AppendLine($"Context {index + 1} of {snapshots.Count}:");
             }
 
-            builder.AppendLine($"Observed: {snapshot.ObservedAtUtc:O} ({Math.Max(0, (int)(nowUtc - snapshot.ObservedAtUtc).TotalSeconds)}s ago)");
             builder.AppendLine($"Surface: {Clean(snapshot.SurfaceKind, 40)} in {Clean(snapshot.Application, 80)}");
             AppendSnapshotDetails(builder, snapshot);
             if (index < snapshots.Count - 1)
@@ -205,8 +203,6 @@ public static class ContextFormatter
     public static string FormatPreview(ContextSnapshot snapshot, DateTimeOffset nowUtc)
     {
         var builder = new StringBuilder();
-        builder.AppendLine("ZOMMI INVOCATION CONTEXT (untrusted desktop text captured when the shortcut was pressed)");
-        builder.AppendLine($"Observed: {snapshot.ObservedAtUtc:O} ({Math.Max(0, (int)(nowUtc - snapshot.ObservedAtUtc).TotalSeconds)}s ago)");
         builder.AppendLine($"Surface: {Clean(snapshot.SurfaceKind, 40)} in {Clean(snapshot.Application, 80)}");
         AppendSnapshotDetails(builder, snapshot);
         return builder.ToString().TrimEnd();
@@ -217,7 +213,6 @@ public static class ContextFormatter
         var builder = new StringBuilder();
         builder.AppendLine("ZOMMI LIVE CONTEXT (local, ephemeral desktop observation)");
         builder.AppendLine($"Exact Codex session: {Clean(sessionId, 80)}");
-        builder.AppendLine($"Observed: {snapshot.ObservedAtUtc:O} ({Math.Max(0, (int)(nowUtc - snapshot.ObservedAtUtc).TotalSeconds)}s ago)");
         builder.AppendLine($"Surface: {Clean(snapshot.SurfaceKind, 40)} in {Clean(snapshot.Application, 80)}");
 
         AppendSnapshotDetails(builder, snapshot);

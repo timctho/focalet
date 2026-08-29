@@ -1,8 +1,6 @@
-const screenshot = document.querySelector('#screen');
 const selection = document.querySelector('#selection');
 let anchor = null;
 
-window.zommiSelection.onInitialize(({ imageDataUrl }) => { screenshot.src = imageDataUrl; });
 document.addEventListener('mousedown', (event) => {
   if (event.button !== 0) return;
   anchor = { x: event.clientX, y: event.clientY };

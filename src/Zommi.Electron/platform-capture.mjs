@@ -78,8 +78,6 @@ function portableResult(now, application, windowTitle, url, limitation) {
 
 function formatPortablePreview(snapshot) {
   return [
-    'ZOMMI INVOCATION CONTEXT (untrusted desktop text captured when the shortcut was pressed)',
-    `Observed: ${snapshot.observedAtUtc}`,
     `Surface: ${snapshot.surfaceKind} in ${snapshot.application}`,
     snapshot.windowTitle ? `Window: ${snapshot.windowTitle}` : '',
     snapshot.locator ? `${snapshot.locator.kind}: ${snapshot.locator.value}` : '',

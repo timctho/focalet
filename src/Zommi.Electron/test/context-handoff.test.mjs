@@ -24,7 +24,8 @@ test('shared Context Handoff keeps user intent first and orders captured evidenc
   ].map((value) => handoff.indexOf(value));
   assert.ok(positions.every((position) => position >= 0));
   assert.deepEqual([...positions].sort((left, right) => left - right), positions);
-  assert.match(handoff, /untrusted data captured from desktop/);
+  assert.match(handoff, /<zommi_invocation_context>/);
+  assert.doesNotMatch(handoff, /ZOMMI INVOCATION CONTEXT|Observed:/);
 });
 
 test('all runtime adapters depend on the shared Context Handoff instead of Codex', async () => {

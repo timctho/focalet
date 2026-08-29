@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, Tray, clipboard, globalShortcut, ipcMain, nativeImage, nativeTheme, powerMonitor, screen } from 'electron';
+import { app, BrowserWindow, ClipboardItem, Menu, Tray, clipboard, globalShortcut, ipcMain, nativeImage, nativeTheme, powerMonitor, screen } from 'electron';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { appendFile, readFile, rm, writeFile } from 'node:fs/promises';
@@ -201,8 +201,8 @@ async function runAcceptanceInputProbe(path) {
     result.compactOrbIdleIsStill = compactIdleBefore.frameCount > 0
       && compactIdleAfter.frameCount === compactIdleBefore.frameCount
       && compactIdleAfter.image === compactIdleBefore.image;
-    result.compactOrbHasNoLegacySurfaceOrGrayRim = compactIdleBefore.panelVisibility === 'hidden'
-      && compactIdleBefore.material.startsWith('05-nebula-liquid-glass')
+    result.compactIdleDiagnostics = compactIdleBefore;
+    result.compactOrbHasNoLegacySurfaceOrGrayRim = compactIdleBefore.material.startsWith('05-nebula-liquid-glass')
       && compactIdleBefore.svgCount === 0;
     setPanelOpen(true, { animate: false });
     mainWindow.focus();
@@ -262,17 +262,29 @@ async function runAcceptanceInputProbe(path) {
     result.modelPanelOpensBelowTopControl = await evaluateRenderer(`{ const p = document.querySelector('#ModelPanel')?.getBoundingClientRect(); const s = document.querySelector('#ModelSummary')?.getBoundingClientRect(); return Boolean(p && s && p.top > s.bottom); }`);
     result.modelSelectionBesideAgentAtTop = await evaluateRenderer(`{ const m = document.querySelector('#ModelSummary')?.getBoundingClientRect(); const r = document.querySelector('#RuntimeSummary')?.getBoundingClientRect(); const c = document.querySelector('.composer-shell')?.getBoundingClientRect(); return Boolean(m && r && c && m.left >= r.right && Math.abs((m.top + m.height / 2) - (r.top + r.height / 2)) <= 2 && m.bottom < c.top); }`);
     result.markdownDisplayed = await evaluateRenderer(`Boolean(document.querySelector('#CodexTranscript .message.user strong') && document.querySelector('#CodexTranscript .message.assistant strong') && document.querySelector('#CodexTranscript .message.assistant ul') && document.querySelector('#CodexTranscript .message.assistant code') && document.querySelector('#CodexTranscript .message.assistant table'))`);
-    result.formattedResponseHasCopyButton = await evaluateRenderer(`document.querySelectorAll('#CodexTranscript .response-copy-button').length === 1`);
+    result.formattedBlocksHaveCopyIcons = await evaluateRenderer(`{ const message = document.querySelector('#CodexTranscript .conversation-turn:last-child .message.assistant'); const blocks = [...(message?.querySelectorAll('pre, table') || [])]; const buttons = blocks.map((block) => block.parentElement?.querySelector(':scope > .content-copy-button')); return Boolean(blocks.length === 2 && buttons.every((button) => button?.querySelector('.ui-icon') && button.querySelector('.copy-label')?.textContent === 'Copy') && !message?.querySelector('.response-copy-button')); }`);
+    result.copyTextHiddenUntilHover = await evaluateRenderer(`{ const button = document.querySelector('#CodexTranscript .conversation-turn:last-child table')?.parentElement?.querySelector(':scope > .content-copy-button'); const label = button?.querySelector('.copy-label'); return Boolean(button && label && Number(getComputedStyle(label).opacity) === 0 && Number.parseFloat(getComputedStyle(button).width) <= 24); }`);
     clipboard.clear();
-    await evaluateRenderer(`{ document.querySelector('#CodexTranscript .conversation-turn:last-child .response-copy-button')?.click(); return true; }`);
+    await evaluateRenderer(`{ document.querySelector('#CodexTranscript .conversation-turn:last-child table')?.parentElement?.querySelector(':scope > .content-copy-button')?.click(); return true; }`);
     await delay(120);
     const copiedFormattedResponse = await clipboard.readText();
     result.formattedResponseCopyDiagnostics = {
       text: copiedFormattedResponse,
-      button: await evaluateRenderer(`{ const button = document.querySelector('#CodexTranscript .conversation-turn:last-child .response-copy-button'); return button ? { text: button.textContent, disabled: button.disabled } : null; }`),
+      button: await evaluateRenderer(`{ const button = document.querySelector('#CodexTranscript .conversation-turn:last-child table')?.parentElement?.querySelector(':scope > .content-copy-button'); return button ? { text: button.textContent, disabled: button.disabled } : null; }`),
     };
-    result.formattedResponseCopyWorks = /## History answer 42[\s\S]*\| Column \| Value \|/.test(copiedFormattedResponse);
+    result.formattedResponseCopyWorks = /^Column\tValue\r?\nStatus\tReady$/.test(copiedFormattedResponse);
+    clipboard.clear();
+    await evaluateRenderer(`{ document.querySelector('#CodexTranscript .conversation-turn:last-child .message.assistant pre')?.parentElement?.querySelector(':scope > .content-copy-button')?.click(); return true; }`);
+    await delay(120);
+    const copiedCode = await clipboard.readText();
+    result.codeCopyDiagnostics = copiedCode;
+    result.codeCopyWorks = copiedCode.trim() === 'const answer = 42;';
     result.generatedImageDisplayed = await evaluateRenderer(`Boolean(document.querySelector('#CodexTranscript .artifact-card.image img'))`);
+    result.generatedImageHasCopyIcon = await evaluateRenderer(`Boolean(document.querySelector('#CodexTranscript .artifact-card.image .artifact-surface > .content-copy-button .ui-icon'))`);
+    clipboard.clear();
+    await evaluateRenderer(`{ document.querySelector('#CodexTranscript .artifact-card.image .artifact-surface > .content-copy-button')?.click(); return true; }`);
+    await delay(180);
+    result.generatedImageCopyWorks = await clipboard.has('image/png');
     result.generatedHtmlPreviewDisplayed = await evaluateRenderer(`Boolean(document.querySelector('#CodexTranscript .artifact-card.html iframe')?.srcdoc.includes('ZOMMI_HTML_PREVIEW'))`);
     if (acceptanceModelEvidencePath) await captureAcceptanceEvidence(acceptanceModelEvidencePath);
     const effortBefore = await evaluateRenderer(`document.querySelector('#EffortList .effort-option.selected')?.dataset.effort || ''`);
@@ -337,6 +349,7 @@ async function runAcceptanceInputProbe(path) {
       && workingOrbBefore.renderState === 'working'
       && workingOrbAfter.frameCount > workingOrbBefore.frameCount
       && workingOrbAfter.image !== workingOrbBefore.image;
+    result.compactOrbChromaCircleVisible = await evaluateRenderer(`{ const ring = document.querySelector('#ZommiOrb .orb-chroma'); const style = ring ? getComputedStyle(ring) : null; return Boolean(style && Number(style.opacity) > 0.5 && style.animationName.includes('orb-chroma-circle')); }`);
     setPanelOpen(true, { animate: false });
     await delay(540);
     await clickRendererElement('#ToggleSessions');
@@ -388,7 +401,7 @@ async function runAcceptanceInputProbe(path) {
     await delay(180);
     result.backgroundCompletionShowsUnread = await evaluateRenderer(`document.querySelector('#SessionList .session-item[data-thread-id="seeded-zommi-thread"]')?.dataset.status === 'unread'`);
     result.passed = Object.entries(result)
-      .filter(([key]) => !['inputPath', 'reducedMotion', 'dragRegionStyles', 'whitespaceDragDiagnostics', 'sessionSidebarHoverDiagnostics', 'modelPanelDiagnostics', 'formattedResponseCopyDiagnostics', 'bidirectionalWheelDiagnostics', 'manualScrollDiagnostics', 'thinkingWheelDiagnostics', 'thinkingCardsPerTurn'].includes(key))
+      .filter(([key]) => !['inputPath', 'reducedMotion', 'dragRegionStyles', 'whitespaceDragDiagnostics', 'compactIdleDiagnostics', 'sessionSidebarHoverDiagnostics', 'modelPanelDiagnostics', 'formattedResponseCopyDiagnostics', 'codeCopyDiagnostics', 'bidirectionalWheelDiagnostics', 'manualScrollDiagnostics', 'thinkingWheelDiagnostics', 'thinkingCardsPerTurn'].includes(key))
       .every(([, value]) => value === true);
   } catch (error) {
     result.passed = false;
@@ -595,6 +608,16 @@ function registerIpc() {
     if (path) setTimeout(() => captureAcceptanceEvidence(path), 300);
   });
   ipcMain.handle('clipboard:write', (_event, text) => clipboard.writeText(String(text || '')));
+  ipcMain.handle('clipboard:write-image', (_event, dataUrl) => {
+    const value = String(dataUrl || '');
+    if (!/^data:image\/[a-z0-9.+-]+(?:;[a-z0-9=.+-]+)*;base64,[a-z0-9+/=\s]+$/i.test(value)) {
+      throw new Error('Only an inline image can be copied.');
+    }
+    const image = nativeImage.createFromDataURL(value);
+    if (image.isEmpty()) throw new Error('The image could not be decoded for the clipboard.');
+    const png = image.toPNG();
+    return clipboard.write([new ClipboardItem({ 'image/png': new Blob([png], { type: 'image/png' }) })]);
+  });
   ipcMain.handle('artifact:preview', (_event, request) => loadArtifactPreview(request, {
     runtimeState: seededAcceptance ? seededRuntimeState() : backend.getRuntimeState(),
   }));
@@ -1065,7 +1088,7 @@ function seededHistory(threadId) {
   const turns = Array.from({ length: 42 }, (_value, index) => {
     const items = [
       { id: `history-user-${index + 1}`, type: 'userMessage', content: [{ type: 'text', text: index === 41 ? 'History **question 42**' : `History question ${index + 1}` }] },
-      { id: `history-agent-${index + 1}`, type: 'agentMessage', phase: 'final', status: 'completed', text: index === 41 ? '## History answer 42\n\n- **Markdown list**\n- `inline code`\n\n| Column | Value |\n| --- | --- |\n| Status | Ready |' : `History answer ${index + 1}` },
+      { id: `history-agent-${index + 1}`, type: 'agentMessage', phase: 'final', status: 'completed', text: index === 41 ? '## History answer 42\n\n- **Markdown list**\n- `inline code`\n\n```js\nconst answer = 42;\n```\n\n| Column | Value |\n| --- | --- |\n| Status | Ready |' : `History answer ${index + 1}` },
     ];
     if (index === 41) {
       items.splice(1, 0, {
@@ -1109,7 +1132,7 @@ function seedAcceptanceContexts() {
 }
 
 function seededPreview(snapshot) {
-  return ['ZOMMI INVOCATION CONTEXT', `PRIMARY SURFACE SELECTION:\n${snapshot.selection.join('\n')}`, `Window: ${snapshot.windowTitle}`, `URL: ${snapshot.locator.value}`, ...snapshot.visibleText].filter(Boolean).join('\n');
+  return [`PRIMARY SURFACE SELECTION:\n${snapshot.selection.join('\n')}`, `Window: ${snapshot.windowTitle}`, `URL: ${snapshot.locator.value}`, ...snapshot.visibleText].filter(Boolean).join('\n');
 }
 
 async function captureTransportEvidence(path) {

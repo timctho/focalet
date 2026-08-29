@@ -1435,32 +1435,77 @@ function compactLabel(value) {
 
 function renderAssistantMarkdown(element, markdown) {
   element.innerHTML = renderMarkdown(markdown);
-  if (!element.querySelector('h1, h2, h3, h4, h5, h6, pre, table')) return;
-  const actions = document.createElement('div');
-  actions.className = 'response-actions';
-  const copy = document.createElement('button');
-  copy.type = 'button';
-  copy.className = 'response-copy-button';
-  copy.textContent = 'Copy';
-  copy.setAttribute('aria-label', 'Copy formatted response');
-  copy.addEventListener('click', () => copyFormattedResponse(copy, markdown));
-  actions.append(copy);
-  element.prepend(actions);
+  for (const block of [...element.querySelectorAll('pre, table, img')]) decorateCopyableBlock(block);
 }
 
-async function copyFormattedResponse(button, markdown) {
+function decorateCopyableBlock(block) {
+  const kind = block.matches('pre') ? 'code' : block.matches('table') ? 'table' : 'image';
+  const wrapper = document.createElement('div');
+  wrapper.className = `copyable-block copyable-${kind}`;
+  block.replaceWith(wrapper);
+  wrapper.append(block, createContentCopyButton(block, kind));
+}
+
+function createContentCopyButton(target, kind) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'content-copy-button';
+  button.dataset.copyKind = kind;
+  button.setAttribute('aria-label', `Copy ${kind}`);
+  button.title = `Copy ${kind}`;
+  const label = document.createElement('span');
+  label.className = 'copy-label';
+  label.textContent = 'Copy';
+  button.append(createUiIcon('copy'), label);
+  button.addEventListener('click', () => copyContentBlock(button, target, kind));
+  return button;
+}
+
+async function copyContentBlock(button, target, kind) {
   button.disabled = true;
   try {
-    await window.zommi.copy(markdown);
-    button.textContent = 'Copied';
+    if (kind === 'image') {
+      await window.zommi.copyImage(await imageDataUrlForClipboard(target));
+    } else {
+      await window.zommi.copy(copyableBlockText(target, kind));
+    }
+    setCopyButtonLabel(button, 'Copied');
   } catch {
-    button.textContent = 'Copy failed';
+    setCopyButtonLabel(button, 'Failed');
   }
   setTimeout(() => {
     if (!button.isConnected) return;
     button.disabled = false;
-    button.textContent = 'Copy';
+    setCopyButtonLabel(button, 'Copy');
   }, 1400);
+}
+
+function copyableBlockText(target, kind) {
+  if (kind === 'table') {
+    return [...target.rows]
+      .map((row) => [...row.cells].map((cell) => cell.textContent.trim()).join('\t'))
+      .join('\n');
+  }
+  return target.textContent;
+}
+
+async function imageDataUrlForClipboard(image) {
+  if (!image.complete || !image.naturalWidth || !image.naturalHeight) await image.decode();
+  if (!image.naturalWidth || !image.naturalHeight) throw new Error('The image is not ready to copy.');
+  const canvas = document.createElement('canvas');
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Image clipboard conversion is unavailable.');
+  context.drawImage(image, 0, 0);
+  return canvas.toDataURL('image/png');
+}
+
+function setCopyButtonLabel(button, value) {
+  const kind = button.dataset.copyKind || 'content';
+  button.querySelector('.copy-label').textContent = value;
+  button.setAttribute('aria-label', `${value} ${kind}`);
+  button.title = `${value} ${kind}`;
 }
 
 function renderArtifacts(values, runtimeTargetId = activeRuntimeTargetId) {
@@ -1514,7 +1559,9 @@ async function hydrateArtifact(state, runtimeTargetId) {
         ? { ...artifact, html: artifact.html }
         : await window.zommi.loadArtifactPreview({ ...artifact, runtimeTargetId: runtimeTargetId || activeRuntimeTargetId });
     state.loaded = loaded;
-    state.surface.replaceChildren(createArtifactMedia(loaded, true));
+    const media = createArtifactMedia(loaded, true);
+    state.surface.replaceChildren(media);
+    if (loaded.kind === 'image') state.surface.append(createContentCopyButton(media, 'image'));
     state.surface.classList.remove('loading');
     state.open.disabled = false;
     state.open.addEventListener('click', () => showArtifactViewer(loaded, artifact));
@@ -1570,6 +1617,7 @@ function createUiIcon(name) {
     spinner: 'M15.5 10a5.5 5.5 0 1 1-2.1-4.3',
     unread: 'M10 5.5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Z',
     read: 'M3.8 10s2.2-3.4 6.2-3.4 6.2 3.4 6.2 3.4-2.2 3.4-6.2 3.4S3.8 10 3.8 10Zm6.2-1.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z',
+    copy: 'M7.2 6.4V5.2c0-.9.7-1.7 1.7-1.7h5.9c.9 0 1.7.8 1.7 1.7v5.9c0 .9-.8 1.7-1.7 1.7h-1.2m-2.5-6.4H5.2c-.9 0-1.7.8-1.7 1.7V14c0 .9.8 1.7 1.7 1.7h5.9c.9 0 1.7-.8 1.7-1.7V8.1c0-.9-.8-1.7-1.7-1.7Z',
   };
   path.setAttribute('d', paths[name] || paths.tool);
   svg.append(path);
