@@ -1,5 +1,7 @@
 # Zommi
 
+[![CI](https://github.com/timctho/zommi/actions/workflows/ci.yml/badge.svg)](https://github.com/timctho/zommi/actions/workflows/ci.yml)
+
 Zommi is a local floating context companion for existing agent runtimes. Its cross-platform
 Electron shell rests as a small orb above the taskbar, expands into chat on
 hover, and connects through a protocol-first runtime broker. Windows delegates
@@ -96,6 +98,11 @@ Run the Electron and managed contract checks with:
 npm --prefix src/Zommi.Electron test
 dotnet run --project tests/Zommi.Tests/Zommi.Tests.csproj
 ```
+
+Every pull request and push to `main` runs those tests, performs a Release .NET
+build, and assembles the self-contained `zommi-win-x64.zip` package on a Windows
+runner. The workflow uploads the portable package and its SHA-256 checksum as a
+14-day `zommi-win-x64-<commit>` artifact.
 
 Run an authenticated, model-backed latency walkthrough with simple,
 selection-rich, and multi-context-plus-image turns using

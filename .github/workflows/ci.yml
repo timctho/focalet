@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests and Release build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: src/Zommi.Electron/package-lock.json
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore Electron dependencies
+        working-directory: src/Zommi.Electron
+        run: npm ci
+
+      - name: Run Electron tests
+        working-directory: src/Zommi.Electron
+        run: npm test
+
+      - name: Restore .NET dependencies
+        run: dotnet restore Zommi.sln
+
+      - name: Run managed tests
+        run: dotnet run --project tests/Zommi.Tests/Zommi.Tests.csproj --configuration Release --no-restore
+
+      - name: Build .NET solution
+        run: dotnet build Zommi.sln --configuration Release --no-restore
+
+  windows-release:
+    name: Windows release package
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: src/Zommi.Electron/package-lock.json
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build portable Windows release
+        shell: pwsh
+        run: ./scripts/package-windows.ps1 -Runtime win-x64
+
+      - name: Verify release package
+        shell: pwsh
+        run: |
+          $archive = 'artifacts/zommi-win-x64.zip'
+          $package = 'artifacts/zommi-win-x64'
+          $required = @(
+            "$package/Zommi.exe",
+            "$package/resources/native/Zommi.exe",
+            "$package/resources/native/Zommi.Hook.exe",
+            "$package/SHA256SUMS.txt"
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Release package is missing $path"
+            }
+          }
+          if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) {
+            throw "Release archive is missing $archive"
+          }
+          $archiveHash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          Set-Content -LiteralPath "${archive}.sha256" -Encoding ascii -Value "$archiveHash  zommi-win-x64.zip"
+          Get-Item -LiteralPath $archive, "${archive}.sha256" | Format-Table Name, Length
+
+      - name: Upload Windows release
+        uses: actions/upload-artifact@v4
+        with:
+          name: zommi-win-x64-${{ github.sha }}
+          path: |
+            artifacts/zommi-win-x64.zip
+            artifacts/zommi-win-x64.zip.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
