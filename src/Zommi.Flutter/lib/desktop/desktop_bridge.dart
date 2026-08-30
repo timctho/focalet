@@ -898,8 +898,8 @@ String _nativeHostPath() {
   if (configured != null && configured.trim().isNotEmpty) return configured;
   final root = File(Platform.resolvedExecutable).parent.path;
   final candidates = [
-    '$root${Platform.pathSeparator}native${Platform.pathSeparator}Zommi.exe',
-    '$root${Platform.pathSeparator}resources${Platform.pathSeparator}native${Platform.pathSeparator}Zommi.exe',
+    '$root${Platform.pathSeparator}native'
+        '${Platform.pathSeparator}Zommi.Capture.exe',
   ];
   return candidates.firstWhere(
     (candidate) => File(candidate).existsSync(),

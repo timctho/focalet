@@ -3,262 +3,159 @@ param(
     [ValidateSet('win-x64', 'win-arm64')]
     [string] $Runtime = 'win-x64',
 
-    [switch] $SkipPublish,
+    [switch] $SkipBuild,
 
-    [switch] $DeployToDownloads
+    [switch] $DeployToDownloads,
+
+    [string] $SigningThumbprint = $env:ZOMMI_WINDOWS_SIGNING_THUMBPRINT
 )
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$outputDirectory = Join-Path $repositoryRoot "artifacts/zommi-$Runtime"
-$nativeOutputDirectory = Join-Path $repositoryRoot "artifacts/zommi-native-$Runtime"
-$electronDirectory = Join-Path $repositoryRoot 'src/Zommi.Electron'
-$dotnetArtifactsDirectory = Join-Path `
-    ([IO.Path]::GetTempPath()) `
-    "zommi-dotnet-publish-$([Guid]::NewGuid().ToString('N'))"
-$wslPrefix = if ($repositoryRoot.StartsWith('\\wsl.localhost\', [StringComparison]::OrdinalIgnoreCase)) {
-    '\\wsl.localhost\'
-}
-elseif ($repositoryRoot.StartsWith('\\wsl$\', [StringComparison]::OrdinalIgnoreCase)) {
-    '\\wsl$\'
+$flutterDirectory = Join-Path $repositoryRoot 'src/Zommi.Flutter'
+$architecture = if ($Runtime -eq 'win-arm64') { 'arm64' } else { 'x64' }
+$rustTarget = if ($Runtime -eq 'win-arm64') { 'aarch64-pc-windows-msvc' } else { 'x86_64-pc-windows-msvc' }
+$flutterOutput = Join-Path $flutterDirectory "build/windows/$architecture/runner/Release"
+$cargoTargetRoot = if ([string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
+    Join-Path $repositoryRoot 'target'
 }
 else {
-    $null
+    [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR)
 }
-$wslDistro = $null
-$linuxRepositoryRoot = $null
-if ($null -ne $wslPrefix) {
-    $wslRelativeRoot = $repositoryRoot.Substring($wslPrefix.Length)
-    $distroSeparator = $wslRelativeRoot.IndexOf('\')
-    if ($distroSeparator -le 0) {
-        throw "Could not resolve the WSL distribution from $repositoryRoot."
-    }
-    $wslDistro = $wslRelativeRoot.Substring(0, $distroSeparator)
-    $linuxRepositoryRoot = $wslRelativeRoot.Substring($distroSeparator).Replace('\', '/')
+$rustCore = Join-Path $cargoTargetRoot "$rustTarget/release/zommi-core-host.exe"
+$captureOutput = Join-Path $repositoryRoot "artifacts/zommi-capture-$Runtime"
+$packageDirectory = Join-Path $repositoryRoot "artifacts/zommi-windows-$architecture"
+$gitCommit = (git -C $repositoryRoot rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $gitCommit -notmatch '^[0-9a-f]{40}$') {
+    throw 'Could not resolve the exact source revision for the release manifest.'
 }
 
 if ($DeployToDownloads) {
-    if ($null -ne $wslPrefix) {
-        $baselineCommand = 'node "$1"'
-        & wsl.exe -d $wslDistro -e sh -lc $baselineCommand `
-            zommi-release-baseline `
-            "$linuxRepositoryRoot/scripts/assert-release-baseline.mjs"
-    }
-    else {
-        node (Join-Path $repositoryRoot 'scripts/assert-release-baseline.mjs')
-    }
+    git -C $repositoryRoot fetch --quiet --no-tags origin main
     if ($LASTEXITCODE -ne 0) {
-        throw 'Refusing Downloads deployment because the release baseline check failed.'
+        throw 'Could not refresh origin/main before Downloads deployment.'
+    }
+    $baseline = (git -C $repositoryRoot rev-parse --verify refs/remotes/origin/main).Trim()
+    git -C $repositoryRoot merge-base --is-ancestor $baseline $gitCommit
+    if ($LASTEXITCODE -ne 0) {
+        throw "Refusing deployment from stale source $gitCommit; latest origin/main is $baseline."
     }
 }
 
-if (-not $SkipPublish) {
+if (-not $SkipBuild) {
+    Push-Location $flutterDirectory
     try {
-        if (Test-Path -LiteralPath $nativeOutputDirectory) {
-            Remove-Item -LiteralPath $nativeOutputDirectory -Recurse -Force
-        }
-        dotnet publish (Join-Path $repositoryRoot 'src/Zommi.Windows/Zommi.Windows.csproj') `
-            --configuration Release `
-            --runtime $Runtime `
-            --self-contained true `
-            --artifacts-path $dotnetArtifactsDirectory `
-            --output $nativeOutputDirectory
+        flutter pub get
         if ($LASTEXITCODE -ne 0) {
-            throw "Zommi Windows publish failed with exit code $LASTEXITCODE."
+            throw "Flutter dependency restore failed with exit code $LASTEXITCODE."
         }
-
-        dotnet publish (Join-Path $repositoryRoot 'src/Zommi.Hook/Zommi.Hook.csproj') `
-            --configuration Release `
-            --runtime $Runtime `
-            --self-contained true `
-            --artifacts-path $dotnetArtifactsDirectory `
-            --output $nativeOutputDirectory
+        $flutterArguments = @('build', 'windows', '--release', '--no-pub')
+        if ($Runtime -eq 'win-arm64') {
+            $flutterArguments += '--target-platform=windows-arm64'
+        }
+        & flutter @flutterArguments
         if ($LASTEXITCODE -ne 0) {
-            throw "Zommi Hook publish failed with exit code $LASTEXITCODE."
+            throw "Flutter Windows build failed with exit code $LASTEXITCODE."
         }
     }
     finally {
-        Remove-Item -LiteralPath $dotnetArtifactsDirectory -Recurse -Force -ErrorAction SilentlyContinue
+        Pop-Location
     }
 
-    if ($null -ne $wslPrefix) {
-        $linuxElectronDirectory = "$linuxRepositoryRoot/src/Zommi.Electron"
-        $linuxPackager = "$linuxElectronDirectory/scripts/package-electron.mjs"
-        $linuxOutputDirectory = "$linuxRepositoryRoot/artifacts/zommi-$Runtime"
-        $linuxNativeDirectory = "$linuxRepositoryRoot/artifacts/zommi-native-$Runtime"
-        $packageCommand = 'cd "$1" && npm ci && node "$2" --platform "$3" --arch "$4" --output "$5" --native-dir "$6"'
-        $architecture = if ($Runtime -eq 'win-arm64') { 'arm64' } else { 'x64' }
-        & wsl.exe -d $wslDistro -e sh -lc $packageCommand `
-            zommi-package `
-            $linuxElectronDirectory `
-            $linuxPackager `
-            win32 `
-            $architecture `
-            $linuxOutputDirectory `
-            $linuxNativeDirectory
+    cargo build `
+        --manifest-path (Join-Path $repositoryRoot 'Cargo.toml') `
+        --release `
+        --bin zommi-core-host `
+        --target $rustTarget
+    if ($LASTEXITCODE -ne 0) {
+        throw "Rust core build failed with exit code $LASTEXITCODE."
+    }
+
+    if (Test-Path -LiteralPath $captureOutput) {
+        Remove-Item -LiteralPath $captureOutput -Recurse -Force
+    }
+    dotnet publish (Join-Path $repositoryRoot 'src/Zommi.Windows/Zommi.Windows.csproj') `
+        --configuration Release `
+        --runtime $Runtime `
+        --self-contained true `
+        -p:PublishSingleFile=true `
+        -p:DebugType=None `
+        --output $captureOutput
+    if ($LASTEXITCODE -ne 0) {
+        throw "Windows capture helper publish failed with exit code $LASTEXITCODE."
+    }
+}
+
+$captureExecutable = Join-Path $captureOutput 'Zommi.Capture.exe'
+foreach ($required in @($flutterOutput, $rustCore, $captureExecutable)) {
+    if (-not (Test-Path -LiteralPath $required)) {
+        throw "Release input is missing: $required"
+    }
+}
+
+$signingStatus = 'unsigned'
+$signingMechanism = 'none'
+if (-not [string]::IsNullOrWhiteSpace($SigningThumbprint)) {
+    $signTool = (Get-Command signtool.exe -ErrorAction Stop).Source
+    $signingInputs = @(
+        Get-ChildItem -LiteralPath $flutterOutput -Recurse -File |
+            Where-Object { $_.Extension -in @('.exe', '.dll') }
+        Get-Item -LiteralPath $rustCore
+        Get-ChildItem -LiteralPath $captureOutput -Recurse -File |
+            Where-Object { $_.Extension -in @('.exe', '.dll') }
+    )
+    foreach ($inputFile in $signingInputs) {
+        & $signTool sign /sha1 $SigningThumbprint /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $inputFile.FullName
         if ($LASTEXITCODE -ne 0) {
-            throw "Electron Windows packaging in WSL failed with exit code $LASTEXITCODE."
+            throw "Authenticode signing failed for $($inputFile.FullName)."
         }
     }
-    else {
-        Push-Location $electronDirectory
-        try {
-            npm ci
-            if ($LASTEXITCODE -ne 0) {
-                throw "Electron dependency restore failed with exit code $LASTEXITCODE."
-            }
-            $architecture = if ($Runtime -eq 'win-arm64') { 'arm64' } else { 'x64' }
-            node (Join-Path $electronDirectory 'scripts/package-electron.mjs') `
-                --platform win32 `
-                --arch $architecture `
-                --output $outputDirectory `
-                --native-dir $nativeOutputDirectory
-            if ($LASTEXITCODE -ne 0) {
-                throw "Electron Windows packaging failed with exit code $LASTEXITCODE."
-            }
-        }
-        finally {
-            Pop-Location
+    $signingStatus = 'distribution-signed'
+    $signingMechanism = 'authenticode'
+}
+
+$python = (Get-Command python.exe -ErrorAction SilentlyContinue).Source
+if ([string]::IsNullOrWhiteSpace($python)) {
+    $python = (Get-Command python -ErrorAction Stop).Source
+}
+$assemblerArguments = @(
+    (Join-Path $repositoryRoot 'scripts/assemble_release.py'),
+    '--platform', 'windows',
+    '--architecture', $architecture,
+    '--flutter-output', $flutterOutput,
+    '--core-host', $rustCore,
+    '--capture-host', $captureOutput,
+    '--output-root', (Join-Path $repositoryRoot 'artifacts'),
+    '--git-commit', $gitCommit,
+    '--document', (Join-Path $repositoryRoot 'README.md'),
+    '--document', (Join-Path $repositoryRoot 'docs/flutter-rust-migration.md'),
+    '--signing-status', $signingStatus,
+    '--signing-mechanism', $signingMechanism
+)
+& $python @assemblerArguments
+if ($LASTEXITCODE -ne 0) {
+    throw "Windows release assembly failed with exit code $LASTEXITCODE."
+}
+
+& $python `
+    (Join-Path $repositoryRoot 'scripts/verify_release.py') `
+    $packageDirectory `
+    --expected-platform windows `
+    --expected-commit $gitCommit
+if ($LASTEXITCODE -ne 0) {
+    throw "Windows release verification failed with exit code $LASTEXITCODE."
+}
+
+if ($signingStatus -eq 'distribution-signed') {
+    foreach ($relative in @('Zommi.exe', 'zommi-core-host.exe', 'native/Zommi.Capture.exe')) {
+        $signature = Get-AuthenticodeSignature (Join-Path $packageDirectory $relative)
+        if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
+            throw "Authenticode verification failed for ${relative}: $($signature.Status)."
         }
     }
 }
 
-Copy-Item (Join-Path $repositoryRoot 'docs/windows-prototype.md') $outputDirectory
-Copy-Item (Join-Path $repositoryRoot 'docs/windows-acceptance.md') $outputDirectory
-Copy-Item (Join-Path $repositoryRoot 'docs/acceptance-report.md') $outputDirectory
-Copy-Item (Join-Path $repositoryRoot 'scripts/Zommi.WslHook.ps1') $outputDirectory
-
-$executablePath = Join-Path $outputDirectory 'Zommi.exe'
-$nativeHostPath = Join-Path $outputDirectory 'resources/native/Zommi.exe'
-$hookExecutablePath = Join-Path $outputDirectory 'resources/native/Zommi.Hook.exe'
-$codexBridgePath = Join-Path $outputDirectory 'resources/app/codex-bridge.mjs'
-$runtimeCatalogPath = Join-Path $outputDirectory 'resources/app/runtime-catalog.mjs'
-$runtimeDiscoveryPath = Join-Path $outputDirectory 'resources/app/runtime-discovery.mjs'
-$runtimeSettingsPath = Join-Path $outputDirectory 'resources/app/runtime-settings.mjs'
-$runtimeBrokerPath = Join-Path $outputDirectory 'resources/app/runtime-broker.mjs'
-$brokerProtocolPath = Join-Path $outputDirectory 'resources/app/broker-protocol.mjs'
-$contextHandoffPath = Join-Path $outputDirectory 'resources/app/context-handoff.mjs'
-$protocolFramingPath = Join-Path $outputDirectory 'resources/app/protocol-framing.mjs'
-$adapterDiagnosticsPath = Join-Path $outputDirectory 'resources/app/adapter-diagnostics.mjs'
-$transportMetricsPath = Join-Path $outputDirectory 'resources/app/transport-metrics.mjs'
-$hermesGatewayAdapterPath = Join-Path $outputDirectory 'resources/app/hermes-gateway-adapter.mjs'
-$openClawGatewayAdapterPath = Join-Path $outputDirectory 'resources/app/openclaw-gateway-adapter.mjs'
-$ptyCompatibilityAdapterPath = Join-Path $outputDirectory 'resources/app/pty-compatibility-adapter.mjs'
-$ptyProfilesPath = Join-Path $outputDirectory 'resources/app/pty-profiles.mjs'
-$acpAdapterPath = Join-Path $outputDirectory 'resources/app/acp-adapter.mjs'
-$piRpcAdapterPath = Join-Path $outputDirectory 'resources/app/pi-rpc-adapter.mjs'
-$electronMainPath = Join-Path $outputDirectory 'resources/app/main.mjs'
-$preloadPath = Join-Path $outputDirectory 'resources/app/preload.cjs'
-$windowLayoutPath = Join-Path $outputDirectory 'resources/app/window-layout.mjs'
-$rendererHtmlPath = Join-Path $outputDirectory 'resources/app/renderer/index.html'
-$rendererPath = Join-Path $outputDirectory 'resources/app/renderer/renderer.mjs'
-$rendererMarkdownPath = Join-Path $outputDirectory 'resources/app/renderer/markdown.mjs'
-$rendererOrbPath = Join-Path $outputDirectory 'resources/app/renderer/orb-renderer.mjs'
-$rendererStylesPath = Join-Path $outputDirectory 'resources/app/renderer/styles.css'
-$markedRuntimePath = Join-Path $outputDirectory 'resources/app/node_modules/marked/lib/marked.esm.js'
-$wslHookPath = Join-Path $outputDirectory 'Zommi.WslHook.ps1'
-$hashPath = Join-Path $outputDirectory 'SHA256SUMS.txt'
-if (-not (Test-Path -LiteralPath $executablePath) -or
-    -not (Test-Path -LiteralPath $nativeHostPath) -or
-    -not (Test-Path -LiteralPath $hookExecutablePath) -or
-    -not (Test-Path -LiteralPath $codexBridgePath) -or
-    -not (Test-Path -LiteralPath $runtimeCatalogPath) -or
-    -not (Test-Path -LiteralPath $runtimeDiscoveryPath) -or
-    -not (Test-Path -LiteralPath $runtimeSettingsPath) -or
-    -not (Test-Path -LiteralPath $runtimeBrokerPath) -or
-    -not (Test-Path -LiteralPath $brokerProtocolPath) -or
-    -not (Test-Path -LiteralPath $contextHandoffPath) -or
-    -not (Test-Path -LiteralPath $protocolFramingPath) -or
-    -not (Test-Path -LiteralPath $adapterDiagnosticsPath) -or
-    -not (Test-Path -LiteralPath $transportMetricsPath) -or
-    -not (Test-Path -LiteralPath $hermesGatewayAdapterPath) -or
-    -not (Test-Path -LiteralPath $openClawGatewayAdapterPath) -or
-    -not (Test-Path -LiteralPath $ptyCompatibilityAdapterPath) -or
-    -not (Test-Path -LiteralPath $ptyProfilesPath) -or
-    -not (Test-Path -LiteralPath $acpAdapterPath) -or
-    -not (Test-Path -LiteralPath $piRpcAdapterPath) -or
-    -not (Test-Path -LiteralPath $electronMainPath) -or
-    -not (Test-Path -LiteralPath $preloadPath) -or
-    -not (Test-Path -LiteralPath $windowLayoutPath) -or
-    -not (Test-Path -LiteralPath $rendererHtmlPath) -or
-    -not (Test-Path -LiteralPath $rendererPath) -or
-    -not (Test-Path -LiteralPath $rendererMarkdownPath) -or
-    -not (Test-Path -LiteralPath $rendererOrbPath) -or
-    -not (Test-Path -LiteralPath $rendererStylesPath) -or
-    -not (Test-Path -LiteralPath $markedRuntimePath) -or
-    -not (Test-Path -LiteralPath $wslHookPath)) {
-    throw "The package is incomplete; required runtime files are missing from $outputDirectory."
-}
-$hash = (Get-FileHash -Algorithm SHA256 $executablePath).Hash.ToLowerInvariant()
-$nativeHostHash = (Get-FileHash -Algorithm SHA256 $nativeHostPath).Hash.ToLowerInvariant()
-$hookHash = (Get-FileHash -Algorithm SHA256 $hookExecutablePath).Hash.ToLowerInvariant()
-$codexBridgeHash = (Get-FileHash -Algorithm SHA256 $codexBridgePath).Hash.ToLowerInvariant()
-$runtimeCatalogHash = (Get-FileHash -Algorithm SHA256 $runtimeCatalogPath).Hash.ToLowerInvariant()
-$runtimeDiscoveryHash = (Get-FileHash -Algorithm SHA256 $runtimeDiscoveryPath).Hash.ToLowerInvariant()
-$runtimeSettingsHash = (Get-FileHash -Algorithm SHA256 $runtimeSettingsPath).Hash.ToLowerInvariant()
-$runtimeBrokerHash = (Get-FileHash -Algorithm SHA256 $runtimeBrokerPath).Hash.ToLowerInvariant()
-$brokerProtocolHash = (Get-FileHash -Algorithm SHA256 $brokerProtocolPath).Hash.ToLowerInvariant()
-$contextHandoffHash = (Get-FileHash -Algorithm SHA256 $contextHandoffPath).Hash.ToLowerInvariant()
-$protocolFramingHash = (Get-FileHash -Algorithm SHA256 $protocolFramingPath).Hash.ToLowerInvariant()
-$adapterDiagnosticsHash = (Get-FileHash -Algorithm SHA256 $adapterDiagnosticsPath).Hash.ToLowerInvariant()
-$transportMetricsHash = (Get-FileHash -Algorithm SHA256 $transportMetricsPath).Hash.ToLowerInvariant()
-$hermesGatewayAdapterHash = (Get-FileHash -Algorithm SHA256 $hermesGatewayAdapterPath).Hash.ToLowerInvariant()
-$openClawGatewayAdapterHash = (Get-FileHash -Algorithm SHA256 $openClawGatewayAdapterPath).Hash.ToLowerInvariant()
-$ptyCompatibilityAdapterHash = (Get-FileHash -Algorithm SHA256 $ptyCompatibilityAdapterPath).Hash.ToLowerInvariant()
-$ptyProfilesHash = (Get-FileHash -Algorithm SHA256 $ptyProfilesPath).Hash.ToLowerInvariant()
-$acpAdapterHash = (Get-FileHash -Algorithm SHA256 $acpAdapterPath).Hash.ToLowerInvariant()
-$piRpcAdapterHash = (Get-FileHash -Algorithm SHA256 $piRpcAdapterPath).Hash.ToLowerInvariant()
-$electronMainHash = (Get-FileHash -Algorithm SHA256 $electronMainPath).Hash.ToLowerInvariant()
-$preloadHash = (Get-FileHash -Algorithm SHA256 $preloadPath).Hash.ToLowerInvariant()
-$windowLayoutHash = (Get-FileHash -Algorithm SHA256 $windowLayoutPath).Hash.ToLowerInvariant()
-$rendererHtmlHash = (Get-FileHash -Algorithm SHA256 $rendererHtmlPath).Hash.ToLowerInvariant()
-$rendererHash = (Get-FileHash -Algorithm SHA256 $rendererPath).Hash.ToLowerInvariant()
-$rendererMarkdownHash = (Get-FileHash -Algorithm SHA256 $rendererMarkdownPath).Hash.ToLowerInvariant()
-$rendererOrbHash = (Get-FileHash -Algorithm SHA256 $rendererOrbPath).Hash.ToLowerInvariant()
-$rendererStylesHash = (Get-FileHash -Algorithm SHA256 $rendererStylesPath).Hash.ToLowerInvariant()
-$markedRuntimeHash = (Get-FileHash -Algorithm SHA256 $markedRuntimePath).Hash.ToLowerInvariant()
-$wslHookHash = (Get-FileHash -Algorithm SHA256 $wslHookPath).Hash.ToLowerInvariant()
-Set-Content -Path $hashPath -Encoding ascii -Value `
-    "$hash  Zommi.exe", `
-    "$nativeHostHash  resources/native/Zommi.exe", `
-    "$hookHash  resources/native/Zommi.Hook.exe", `
-    "$codexBridgeHash  resources/app/codex-bridge.mjs", `
-    "$runtimeCatalogHash  resources/app/runtime-catalog.mjs", `
-    "$runtimeDiscoveryHash  resources/app/runtime-discovery.mjs", `
-    "$runtimeSettingsHash  resources/app/runtime-settings.mjs", `
-    "$runtimeBrokerHash  resources/app/runtime-broker.mjs", `
-    "$brokerProtocolHash  resources/app/broker-protocol.mjs", `
-    "$contextHandoffHash  resources/app/context-handoff.mjs", `
-    "$protocolFramingHash  resources/app/protocol-framing.mjs", `
-    "$adapterDiagnosticsHash  resources/app/adapter-diagnostics.mjs", `
-    "$transportMetricsHash  resources/app/transport-metrics.mjs", `
-    "$hermesGatewayAdapterHash  resources/app/hermes-gateway-adapter.mjs", `
-    "$openClawGatewayAdapterHash  resources/app/openclaw-gateway-adapter.mjs", `
-    "$ptyCompatibilityAdapterHash  resources/app/pty-compatibility-adapter.mjs", `
-    "$ptyProfilesHash  resources/app/pty-profiles.mjs", `
-    "$acpAdapterHash  resources/app/acp-adapter.mjs", `
-    "$piRpcAdapterHash  resources/app/pi-rpc-adapter.mjs", `
-    "$electronMainHash  resources/app/main.mjs", `
-    "$preloadHash  resources/app/preload.cjs", `
-    "$windowLayoutHash  resources/app/window-layout.mjs", `
-    "$rendererHtmlHash  resources/app/renderer/index.html", `
-    "$rendererHash  resources/app/renderer/renderer.mjs", `
-    "$rendererMarkdownHash  resources/app/renderer/markdown.mjs", `
-    "$rendererOrbHash  resources/app/renderer/orb-renderer.mjs", `
-    "$rendererStylesHash  resources/app/renderer/styles.css", `
-    "$markedRuntimeHash  resources/app/node_modules/marked/lib/marked.esm.js", `
-    "$wslHookHash  Zommi.WslHook.ps1"
-
-$archivePath = "$outputDirectory.zip"
-$pendingArchivePath = "$outputDirectory.pending.zip"
-if (Test-Path $pendingArchivePath) {
-    Remove-Item -Force $pendingArchivePath
-}
-
-Compress-Archive -Path (Join-Path $outputDirectory '*') -DestinationPath $pendingArchivePath
-Move-Item -LiteralPath $pendingArchivePath -Destination $archivePath -Force
-Write-Host "Windows prototype published to $outputDirectory"
-Write-Host "Portable archive: $archivePath"
+Write-Host "Flutter + Rust Windows release published to $packageDirectory"
 
 if ($DeployToDownloads) {
     & (Join-Path $PSScriptRoot 'deploy-windows-downloads.ps1') -Runtime $Runtime

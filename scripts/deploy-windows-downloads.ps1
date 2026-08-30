@@ -10,7 +10,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$packageName = "zommi-$Runtime"
+$architecture = if ($Runtime -eq 'win-arm64') { 'arm64' } else { 'x64' }
+$packageName = "zommi-windows-$architecture"
 $sourceDirectory = Join-Path $repositoryRoot "artifacts/$packageName"
 $sourceArchive = "$sourceDirectory.zip"
 $downloadsRoot = [IO.Path]::GetFullPath($DownloadsDirectory).TrimEnd('\')
@@ -85,7 +86,6 @@ function Get-TargetDirectoryProcesses {
     $directoryPrefix = $normalizedDirectory + '\'
     return @(
         Get-CimInstance Win32_Process | Where-Object {
-            $_.Name -eq 'Zommi.exe' -and
             $_.ExecutablePath -and
             [IO.Path]::GetFullPath($_.ExecutablePath).StartsWith(
                 $directoryPrefix,
@@ -121,9 +121,8 @@ try {
     }
 
     $targetExecutable = Join-Path $targetDirectory 'Zommi.exe'
-    # The Electron process tree and the capture-only native host use separate
-    # executables inside the deployed directory. Stop the whole exact package
-    # tree so the native host cannot retain a file lock during atomic replace.
+    # Stop the exact Flutter app, Rust core, and capture helper package tree so
+    # no child retains a file lock during the atomic replacement.
     $targetProcesses = @(Get-TargetDirectoryProcesses $targetDirectory)
     $stoppedProcessCount = $targetProcesses.Count
     foreach ($process in $targetProcesses) {
@@ -155,11 +154,8 @@ try {
     }
 
     $startedProcessId = $null
-    $electronProcessCount = 0
+    $flutterProcessCount = 0
     if (-not $NoStart) {
-        # Electron-hosted terminals (including parent application) may export this for their
-        # own children; a deployed desktop app must launch as Electron.
-        Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
         $startedProcess = Start-Process `
             -FilePath (Join-Path $targetDirectory 'Zommi.exe') `
             -WorkingDirectory $targetDirectory `
@@ -178,19 +174,19 @@ try {
                 throw "The deployed Zommi process exited with code $($startedProcess.ExitCode)."
             }
             $runningTargets = @(Get-ExactTargetProcesses (Join-Path $targetDirectory 'Zommi.exe'))
-            if ($runningTargets.Count -ge 3 -and
+            if ($runningTargets.Count -ge 1 -and
                 $runningTargets.ProcessId -contains $startedProcess.Id) {
                 break
             }
             Start-Sleep -Milliseconds 250
         } while ([DateTime]::UtcNow -lt $processDeadline)
 
-        if ($runningTargets.Count -lt 3 -or
+        if ($runningTargets.Count -lt 1 -or
             $runningTargets.ProcessId -notcontains $startedProcess.Id) {
-            throw "Expected the Electron browser process and its children; found $($runningTargets.Count) exact-path processes."
+            throw "Expected the Flutter desktop process; found $($runningTargets.Count) exact-path processes."
         }
         $startedProcessId = $startedProcess.Id
-        $electronProcessCount = $runningTargets.Count
+        $flutterProcessCount = $runningTargets.Count
     }
 
     if ($hadDirectoryBackup) {
@@ -208,7 +204,7 @@ try {
         archiveSha256 = $targetArchiveHash.ToLowerInvariant()
         stoppedProcesses = $stoppedProcessCount
         startedProcessId = $startedProcessId
-        electronProcessCount = $electronProcessCount
+        flutterProcessCount = $flutterProcessCount
     } | ConvertTo-Json
 }
 catch {

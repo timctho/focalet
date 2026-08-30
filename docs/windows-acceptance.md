@@ -1,95 +1,80 @@
-# Windows Electron acceptance walkthrough
+# Windows Flutter acceptance walkthrough
 
-Use this walkthrough on a real unlocked Windows 10 or 11 desktop. Unit tests
-and package assembly are implementation evidence; the visible run verifies
-native capture, global shortcuts, Electron rendering, and Codex handoff.
+Run this walkthrough on a real, unlocked Windows 10 or 11 desktop. Widget tests
+and package smoke prove implementation contracts; they do not prove physical
+hotkeys, z-order, pointer behavior, permissions, UI Automation, or GPU capture.
 
-Record the source revision, Windows version, `codex --version`, `Zommi.exe`
-SHA-256, browser version, and any failed check.
+Record the source revision, Windows version, Flutter/Rust/.NET versions,
+`release-manifest.json`, archive SHA-256, selected runtime version, and whether
+the package is Authenticode-signed.
 
-## Setup
+## Package identity
 
-1. Extract the complete `zommi-win-x64.zip` into a local Windows directory.
-2. Verify the root Electron `Zommi.exe` and
-   `resources\native\Zommi.exe` against `SHA256SUMS.txt`.
-3. Start the root `Zommi.exe`. It should show a small orb centered just above
-   the taskbar and also remain available from the tray.
-4. Confirm Codex CLI is installed, signed in, and available in the default WSL
-   distribution.
+1. Extract the complete `zommi-windows-x64.zip` to a local folder.
+2. Run:
 
-## Structured Alt+A context
+   ```powershell
+   python .\scripts\verify_release.py `
+     .\artifacts\zommi-windows-x64 `
+     --expected-platform windows `
+     --expected-commit <40-character-sha>
+   ```
 
-1. Open a browser page with selectable text and a semantic table or list.
-2. Select a distinctive text fragment or exposed grid range, place the pointer over a named control,
-   and press **Alt+A**.
-3. Verify the rounded translucent Electron window expands at its fixed
-   bottom-center anchor, does not move beside the pointer, and focuses the
-   composer.
-4. Verify a compact host token is added. The composer must not contain the raw
-   page text and Alt+A must not add an image.
-5. Hover the token. Verify `PRIMARY SURFACE SELECTION` contains the selected
-   text/range before `Mouse pointer`, which identifies the hovered control
-   separately.
-6. Move the pointer into the preview and scroll it. The preview must stay open,
-   its content must move, and no scrollbar should be visible.
-7. For a semantic table, inspect the preview JSON and verify it preserves the
-   provider's nested roles/coordinates. Do not accept inferred Markdown or a
-   model-constructed table as capture proof.
-8. In PowerPoint, select one text box and then multiple shapes. For each Alt+A
-   capture, verify the preview identifies the active slide and selected shape
-   count, names, text where present, and screen-space bounds. This requires a
-   real unlocked Office session; source/build checks do not prove it.
-9. Move the pointer away from the chat. Verify it smoothly returns to the orb
-   after a short delay. Hovering the expanded panel must not change its
-   translucency.
+3. Confirm the package contains `Zommi.exe`, `zommi-core-host.exe`,
+   `native\Zommi.Capture.exe`, manifest, and checksums, with no Electron or
+   Node payload.
+4. If signing is required, verify all three executable signatures and require
+   manifest status `distribution-signed`.
 
-The packaged runtime enforces a 1,500 ms budget from Alt+A to a visible context
-token for both cold and warm capture. The response walkthrough enforces 1,000
-ms for local send acceptance, 10,000 ms to first visible agent output in the
-prestarted runtime, and 30,000 ms for a short exact response. Report the raw
-measurements; external model latency is not evidence of local capture speed.
+## Window and interaction
 
-## Multiple contexts and explicit images
+1. Start the exact extracted `Zommi.exe`.
+2. Confirm a small quiet orb appears centered just above the work-area edge and
+   stays topmost without taking over the taskbar.
+3. Hover it: the translucent panel expands from the same bottom-center anchor
+   and focuses the composer.
+4. Move outside: it remains expanded for 499 ms and collapses at 500 ms.
+5. Verify blank header space drags the window while controls, transcript,
+   composer, session list, and scrollable activity remain interactive.
+6. With reduced motion enabled, verify working state remains visually distinct
+   without continuous animation.
 
-1. Change tabs or windows and press **Alt+A** again. Verify another token is
-   accumulated in the same composer.
-2. Press **Alt+Shift+A**, drag a region, and release. Verify exactly one image
-   token is appended and its hover preview shows the selected pixels.
-   Alt+A alone must never append image data, including on ambiguous canvases.
-3. Remove a token and verify it no longer participates in the next turn.
+## Structured context (`Alt+A`)
 
-## Codex streaming
+1. Put the pointer over a browser or native control and press `Alt+A`.
+2. Verify capture finishes before Zommi shows/focuses and the window does not
+   jump to the pointer.
+3. Confirm exactly one context chip appears and its preview shows the intended
+   selection/window/URL/pointer evidence without confidence metadata.
+4. Repeat on a second surface and confirm chips accumulate with unique labels.
+5. Exercise selected browser text, files, a grid cell/range, and PowerPoint
+   shape/text where those providers are installed.
 
-1. Ask for an exact distinctive value from one attached context and press
-   Enter.
-2. Verify the user turn shows only compact tokens plus the typed prompt.
-3. Verify thinking/tool activity and the answer stream in the same Electron
-   surface, and that the answer contains the requested value.
-4. Hide and invoke Zommi again. Verify the existing conversation remains.
+## Explicit image (`Alt+Shift+A`)
 
-## Automated controlled checks
+1. Press `Alt+Shift+A` and confirm the selector appears without waiting for a
+   slow UIA capture.
+2. Cancel once and verify no attachment is added.
+3. Select a region and verify one image chip, dimensions, preview, removal, and
+   pointer-context pairing.
+4. Treat blank/different GPU-composited Chrome pixels as a documented fidelity
+   limitation, not a gesture or attachment failure.
 
-Build the package, then run from Windows PowerShell:
+## Runtime and conversation
 
-```powershell
-.\scripts\test-windows-ui-contract.ps1 `
-  -ExecutablePath .\artifacts\zommi-win-x64\Zommi.exe `
-  -EvidencePath .\artifacts\electron-glass-ui.png
+1. Confirm runtime discovery shows the exact native/WSL host and protocol.
+2. If authentication is missing, use the runtime-owned sign-in action and
+   verify no credential is copied into Zommi settings.
+3. Send a turn with context and confirm thinking/tool/final blocks stream once.
+4. Draft while streaming, interrupt the exact active turn, switch sessions,
+   and verify background running/unread state.
+5. Exercise approval and structured-question responses, Markdown/code/image
+   copy, and local image/HTML artifact previews.
+6. Restart and confirm the exact Session Binding is restored only when safe.
 
-.\scripts\test-windows-runtime.ps1 `
-  -ExecutablePath .\artifacts\zommi-win-x64\Zommi.exe
+## Acceptance boundary
 
-.\scripts\test-windows-send-acceptance.ps1 `
-  -ExecutablePath .\artifacts\zommi-win-x64\Zommi.exe `
-  -RequireChromeTool
-```
-
-The UI contract uses seeded contexts plus the real packaged image selector. The
-runtime contract opens an isolated Edge fixture, invokes the real Alt+A path,
-checks its accessibility hierarchy and pointer label, and requires Codex to
-stream a random exact token from the attached context. It does not prove
-arbitrary protected, canvas-only, elevated, or secure-desktop surfaces, agent
-tool availability, or control of the user's signed-in tab. The separate Send
-acceptance creates a private random local page and requires the configured
-user-owned `chrome` MCP server to expose a tool lifecycle and return its token;
-it still does not prove control of the user's signed-in tab.
+Do not call Windows accepted until the exact packaged revision passes the
+physical walkthrough above. Package assembly, JSONL process smoke, widget
+goldens, and cross-compilation are supporting evidence only. Locked-RDP gestures
+and hardware-composited capture require their own direct evidence.

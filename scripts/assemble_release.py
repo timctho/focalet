@@ -1,0 +1,263 @@
+#!/usr/bin/env python3
+"""Assemble one native Flutter + Rust Zommi release directory and archive."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import platform as host_platform
+import shutil
+import subprocess
+import tarfile
+import tempfile
+import zipfile
+
+
+def _copy_contents(source: Path, destination: Path) -> None:
+    if not source.is_dir():
+        raise ValueError(f"Flutter output directory does not exist: {source}")
+    for child in source.iterdir():
+        target = destination / child.name
+        if child.is_dir() and not child.is_symlink():
+            shutil.copytree(child, target, symlinks=True)
+        elif child.is_symlink():
+            target.symlink_to(os.readlink(child), target_is_directory=child.is_dir())
+        else:
+            shutil.copy2(child, target)
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _regular_files(root: Path) -> list[Path]:
+    return sorted(
+        (
+            path
+            for path in root.rglob("*")
+            if path.is_file() and not path.is_symlink()
+        ),
+        key=lambda path: path.relative_to(root).as_posix(),
+    )
+
+
+def _write_checksums(root: Path) -> None:
+    checksum_path = root / "SHA256SUMS.txt"
+    lines = [
+        f"{_sha256(path)}  {path.relative_to(root).as_posix()}"
+        for path in _regular_files(root)
+        if path != checksum_path
+    ]
+    checksum_path.write_text("\n".join(lines) + "\n", encoding="ascii")
+
+
+def _sign_macos(application: Path, identity: str | None) -> dict[str, str]:
+    selected = identity or "-"
+    command = ["codesign", "--force", "--deep", "--sign", selected]
+    if identity:
+        command.extend(["--options", "runtime", "--timestamp"])
+    command.append(str(application))
+    subprocess.run(command, check=True)
+    subprocess.run(
+        ["codesign", "--verify", "--deep", "--strict", str(application)],
+        check=True,
+    )
+    return {
+        "status": "distribution-signed" if identity else "ad-hoc",
+        "mechanism": "codesign",
+    }
+
+
+def _write_manifest(
+    root: Path,
+    *,
+    target_platform: str,
+    architecture: str,
+    commit: str,
+    entrypoint: str,
+    core_host: str,
+    capture_host: str | None,
+    signing: dict[str, str],
+) -> None:
+    manifest = {
+        "schemaVersion": 1,
+        "product": "Zommi",
+        "version": "0.1.0",
+        "gitCommit": commit,
+        "platform": target_platform,
+        "architecture": architecture,
+        "entrypoint": entrypoint,
+        "coreHost": core_host,
+        "components": {
+            "desktopUi": "flutter",
+            "runtimeCore": "rust",
+            "captureProvider": "dotnet-uia" if capture_host else "platform-native",
+        },
+        "signing": signing,
+    }
+    if capture_host:
+        manifest["captureHost"] = capture_host
+    (root / "release-manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _zip_directory(root: Path, archive: Path) -> None:
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as output:
+        for path in sorted(root.rglob("*")):
+            relative = Path(root.name) / path.relative_to(root)
+            if path.is_symlink():
+                info = zipfile.ZipInfo(relative.as_posix())
+                info.create_system = 3
+                info.external_attr = 0o120777 << 16
+                output.writestr(info, os.readlink(path))
+            elif path.is_file():
+                output.write(path, relative.as_posix())
+
+
+def _archive(root: Path, target_platform: str) -> Path:
+    if target_platform == "linux":
+        pending = root.with_name(f"{root.name}.pending.tar.gz")
+        final = root.with_name(f"{root.name}.tar.gz")
+        with tarfile.open(pending, "w:gz") as output:
+            output.add(root, arcname=root.name, recursive=True)
+    else:
+        pending = root.with_name(f"{root.name}.pending.zip")
+        final = root.with_name(f"{root.name}.zip")
+        if target_platform == "macos" and shutil.which("ditto"):
+            subprocess.run(
+                [
+                    "ditto",
+                    "-c",
+                    "-k",
+                    "--sequesterRsrc",
+                    "--keepParent",
+                    str(root),
+                    str(pending),
+                ],
+                check=True,
+            )
+        else:
+            _zip_directory(root, pending)
+    if final.exists():
+        final.unlink()
+    pending.replace(final)
+    Path(f"{final}.sha256").write_text(
+        f"{_sha256(final)}  {final.name}\n",
+        encoding="ascii",
+    )
+    return final
+
+
+def assemble(args: argparse.Namespace) -> tuple[Path, Path]:
+    output_root = args.output_root.resolve()
+    output_root.mkdir(parents=True, exist_ok=True)
+    package_name = f"zommi-{args.platform}-{args.architecture}"
+    destination = output_root / package_name
+    pending = Path(tempfile.mkdtemp(prefix=f".{package_name}-", dir=output_root))
+    try:
+        signing = {
+            "status": args.signing_status,
+            "mechanism": args.signing_mechanism,
+        }
+        capture_relative: str | None = None
+        if args.platform == "macos":
+            application = pending / "Zommi.app"
+            shutil.copytree(args.flutter_output, application, symlinks=True)
+            core_relative = "Zommi.app/Contents/MacOS/zommi-core-host"
+            entrypoint = "Zommi.app/Contents/MacOS/Zommi"
+            core_destination = pending / core_relative
+            shutil.copy2(args.core_host, core_destination)
+            core_destination.chmod(core_destination.stat().st_mode | 0o111)
+            signing = _sign_macos(application, args.macos_signing_identity)
+        else:
+            _copy_contents(args.flutter_output, pending)
+            if args.platform == "windows":
+                entrypoint = "Zommi.exe"
+                core_relative = "zommi-core-host.exe"
+                capture_relative = "native/Zommi.Capture.exe"
+                if args.capture_host is None:
+                    raise ValueError("Windows releases require --capture-host.")
+                shutil.copytree(args.capture_host, pending / "native", symlinks=True)
+            else:
+                entrypoint = "zommi"
+                core_relative = "zommi-core-host"
+            core_destination = pending / core_relative
+            shutil.copy2(args.core_host, core_destination)
+            if args.platform == "linux":
+                core_destination.chmod(core_destination.stat().st_mode | 0o111)
+
+        for document in args.document:
+            document = document.resolve()
+            if not document.is_file():
+                raise ValueError(f"Release document does not exist: {document}")
+            docs = pending / "docs"
+            docs.mkdir(exist_ok=True)
+            shutil.copy2(document, docs / document.name)
+
+        _write_manifest(
+            pending,
+            target_platform=args.platform,
+            architecture=args.architecture,
+            commit=args.git_commit,
+            entrypoint=entrypoint,
+            core_host=core_relative,
+            capture_host=capture_relative,
+            signing=signing,
+        )
+        _write_checksums(pending)
+        if destination.exists():
+            shutil.rmtree(destination)
+        pending.replace(destination)
+        archive = _archive(destination, args.platform)
+        return destination, archive
+    except BaseException:
+        shutil.rmtree(pending, ignore_errors=True)
+        raise
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--platform", choices=("windows", "linux", "macos"), required=True)
+    parser.add_argument("--architecture", choices=("x64", "arm64"), required=True)
+    parser.add_argument("--flutter-output", type=Path, required=True)
+    parser.add_argument("--core-host", type=Path, required=True)
+    parser.add_argument("--capture-host", type=Path)
+    parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument("--git-commit", required=True)
+    parser.add_argument("--document", type=Path, action="append", default=[])
+    parser.add_argument("--macos-signing-identity")
+    parser.add_argument(
+        "--signing-status",
+        choices=("unsigned", "checksum-only", "distribution-signed"),
+        default="unsigned",
+    )
+    parser.add_argument("--signing-mechanism", default="none")
+    return parser
+
+
+def main() -> int:
+    args = _parser().parse_args()
+    destination, archive = assemble(args)
+    print(
+        json.dumps(
+            {
+                "package": str(destination),
+                "archive": str(archive),
+                "host": host_platform.platform(),
+            }
+        )
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -10,27 +10,19 @@ on:
 permissions:
   contents: read
 
-env:
-  NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
-
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   test:
-    name: Tests and Release build
+    name: Flutter and Rust contracts
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Linux, X64, zommi-ci]
     timeout-minutes: 20
     steps:
       - name: Check out source
         uses: actions/checkout@v7
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@1.93.0
@@ -44,7 +36,7 @@ jobs:
           flutter-version: 3.47.2
           cache: true
 
-      - name: Set up .NET
+      - name: Set up .NET capture build
         uses: actions/setup-dotnet@v6
         env:
           DOTNET_INSTALL_DIR: ${{ runner.tool_cache }}/dotnet
@@ -69,83 +61,18 @@ jobs:
           flutter analyze --no-pub
           flutter test --no-pub
 
-      - name: Restore Electron dependencies
-        working-directory: src/Zommi.Electron
-        run: npm ci
-
-      - name: Run Electron tests
-        working-directory: src/Zommi.Electron
-        run: npm test
-
-      - name: Restore .NET dependencies
-        run: dotnet restore Zommi.sln
-
-      - name: Run managed tests
-        run: dotnet run --project tests/Zommi.Tests/Zommi.Tests.csproj --configuration Release --no-restore
-
-      - name: Build .NET solution
-        run: dotnet build Zommi.sln --configuration Release --no-restore
-
-  windows-release:
-    name: Windows release package
-    needs: test
-    runs-on: [self-hosted, Linux, X64, zommi-ci]
-    timeout-minutes: 30
-    steps:
-      - name: Check out source
-        uses: actions/checkout@v7
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-
-      - name: Set up .NET
-        uses: actions/setup-dotnet@v6
-        env:
-          DOTNET_INSTALL_DIR: ${{ runner.tool_cache }}/dotnet
-        with:
-          dotnet-version: 8.0.x
-
-      - name: Build portable Windows release
-        shell: bash
+      - name: Test release package contracts
         run: |
-          windows_script="$(wslpath -w "$GITHUB_WORKSPACE/scripts/package-windows.ps1")"
-          /init '/mnt/c/Program Files/PowerShell/7/pwsh.exe' \
-            -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass \
-            -File "$windows_script" -Runtime win-x64
+          python3 -m py_compile scripts/assemble_release.py scripts/verify_release.py tests/test_release_package.py
+          python3 tests/test_release_package.py -v
 
-      - name: Verify release package
-        shell: bash
+      - name: Build Windows capture helper
         run: |
-          archive='artifacts/zommi-win-x64.zip'
-          package='artifacts/zommi-win-x64'
-          required=(
-            "$package/Zommi.exe"
-            "$package/resources/native/Zommi.exe"
-            "$package/resources/native/Zommi.Hook.exe"
-            "$package/SHA256SUMS.txt"
-          )
-          for required_path in "${required[@]}"; do
-            test -f "$required_path" || { echo "Release package is missing $required_path" >&2; exit 1; }
-          done
-          test -f "$archive" || { echo "Release archive is missing $archive" >&2; exit 1; }
-          (cd artifacts && sha256sum zommi-win-x64.zip > zommi-win-x64.zip.sha256)
-          ls -lh "$archive" "${archive}.sha256"
+          dotnet run --project tests/Zommi.Capture.Tests/Zommi.Capture.Tests.csproj --configuration Release
+          dotnet build src/Zommi.Windows/Zommi.Windows.csproj --configuration Release
 
-      - name: Upload Windows release
-        uses: actions/upload-artifact@v7
-        with:
-          name: zommi-win-x64-${{ github.sha }}
-          path: |
-            artifacts/zommi-win-x64.zip
-            artifacts/zommi-win-x64.zip.sha256
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 14
-
-  flutter-desktop-builds:
-    name: Flutter desktop compile (${{ matrix.target }})
+  release:
+    name: Native release (${{ matrix.target }})
     needs: test
     strategy:
       fail-fast: false
@@ -158,7 +85,7 @@ jobs:
           - os: macos-15
             target: macos
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -169,6 +96,25 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ninja-build libgtk-3-dev libkeybinder-3.0-dev libayatana-appindicator3-dev
 
+      - name: Ensure Windows ATL build tools
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installer = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vs_installer.exe'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $installPath = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
+          if ([string]::IsNullOrWhiteSpace($installPath)) { throw 'Visual Studio C++ tools were not found.' }
+          & $installer modify --installPath $installPath --add Microsoft.VisualStudio.Component.VC.ATL --quiet --norestart
+          if ($LASTEXITCODE -notin @(0, 3010)) { throw "Visual Studio ATL installation failed with $LASTEXITCODE." }
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@1.93.0
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -176,10 +122,43 @@ jobs:
           flutter-version: 3.47.2
           cache: true
 
-      - name: Restore Flutter dependencies
-        working-directory: src/Zommi.Flutter
-        run: flutter pub get
+      - name: Set up .NET capture publisher
+        if: runner.os == 'Windows'
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 8.0.x
 
-      - name: Compile native Flutter runner
-        working-directory: src/Zommi.Flutter
-        run: flutter build ${{ matrix.target }} --release --no-pub
+      - name: Build and verify Linux release
+        if: runner.os == 'Linux'
+        run: bash scripts/package-unix.sh linux
+
+      - name: Build and verify macOS release
+        if: runner.os == 'macOS'
+        env:
+          ZOMMI_MACOS_SIGNING_IDENTITY: ${{ secrets.ZOMMI_MACOS_SIGNING_IDENTITY }}
+        run: bash scripts/package-unix.sh macos
+
+      - name: Build and verify Windows release
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          ZOMMI_WINDOWS_SIGNING_THUMBPRINT: ${{ secrets.ZOMMI_WINDOWS_SIGNING_THUMBPRINT }}
+        run: ./scripts/package-windows.ps1 -Runtime win-x64
+
+      - name: Show release identity and signing state
+        shell: bash
+        run: |
+          python -c "import glob,json; p=glob.glob('artifacts/zommi-*/release-manifest.json'); assert len(p)==1, p; print(json.dumps(json.load(open(p[0], encoding='utf-8')), indent=2))"
+
+      - name: Upload native release
+        uses: actions/upload-artifact@v7
+        with:
+          name: zommi-${{ matrix.target }}-${{ runner.arch }}-${{ github.sha }}
+          path: |
+            artifacts/zommi-${{ matrix.target }}-*.zip
+            artifacts/zommi-${{ matrix.target }}-*.zip.sha256
+            artifacts/zommi-${{ matrix.target }}-*.tar.gz
+            artifacts/zommi-${{ matrix.target }}-*.tar.gz.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

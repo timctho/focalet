@@ -8,7 +8,7 @@ using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
 using FlaUI.Core.Exceptions;
 using FlaUI.UIA3;
-using Zommi.Core;
+using Zommi.Capture;
 
 namespace Zommi.Windows;
 

@@ -2,147 +2,131 @@
 
 [![CI](https://github.com/timctho/zommi/actions/workflows/ci.yml/badge.svg)](https://github.com/timctho/zommi/actions/workflows/ci.yml)
 
-Zommi is a local floating context companion for existing agent runtimes. Its cross-platform
-Electron shell rests as a small orb above the taskbar, expands into chat on
-hover, and connects through a protocol-first runtime broker. Windows delegates
-only UI Automation capture and explicit image selection to a packaged native host.
+Zommi is a local floating context companion for existing agent runtimes. Its
+Flutter desktop shell rests as a small orb above the work area, expands into
+chat on hover, and talks to a separate Rust runtime core over versioned JSONL.
+Windows uses one capture-only .NET helper for UI Automation and explicit region
+selection; it does not own sessions, runtimes, or model credentials.
 
-Its goal is to let someone browse, point, and ask naturally while their chosen
-agent receives a compact description of what they are seeing. Zommi does not
-host a model, require model API keys, or replace Codex, Hermes, or another agent
-runtime.
+Zommi does not host a model, require model API keys, or replace Codex, Pi,
+Hermes, OpenClaw, or another agent runtime. Authentication, tools, permissions,
+models, and canonical history remain owned by the selected runtime.
 
-The product intent and initial success boundary are documented in
-[docs/product-intent.md](docs/product-intent.md). Project-specific language is
-defined in [CONTEXT.md](CONTEXT.md).
+The product intent is in [docs/product-intent.md](docs/product-intent.md), and
+project terminology is defined in [CONTEXT.md](CONTEXT.md).
 
-## Status
+## Current architecture
 
-The Electron client is implemented for Windows, macOS, and Linux. The final
-Windows package is cross-built and awaits native execution after Windows interop
-is restored; an earlier package in the same tranche has controlled native
-acceptance. Linux has packaged UI and real Codex transport evidence. macOS has
-assembly/unit evidence and still needs real native-desktop acceptance. The
-product provides:
+```text
+Flutter desktop app
+  ├── orb, composer, history, approvals, previews, tray, and hotkeys
+  ├── macOS/Linux platform capture
+  └── Windows Zommi.Capture helper (UIA and explicit region selection only)
+          ↕
+Rust zommi-core-host
+  ├── runtime discovery and exact Session Binding
+  ├── Codex, Pi, ACP, Hermes, OpenClaw, and PTY adapters
+  └── normalized stream, approval, question, and artifact events
+```
 
-- a tray-resident, Siri-like orb centered above the taskbar that smoothly
-  expands into a rounded translucent chat on hover;
-- constant panel translucency on hover and an automatic return to the orb
-  0.5 seconds after the pointer leaves;
-- `Alt+A` capture that opens the anchored chat without moving it to the
-  pointer;
-- cumulative URL-abbreviated context tokens directly in the composer;
-- an in-window raw-context preview that stays open while the pointer enters it
-  and supports scrolling without visible scrollbars;
-- `Alt+Shift+A` drag selection for image context;
-- selection-first context: selected text/files, UIA selected items and grid
-  coordinates, Google Sheets range boxes, and native PowerPoint
-  slide/shape/text selections when their providers expose them;
-- browser URL, nearby post-render accessibility hierarchy, Explorer
-  path/selection, bounded accessibility text, and pointer target fallback;
-- zero-config discovery on native Windows and installed WSL distributions,
-  deterministic default selection, and a visible Runtime Target picker;
-- first-class adapters for Codex app-server, Pi RPC, ACP/Hermes, Hermes Gateway,
-  OpenClaw's runtime-owned Gateway/ACP bridge, and Advanced direct OpenClaw
-  Gateway endpoints, plus a visibly degraded PTY compatibility path;
-- streamed thinking/commentary, plans, tool lifecycle/output, final replies,
-  exact interruption, and session history when the selected protocol supports them;
-- user-resolved runtimes without Zommi-owned model, provider, authentication,
-  permission, plugin, MCP, or tool configuration; and
-- conversation continuity across invocations.
+The Electron/JavaScript broker and the old hook/state relay are removed from the
+authoritative source and release inventory. Release verification rejects any
+Electron, Node module, or `.mjs` payload.
 
-The current source and packages have passing JS/.NET contracts, packaged Linux
-Codex transport and seeded UI evidence, and real Codex and Hermes turns. The
-fresh-profile Windows discovery, capture, send, stream, session-switch, and
-interrupt run belongs to the preceding package revision. Final native Windows,
-locked-RDP hover, pointer immobility, physical drag, and synthetic global-hotkey
-claims remain unaccepted. Real Pi and OpenClaw runs require those CLIs to be
-installed. Evidence boundaries are tracked in
-[docs/acceptance-report.md](docs/acceptance-report.md).
+## User experience
 
-Build and walkthrough instructions are in
-[docs/windows-prototype.md](docs/windows-prototype.md).
+- bottom-center quiet orb with a visible working state and 500 ms delayed
+  collapse;
+- `Alt+A` selection-first context without moving the window to the pointer;
+- `Alt+Shift+A` explicit image-region selection paired with pointer context;
+- cumulative context chips and bounded previews;
+- exact runtime, model, reasoning, and provider-owned session selection;
+- paged history, concurrent background turns, running/unread state, and exact
+  interruption;
+- streamed thinking, plans, tools, approvals, structured questions, Markdown,
+  image/HTML artifact previews, and clipboard actions; and
+- accessible names, keyboard actions, reduced motion, and visible degraded
+  states.
 
-## Launch
+Capture fidelity is not a migration gate. Windows `Alt+A` still uses the rich
+UIA provider. Windows `Alt+Shift+A` now uses native region capture rather than
+Chromium compositor capture, so GPU-composited pixels can differ or be blank.
+macOS and Linux use their platform selectors; Wayland and OS permissions remain
+explicit limitations. See [docs/flutter-rust-migration.md](docs/flutter-rust-migration.md).
 
-1. Extract the entire `zommi-win-x64.zip` archive to a local Windows folder.
-2. Double-click `Zommi.exe`.
+## Native packages
 
-That is the complete Zommi setup. It searches native Windows and WSL for
-supported CLIs, reuses their existing login/configuration, selects a deterministic
-protocol target, and remains in the tray. Select a range, shape, text box, text, or
-file when that is what you mean; otherwise hover a browser page, control, or
-window and press **Alt+A**. Zommi captures the selection first, then the
-underlying pointer and surrounding structured context
-before taking focus and inserts a token such as `[amazon.com]` into the
-composer. It expands at its fixed bottom-center position and focuses the
-composer. Switch pages and press Alt+A again to accumulate more tokens. Hover a token to inspect the
-captured text. Press **Alt+Shift+A** only when you want to attach image context.
-Type the question and press Enter; agent thinking, tool activity, and the answer
-stream into the same surface.
+| Platform | Package | Entrypoint | Core |
+| --- | --- | --- | --- |
+| Windows x64 | `zommi-windows-x64.zip` | `Zommi.exe` | `zommi-core-host.exe` |
+| Linux x64/arm64 | `zommi-linux-<arch>.tar.gz` | `zommi` | `zommi-core-host` |
+| macOS x64/arm64 | `zommi-macos-<arch>.zip` | `Zommi.app` | inside `Contents/MacOS` |
 
-A supported CLI must already be installed and authenticated in its own native or
-WSL environment. No path entry or credential copy is required. The prototype is
-unsigned, so Windows SmartScreen may require **More info → Run anyway** on first
-launch.
+Each archive contains `release-manifest.json` and `SHA256SUMS.txt`; the archive
+also has a sibling `.sha256`. The verifier checks complete file inventory,
+component identity, checksums, absence of legacy payloads, and a real Rust-core
+initialize/shutdown exchange. Windows also pings the packaged capture helper.
 
-Browser-control tools remain owned by Codex. A browser tool injected by the
-ChatGPT desktop host is scoped to that host's Agent Session and is not inherited
-by Zommi's separately launched app-server. To use Chrome from Zommi, configure a
-user-owned Chrome MCP server in the default WSL Codex runtime; see
-[the Windows browser-tool setup](docs/windows-prototype.md#optional-user-owned-chrome-tool).
+Signing is reported, not inferred. Windows is `distribution-signed` only when a
+valid Authenticode certificate thumbprint is supplied. macOS uses the supplied
+Developer ID identity or records `ad-hoc`. Linux records `checksum-only` unless
+a later distribution-signing stage is configured.
 
-Run the Rust, Flutter, Electron, and managed contract checks with:
+## Build and test
+
+Required toolchains are Rust 1.93, Flutter 3.47.2, Python 3, and .NET 8 for the
+Windows capture helper. Native Flutter packaging must run on its target OS.
 
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
 cargo build --workspace --bins
-(cd src/Zommi.Flutter && dart format --output=none --set-exit-if-changed lib test && flutter analyze && flutter test)
-npm --prefix src/Zommi.Electron test
-dotnet run --project tests/Zommi.Tests/Zommi.Tests.csproj
+
+cd src/Zommi.Flutter
+flutter pub get
+dart format --output=none --set-exit-if-changed lib test
+flutter analyze --no-pub
+flutter test --no-pub
+cd ../..
+
+python3 tests/test_release_package.py -v
+dotnet run --project tests/Zommi.Capture.Tests/Zommi.Capture.Tests.csproj --configuration Release
+dotnet build src/Zommi.Windows/Zommi.Windows.csproj --configuration Release
 ```
 
-After building the Rust host, an authenticated local Codex installation can
-exercise the live Rust path with:
+Build and verify a native release on Linux or macOS:
 
 ```sh
-npm --prefix src/Zommi.Electron run test:rust-codex-live
+bash scripts/package-unix.sh linux
+# or, on macOS:
+bash scripts/package-unix.sh macos
 ```
 
-The Flutter tests include a real process-level handshake with
-`zommi-core-host`, interaction coverage for the floating surface and composer,
-and a checked visual baseline. Every pull request and push to `main` runs these
-checks, performs a Release .NET build, and assembles the current self-contained
-`zommi-win-x64.zip` package. The workflow uploads the portable package and its
-SHA-256 checksum as a 14-day `zommi-win-x64-<commit>` artifact.
+On Windows PowerShell:
 
-Run an authenticated, model-backed latency walkthrough with simple,
-selection-rich, and multi-context-plus-image turns using
-`node scripts/test-user-response-latency.mjs`. Its expected values live only in
-the selected context and image fixtures, so it verifies attachment use as well
-as the response budgets documented in the Windows acceptance guide.
+```powershell
+.\scripts\package-windows.ps1 -Runtime win-x64
+```
 
-The Windows runtime suite is `scripts/test-windows-runtime.ps1`; package first,
-then run it from Windows PowerShell as described in the acceptance report.
+To require real signing, set `ZOMMI_WINDOWS_SIGNING_THUMBPRINT` or
+`ZOMMI_MACOS_SIGNING_IDENTITY` in the native build environment. The CI matrix
+builds and verifies one native release on Windows, Linux, and macOS and uploads
+only the archive plus checksum.
 
-## Core boundary
+## Launch
 
-- Local and account-free by default.
-- Floating desktop UX rather than a browser-only chat surface.
-- Structured Surface Selection, URL, path, window, nearby accessibility, and
-  pointer fallback; pixels are attached only through the explicit
-  Alt+Shift+A region-selection path.
-- Ephemeral by default; observation does not imply recording or persistence.
-- Attached to an exact Runtime Target and provider-owned Agent Session; it never
-  guesses from recent or foreground sessions.
-- No bundled chatbot, inference provider, or credential store.
-- Zommi neither adds nor restricts agent tools. Capabilities come from the
-  selected runtime and its user-owned configuration; tools injected into a
-  different host or session do not transfer automatically.
+- Windows: extract the full ZIP and run `Zommi.exe`.
+- Linux: extract the tarball and run `./zommi` from the extracted directory.
+- macOS: extract the ZIP and open `Zommi.app`.
 
-The architecture and rollout gates are in
-[docs/multi-runtime-broker-plan.md](docs/multi-runtime-broker-plan.md), with the
-protocol-first decision in
-[docs/adr/0003-use-protocol-first-runtime-adapters.md](docs/adr/0003-use-protocol-first-runtime-adapters.md).
+At least one supported agent CLI must already be installed and authenticated in
+its own environment. Zommi discovers native and WSL targets, or accepts an
+explicit credential-free path/endpoint override. It never copies runtime
+credentials into its own settings.
+
+Windows build and manual native acceptance details are in
+[docs/windows-prototype.md](docs/windows-prototype.md) and
+[docs/windows-acceptance.md](docs/windows-acceptance.md). Native hotkey, z-order,
+drag, permission, capture, and signed-distribution acceptance remains separate
+from unit tests and package assembly.

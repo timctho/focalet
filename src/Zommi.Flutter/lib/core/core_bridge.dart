@@ -620,11 +620,7 @@ final class ProcessCoreBridge
   }
 
   String _resolveExecutablePath() {
-    if (executablePath case final configured?) return configured;
-    if (Platform.environment['ZOMMI_CORE_HOST'] case final configured?) {
-      return configured;
-    }
-    return Platform.isWindows ? 'zommi-core-host.exe' : 'zommi-core-host';
+    return resolveCoreHostExecutable(configured: executablePath);
   }
 
   void _handleLine(String line) {
@@ -702,6 +698,42 @@ final class ProcessCoreBridge
     );
     if (!_events.isClosed) await _events.close();
   }
+}
+
+String resolveCoreHostExecutable({
+  String? configured,
+  Map<String, String>? environment,
+  String? resolvedExecutable,
+  String? applicationDirectory,
+  String? pathSeparator,
+  String? operatingSystem,
+  bool Function(String path)? exists,
+}) {
+  if (configured?.trim().isNotEmpty == true) return configured!.trim();
+  final processEnvironment = environment ?? Platform.environment;
+  final environmentPath = processEnvironment['ZOMMI_CORE_HOST']?.trim();
+  if (environmentPath?.isNotEmpty == true) return environmentPath!;
+
+  final platform = operatingSystem ?? Platform.operatingSystem;
+  final executableName = platform == 'windows'
+      ? 'zommi-core-host.exe'
+      : 'zommi-core-host';
+  final separator = pathSeparator ?? Platform.pathSeparator;
+  final executableDirectory =
+      applicationDirectory ??
+      File(resolvedExecutable ?? Platform.resolvedExecutable).parent.path;
+  final candidates = <String>[
+    '$executableDirectory$separator$executableName',
+    '$executableDirectory${separator}lib$separator$executableName',
+    if (platform == 'macos')
+      '${Directory(executableDirectory).parent.path}${separator}Resources'
+          '$separator$executableName',
+  ];
+  for (final candidate in candidates) {
+    final present = exists?.call(candidate) ?? File(candidate).existsSync();
+    if (present) return candidate;
+  }
+  return executableName;
 }
 
 Map<String, Object?> _map(Object? value) {

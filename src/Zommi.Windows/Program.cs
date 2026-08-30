@@ -5,12 +5,9 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
-        RuntimeOptions.Apply(args);
-
-        if (args.Contains("--capture-host", StringComparer.OrdinalIgnoreCase) ||
-            args.Contains("--electron-host", StringComparer.OrdinalIgnoreCase))
+        if (args.Contains("--capture-host", StringComparer.OrdinalIgnoreCase))
         {
-            return ElectronNativeHost.Run();
+            return CaptureNativeHost.Run();
         }
 
         if (args.Contains("--acceptance-capture-once", StringComparer.OrdinalIgnoreCase))
@@ -23,7 +20,7 @@ internal static class Program
             return AcceptanceProbe.SelectedTextCapture();
         }
 
-        Console.Error.WriteLine("Zommi.Windows is the capture-only desktop native host. Start the packaged Zommi desktop application instead.");
+        Console.Error.WriteLine("Zommi.Capture is a capture-only helper. Start the packaged Flutter Zommi application instead.");
         return 2;
     }
 }

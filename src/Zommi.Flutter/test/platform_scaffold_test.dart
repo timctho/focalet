@@ -52,6 +52,7 @@ void main() {
       'setAlwaysOnTop(true)',
       'Capture completes before Flutter is shown or focused',
       "'--capture-host'",
+      'Zommi.Capture.exe',
       "_selectorClient.request('selectImage')",
       "Process.run('osascript'",
       "_runText('xdotool'",
@@ -109,4 +110,34 @@ void main() {
       );
     },
   );
+
+  test('release cutover packages Flutter and Rust without Electron', () {
+    final repository = Directory.current.parent.parent;
+    bool hasFiles(String path) {
+      final directory = Directory(path);
+      return directory.existsSync() &&
+          directory.listSync(recursive: true).whereType<File>().isNotEmpty;
+    }
+
+    expect(hasFiles('${repository.path}/src/Zommi.Electron'), isFalse);
+    expect(hasFiles('${repository.path}/src/Zommi.Hook'), isFalse);
+    final workflow = File('${repository.path}/.github/workflows/ci.yml')
+        .readAsStringSync();
+    for (final contract in [
+      r'Native release (${{ matrix.target }})',
+      'bash scripts/package-unix.sh linux',
+      'bash scripts/package-unix.sh macos',
+      './scripts/package-windows.ps1 -Runtime win-x64',
+      'tests/test_release_package.py',
+    ]) {
+      expect(workflow, contains(contract));
+    }
+    expect(workflow, isNot(contains('npm ')));
+    expect(workflow, isNot(contains('src/Zommi.Electron')));
+
+    final verifier = File('${repository.path}/scripts/verify_release.py')
+        .readAsStringSync();
+    expect(verifier, contains('Legacy Electron/Node payload found'));
+    expect(verifier, contains('Rust core initialize smoke did not succeed'));
+  });
 }
