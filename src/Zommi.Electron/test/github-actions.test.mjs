@@ -7,13 +7,22 @@ import { fileURLToPath } from 'node:url';
 const repositoryRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const workflowPath = join(repositoryRoot, '.github', 'workflows', 'ci.yml');
 
-test('GitHub CI runs Electron and managed tests before the release job', async () => {
+test('GitHub CI runs Rust, Flutter, Electron, and managed tests before the release job', async () => {
   const workflow = await readFile(workflowPath, 'utf8');
   assert.match(workflow, /pull_request:/);
   assert.match(workflow, /push:\n\s+branches:\n\s+- main/);
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /permissions:\n\s+contents: read/);
   assert.match(workflow, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
+  assert.match(workflow, /uses: dtolnay\/rust-toolchain@1\.93\.0/);
+  assert.match(workflow, /cargo fmt --all -- --check/);
+  assert.match(workflow, /cargo clippy --workspace --all-targets -- -D warnings/);
+  assert.match(workflow, /cargo test --workspace --all-targets/);
+  assert.match(workflow, /uses: subosito\/flutter-action@v2/);
+  assert.match(workflow, /flutter-version: 3\.47\.2/);
+  assert.match(workflow, /dart format --output=none --set-exit-if-changed lib test/);
+  assert.match(workflow, /flutter analyze --no-pub/);
+  assert.match(workflow, /flutter test --no-pub/);
   assert.match(workflow, /run: npm test/);
   assert.match(workflow, /dotnet run --project tests\/Zommi\.Tests\/Zommi\.Tests\.csproj --configuration Release --no-restore/);
   assert.match(workflow, /dotnet build Zommi\.sln --configuration Release --no-restore/);

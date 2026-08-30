@@ -92,17 +92,24 @@ by Zommi's separately launched app-server. To use Chrome from Zommi, configure a
 user-owned Chrome MCP server in the default WSL Codex runtime; see
 [the Windows browser-tool setup](docs/windows-prototype.md#optional-user-owned-chrome-tool).
 
-Run the Electron and managed contract checks with:
+Run the Rust, Flutter, Electron, and managed contract checks with:
 
 ```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --all-targets
+cargo build --workspace --bins
+(cd src/Zommi.Flutter && dart format --output=none --set-exit-if-changed lib test && flutter analyze && flutter test)
 npm --prefix src/Zommi.Electron test
 dotnet run --project tests/Zommi.Tests/Zommi.Tests.csproj
 ```
 
-Every pull request and push to `main` runs those tests, performs a Release .NET
-build, and assembles the self-contained `zommi-win-x64.zip` package on a Windows
-runner. The workflow uploads the portable package and its SHA-256 checksum as a
-14-day `zommi-win-x64-<commit>` artifact.
+The Flutter tests include a real process-level handshake with
+`zommi-core-host`, interaction coverage for the floating surface and composer,
+and a checked visual baseline. Every pull request and push to `main` runs these
+checks, performs a Release .NET build, and assembles the current self-contained
+`zommi-win-x64.zip` package. The workflow uploads the portable package and its
+SHA-256 checksum as a 14-day `zommi-win-x64-<commit>` artifact.
 
 Run an authenticated, model-backed latency walkthrough with simple,
 selection-rich, and multi-context-plus-image turns using

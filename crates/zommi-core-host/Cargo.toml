@@ -1,0 +1,10 @@
+[package]
+name = "zommi-core-host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+zommi-core = { path = "../zommi-core" }
