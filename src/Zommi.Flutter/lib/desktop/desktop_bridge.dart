@@ -140,7 +140,9 @@ final class FlutterDesktopBridge
     unawaited(
       windowManager.waitUntilReadyToShow(options, () async {
         await windowManager.setAsFrameless();
-        await windowManager.setHasShadow(false);
+        if (supportsNativeWindowShadow(Platform.operatingSystem)) {
+          await windowManager.setHasShadow(false);
+        }
         await windowManager.setAlwaysOnTop(true);
         await windowManager.setSkipTaskbar(true);
         await windowManager.show();
@@ -535,6 +537,9 @@ final class FlutterDesktopBridge
     if (!_invocations.isClosed) await _invocations.close();
   }
 }
+
+bool supportsNativeWindowShadow(String operatingSystem) =>
+    operatingSystem == 'windows' || operatingSystem == 'macos';
 
 abstract interface class CaptureProvider {
   Future<void> initialize();

@@ -4,6 +4,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 
 void main() {
+  test('Linux skips the unsupported native window shadow method', () {
+    expect(supportsNativeWindowShadow('linux'), isFalse);
+    expect(supportsNativeWindowShadow('windows'), isTrue);
+    expect(supportsNativeWindowShadow('macos'), isTrue);
+  });
+
   test(
     'Windows region selection is not queued behind slow UIA capture',
     () async {
