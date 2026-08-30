@@ -124,8 +124,10 @@ void main() {
     final workflow = File('${repository.path}/.github/workflows/ci.yml')
         .readAsStringSync();
     for (final contract in [
+      'Native release (linux)',
+      'runs-on: [self-hosted, Linux, X64, zommi-release]',
+      'bash scripts/package-linux-self-hosted.sh',
       r'Native release (${{ matrix.target }})',
-      'bash scripts/package-unix.sh linux',
       'bash scripts/package-unix.sh macos',
       './scripts/package-windows.ps1 -Runtime win-x64',
       'tests/test_release_package.py',
@@ -139,5 +141,12 @@ void main() {
         .readAsStringSync();
     expect(verifier, contains('Legacy Electron/Node payload found'));
     expect(verifier, contains('Rust core initialize smoke did not succeed'));
+
+    final linuxPackager = File(
+      '${repository.path}/scripts/package-linux-self-hosted.sh',
+    ).readAsStringSync();
+    expect(linuxPackager, contains('Ubuntu 20.04 only'));
+    expect(linuxPackager, contains('PKG_CONFIG_SYSROOT_DIR'));
+    expect(linuxPackager, contains('scripts/package-unix.sh'));
   });
 }
