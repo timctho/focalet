@@ -99,14 +99,15 @@ void main() {
     });
     await bridge.initialize();
     final discovery = await bridge.discoverRuntimeTargets();
-    expect(discovery.targets, hasLength(1));
-    expect(discovery.targets.single.runtimeId, 'codex');
-    expect(discovery.selectedTargetId, discovery.targets.single.id);
+    final codexTarget = discovery.targets.singleWhere(
+      (target) => target.runtimeId == 'codex',
+    );
+    expect(discovery.selectedTargetId, codexTarget.id);
     final connection = await bridge.connectRuntime(
-      runtimeTargetId: discovery.targets.single.id,
+      runtimeTargetId: codexTarget.id,
       cwd: temporary.path,
     );
-    expect(connection.runtimeTargetId, discovery.targets.single.id);
+    expect(connection.runtimeTargetId, codexTarget.id);
     expect(connection.sessionId, 'thread-rust-flutter');
     expect(connection.runtimeVersion, '9.8.7');
     final sessions = await bridge.listSessions(
@@ -175,6 +176,36 @@ void main() {
               receipt.runtimeTargetId,
             )
             .having((event) => event.sessionId, 'sessionId', receipt.sessionId),
+      ),
+    );
+    final replay = await bridge.startTurn(
+      runtimeTargetId: connection.runtimeTargetId,
+      sessionId: connection.sessionId,
+      message: 'compare selected context',
+      snapshots: const [
+        <String, Object?>{
+          'surfaceKind': 'Browser',
+          'application': 'Edge',
+          'selection': <String>['selected value'],
+        },
+      ],
+      images: const ['data:image/png;base64,aGVsbG8='],
+      clientOperationId: 'client:flutter-rust-e2e',
+    );
+    expect(replay.turnId, receipt.turnId);
+    await expectLater(
+      bridge.startTurn(
+        runtimeTargetId: connection.runtimeTargetId,
+        sessionId: connection.sessionId,
+        message: 'conflicting replay',
+        clientOperationId: 'client:flutter-rust-e2e',
+      ),
+      throwsA(
+        isA<CoreProtocolException>().having(
+          (error) => error.code,
+          'code',
+          'conflict',
+        ),
       ),
     );
     await subscription.cancel();
@@ -267,6 +298,14 @@ void main() {
       (request) =>
           request['method'] == 'turn/start' &&
           jsonEncode(request).contains('compare selected context'),
+    );
+    expect(
+      requests.whereType<Map>().where(
+        (request) =>
+            request['method'] == 'turn/start' &&
+            jsonEncode(request).contains('compare selected context'),
+      ),
+      hasLength(1),
     );
     final params = turnStart['params'] as Map;
     expect(params['summary'], 'detailed');

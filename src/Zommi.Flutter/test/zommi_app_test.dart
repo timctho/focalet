@@ -234,6 +234,7 @@ final class FakeCoreBridge implements CoreBridge {
     runtimeVersion: '9.8.7',
     models: [],
     sessions: [],
+    capabilities: [],
   );
 
   @override
@@ -251,6 +252,7 @@ final class FakeCoreBridge implements CoreBridge {
       RuntimeTarget(
         id: 'runtime-codex',
         runtimeId: 'codex',
+        adapterId: 'codex-app-server',
         displayName: 'Codex',
         protocolName: 'Codex app-server',
         executablePath: '/bin/codex',
@@ -297,6 +299,31 @@ final class FakeCoreBridge implements CoreBridge {
   }) async => <String, Object?>{
     'thread': <String, Object?>{'id': sessionId},
   };
+
+  @override
+  Future<void> resolveApproval({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String approvalId,
+    String? optionId,
+  }) async {}
+
+  @override
+  Future<void> resolveQuestion({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String questionId,
+    required Map<String, Object?> answer,
+  }) async {}
+
+  @override
+  Future<void> steerTurn({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String turnId,
+    required String message,
+    List<String> images = const [],
+  }) async {}
 
   @override
   Future<TurnReceipt> startTurn({

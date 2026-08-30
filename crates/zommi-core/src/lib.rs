@@ -1,6 +1,14 @@
+pub mod acp_adapter;
+pub mod artifacts;
 pub mod broker_protocol;
 pub mod codex_adapter;
 pub mod context_handoff;
+pub mod hermes_gateway_adapter;
+mod openclaw_device_identity;
+pub mod openclaw_gateway_adapter;
+pub mod pi_adapter;
+pub mod pty_adapter;
+pub mod runtime_adapter;
 pub mod runtime_discovery;
 pub mod session_binding;
 
@@ -11,7 +19,7 @@ pub use broker_protocol::{
 };
 pub use context_handoff::{build_context_handoff, compact_accessibility_tree};
 pub use runtime_discovery::{
-    ExecutionHost, RuntimeCommand, RuntimeTarget, command_for_target, discover_codex_targets,
+    ExecutionHost, RuntimeCommand, RuntimeTarget, command_for_target, discover_runtime_targets,
     select_default_target,
 };
 pub use session_binding::{SessionBinding, SessionBindingStore};

@@ -1,6 +1,7 @@
 use std::{env, fs, io, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -8,6 +9,8 @@ pub struct SessionBinding {
     pub runtime_target_id: String,
     pub session_id: String,
     pub cwd: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_metadata: Option<Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -86,6 +89,7 @@ mod tests {
             runtime_target_id: "runtime-exact".into(),
             session_id: "thread-exact".into(),
             cwd: "/workspace".into(),
+            session_metadata: Some(serde_json::json!({"sessionFile": "/sessions/a.jsonl"})),
         };
         store.save(&binding).expect("save binding");
         assert_eq!(store.load(), Some(binding));

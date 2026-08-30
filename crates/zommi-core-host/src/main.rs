@@ -1,4 +1,4 @@
-use std::{env, io, path::PathBuf};
+use std::{collections::HashMap, env, io, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -9,10 +9,10 @@ use tokio::{
 use uuid::Uuid;
 use zommi_core::{
     SessionBinding, SessionBindingStore, build_context_handoff,
-    codex_adapter::{
-        CodexAdapter, CodexConfig, CodexError, CodexTurnRequest, CoreEvent, EventSender,
-    },
-    command_for_target, discover_codex_targets, select_default_target, validate_broker_request,
+    codex_adapter::{CodexError, CoreEvent, EventSender},
+    command_for_target, discover_runtime_targets, operation_fingerprint,
+    runtime_adapter::{AdapterTurnRequest, RuntimeAdapter},
+    select_default_target, validate_broker_request, validate_turn_input,
 };
 
 const CORE_PROTOCOL_VERSION: u64 = 1;
@@ -62,9 +62,16 @@ struct HostAction {
 
 struct HostState {
     targets: Vec<zommi_core::RuntimeTarget>,
-    adapter: Option<CodexAdapter>,
+    adapter: Option<RuntimeAdapter>,
     binding_store: SessionBindingStore,
+    operations: HashMap<String, OperationRecord>,
     event_tx: EventSender,
+}
+
+#[derive(Clone)]
+struct OperationRecord {
+    fingerprint: String,
+    outcome: Result<Value, HostError>,
 }
 
 impl HostState {
@@ -73,6 +80,7 @@ impl HostState {
             targets: Vec::new(),
             adapter: None,
             binding_store: SessionBindingStore::platform_default(),
+            operations: HashMap::new(),
             event_tx,
         }
     }
@@ -129,12 +137,20 @@ impl HostState {
                 "protocolVersion": CORE_PROTOCOL_VERSION,
                 "capabilities": [
                     "context.handoff.v1",
+                    "artifact.extract.v1",
                     "protocol.validation.v1",
                     "runtime.discovery.v1",
+                    "runtime.adapters.v1",
                     "session.binding.v1",
-                    "codex.appServer.v1",
+                    "session.list.v1",
+                    "session.create.v1",
+                    "session.resume.v1",
+                    "history.read.v1",
                     "turn.stream.v1",
-                    "turn.interrupt.v1"
+                    "turn.interrupt.v1",
+                    "turn.steer.v1",
+                    "approval.resolve.v1",
+                    "question.resolve.v1"
                 ]
             })),
             "context.buildHandoff" => {
@@ -155,7 +171,7 @@ impl HostState {
                 Ok(json!({"text": build_context_handoff(message, snapshots, image_count)}))
             }
             "runtime.discover" => {
-                self.targets = tokio::task::spawn_blocking(discover_codex_targets)
+                self.targets = tokio::task::spawn_blocking(discover_runtime_targets)
                     .await
                     .map_err(|error| HostError::new("discovery-failed", error.to_string()))?;
                 let binding = self.binding_store.load();
@@ -185,23 +201,27 @@ impl HostState {
                         payload.get("effort").and_then(Value::as_str),
                     )
                     .await?;
+                let session_id = adapter.active_session_id().await?;
                 self.save_binding(
-                    &connection.runtime_target_id,
-                    &connection.session_id,
+                    adapter.target_id(),
+                    &session_id,
+                    adapter.binding_metadata().await,
                     payload,
                 )?;
-                Ok(serde_json::to_value(connection)?)
+                Ok(connection)
             }
             "session.open" => {
                 let adapter = self.exact_adapter(payload)?;
                 let session_id = required_string(payload, "sessionId")?;
                 let connection = adapter.open_session(session_id).await?;
+                let active_session_id = adapter.active_session_id().await?;
                 self.save_binding(
-                    &connection.runtime_target_id,
-                    &connection.session_id,
+                    adapter.target_id(),
+                    &active_session_id,
+                    adapter.binding_metadata().await,
                     payload,
                 )?;
-                Ok(serde_json::to_value(connection)?)
+                Ok(connection)
             }
             "session.read" => {
                 let adapter = self.exact_adapter(payload)?;
@@ -244,18 +264,57 @@ impl HostState {
                     retryable: error.retryable,
                 })?;
                 let client_operation_id = identity.client_operation_id;
-                let receipt = adapter
-                    .start_turn(CodexTurnRequest {
+                let input = validate_turn_input(message, snapshots, &images).map_err(|error| {
+                    HostError {
+                        code: error.code,
+                        message: error.message,
+                        retryable: error.retryable,
+                    }
+                })?;
+                let fingerprint = operation_fingerprint(&json!({
+                    "runtimeTargetId": adapter.target_id(),
+                    "sessionId": session_id,
+                    "message": input.message,
+                    "snapshots": input.snapshots,
+                    "images": input.images,
+                    "model": payload.get("model"),
+                    "effort": payload.get("effort")
+                }));
+                if let Some(previous) = self.operations.get(&client_operation_id) {
+                    if previous.fingerprint != fingerprint {
+                        return Err(HostError::new(
+                            "conflict",
+                            "clientOperationId was reused for a different turn.",
+                        ));
+                    }
+                    return previous.outcome.clone();
+                }
+                let outcome = adapter
+                    .start_turn(AdapterTurnRequest {
                         session_id,
-                        message,
-                        snapshots,
-                        images: &images,
+                        message: &input.message,
+                        snapshots: &input.snapshots,
+                        images: &input.images,
                         client_operation_id: &client_operation_id,
                         model: payload.get("model").and_then(Value::as_str),
                         effort: payload.get("effort").and_then(Value::as_str),
                     })
-                    .await?;
-                Ok(serde_json::to_value(receipt)?)
+                    .await
+                    .map_err(HostError::from)
+                    .and_then(|receipt| serde_json::to_value(receipt).map_err(HostError::from));
+                self.operations.insert(
+                    client_operation_id,
+                    OperationRecord {
+                        fingerprint,
+                        outcome: outcome.clone(),
+                    },
+                );
+                if self.operations.len() > 512
+                    && let Some(oldest) = self.operations.keys().next().cloned()
+                {
+                    self.operations.remove(&oldest);
+                }
+                outcome
             }
             "turn.interrupt" => {
                 let adapter = self.exact_adapter(payload)?;
@@ -263,6 +322,44 @@ impl HostState {
                     .interrupt_turn(
                         required_string(payload, "sessionId")?,
                         required_string(payload, "turnId")?,
+                    )
+                    .await?)
+            }
+            "turn.steer" => {
+                let adapter = self.exact_adapter(payload)?;
+                let images = payload
+                    .get("images")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .map(|value| value.as_str().unwrap_or_default().to_owned())
+                    .collect::<Vec<_>>();
+                Ok(adapter
+                    .steer_turn(
+                        required_string(payload, "sessionId")?,
+                        required_string(payload, "turnId")?,
+                        required_string(payload, "message")?,
+                        &images,
+                    )
+                    .await?)
+            }
+            "approval.resolve" => {
+                let adapter = self.exact_adapter(payload)?;
+                Ok(adapter
+                    .resolve_approval(
+                        required_string(payload, "sessionId")?,
+                        required_string(payload, "approvalId")?,
+                        payload.get("optionId").and_then(Value::as_str),
+                    )
+                    .await?)
+            }
+            "question.resolve" => {
+                let adapter = self.exact_adapter(payload)?;
+                Ok(adapter
+                    .resolve_question(
+                        required_string(payload, "sessionId")?,
+                        required_string(payload, "questionId")?,
+                        payload.get("answer").unwrap_or(&Value::Null),
                     )
                     .await?)
             }
@@ -281,7 +378,7 @@ impl HostState {
 
     async fn connect_runtime(&mut self, payload: &Value) -> Result<Value, HostError> {
         if self.targets.is_empty() {
-            self.targets = tokio::task::spawn_blocking(discover_codex_targets)
+            self.targets = tokio::task::spawn_blocking(discover_runtime_targets)
                 .await
                 .map_err(|error| HostError::new("discovery-failed", error.to_string()))?;
         }
@@ -306,7 +403,7 @@ impl HostState {
             HostError::new(
                 "runtime-unavailable",
                 requested_target_id.map_or_else(
-                    || "No Codex runtime was found. Install Codex, then refresh.".into(),
+                    || "No supported agent runtime was found. Install a supported CLI, then refresh.".into(),
                     |target_id| format!("The exact runtime target '{target_id}' was not found."),
                 ),
             )
@@ -348,35 +445,65 @@ impl HostState {
                     .filter(|binding| binding.runtime_target_id == target.id)
                     .map(|binding| binding.session_id.clone())
             });
+        let preferred_session_file = payload
+            .get("preferredSessionFile")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+            .or_else(|| {
+                binding
+                    .as_ref()
+                    .filter(|binding| binding.runtime_target_id == target.id)
+                    .and_then(|binding| binding.session_metadata.as_ref())
+                    .and_then(|metadata| metadata.get("sessionFile"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            });
         let mut runtime_command = command_for_target(&target);
-        if let Some(arguments) = env::var_os("ZOMMI_CODEX_ARGS_JSON") {
+        let adapter_override = format!(
+            "ZOMMI_{}_ARGS_JSON",
+            target.adapter_id.to_ascii_uppercase().replace('-', "_")
+        );
+        let runtime_override =
+            format!("ZOMMI_{}_ARGS_JSON", target.runtime_id.to_ascii_uppercase());
+        if let Some(arguments) =
+            env::var_os(adapter_override).or_else(|| env::var_os(runtime_override))
+        {
             let parsed = serde_json::from_str::<Vec<String>>(&arguments.to_string_lossy())
                 .map_err(|error| {
                     HostError::new(
                         "invalid-configuration",
-                        format!("ZOMMI_CODEX_ARGS_JSON is invalid: {error}"),
+                        format!("Runtime argument override is invalid: {error}"),
                     )
                 })?;
             runtime_command.args = parsed;
         }
-        let adapter = CodexAdapter::connect(
-            CodexConfig::new(target, runtime_command, cwd.clone(), preferred_session_id),
+        let adapter = RuntimeAdapter::connect(
+            target,
+            runtime_command,
+            cwd.clone(),
+            preferred_session_id,
+            preferred_session_file,
             self.event_tx.clone(),
         )
         .await?;
-        let connection = adapter.connection().await?;
+        let connection = adapter.connection_value().await?;
+        let runtime_target_id = adapter.target_id().to_owned();
+        let session_id = adapter.active_session_id().await?;
+        let session_metadata = adapter.binding_metadata().await;
         self.binding_store
             .save(&SessionBinding {
-                runtime_target_id: connection.runtime_target_id.clone(),
-                session_id: connection.session_id.clone(),
+                runtime_target_id,
+                session_id,
                 cwd: cwd.to_string_lossy().into_owned(),
+                session_metadata,
             })
             .map_err(|error| HostError::new("persistence-failed", error.to_string()))?;
         self.adapter = Some(adapter);
-        Ok(serde_json::to_value(connection)?)
+        Ok(connection)
     }
 
-    fn exact_adapter(&self, payload: &Value) -> Result<CodexAdapter, HostError> {
+    fn exact_adapter(&self, payload: &Value) -> Result<RuntimeAdapter, HostError> {
         let adapter = self.adapter.as_ref().ok_or_else(|| {
             HostError::new(
                 "runtime-unavailable",
@@ -397,6 +524,7 @@ impl HostState {
         &self,
         runtime_target_id: &str,
         session_id: &str,
+        session_metadata: Option<Value>,
         payload: &Value,
     ) -> Result<(), HostError> {
         let cwd = payload
@@ -416,12 +544,13 @@ impl HostState {
                 runtime_target_id: runtime_target_id.into(),
                 session_id: session_id.into(),
                 cwd,
+                session_metadata,
             })
             .map_err(|error| HostError::new("persistence-failed", error.to_string()))
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct HostError {
     code: String,
     message: String,
@@ -591,6 +720,12 @@ mod tests {
                 .as_array()
                 .expect("capabilities")
                 .contains(&Value::String("turn.stream.v1".into()))
+        );
+        assert!(
+            result["result"]["capabilities"]
+                .as_array()
+                .expect("capabilities")
+                .contains(&Value::String("runtime.adapters.v1".into()))
         );
     }
 

@@ -1,0 +1,209 @@
+#!/usr/bin/env python3
+"""Deterministic Pi RPC fixture for the Rust adapter."""
+
+import json
+import os
+import sys
+
+
+session_id = os.environ.get("ZOMMI_FAKE_PI_SESSION", "pi-session-a")
+session_file = os.environ.get("ZOMMI_FAKE_PI_INITIAL_FILE", "/sessions/a.jsonl")
+request_log = os.environ.get("ZOMMI_FAKE_REQUEST_LOG")
+active = False
+
+
+def send(message):
+    sys.stdout.write(json.dumps(message, separators=(",", ":")) + "\n")
+    sys.stdout.flush()
+
+
+def log(message):
+    if request_log:
+        with open(request_log, "a", encoding="utf-8") as stream:
+            stream.write(json.dumps(message, separators=(",", ":")) + "\n")
+
+
+def response(request, data=None, success=True):
+    send(
+        {
+            "type": "response",
+            "id": request["id"],
+            "success": success,
+            "data": {} if data is None else data,
+        }
+    )
+
+
+for line in sys.stdin:
+    try:
+        request = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    log(request)
+    request_type = request.get("type")
+    if request_type == "extension_ui_response":
+        if active:
+            send({"type": "agent_end"})
+            active = False
+        continue
+    if "id" not in request:
+        continue
+
+    if request_type == "get_state":
+        response(
+            request,
+            {
+                "version": "4.5.6",
+                "sessionId": session_id,
+                "sessionFile": session_file,
+                "sessionName": "Pi fixture",
+                "model": {"provider": "openai", "id": "gpt-test"},
+                "thinkingLevel": "high",
+            },
+        )
+    elif request_type == "get_available_models":
+        response(
+            request,
+            {
+                "models": [
+                    {
+                        "provider": "openai",
+                        "id": "gpt-test",
+                        "name": "GPT Test",
+                        "reasoning": True,
+                        "thinkingLevelMap": {
+                            "minimal": None,
+                            "low": None,
+                            "medium": None,
+                            "high": "high",
+                            "xhigh": None,
+                        },
+                    }
+                ]
+            },
+        )
+    elif request_type == "get_messages":
+        response(
+            request,
+            {
+                "messages": [
+                    {
+                        "id": "u1",
+                        "role": "user",
+                        "content": [{"type": "text", "text": "saved question"}],
+                    },
+                    {
+                        "id": "a1",
+                        "role": "assistant",
+                        "content": [
+                            {"type": "thinking", "text": "saved thought"},
+                            {"type": "text", "text": "saved answer"},
+                        ],
+                    },
+                ]
+            },
+        )
+    elif request_type == "switch_session":
+        session_file = request["sessionPath"]
+        session_id = "pi-session-bound"
+        response(request, {"cancelled": False})
+    elif request_type == "new_session":
+        session_id = "pi-session-new"
+        session_file = "/sessions/new.jsonl"
+        response(request, {"cancelled": False})
+    elif request_type in ("set_model", "set_thinking_level"):
+        response(request)
+    elif request_type == "prompt":
+        active = True
+        response(request)
+        send(
+            {
+                "type": "message_update",
+                "assistantMessageEvent": {
+                    "type": "thinking_delta",
+                    "contentIndex": 0,
+                    "delta": "considering",
+                },
+            }
+        )
+        send(
+            {
+                "type": "message_update",
+                "assistantMessageEvent": {
+                    "type": "text_delta",
+                    "contentIndex": 1,
+                    "delta": "Pi Rust reply",
+                },
+            }
+        )
+        send(
+            {
+                "type": "tool_execution_end",
+                "toolName": "generate_preview",
+                "toolCallId": "pi-tool-image",
+                "result": {
+                    "content": [
+                        {
+                            "type": "image",
+                            "mimeType": "image/png",
+                            "data": "aGVsbG8=",
+                        },
+                        {
+                            "type": "resource_link",
+                            "uri": "preview.html",
+                            "title": "Preview",
+                        },
+                    ]
+                },
+            }
+        )
+        prompt_text = request.get("message", "")
+        if "exit-runtime" in prompt_text:
+            sys.stderr.write(
+                "password=pi-adapter-secret "
+                "<zommi_invocation_context>captured private Pi context</zommi_invocation_context>"
+            )
+            sys.stderr.flush()
+            raise SystemExit(26)
+        if "ask-question" in prompt_text:
+            send(
+                {
+                    "type": "extension_ui_request",
+                    "id": "ui-1",
+                    "method": "confirm",
+                    "title": "Continue?",
+                    "message": "Run it?",
+                }
+            )
+        elif "hold-for-interrupt" not in prompt_text:
+            send({"type": "agent_end"})
+            active = False
+            if "late-frame" in prompt_text:
+                send(
+                    {
+                        "type": "message_update",
+                        "assistantMessageEvent": {
+                            "type": "text_delta",
+                            "contentIndex": 1,
+                            "delta": "late Pi output",
+                        },
+                    }
+                )
+    elif request_type == "steer":
+        response(request, {"accepted": True})
+    elif request_type == "clear_queue":
+        response(request)
+    elif request_type == "abort":
+        response(request)
+        if active:
+            send({"type": "agent_end"})
+            active = False
+    else:
+        send(
+            {
+                "type": "response",
+                "id": request["id"],
+                "success": False,
+                "error": "unsupported Pi fixture request",
+            }
+        )

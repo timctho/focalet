@@ -25,6 +25,127 @@ const CODEX_CAPABILITY_HINTS: &[&str] = &[
     "reasoning.select.v1",
 ];
 
+const PI_CAPABILITY_HINTS: &[&str] = &[
+    "session.create.v1",
+    "session.resume.v1",
+    "history.read.v1",
+    "turn.stream.v1",
+    "turn.interrupt.v1",
+    "turn.steer.v1",
+    "input.image.v1",
+    "model.select.v1",
+    "reasoning.select.v1",
+    "question.resolve.v1",
+];
+
+const ACP_CAPABILITY_HINTS: &[&str] = &[
+    "session.list.v1",
+    "session.create.v1",
+    "session.resume.v1",
+    "history.read.v1",
+    "turn.stream.v1",
+    "turn.interrupt.v1",
+    "input.image.v1",
+    "approval.resolve.v1",
+    "question.resolve.v1",
+    "model.select.v1",
+];
+
+const HERMES_GATEWAY_CAPABILITY_HINTS: &[&str] = &[
+    "session.list.v1",
+    "session.create.v1",
+    "session.resume.v1",
+    "history.read.v1",
+    "turn.stream.v1",
+    "turn.interrupt.v1",
+    "input.image.v1",
+    "approval.resolve.v1",
+    "question.resolve.v1",
+    "model.select.v1",
+    "reasoning.select.v1",
+];
+
+const OPENCLAW_GATEWAY_CAPABILITY_HINTS: &[&str] = &[
+    "session.list.v1",
+    "session.create.v1",
+    "session.resume.v1",
+    "history.read.v1",
+    "turn.stream.v1",
+    "turn.interrupt.v1",
+    "input.image.v1",
+    "approval.resolve.v1",
+    "question.resolve.v1",
+    "operation.idempotency.v1",
+];
+
+#[derive(Clone, Copy)]
+struct CatalogEntry {
+    executable: &'static str,
+    runtime_id: &'static str,
+    adapter_id: &'static str,
+    display_name: &'static str,
+    protocol_name: &'static str,
+    priority: u32,
+    capability_hints: &'static [&'static str],
+}
+
+const RUNTIME_CATALOG: &[CatalogEntry] = &[
+    CatalogEntry {
+        executable: "codex",
+        runtime_id: "codex",
+        adapter_id: "codex-app-server",
+        display_name: "Codex",
+        protocol_name: "Codex app-server",
+        priority: 10,
+        capability_hints: CODEX_CAPABILITY_HINTS,
+    },
+    CatalogEntry {
+        executable: "pi",
+        runtime_id: "pi",
+        adapter_id: "pi-rpc",
+        display_name: "Pi",
+        protocol_name: "Pi RPC",
+        priority: 20,
+        capability_hints: PI_CAPABILITY_HINTS,
+    },
+    CatalogEntry {
+        executable: "hermes",
+        runtime_id: "hermes",
+        adapter_id: "hermes-acp",
+        display_name: "Hermes",
+        protocol_name: "ACP",
+        priority: 30,
+        capability_hints: ACP_CAPABILITY_HINTS,
+    },
+    CatalogEntry {
+        executable: "hermes",
+        runtime_id: "hermes",
+        adapter_id: "hermes-gateway",
+        display_name: "Hermes",
+        protocol_name: "Gateway",
+        priority: 31,
+        capability_hints: HERMES_GATEWAY_CAPABILITY_HINTS,
+    },
+    CatalogEntry {
+        executable: "openclaw",
+        runtime_id: "openclaw",
+        adapter_id: "openclaw-acp",
+        display_name: "OpenClaw",
+        protocol_name: "ACP",
+        priority: 40,
+        capability_hints: ACP_CAPABILITY_HINTS,
+    },
+    CatalogEntry {
+        executable: "claude",
+        runtime_id: "claude",
+        adapter_id: "pty-compatibility",
+        display_name: "Claude CLI",
+        protocol_name: "Terminal compatibility",
+        priority: 1_000,
+        capability_hints: &["turn.stream.v1"],
+    },
+];
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionHost {
@@ -54,6 +175,10 @@ pub struct RuntimeTarget {
     pub runtime_home: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,11 +188,11 @@ pub struct RuntimeCommand {
     pub working_directory: Option<String>,
 }
 
-pub fn discover_codex_targets() -> Vec<RuntimeTarget> {
-    discover_codex_targets_with(&env::vars().collect(), env::consts::OS)
+pub fn discover_runtime_targets() -> Vec<RuntimeTarget> {
+    discover_runtime_targets_with(&env::vars().collect(), env::consts::OS)
 }
 
-pub fn discover_codex_targets_with(
+pub fn discover_runtime_targets_with(
     environment: &HashMap<String, String>,
     platform: &str,
 ) -> Vec<RuntimeTarget> {
@@ -85,23 +210,42 @@ pub fn discover_codex_targets_with(
         name: None,
     };
 
-    if let Some(configured) = environment
-        .get("ZOMMI_CODEX_COMMAND")
+    for entry in RUNTIME_CATALOG {
+        let override_name = format!("ZOMMI_{}_COMMAND", entry.executable.to_ascii_uppercase());
+        if let Some(configured) = environment
+            .get(&override_name)
+            .filter(|value| !value.trim().is_empty())
+        {
+            targets.push(target_for(
+                &native_host,
+                configured.trim(),
+                entry,
+                environment.get("HOME").map(String::as_str),
+                Some("configured"),
+            ));
+        } else if let Some(executable) =
+            resolve_native_command(entry.executable, environment, platform)
+        {
+            targets.push(target_for(
+                &native_host,
+                &executable.to_string_lossy(),
+                entry,
+                environment.get("HOME").map(String::as_str),
+                None,
+            ));
+        }
+    }
+
+    if let Some(endpoint) = environment
+        .get("ZOMMI_OPENCLAW_GATEWAY_URL")
         .filter(|value| !value.trim().is_empty())
+        .and_then(|value| validate_gateway_endpoint(value).ok())
     {
-        targets.push(target_for(
-            &native_host,
-            configured.trim(),
-            environment.get("HOME").map(String::as_str),
-            Some("configured"),
-        ));
-    } else if let Some(executable) = resolve_native_command("codex", environment, platform) {
-        targets.push(target_for(
-            &native_host,
-            &executable.to_string_lossy(),
-            environment.get("HOME").map(String::as_str),
-            None,
-        ));
+        let profile_id = environment
+            .get("ZOMMI_OPENCLAW_GATEWAY_AGENT_ID")
+            .filter(|value| valid_profile_id(value))
+            .map(|value| value.trim().to_owned());
+        targets.push(openclaw_gateway_target(endpoint, platform, profile_id));
     }
 
     if platform == "windows" {
@@ -146,6 +290,7 @@ pub fn select_default_target<'a>(
 }
 
 pub fn command_for_target(target: &RuntimeTarget) -> RuntimeCommand {
+    let launch_args = launch_args(target.adapter_id.as_str());
     if target.execution_host.kind == "wsl" {
         let name = target
             .execution_host
@@ -156,13 +301,15 @@ pub fn command_for_target(target: &RuntimeTarget) -> RuntimeCommand {
         if let Some(home) = &target.runtime_home {
             args.extend(["--cd".into(), home.clone()]);
         }
-        args.extend([
-            "-e".into(),
-            "env".into(),
-            "CODEX_INTERNAL_ORIGINATOR_OVERRIDE=codex_exec".into(),
-            target.executable_path.clone(),
-            "app-server".into(),
-        ]);
+        args.push("-e".into());
+        if target.adapter_id == "codex-app-server" {
+            args.extend([
+                "env".into(),
+                "CODEX_INTERNAL_ORIGINATOR_OVERRIDE=codex_exec".into(),
+            ]);
+        }
+        args.push(target.executable_path.clone());
+        args.extend(launch_args.iter().map(|value| (*value).into()));
         return RuntimeCommand {
             command: "wsl.exe".into(),
             args,
@@ -180,23 +327,24 @@ pub fn command_for_target(target: &RuntimeTarget) -> RuntimeCommand {
             Some("cmd" | "bat")
         )
     {
+        let mut args = vec![
+            "/d".into(),
+            "/v:off".into(),
+            "/s".into(),
+            "/c".into(),
+            target.executable_path.clone(),
+        ];
+        args.extend(launch_args.iter().map(|value| (*value).into()));
         return RuntimeCommand {
             command: "cmd.exe".into(),
-            args: vec![
-                "/d".into(),
-                "/v:off".into(),
-                "/s".into(),
-                "/c".into(),
-                target.executable_path.clone(),
-                "app-server".into(),
-            ],
+            args,
             working_directory: target.runtime_home.clone(),
         };
     }
 
     RuntimeCommand {
         command: target.executable_path.clone(),
-        args: vec!["app-server".into()],
+        args: launch_args.iter().map(|value| (*value).into()).collect(),
         working_directory: target.runtime_home.clone(),
     }
 }
@@ -228,41 +376,48 @@ fn discover_wsl_targets(environment: &HashMap<String, String>) -> Vec<RuntimeTar
             .iter()
             .map(|distribution| {
                 let default_name = default_name.as_deref();
-                scope.spawn(move || detect_wsl_codex(distribution, default_name, environment))
+                scope.spawn(move || detect_wsl_runtimes(distribution, default_name, environment))
             })
             .collect::<Vec<_>>()
             .into_iter()
-            .filter_map(|probe| probe.join().ok().flatten())
+            .filter_map(|probe| probe.join().ok())
+            .flatten()
             .collect()
     })
 }
 
-fn detect_wsl_codex(
+fn detect_wsl_runtimes(
     distribution: &str,
     default_name: Option<&str>,
     environment: &HashMap<String, String>,
-) -> Option<RuntimeTarget> {
-    let script = concat!(
+) -> Vec<RuntimeTarget> {
+    let executable_names = RUNTIME_CATALOG
+        .iter()
+        .map(|entry| format!("'{}'", entry.executable))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let script = format!(
+        "{}{}{}{}{}{}{}",
         "zommi_shell=$(getent passwd $(id -un) 2>/dev/null | cut -d: -f7); ",
         "[ -x \"$zommi_shell\" ] || zommi_shell=\"${SHELL:-/bin/sh}\"; ",
         "exec \"$zommi_shell\" -lc '",
         "printf \"__ZOMMI_RUNTIME_HOME__%s\\n\" \"$HOME\"; ",
-        "zommi_path=$(command -v -- codex 2>/dev/null || true); ",
-        "case \"$zommi_path\" in /*) printf \"__ZOMMI_RUNTIME_PATH__codex\\t%s\\n\" \"$zommi_path\" ;; esac'"
+        "for zommi_command in ",
+        executable_names,
+        "; do zommi_path=$(command -v -- \"$zommi_command\" 2>/dev/null || true); case \"$zommi_path\" in /*) printf \"__ZOMMI_RUNTIME_PATH__%s\\t%s\\n\" \"$zommi_command\" \"$zommi_path\" ;; esac; done'"
     );
     let output = run_command(
         "wsl.exe",
-        &["-d", distribution, "-e", "sh", "-lc", script],
+        &["-d", distribution, "-e", "sh", "-lc", &script],
         Some(environment),
-    )?;
+    );
+    let Some(output) = output else {
+        return Vec::new();
+    };
     let output = normalize_command_output(&output);
     let home = output
         .lines()
         .find_map(|line| line.strip_prefix("__ZOMMI_RUNTIME_HOME__"));
-    let executable = output.lines().find_map(|line| {
-        line.strip_prefix("__ZOMMI_RUNTIME_PATH__codex\t")
-            .filter(|path| path.starts_with('/'))
-    })?;
     let host = ExecutionHost {
         id: format!("wsl:{}", distribution.to_ascii_lowercase()),
         kind: "wsl".into(),
@@ -271,7 +426,19 @@ fn detect_wsl_codex(
         is_default: default_name.is_some_and(|name| name.eq_ignore_ascii_case(distribution)),
         name: Some(distribution.into()),
     };
-    Some(target_for(&host, executable, home, None))
+    output
+        .lines()
+        .filter_map(|line| line.strip_prefix("__ZOMMI_RUNTIME_PATH__"))
+        .filter_map(|line| line.split_once('\t'))
+        .filter(|(_, path)| path.starts_with('/'))
+        .flat_map(|(name, path)| {
+            RUNTIME_CATALOG
+                .iter()
+                .filter(|entry| entry.executable == name)
+                .map(|entry| target_for(&host, path, entry, home, None))
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 fn run_command(
@@ -370,22 +537,27 @@ fn resolve_native_command(
 fn target_for(
     host: &ExecutionHost,
     executable_path: &str,
+    entry: &CatalogEntry,
     runtime_home: Option<&str>,
     source: Option<&str>,
 ) -> RuntimeTarget {
-    let identity = format!("{}\0codex-app-server\0{executable_path}\0default", host.id);
+    let identity = format!(
+        "{}\0{}\0{executable_path}\0default",
+        host.id, entry.adapter_id
+    );
     let hash = format!("{:x}", Sha256::digest(identity.as_bytes()));
     RuntimeTarget {
         id: format!("runtime-{}", &hash[..20]),
-        runtime_id: "codex".into(),
-        adapter_id: "codex-app-server".into(),
-        display_name: "Codex".into(),
-        protocol_name: "Codex app-server".into(),
+        runtime_id: entry.runtime_id.into(),
+        adapter_id: entry.adapter_id.into(),
+        display_name: entry.display_name.into(),
+        protocol_name: entry.protocol_name.into(),
         executable_path: executable_path.into(),
         execution_host: host.clone(),
         status: "detected".into(),
-        priority: 10,
-        capability_hints: CODEX_CAPABILITY_HINTS
+        priority: entry.priority,
+        capability_hints: entry
+            .capability_hints
             .iter()
             .map(|value| (*value).into())
             .collect(),
@@ -393,6 +565,89 @@ fn target_for(
             .filter(|value| !value.is_empty())
             .map(str::to_owned),
         source: source.map(str::to_owned),
+        endpoint: None,
+        profile_id: None,
+    }
+}
+
+fn openclaw_gateway_target(
+    endpoint: String,
+    platform: &str,
+    profile_id: Option<String>,
+) -> RuntimeTarget {
+    let identity = format!("{endpoint}\0{}", profile_id.as_deref().unwrap_or("default"));
+    let hash = format!("{:x}", Sha256::digest(identity.as_bytes()));
+    RuntimeTarget {
+        id: format!("runtime-openclaw-gateway-{}", &hash[..20]),
+        runtime_id: "openclaw".into(),
+        adapter_id: "openclaw-gateway".into(),
+        display_name: "OpenClaw".into(),
+        protocol_name: "Direct Gateway".into(),
+        executable_path: String::new(),
+        execution_host: ExecutionHost {
+            id: format!("remote:{platform}"),
+            kind: "remote".into(),
+            platform: platform.into(),
+            display_name: "Remote Gateway".into(),
+            is_default: false,
+            name: None,
+        },
+        status: "detected".into(),
+        priority: 41,
+        capability_hints: OPENCLAW_GATEWAY_CAPABILITY_HINTS
+            .iter()
+            .map(|value| (*value).into())
+            .collect(),
+        runtime_home: None,
+        source: Some("configured".into()),
+        endpoint: Some(endpoint),
+        profile_id,
+    }
+}
+
+fn valid_profile_id(value: &str) -> bool {
+    let value = value.trim();
+    !value.is_empty()
+        && value.len() <= 256
+        && !value
+            .chars()
+            .any(|character| matches!(character, '\u{0000}'..='\u{001f}' | '\u{007f}'))
+}
+
+fn validate_gateway_endpoint(value: &str) -> Result<String, ()> {
+    let endpoint = url::Url::parse(value.trim()).map_err(|_| ())?;
+    if !matches!(endpoint.scheme(), "ws" | "wss")
+        || !endpoint.username().is_empty()
+        || endpoint.password().is_some()
+        || endpoint.host_str().is_none()
+        || endpoint.query_pairs().any(|(key, _)| {
+            let key = key.to_ascii_lowercase();
+            ["token", "password", "secret", "key", "auth"]
+                .iter()
+                .any(|fragment| key.contains(fragment))
+        })
+    {
+        return Err(());
+    }
+    Ok(endpoint.to_string())
+}
+
+fn launch_args(adapter_id: &str) -> &'static [&'static str] {
+    match adapter_id {
+        "codex-app-server" => &["app-server"],
+        "pi-rpc" => &["--mode", "rpc"],
+        "hermes-acp" | "openclaw-acp" => &["acp"],
+        "hermes-gateway" => &[
+            "serve",
+            "--port",
+            "0",
+            "--host",
+            "127.0.0.1",
+            "--skip-build",
+            "--isolated",
+        ],
+        "pty-compatibility" => &[],
+        _ => &[],
     }
 }
 
@@ -413,7 +668,7 @@ mod tests {
     use std::{collections::HashMap, fs};
 
     use super::{
-        ExecutionHost, RuntimeTarget, command_for_target, discover_codex_targets_with,
+        ExecutionHost, RuntimeTarget, command_for_target, discover_runtime_targets_with,
         select_default_target,
     };
 
@@ -427,8 +682,8 @@ mod tests {
             ("PATH".into(), root.to_string_lossy().into_owned()),
             ("HOME".into(), "/home/test".into()),
         ]);
-        let first = discover_codex_targets_with(&environment, "linux");
-        let second = discover_codex_targets_with(&environment, "linux");
+        let first = discover_runtime_targets_with(&environment, "linux");
+        let second = discover_runtime_targets_with(&environment, "linux");
         assert_eq!(first, second);
         assert_eq!(first.len(), 1);
         assert_eq!(first[0].adapter_id, "codex-app-server");
@@ -458,6 +713,8 @@ mod tests {
             capability_hints: Vec::new(),
             runtime_home: None,
             source: None,
+            endpoint: None,
+            profile_id: None,
         };
         let targets = vec![target("default", true), target("bound", false)];
         assert_eq!(
@@ -488,6 +745,8 @@ mod tests {
             capability_hints: Vec::new(),
             runtime_home: Some("/home/u".into()),
             source: None,
+            endpoint: None,
+            profile_id: None,
         };
         let command = command_for_target(&target);
         assert_eq!(command.command, "wsl.exe");
@@ -504,6 +763,52 @@ mod tests {
                 "/home/u/bin/codex",
                 "app-server"
             ]
+        );
+    }
+
+    #[test]
+    fn discovers_credential_free_openclaw_gateway_endpoint() {
+        let environment = HashMap::from([
+            (
+                "ZOMMI_OPENCLAW_GATEWAY_URL".into(),
+                "wss://gateway.example.test/control".into(),
+            ),
+            ("ZOMMI_OPENCLAW_GATEWAY_AGENT_ID".into(), "main".into()),
+        ]);
+        let targets = discover_runtime_targets_with(&environment, "linux");
+        let target = targets
+            .iter()
+            .find(|target| target.adapter_id == "openclaw-gateway")
+            .expect("configured Gateway target");
+        assert_eq!(
+            target.endpoint.as_deref(),
+            Some("wss://gateway.example.test/control")
+        );
+        assert_eq!(target.execution_host.kind, "remote");
+        assert_eq!(target.source.as_deref(), Some("configured"));
+        assert_eq!(target.profile_id.as_deref(), Some("main"));
+
+        let changed_profile = HashMap::from([
+            (
+                "ZOMMI_OPENCLAW_GATEWAY_URL".into(),
+                "wss://gateway.example.test/control".into(),
+            ),
+            ("ZOMMI_OPENCLAW_GATEWAY_AGENT_ID".into(), "secondary".into()),
+        ]);
+        let changed = discover_runtime_targets_with(&changed_profile, "linux")
+            .into_iter()
+            .find(|target| target.adapter_id == "openclaw-gateway")
+            .expect("second configured target");
+        assert_ne!(target.id, changed.id);
+
+        let rejected = HashMap::from([(
+            "ZOMMI_OPENCLAW_GATEWAY_URL".into(),
+            "wss://gateway.example.test/?token=private".into(),
+        )]);
+        assert!(
+            discover_runtime_targets_with(&rejected, "linux")
+                .iter()
+                .all(|target| target.adapter_id != "openclaw-gateway")
         );
     }
 }

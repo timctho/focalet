@@ -56,6 +56,28 @@ abstract interface class CoreBridge {
     required String turnId,
   });
 
+  Future<void> steerTurn({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String turnId,
+    required String message,
+    List<String> images = const [],
+  });
+
+  Future<void> resolveApproval({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String approvalId,
+    String? optionId,
+  });
+
+  Future<void> resolveQuestion({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String questionId,
+    required Map<String, Object?> answer,
+  });
+
   Future<String> buildContextHandoff({
     required String message,
     List<Map<String, Object?>> snapshots = const [],
@@ -69,27 +91,36 @@ final class RuntimeTarget {
   const RuntimeTarget({
     required this.id,
     required this.runtimeId,
+    required this.adapterId,
     required this.displayName,
     required this.protocolName,
     required this.executablePath,
     required this.executionHost,
+    this.endpoint,
+    this.profileId,
   });
 
   factory RuntimeTarget.fromJson(Map<String, Object?> json) => RuntimeTarget(
     id: json['id']?.toString() ?? '',
     runtimeId: json['runtimeId']?.toString() ?? '',
+    adapterId: json['adapterId']?.toString() ?? '',
     displayName: json['displayName']?.toString() ?? '',
     protocolName: json['protocolName']?.toString() ?? '',
     executablePath: json['executablePath']?.toString() ?? '',
     executionHost: _map(json['executionHost']),
+    endpoint: json['endpoint']?.toString(),
+    profileId: json['profileId']?.toString(),
   );
 
   final String id;
   final String runtimeId;
+  final String adapterId;
   final String displayName;
   final String protocolName;
   final String executablePath;
   final Map<String, Object?> executionHost;
+  final String? endpoint;
+  final String? profileId;
 }
 
 final class RuntimeDiscovery {
@@ -106,6 +137,8 @@ final class RuntimeConnection {
     required this.protocolVersion,
     required this.models,
     required this.sessions,
+    required this.capabilities,
+    this.sessionMetadata = const <String, Object?>{},
     this.runtimeVersion,
   });
 
@@ -117,6 +150,10 @@ final class RuntimeConnection {
         runtimeVersion: json['runtimeVersion']?.toString(),
         models: _mapList(json['models']),
         sessions: _mapList(json['sessions']),
+        capabilities: (json['capabilities'] as List<Object?>? ?? const [])
+            .map((value) => value.toString())
+            .toList(growable: false),
+        sessionMetadata: _map(json['sessionMetadata']),
       );
 
   final String runtimeTargetId;
@@ -125,6 +162,8 @@ final class RuntimeConnection {
   final String? runtimeVersion;
   final List<Map<String, Object?>> models;
   final List<Map<String, Object?>> sessions;
+  final List<String> capabilities;
+  final Map<String, Object?> sessionMetadata;
 }
 
 final class TurnReceipt {
@@ -350,6 +389,53 @@ final class ProcessCoreBridge implements CoreBridge {
       'runtimeTargetId': runtimeTargetId,
       'sessionId': sessionId,
       'turnId': turnId,
+    });
+  }
+
+  @override
+  Future<void> steerTurn({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String turnId,
+    required String message,
+    List<String> images = const [],
+  }) async {
+    await _request('turn.steer', <String, Object?>{
+      'runtimeTargetId': runtimeTargetId,
+      'sessionId': sessionId,
+      'turnId': turnId,
+      'message': message,
+      'images': images,
+    });
+  }
+
+  @override
+  Future<void> resolveApproval({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String approvalId,
+    String? optionId,
+  }) async {
+    await _request('approval.resolve', <String, Object?>{
+      'runtimeTargetId': runtimeTargetId,
+      'sessionId': sessionId,
+      'approvalId': approvalId,
+      'optionId': ?optionId,
+    });
+  }
+
+  @override
+  Future<void> resolveQuestion({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String questionId,
+    required Map<String, Object?> answer,
+  }) async {
+    await _request('question.resolve', <String, Object?>{
+      'runtimeTargetId': runtimeTargetId,
+      'sessionId': sessionId,
+      'questionId': questionId,
+      'answer': answer,
     });
   }
 

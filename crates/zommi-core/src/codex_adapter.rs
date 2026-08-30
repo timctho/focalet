@@ -22,7 +22,8 @@ use tokio::{
 };
 
 use crate::{
-    RuntimeCommand, RuntimeTarget, build_context_handoff, sanitize_diagnostic, validate_turn_input,
+    RuntimeCommand, RuntimeTarget, artifacts::artifacts_from_thread_item, build_context_handoff,
+    sanitize_diagnostic, validate_turn_input,
 };
 
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -929,7 +930,7 @@ impl Inner {
             .or_else_nonempty(state.active_turns.get(&thread_id).cloned())
             .unwrap_or_default();
         let operation = state.turn_client_operations.get(&thread_id).cloned();
-        let update = parse_stream_update(method, &params, &state.item_kinds);
+        let update = parse_stream_update(method, &params, &state.item_kinds, self.cwd.to_str());
         if method == "item/completed" {
             let item_id = value_string(params.pointer("/item/id"));
             state.item_kinds.remove(&item_id);
@@ -1133,6 +1134,7 @@ fn parse_stream_update(
     method: &str,
     params: &Value,
     item_kinds: &HashMap<String, String>,
+    cwd: Option<&str>,
 ) -> Option<Value> {
     let item_id = value_string(params.get("itemId"))
         .or_else_nonempty(Some(value_string(params.pointer("/item/id"))))
@@ -1210,6 +1212,11 @@ fn parse_stream_update(
     };
     let item = params.get("item")?;
     let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();
+    let artifacts = if lifecycle == "completed" {
+        artifacts_from_thread_item(item, cwd)
+    } else {
+        Vec::new()
+    };
     let status = item.get("status").and_then(Value::as_str);
     if item_type == "agentMessage" && lifecycle == "completed" {
         let text = item.get("text").and_then(Value::as_str)?;
@@ -1223,7 +1230,7 @@ fn parse_stream_update(
                     "assistant"
                 }
             });
-        return Some(update(
+        let mut value = update(
             kind,
             lifecycle,
             if kind == "thinking" {
@@ -1235,7 +1242,11 @@ fn parse_stream_update(
             &item_id,
             status,
             true,
-        ));
+        );
+        if !artifacts.is_empty() {
+            value["artifacts"] = Value::Array(artifacts);
+        }
+        return Some(value);
     }
     let (kind, title) = match item_type {
         "reasoning" => ("thinking", "Thinking"),
@@ -1249,7 +1260,7 @@ fn parse_stream_update(
         "imageGeneration" => ("tool", "Image generation"),
         _ => return None,
     };
-    Some(update(
+    let mut value = update(
         kind,
         lifecycle,
         title,
@@ -1257,7 +1268,11 @@ fn parse_stream_update(
         &item_id,
         status,
         false,
-    ))
+    );
+    if !artifacts.is_empty() {
+        value["artifacts"] = Value::Array(artifacts);
+    }
+    Some(value)
 }
 
 fn update(
@@ -1469,11 +1484,31 @@ mod tests {
                 "text": "complete answer"
             }}),
             &kinds,
+            Some("/workspace"),
         )
         .expect("normalized update");
         assert_eq!(update["kind"], "assistant");
         assert_eq!(update["replace"], true);
         assert_eq!(update["text"], "complete answer");
+    }
+
+    #[test]
+    fn completed_items_include_rust_extracted_artifacts() {
+        let update = parse_stream_update(
+            "item/completed",
+            &json!({"item": {
+                "id": "files-1", "type": "fileChange", "status": "completed",
+                "changes": [
+                    {"kind": "update", "path": "preview.html"},
+                    {"kind": "create", "path": "chart.png"}
+                ]
+            }}),
+            &HashMap::new(),
+            Some("/workspace"),
+        )
+        .expect("normalized artifact update");
+        assert_eq!(update["artifacts"].as_array().map(Vec::len), Some(2));
+        assert_eq!(update["artifacts"][0]["cwd"], "/workspace");
     }
 
     #[test]
@@ -1484,6 +1519,7 @@ mod tests {
                 "item/reasoning/summaryTextDelta",
                 &json!({"itemId": "r", "delta": "thinking"}),
                 &kinds,
+                None,
             )
             .expect("reasoning")["kind"],
             "thinking"
@@ -1493,6 +1529,7 @@ mod tests {
                 "item/commandExecution/outputDelta",
                 &json!({"itemId": "c", "delta": "output"}),
                 &kinds,
+                None,
             )
             .expect("tool output")["kind"],
             "toolOutput"
