@@ -47,15 +47,21 @@ class _ZommiShellState extends State<ZommiShell> {
   final _composer = TextEditingController();
   final _composerFocus = FocusNode(debugLabel: 'Zommi composer');
   final List<_ChatMessage> _messages = [];
+  final Map<String, int> _messageIndexes = {};
+  final Set<String> _completedTurnIds = {};
   Timer? _collapseTimer;
+  StreamSubscription<CoreEvent>? _eventSubscription;
   bool _expanded = false;
   bool _submitting = false;
   String _status = 'Connecting to Rust core…';
-  String? _lastHandoff;
+  String? _runtimeTargetId;
+  String? _sessionId;
+  String? _activeTurnId;
 
   @override
   void initState() {
     super.initState();
+    _eventSubscription = widget.core.events.listen(_handleCoreEvent);
     unawaited(_initializeCore());
   }
 
@@ -63,11 +69,97 @@ class _ZommiShellState extends State<ZommiShell> {
     try {
       final status = await widget.core.initialize();
       if (!mounted) return;
-      setState(() => _status = 'Rust core ${status.version} ready');
+      setState(() => _status = 'Discovering Codex runtimes…');
+      final discovery = await widget.core.discoverRuntimeTargets();
+      if (!mounted) return;
+      final targetId = discovery.selectedTargetId;
+      if (targetId == null || targetId.isEmpty) {
+        setState(() => _status = 'No Codex runtime found');
+        return;
+      }
+      final connection = await widget.core.connectRuntime(
+        runtimeTargetId: targetId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _runtimeTargetId = connection.runtimeTargetId;
+        _sessionId = connection.sessionId;
+        _status = 'Codex ${connection.runtimeVersion ?? status.version} ready';
+      });
     } on Object catch (error) {
       if (!mounted) return;
       setState(() => _status = 'Rust core unavailable · $error');
     }
+  }
+
+  void _handleCoreEvent(CoreEvent event) {
+    if (!mounted) return;
+    if (_runtimeTargetId != null && event.runtimeTargetId != _runtimeTargetId) {
+      return;
+    }
+    if (event.name == 'runtime.status') {
+      final message = event.payload['message']?.toString();
+      if (message != null && message.isNotEmpty) {
+        setState(() => _status = message);
+      }
+      return;
+    }
+    if (event.name == 'turn.started') {
+      setState(() {
+        _activeTurnId = event.turnId;
+        _status = 'Codex is responding…';
+      });
+      return;
+    }
+    if (event.name == 'item.update') {
+      _applyItemUpdate(event);
+      return;
+    }
+    if (event.name == 'turn.completed') {
+      final turnId = event.turnId;
+      if (turnId != null) {
+        if (_completedTurnIds.length >= 512) _completedTurnIds.clear();
+        _completedTurnIds.add(turnId);
+      }
+      final status = event.payload['status']?.toString() ?? 'completed';
+      setState(() {
+        if (_activeTurnId == turnId || turnId == null) _activeTurnId = null;
+        _status = switch (status) {
+          'completed' => 'Codex reply complete',
+          'interrupted' => 'Codex turn stopped',
+          'unknown' => 'Codex outcome unknown · runtime exited',
+          _ => 'Codex turn $status',
+        };
+      });
+    }
+  }
+
+  void _applyItemUpdate(CoreEvent event) {
+    final itemId = event.payload['itemId']?.toString();
+    if (itemId == null || itemId.isEmpty) return;
+    final kind = event.payload['kind']?.toString() ?? 'assistant';
+    final text = event.payload['text']?.toString() ?? '';
+    final replace = event.payload['replace'] == true;
+    final existing = _messageIndexes[itemId];
+    setState(() {
+      if (existing == null) {
+        _messageIndexes[itemId] = _messages.length;
+        _messages.add(
+          _ChatMessage(
+            text,
+            isUser: false,
+            label: event.payload['title']?.toString() ?? kind,
+          ),
+        );
+      } else {
+        final previous = _messages[existing];
+        _messages[existing] = _ChatMessage(
+          replace ? text : '${previous.text}$text',
+          isUser: false,
+          label: previous.label,
+        );
+      }
+    });
   }
 
   void _expand() {
@@ -91,18 +183,30 @@ class _ZommiShellState extends State<ZommiShell> {
   Future<void> _submit() async {
     final message = _composer.text.trim();
     if (message.isEmpty || _submitting) return;
+    final runtimeTargetId = _runtimeTargetId;
+    final sessionId = _sessionId;
+    if (runtimeTargetId == null || sessionId == null) {
+      setState(() => _status = 'Codex is not connected yet');
+      return;
+    }
     _composer.clear();
     setState(() {
       _messages.add(_ChatMessage(message, isUser: true));
       _submitting = true;
-      _status = 'Preparing context handoff…';
+      _status = 'Starting Codex turn…';
     });
     try {
-      final handoff = await widget.core.buildContextHandoff(message: message);
+      final receipt = await widget.core.startTurn(
+        runtimeTargetId: runtimeTargetId,
+        sessionId: sessionId,
+        message: message,
+      );
       if (!mounted) return;
       setState(() {
-        _lastHandoff = handoff;
-        _status = 'Context handoff prepared by Rust core';
+        if (!_completedTurnIds.contains(receipt.turnId)) {
+          _activeTurnId = receipt.turnId;
+          _status = 'Codex is responding…';
+        }
       });
     } on Object catch (error) {
       if (!mounted) return;
@@ -112,9 +216,27 @@ class _ZommiShellState extends State<ZommiShell> {
     }
   }
 
+  Future<void> _interrupt() async {
+    final runtimeTargetId = _runtimeTargetId;
+    final sessionId = _sessionId;
+    final turnId = _activeTurnId;
+    if (runtimeTargetId == null || sessionId == null || turnId == null) return;
+    setState(() => _status = 'Stopping Codex turn…');
+    try {
+      await widget.core.interruptTurn(
+        runtimeTargetId: runtimeTargetId,
+        sessionId: sessionId,
+        turnId: turnId,
+      );
+    } on Object catch (error) {
+      if (mounted) setState(() => _status = 'Stop failed · $error');
+    }
+  }
+
   @override
   void dispose() {
     _collapseTimer?.cancel();
+    unawaited(_eventSubscription?.cancel());
     _composer.dispose();
     _composerFocus.dispose();
     unawaited(widget.core.close());
@@ -188,16 +310,18 @@ class _ZommiShellState extends State<ZommiShell> {
             children: [
               _PanelHeader(status: _status, busy: _submitting),
               Expanded(child: _buildTranscript()),
-              if (_lastHandoff != null)
+              if (_sessionId != null)
                 Semantics(
-                  label: 'Core handoff prepared',
+                  label: 'Exact Codex session bound',
                   child: SizedBox.shrink(),
                 ),
               _Composer(
                 controller: _composer,
                 focusNode: _composerFocus,
                 busy: _submitting,
+                turnActive: _activeTurnId != null,
                 onSubmit: _submit,
+                onStop: _interrupt,
               ),
             ],
           ),
@@ -354,13 +478,17 @@ class _Composer extends StatelessWidget {
     required this.controller,
     required this.focusNode,
     required this.busy,
+    required this.turnActive,
     required this.onSubmit,
+    required this.onStop,
   });
 
   final TextEditingController controller;
   final FocusNode focusNode;
   final bool busy;
+  final bool turnActive;
   final Future<void> Function() onSubmit;
+  final Future<void> Function() onStop;
 
   @override
   Widget build(BuildContext context) {
@@ -385,9 +513,10 @@ class _Composer extends StatelessWidget {
           Expanded(
             child: CallbackShortcuts(
               bindings: <ShortcutActivator, VoidCallback>{
-                const SingleActivator(LogicalKeyboardKey.enter): () {
-                  unawaited(onSubmit());
-                },
+                if (!turnActive)
+                  const SingleActivator(LogicalKeyboardKey.enter): () {
+                    unawaited(onSubmit());
+                  },
               },
               child: TextField(
                 key: const ValueKey('zommi-composer'),
@@ -404,15 +533,28 @@ class _Composer extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          Semantics(
-            label: busy ? 'Preparing context' : 'Send message',
-            button: true,
-            child: IconButton.filled(
-              key: const ValueKey('send-message'),
-              onPressed: busy ? null : () => unawaited(onSubmit()),
-              icon: Icon(busy ? Icons.more_horiz : Icons.arrow_upward_rounded),
+          if (turnActive)
+            Semantics(
+              label: 'Stop active turn',
+              button: true,
+              child: IconButton.filled(
+                key: const ValueKey('stop-turn'),
+                onPressed: () => unawaited(onStop()),
+                icon: const Icon(Icons.stop_rounded),
+              ),
+            )
+          else
+            Semantics(
+              label: busy ? 'Preparing context' : 'Send message',
+              button: true,
+              child: IconButton.filled(
+                key: const ValueKey('send-message'),
+                onPressed: busy ? null : () => unawaited(onSubmit()),
+                icon: Icon(
+                  busy ? Icons.more_horiz : Icons.arrow_upward_rounded,
+                ),
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -438,8 +580,9 @@ class _PreviewBackdrop extends StatelessWidget {
 }
 
 final class _ChatMessage {
-  const _ChatMessage(this.text, {required this.isUser});
+  const _ChatMessage(this.text, {required this.isUser, this.label});
 
   final String text;
   final bool isUser;
+  final String? label;
 }

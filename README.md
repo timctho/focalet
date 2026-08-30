@@ -104,6 +104,13 @@ npm --prefix src/Zommi.Electron test
 dotnet run --project tests/Zommi.Tests/Zommi.Tests.csproj
 ```
 
+After building the Rust host, an authenticated local Codex installation can
+exercise the live Rust path with:
+
+```sh
+npm --prefix src/Zommi.Electron run test:rust-codex-live
+```
+
 The Flutter tests include a real process-level handshake with
 `zommi-core-host`, interaction coverage for the floating surface and composer,
 and a checked visual baseline. Every pull request and push to `main` runs these

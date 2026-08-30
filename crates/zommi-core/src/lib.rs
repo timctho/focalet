@@ -1,5 +1,8 @@
 pub mod broker_protocol;
+pub mod codex_adapter;
 pub mod context_handoff;
+pub mod runtime_discovery;
+pub mod session_binding;
 
 pub use broker_protocol::{
     BROKER_OPERATIONS, BROKER_PROTOCOL_VERSION, BrokerError, NormalizedBrokerRequest,
@@ -7,3 +10,8 @@ pub use broker_protocol::{
     validate_broker_request, validate_capabilities, validate_turn_input,
 };
 pub use context_handoff::{build_context_handoff, compact_accessibility_tree};
+pub use runtime_discovery::{
+    ExecutionHost, RuntimeCommand, RuntimeTarget, command_for_target, discover_codex_targets,
+    select_default_target,
+};
+pub use session_binding::{SessionBinding, SessionBindingStore};

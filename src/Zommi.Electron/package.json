@@ -7,6 +7,7 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test test/*.test.mjs",
+    "test:rust-codex-live": "node ../../scripts/test-real-rust-codex.mjs",
     "package:windows": "node scripts/package-electron.mjs --platform win32 --arch x64",
     "package:linux": "node scripts/package-electron.mjs --platform linux --arch x64",
     "package:mac": "node scripts/package-electron.mjs --platform darwin --arch arm64"

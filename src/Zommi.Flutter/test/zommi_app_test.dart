@@ -39,15 +39,15 @@ void main() {
       find.byKey(const ValueKey('zommi-composer')),
     );
     expect(composer.focusNode?.hasFocus, isTrue);
-    expect(find.text('Rust core 0.1.0 ready'), findsOneWidget);
+    expect(find.text('Codex 9.8.7 ready'), findsOneWidget);
   });
 
-  testWidgets('composer remains editable while Rust prepares the handoff', (
+  testWidgets('composer remains editable while Rust starts the Codex turn', (
     tester,
   ) async {
     await _setDesktopSurface(tester);
-    final pending = Completer<String>();
-    final core = FakeCoreBridge(handoff: pending.future);
+    final pending = Completer<TurnReceipt>();
+    final core = FakeCoreBridge(turn: pending.future);
     await tester.pumpWidget(ZommiApp(core: core));
     await tester.pump();
     await _expand(tester);
@@ -64,10 +64,95 @@ void main() {
     expect(field.enabled, isNot(false));
     expect(find.text('draft while processing'), findsOneWidget);
 
-    pending.complete('prepared handoff');
+    pending.complete(
+      const TurnReceipt(
+        accepted: true,
+        runtimeTargetId: 'runtime-codex',
+        sessionId: 'thread-codex',
+        turnId: 'turn-codex',
+        clientOperationId: 'client:test',
+      ),
+    );
     await tester.pumpAndSettle();
-    expect(find.bySemanticsLabel('Core handoff prepared'), findsOneWidget);
+    expect(find.bySemanticsLabel('Exact Codex session bound'), findsOneWidget);
     expect(find.text('draft while processing'), findsOneWidget);
+  });
+
+  testWidgets('stream events render and stop targets the exact active turn', (
+    tester,
+  ) async {
+    await _setDesktopSurface(tester);
+    final core = FakeCoreBridge();
+    await tester.pumpWidget(ZommiApp(core: core));
+    await tester.pump();
+    await _expand(tester);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('zommi-composer')),
+      'keep working',
+    );
+    await tester.tap(find.byKey(const ValueKey('send-message')));
+    await tester.pump();
+    core.emit(
+      const CoreEvent(
+        name: 'turn.started',
+        sequence: 1,
+        runtimeTargetId: 'runtime-codex',
+        sessionId: 'thread-codex',
+        turnId: 'turn-codex',
+        clientOperationId: 'client:test',
+        payload: {'status': 'inProgress'},
+      ),
+    );
+    core.emit(
+      const CoreEvent(
+        name: 'item.update',
+        sequence: 2,
+        runtimeTargetId: 'runtime-codex',
+        sessionId: 'thread-codex',
+        turnId: 'turn-codex',
+        clientOperationId: 'client:test',
+        payload: {
+          'kind': 'assistant',
+          'lifecycle': 'delta',
+          'title': 'Codex',
+          'text': 'streamed answer',
+          'itemId': 'agent-1',
+        },
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('streamed answer'), findsOneWidget);
+    expect(find.byKey(const ValueKey('stop-turn')), findsOneWidget);
+    expect(find.byKey(const ValueKey('send-message')), findsNothing);
+    await tester.enterText(
+      find.byKey(const ValueKey('zommi-composer')),
+      'draft while streaming',
+    );
+    expect(find.text('draft while streaming'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('stop-turn')));
+    await tester.pump();
+    expect(core.interruptedIdentity, (
+      'runtime-codex',
+      'thread-codex',
+      'turn-codex',
+    ));
+
+    core.emit(
+      const CoreEvent(
+        name: 'turn.completed',
+        sequence: 3,
+        runtimeTargetId: 'runtime-codex',
+        sessionId: 'thread-codex',
+        turnId: 'turn-codex',
+        clientOperationId: 'client:test',
+        payload: {'status': 'interrupted'},
+      ),
+    );
+    await tester.pump();
+    expect(find.byKey(const ValueKey('stop-turn')), findsNothing);
+    expect(find.text('Codex turn stopped'), findsOneWidget);
   });
 
   testWidgets('expanded shell matches the migration UX baseline', (
@@ -100,11 +185,29 @@ Future<void> _expand(WidgetTester tester) async {
 }
 
 final class FakeCoreBridge implements CoreBridge {
-  FakeCoreBridge({Future<String>? handoff})
-    : _handoff = handoff ?? Future<String>.value('prepared handoff');
+  FakeCoreBridge({Future<TurnReceipt>? turn})
+    : _turn =
+          turn ??
+          Future<TurnReceipt>.value(
+            const TurnReceipt(
+              accepted: true,
+              runtimeTargetId: 'runtime-codex',
+              sessionId: 'thread-codex',
+              turnId: 'turn-codex',
+              clientOperationId: 'client:test',
+            ),
+          );
 
-  final Future<String> _handoff;
+  final Future<TurnReceipt> _turn;
+  final StreamController<CoreEvent> _events =
+      StreamController<CoreEvent>.broadcast(sync: true);
   String? lastMessage;
+  (String, String, String)? interruptedIdentity;
+
+  @override
+  Stream<CoreEvent> get events => _events.stream;
+
+  void emit(CoreEvent event) => _events.add(event);
 
   @override
   Future<String> buildContextHandoff({
@@ -113,11 +216,49 @@ final class FakeCoreBridge implements CoreBridge {
     int imageCount = 0,
   }) {
     lastMessage = message;
-    return _handoff;
+    return Future<String>.value('prepared handoff');
   }
 
   @override
-  Future<void> close() async {}
+  Future<void> close() => _events.close();
+
+  @override
+  Future<RuntimeConnection> connectRuntime({
+    required String runtimeTargetId,
+    String? preferredSessionId,
+    String? cwd,
+  }) async => const RuntimeConnection(
+    runtimeTargetId: 'runtime-codex',
+    sessionId: 'thread-codex',
+    protocolVersion: 1,
+    runtimeVersion: '9.8.7',
+    models: [],
+    sessions: [],
+  );
+
+  @override
+  Future<RuntimeConnection> createSession({
+    required String runtimeTargetId,
+    String? model,
+    String? effort,
+  }) => connectRuntime(runtimeTargetId: runtimeTargetId);
+
+  @override
+  Future<RuntimeDiscovery> discoverRuntimeTargets({
+    String? lastSelectedTargetId,
+  }) async => const RuntimeDiscovery(
+    targets: [
+      RuntimeTarget(
+        id: 'runtime-codex',
+        runtimeId: 'codex',
+        displayName: 'Codex',
+        protocolName: 'Codex app-server',
+        executablePath: '/bin/codex',
+        executionHost: {'id': 'native:linux'},
+      ),
+    ],
+    selectedTargetId: 'runtime-codex',
+  );
 
   @override
   Future<CoreStatus> initialize() async => const CoreStatus(
@@ -125,4 +266,50 @@ final class FakeCoreBridge implements CoreBridge {
     protocolVersion: coreProtocolVersion,
     capabilities: ['context.handoff.v1'],
   );
+
+  @override
+  Future<void> interruptTurn({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String turnId,
+  }) async {
+    interruptedIdentity = (runtimeTargetId, sessionId, turnId);
+  }
+
+  @override
+  Future<List<Map<String, Object?>>> listSessions({
+    required String runtimeTargetId,
+  }) async => const [];
+
+  @override
+  Future<RuntimeConnection> openSession({
+    required String runtimeTargetId,
+    required String sessionId,
+  }) => connectRuntime(
+    runtimeTargetId: runtimeTargetId,
+    preferredSessionId: sessionId,
+  );
+
+  @override
+  Future<Map<String, Object?>> readSession({
+    required String runtimeTargetId,
+    required String sessionId,
+  }) async => <String, Object?>{
+    'thread': <String, Object?>{'id': sessionId},
+  };
+
+  @override
+  Future<TurnReceipt> startTurn({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String message,
+    List<Map<String, Object?>> snapshots = const [],
+    List<String> images = const [],
+    String? clientOperationId,
+    String? model,
+    String? effort,
+  }) {
+    lastMessage = message;
+    return _turn;
+  }
 }

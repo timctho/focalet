@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
@@ -56,4 +58,296 @@ void main() {
       expect(handoff, contains('User-selected image regions attached: 1'));
     },
   );
+
+  test('Flutter drives discovery, exact binding, streaming, and interrupt through Rust', () async {
+    final executableName = Platform.isWindows
+        ? 'zommi-core-host.exe'
+        : 'zommi-core-host';
+    final executable = File(
+      '${Directory.current.path}/../../target/debug/$executableName',
+    ).absolute;
+    expect(executable.existsSync(), isTrue);
+    final fixture = File(
+      '${Directory.current.path}/../../crates/zommi-core-host/tests/'
+      'fake_codex_app_server.py',
+    ).absolute;
+    expect(fixture.existsSync(), isTrue);
+    final python = await _findPython();
+    final temporary = await Directory.systemTemp.createTemp(
+      'zommi-flutter-rust-codex-',
+    );
+    addTearDown(() => temporary.delete(recursive: true));
+    final requestLog = File('${temporary.path}/requests.jsonl');
+    final environment = <String, String>{
+      'ZOMMI_CODEX_COMMAND': python,
+      'ZOMMI_CODEX_ARGS_JSON': jsonEncode(<String>[fixture.path]),
+      'ZOMMI_CORE_STATE_PATH': '${temporary.path}/binding.json',
+      'ZOMMI_FAKE_REQUEST_LOG': requestLog.path,
+    };
+
+    final bridge = ProcessCoreBridge(
+      executablePath: executable.path,
+      environment: environment,
+    );
+    final events = <CoreEvent>[];
+    final completed = Completer<CoreEvent>();
+    final subscription = bridge.events.listen((event) {
+      events.add(event);
+      if (event.name == 'turn.completed' && !completed.isCompleted) {
+        completed.complete(event);
+      }
+    });
+    await bridge.initialize();
+    final discovery = await bridge.discoverRuntimeTargets();
+    expect(discovery.targets, hasLength(1));
+    expect(discovery.targets.single.runtimeId, 'codex');
+    expect(discovery.selectedTargetId, discovery.targets.single.id);
+    final connection = await bridge.connectRuntime(
+      runtimeTargetId: discovery.targets.single.id,
+      cwd: temporary.path,
+    );
+    expect(connection.runtimeTargetId, discovery.targets.single.id);
+    expect(connection.sessionId, 'thread-rust-flutter');
+    expect(connection.runtimeVersion, '9.8.7');
+    final sessions = await bridge.listSessions(
+      runtimeTargetId: connection.runtimeTargetId,
+    );
+    expect(
+      sessions.map((session) => session['id']),
+      contains(connection.sessionId),
+    );
+    final history = await bridge.readSession(
+      runtimeTargetId: connection.runtimeTargetId,
+      sessionId: connection.sessionId,
+    );
+    expect((history['thread'] as Map)['id'], connection.sessionId);
+    final reopened = await bridge.openSession(
+      runtimeTargetId: connection.runtimeTargetId,
+      sessionId: connection.sessionId,
+    );
+    expect(reopened.sessionId, connection.sessionId);
+    await expectLater(
+      bridge.startTurn(
+        runtimeTargetId: connection.runtimeTargetId,
+        sessionId: connection.sessionId,
+        message: 'must not reach Codex',
+        clientOperationId: 'bad',
+      ),
+      throwsA(
+        isA<CoreProtocolException>().having(
+          (error) => error.code,
+          'code',
+          'invalid-request',
+        ),
+      ),
+    );
+
+    final receipt = await bridge.startTurn(
+      runtimeTargetId: connection.runtimeTargetId,
+      sessionId: connection.sessionId,
+      message: 'compare selected context',
+      snapshots: const [
+        <String, Object?>{
+          'surfaceKind': 'Browser',
+          'application': 'Edge',
+          'selection': <String>['selected value'],
+        },
+      ],
+      images: const ['data:image/png;base64,aGVsbG8='],
+      clientOperationId: 'client:flutter-rust-e2e',
+    );
+    expect(receipt.turnId, 'turn-rust-flutter');
+    expect((await completed.future).payload['status'], 'completed');
+    expect(
+      events
+          .where((event) => event.name == 'item.update')
+          .map((event) => event.payload['text'])
+          .whereType<String>(),
+      contains('Rust-owned Codex reply'),
+    );
+    expect(
+      events.where((event) => event.turnId == receipt.turnId),
+      everyElement(
+        isA<CoreEvent>()
+            .having(
+              (event) => event.runtimeTargetId,
+              'runtimeTargetId',
+              receipt.runtimeTargetId,
+            )
+            .having((event) => event.sessionId, 'sessionId', receipt.sessionId),
+      ),
+    );
+    await subscription.cancel();
+    await bridge.close();
+
+    final secondBridge = ProcessCoreBridge(
+      executablePath: executable.path,
+      environment: environment,
+    );
+    addTearDown(secondBridge.close);
+    await secondBridge.initialize();
+    final secondDiscovery = await secondBridge.discoverRuntimeTargets();
+    final resumed = await secondBridge.connectRuntime(
+      runtimeTargetId: secondDiscovery.selectedTargetId!,
+      cwd: temporary.path,
+    );
+    expect(resumed.sessionId, 'thread-rust-flutter');
+
+    final interruptCompleted = Completer<CoreEvent>();
+    final secondSubscription = secondBridge.events.listen((event) {
+      if (event.name == 'turn.completed' && !interruptCompleted.isCompleted) {
+        interruptCompleted.complete(event);
+      }
+    });
+    addTearDown(secondSubscription.cancel);
+    final held = await secondBridge.startTurn(
+      runtimeTargetId: resumed.runtimeTargetId,
+      sessionId: resumed.sessionId,
+      message: 'hold-for-interrupt',
+      clientOperationId: 'client:flutter-rust-interrupt',
+    );
+    await expectLater(
+      secondBridge.interruptTurn(
+        runtimeTargetId: held.runtimeTargetId,
+        sessionId: held.sessionId,
+        turnId: 'another-turn',
+      ),
+      throwsA(
+        isA<CoreProtocolException>().having(
+          (error) => error.code,
+          'code',
+          'identity-mismatch',
+        ),
+      ),
+    );
+    await secondBridge.interruptTurn(
+      runtimeTargetId: held.runtimeTargetId,
+      sessionId: held.sessionId,
+      turnId: held.turnId,
+    );
+    expect((await interruptCompleted.future).payload['status'], 'interrupted');
+
+    final unknownOutcome = secondBridge.events.firstWhere(
+      (event) =>
+          event.name == 'turn.completed' &&
+          event.payload['status'] == 'unknown',
+    );
+    final acceptedBeforeExit = await secondBridge.startTurn(
+      runtimeTargetId: resumed.runtimeTargetId,
+      sessionId: resumed.sessionId,
+      message: 'exit-runtime',
+      clientOperationId: 'client:flutter-rust-exit',
+    );
+    expect(acceptedBeforeExit.accepted, isTrue);
+    final unknown = await unknownOutcome;
+    expect(unknown.turnId, acceptedBeforeExit.turnId);
+    expect(unknown.clientOperationId, 'client:flutter-rust-exit');
+    expect(unknown.payload['error'], isNot(contains('fixture-private')));
+    expect(
+      unknown.payload['error'],
+      isNot(contains('captured private context')),
+    );
+
+    final requests = await requestLog.readAsLines().then(
+      (lines) => lines.map(jsonDecode).toList(growable: false),
+    );
+    expect(
+      requests.whereType<Map>().any(
+        (request) => request['fixtureOriginator'] == 'codex_exec',
+      ),
+      isTrue,
+    );
+    expect(
+      requests.whereType<Map>().where(
+        (request) => request['method'] == 'thread/resume',
+      ),
+      isNotEmpty,
+    );
+    final turnStart = requests.whereType<Map>().firstWhere(
+      (request) =>
+          request['method'] == 'turn/start' &&
+          jsonEncode(request).contains('compare selected context'),
+    );
+    final params = turnStart['params'] as Map;
+    expect(params['summary'], 'detailed');
+    expect(jsonEncode(params), contains('PRIMARY SURFACE SELECTION'));
+    expect(jsonEncode(params), contains('data:image/png;base64,aGVsbG8='));
+    final interrupt = requests.whereType<Map>().firstWhere(
+      (request) => request['method'] == 'turn/interrupt',
+    );
+    expect(interrupt['params'], <String, Object?>{
+      'threadId': 'thread-rust-flutter',
+      'turnId': 'turn-rust-flutter',
+    });
+  });
+
+  test('a busy exact binding falls back to one fresh Codex session', () async {
+    final executableName = Platform.isWindows
+        ? 'zommi-core-host.exe'
+        : 'zommi-core-host';
+    final executable = File(
+      '${Directory.current.path}/../../target/debug/$executableName',
+    ).absolute;
+    final fixture = File(
+      '${Directory.current.path}/../../crates/zommi-core-host/tests/'
+      'fake_codex_app_server.py',
+    ).absolute;
+    final python = await _findPython();
+    final temporary = await Directory.systemTemp.createTemp(
+      'zommi-busy-binding-',
+    );
+    addTearDown(() => temporary.delete(recursive: true));
+    final binding = File('${temporary.path}/binding.json');
+    final requestLog = File('${temporary.path}/requests.jsonl');
+    final bridge = ProcessCoreBridge(
+      executablePath: executable.path,
+      environment: <String, String>{
+        'ZOMMI_CODEX_COMMAND': python,
+        'ZOMMI_CODEX_ARGS_JSON': jsonEncode(<String>[fixture.path]),
+        'ZOMMI_CORE_STATE_PATH': binding.path,
+        'ZOMMI_FAKE_REQUEST_LOG': requestLog.path,
+        'ZOMMI_FAKE_BUSY_RESUME': '1',
+        'ZOMMI_FAKE_THREAD_ID': 'busy-thread',
+        'ZOMMI_FAKE_FRESH_THREAD_ID': 'fresh-thread',
+      },
+    );
+    addTearDown(bridge.close);
+    await bridge.initialize();
+    final discovery = await bridge.discoverRuntimeTargets();
+    await binding.writeAsString(
+      jsonEncode(<String, Object?>{
+        'runtimeTargetId': discovery.selectedTargetId,
+        'sessionId': 'busy-thread',
+        'cwd': temporary.path,
+      }),
+    );
+    final connection = await bridge.connectRuntime(
+      runtimeTargetId: discovery.selectedTargetId!,
+      cwd: temporary.path,
+    );
+    expect(connection.sessionId, 'fresh-thread');
+    final requests = await requestLog.readAsLines().then(
+      (lines) => lines.map(jsonDecode).whereType<Map>().toList(),
+    );
+    final resumeIndex = requests.indexWhere(
+      (request) => request['method'] == 'thread/resume',
+    );
+    final startIndex = requests.indexWhere(
+      (request) => request['method'] == 'thread/start',
+    );
+    expect(resumeIndex, greaterThanOrEqualTo(0));
+    expect(startIndex, greaterThan(resumeIndex));
+  });
+}
+
+Future<String> _findPython() async {
+  for (final candidate in <String>['python3', 'python']) {
+    try {
+      final result = await Process.run(candidate, const ['--version']);
+      if (result.exitCode == 0) return candidate;
+    } on ProcessException {
+      // Try the next common executable name.
+    }
+  }
+  throw StateError('Python is required for the deterministic Codex fixture.');
 }

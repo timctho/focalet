@@ -5,7 +5,56 @@ import 'dart:io';
 const int coreProtocolVersion = 1;
 
 abstract interface class CoreBridge {
+  Stream<CoreEvent> get events;
+
   Future<CoreStatus> initialize();
+
+  Future<RuntimeDiscovery> discoverRuntimeTargets({
+    String? lastSelectedTargetId,
+  });
+
+  Future<RuntimeConnection> connectRuntime({
+    required String runtimeTargetId,
+    String? preferredSessionId,
+    String? cwd,
+  });
+
+  Future<List<Map<String, Object?>>> listSessions({
+    required String runtimeTargetId,
+  });
+
+  Future<RuntimeConnection> createSession({
+    required String runtimeTargetId,
+    String? model,
+    String? effort,
+  });
+
+  Future<RuntimeConnection> openSession({
+    required String runtimeTargetId,
+    required String sessionId,
+  });
+
+  Future<Map<String, Object?>> readSession({
+    required String runtimeTargetId,
+    required String sessionId,
+  });
+
+  Future<TurnReceipt> startTurn({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String message,
+    List<Map<String, Object?>> snapshots = const [],
+    List<String> images = const [],
+    String? clientOperationId,
+    String? model,
+    String? effort,
+  });
+
+  Future<void> interruptTurn({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String turnId,
+  });
 
   Future<String> buildContextHandoff({
     required String message,
@@ -14,6 +63,122 @@ abstract interface class CoreBridge {
   });
 
   Future<void> close();
+}
+
+final class RuntimeTarget {
+  const RuntimeTarget({
+    required this.id,
+    required this.runtimeId,
+    required this.displayName,
+    required this.protocolName,
+    required this.executablePath,
+    required this.executionHost,
+  });
+
+  factory RuntimeTarget.fromJson(Map<String, Object?> json) => RuntimeTarget(
+    id: json['id']?.toString() ?? '',
+    runtimeId: json['runtimeId']?.toString() ?? '',
+    displayName: json['displayName']?.toString() ?? '',
+    protocolName: json['protocolName']?.toString() ?? '',
+    executablePath: json['executablePath']?.toString() ?? '',
+    executionHost: _map(json['executionHost']),
+  );
+
+  final String id;
+  final String runtimeId;
+  final String displayName;
+  final String protocolName;
+  final String executablePath;
+  final Map<String, Object?> executionHost;
+}
+
+final class RuntimeDiscovery {
+  const RuntimeDiscovery({required this.targets, this.selectedTargetId});
+
+  final List<RuntimeTarget> targets;
+  final String? selectedTargetId;
+}
+
+final class RuntimeConnection {
+  const RuntimeConnection({
+    required this.runtimeTargetId,
+    required this.sessionId,
+    required this.protocolVersion,
+    required this.models,
+    required this.sessions,
+    this.runtimeVersion,
+  });
+
+  factory RuntimeConnection.fromJson(Map<String, Object?> json) =>
+      RuntimeConnection(
+        runtimeTargetId: json['runtimeTargetId']?.toString() ?? '',
+        sessionId: json['sessionId']?.toString() ?? '',
+        protocolVersion: json['protocolVersion'] as int? ?? 0,
+        runtimeVersion: json['runtimeVersion']?.toString(),
+        models: _mapList(json['models']),
+        sessions: _mapList(json['sessions']),
+      );
+
+  final String runtimeTargetId;
+  final String sessionId;
+  final int protocolVersion;
+  final String? runtimeVersion;
+  final List<Map<String, Object?>> models;
+  final List<Map<String, Object?>> sessions;
+}
+
+final class TurnReceipt {
+  const TurnReceipt({
+    required this.accepted,
+    required this.runtimeTargetId,
+    required this.sessionId,
+    required this.turnId,
+    required this.clientOperationId,
+  });
+
+  factory TurnReceipt.fromJson(Map<String, Object?> json) => TurnReceipt(
+    accepted: json['accepted'] == true,
+    runtimeTargetId: json['runtimeTargetId']?.toString() ?? '',
+    sessionId: json['sessionId']?.toString() ?? '',
+    turnId: json['turnId']?.toString() ?? '',
+    clientOperationId: json['clientOperationId']?.toString() ?? '',
+  );
+
+  final bool accepted;
+  final String runtimeTargetId;
+  final String sessionId;
+  final String turnId;
+  final String clientOperationId;
+}
+
+final class CoreEvent {
+  const CoreEvent({
+    required this.name,
+    required this.sequence,
+    required this.runtimeTargetId,
+    required this.payload,
+    this.sessionId,
+    this.turnId,
+    this.clientOperationId,
+  });
+
+  factory CoreEvent.fromJson(Map<String, Object?> json) => CoreEvent(
+    name: json['name']?.toString() ?? '',
+    sequence: json['sequence'] as int? ?? 0,
+    runtimeTargetId: json['runtimeTargetId']?.toString() ?? '',
+    sessionId: json['sessionId']?.toString(),
+    turnId: json['turnId']?.toString(),
+    clientOperationId: json['clientOperationId']?.toString(),
+    payload: _map(json['payload']),
+  );
+
+  final String name;
+  final int sequence;
+  final String runtimeTargetId;
+  final String? sessionId;
+  final String? turnId;
+  final String? clientOperationId;
+  final Map<String, Object?> payload;
 }
 
 final class CoreStatus {
@@ -41,12 +206,16 @@ final class CoreProtocolException implements Exception {
 final class ProcessCoreBridge implements CoreBridge {
   ProcessCoreBridge({
     this.executablePath,
-    this.requestTimeout = const Duration(seconds: 10),
+    this.requestTimeout = const Duration(seconds: 30),
+    this.environment = const {},
   });
 
   final String? executablePath;
   final Duration requestTimeout;
+  final Map<String, String> environment;
   final Map<String, Completer<Map<String, Object?>>> _pending = {};
+  final StreamController<CoreEvent> _events =
+      StreamController<CoreEvent>.broadcast(sync: true);
   Process? _process;
   Future<void>? _starting;
   StreamSubscription<String>? _stdoutSubscription;
@@ -54,6 +223,9 @@ final class ProcessCoreBridge implements CoreBridge {
   int _nextId = 0;
   String _stderr = '';
   bool _closing = false;
+
+  @override
+  Stream<CoreEvent> get events => _events.stream;
 
   @override
   Future<CoreStatus> initialize() async {
@@ -66,6 +238,119 @@ final class ProcessCoreBridge implements CoreBridge {
       protocolVersion: result['protocolVersion'] as int? ?? 0,
       capabilities: capabilities,
     );
+  }
+
+  @override
+  Future<RuntimeDiscovery> discoverRuntimeTargets({
+    String? lastSelectedTargetId,
+  }) async {
+    final result = await _request('runtime.discover', <String, Object?>{
+      'lastSelectedTargetId': ?lastSelectedTargetId,
+    });
+    final targets = (result['targets'] as List<Object?>? ?? const [])
+        .map(_map)
+        .map(RuntimeTarget.fromJson)
+        .toList(growable: false);
+    return RuntimeDiscovery(
+      targets: targets,
+      selectedTargetId: result['selectedTargetId']?.toString(),
+    );
+  }
+
+  @override
+  Future<RuntimeConnection> connectRuntime({
+    required String runtimeTargetId,
+    String? preferredSessionId,
+    String? cwd,
+  }) async {
+    final result = await _request('runtime.connect', <String, Object?>{
+      'runtimeTargetId': runtimeTargetId,
+      'preferredSessionId': ?preferredSessionId,
+      'cwd': ?cwd,
+    });
+    return RuntimeConnection.fromJson(result);
+  }
+
+  @override
+  Future<List<Map<String, Object?>>> listSessions({
+    required String runtimeTargetId,
+  }) async {
+    final result = await _request('session.list', <String, Object?>{
+      'runtimeTargetId': runtimeTargetId,
+    });
+    return _mapList(result['data']);
+  }
+
+  @override
+  Future<RuntimeConnection> createSession({
+    required String runtimeTargetId,
+    String? model,
+    String? effort,
+  }) async {
+    final result = await _request('session.create', <String, Object?>{
+      'runtimeTargetId': runtimeTargetId,
+      'model': ?model,
+      'effort': ?effort,
+    });
+    return RuntimeConnection.fromJson(result);
+  }
+
+  @override
+  Future<RuntimeConnection> openSession({
+    required String runtimeTargetId,
+    required String sessionId,
+  }) async {
+    final result = await _request('session.open', <String, Object?>{
+      'runtimeTargetId': runtimeTargetId,
+      'sessionId': sessionId,
+    });
+    return RuntimeConnection.fromJson(result);
+  }
+
+  @override
+  Future<Map<String, Object?>> readSession({
+    required String runtimeTargetId,
+    required String sessionId,
+  }) => _request('session.read', <String, Object?>{
+    'runtimeTargetId': runtimeTargetId,
+    'sessionId': sessionId,
+  });
+
+  @override
+  Future<TurnReceipt> startTurn({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String message,
+    List<Map<String, Object?>> snapshots = const [],
+    List<String> images = const [],
+    String? clientOperationId,
+    String? model,
+    String? effort,
+  }) async {
+    final result = await _request('turn.start', <String, Object?>{
+      'runtimeTargetId': runtimeTargetId,
+      'sessionId': sessionId,
+      'message': message,
+      'snapshots': snapshots,
+      'images': images,
+      'clientOperationId': ?clientOperationId,
+      'model': ?model,
+      'effort': ?effort,
+    });
+    return TurnReceipt.fromJson(result);
+  }
+
+  @override
+  Future<void> interruptTurn({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String turnId,
+  }) async {
+    await _request('turn.interrupt', <String, Object?>{
+      'runtimeTargetId': runtimeTargetId,
+      'sessionId': sessionId,
+      'turnId': turnId,
+    });
   }
 
   @override
@@ -97,15 +382,20 @@ final class ProcessCoreBridge implements CoreBridge {
     final id = (++_nextId).toString();
     final completer = Completer<Map<String, Object?>>();
     _pending[id] = completer;
-    process.stdin.writeln(
-      jsonEncode(<String, Object?>{
-        'id': id,
-        'protocolVersion': coreProtocolVersion,
-        'operation': operation,
-        'payload': payload,
-      }),
-    );
-    await process.stdin.flush();
+    try {
+      process.stdin.writeln(
+        jsonEncode(<String, Object?>{
+          'id': id,
+          'protocolVersion': coreProtocolVersion,
+          'operation': operation,
+          'payload': payload,
+        }),
+      );
+      await process.stdin.flush();
+    } on Object {
+      _pending.remove(id);
+      rethrow;
+    }
     try {
       return await completer.future.timeout(requestTimeout);
     } on TimeoutException {
@@ -135,6 +425,8 @@ final class ProcessCoreBridge implements CoreBridge {
       _resolveExecutablePath(),
       const [],
       runInShell: false,
+      environment: environment,
+      includeParentEnvironment: true,
     );
     _process = process;
     _stdoutSubscription = process.stdout
@@ -184,6 +476,11 @@ final class ProcessCoreBridge implements CoreBridge {
           'The Rust core response protocol does not match the Flutter client.',
         );
       }
+      final event = decoded['event'];
+      if (event is Map<String, Object?>) {
+        _events.add(CoreEvent.fromJson(event));
+        return;
+      }
       final id = decoded['id']?.toString();
       final completer = id == null ? null : _pending.remove(id);
       if (completer == null) return;
@@ -219,21 +516,38 @@ final class ProcessCoreBridge implements CoreBridge {
 
   @override
   Future<void> close() async {
-    final process = _process;
-    if (process == null) return;
     _closing = true;
     try {
-      await _request('core.shutdown');
-      await process.exitCode.timeout(const Duration(seconds: 2));
+      await _starting;
     } on Object {
-      process.kill();
-    } finally {
-      _process = null;
-      await _stdoutSubscription?.cancel();
-      await _stderrSubscription?.cancel();
-      _failPending(
-        const CoreProtocolException('core-closed', 'The Rust core was closed.'),
-      );
+      // Startup failures are already reported to the initiating request.
     }
+    final process = _process;
+    if (process != null) {
+      try {
+        await _request('core.shutdown');
+        await process.exitCode.timeout(const Duration(seconds: 2));
+      } on Object {
+        process.kill();
+      }
+    }
+    _process = null;
+    await _stdoutSubscription?.cancel();
+    await _stderrSubscription?.cancel();
+    _failPending(
+      const CoreProtocolException('core-closed', 'The Rust core was closed.'),
+    );
+    if (!_events.isClosed) await _events.close();
   }
 }
+
+Map<String, Object?> _map(Object? value) {
+  if (value is Map<String, Object?>) return value;
+  if (value is Map) {
+    return value.map((key, value) => MapEntry(key.toString(), value));
+  }
+  return <String, Object?>{};
+}
+
+List<Map<String, Object?>> _mapList(Object? value) =>
+    (value as List<Object?>? ?? const []).map(_map).toList(growable: false);
