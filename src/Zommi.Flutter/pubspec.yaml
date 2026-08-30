@@ -9,6 +9,16 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_html: ^3.0.0
+  flutter_markdown_plus: ^1.0.12
+  hotkey_manager: ^0.2.3
+  html: 0.15.6
+  markdown: ^7.3.1
+  screen_capturer: ^0.2.3
+  screen_retriever: ^0.2.2
+  super_clipboard: ^0.9.1
+  tray_manager: ^0.5.3
+  window_manager: ^0.5.2
 
 dev_dependencies:
   flutter_test:
@@ -17,3 +27,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_32.png
+    - windows/runner/resources/app_icon.ico

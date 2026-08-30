@@ -3,6 +3,13 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  hotkey_manager_windows
+  irondash_engine_context
+  screen_capturer_windows
+  screen_retriever_windows
+  super_native_extensions
+  tray_manager
+  window_manager
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST

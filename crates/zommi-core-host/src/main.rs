@@ -8,11 +8,13 @@ use tokio::{
 };
 use uuid::Uuid;
 use zommi_core::{
-    SessionBinding, SessionBindingStore, build_context_handoff,
+    ConfiguredRuntimeOverride, RuntimeOverrideStore, SessionBinding, SessionBindingStore,
+    build_context_handoff,
     codex_adapter::{CodexError, CoreEvent, EventSender},
-    command_for_target, discover_runtime_targets, operation_fingerprint,
+    command_for_target, discover_runtime_targets_with_overrides, operation_fingerprint,
     runtime_adapter::{AdapterTurnRequest, RuntimeAdapter},
-    select_default_target, validate_broker_request, validate_turn_input,
+    runtime_discovery_settings, select_default_target, target_from_override,
+    validate_broker_request, validate_turn_input,
 };
 
 const CORE_PROTOCOL_VERSION: u64 = 1;
@@ -64,6 +66,8 @@ struct HostState {
     targets: Vec<zommi_core::RuntimeTarget>,
     adapter: Option<RuntimeAdapter>,
     binding_store: SessionBindingStore,
+    override_store: RuntimeOverrideStore,
+    overrides: Vec<ConfiguredRuntimeOverride>,
     operations: HashMap<String, OperationRecord>,
     event_tx: EventSender,
 }
@@ -80,6 +84,8 @@ impl HostState {
             targets: Vec::new(),
             adapter: None,
             binding_store: SessionBindingStore::platform_default(),
+            override_store: RuntimeOverrideStore::platform_default(),
+            overrides: Vec::new(),
             operations: HashMap::new(),
             event_tx,
         }
@@ -140,6 +146,7 @@ impl HostState {
                     "artifact.extract.v1",
                     "protocol.validation.v1",
                     "runtime.discovery.v1",
+                    "runtime.overrides.v1",
                     "runtime.adapters.v1",
                     "session.binding.v1",
                     "session.list.v1",
@@ -171,22 +178,55 @@ impl HostState {
                 Ok(json!({"text": build_context_handoff(message, snapshots, image_count)}))
             }
             "runtime.discover" => {
-                self.targets = tokio::task::spawn_blocking(discover_runtime_targets)
-                    .await
-                    .map_err(|error| HostError::new("discovery-failed", error.to_string()))?;
-                let binding = self.binding_store.load();
-                let selected = select_default_target(
-                    &self.targets,
-                    binding
-                        .as_ref()
-                        .map(|value| value.runtime_target_id.as_str()),
-                    payload.get("lastSelectedTargetId").and_then(Value::as_str),
-                );
-                Ok(json!({
-                    "targets": self.targets,
-                    "selectedTargetId": selected.map(|target| target.id.clone()),
-                    "binding": binding
-                }))
+                self.refresh_runtime_targets().await?;
+                Ok(self.discovery_value(payload))
+            }
+            "runtime.addOverride" => {
+                let mut value = payload.get("override").cloned().ok_or_else(|| {
+                    HostError::new("invalid-request", "Runtime override is required.")
+                })?;
+                let object = value.as_object_mut().ok_or_else(|| {
+                    HostError::new("invalid-request", "Runtime override must be an object.")
+                })?;
+                let generate_id = match object.get("id") {
+                    None | Some(Value::Null) => true,
+                    Some(Value::String(id)) => id.is_empty(),
+                    Some(_) => false,
+                };
+                if generate_id {
+                    object.insert(
+                        "id".into(),
+                        Value::String(format!("override-{}", Uuid::new_v4())),
+                    );
+                }
+                let configured: ConfiguredRuntimeOverride = serde_json::from_value(value)
+                    .map_err(|error| HostError::new("invalid-request", error.to_string()))?;
+                target_from_override(&configured, env::consts::OS)
+                    .map_err(|message| HostError::new("invalid-configuration", message))?;
+                self.overrides
+                    .retain(|existing| existing.id != configured.id);
+                self.overrides.push(configured);
+                self.override_store
+                    .save(&self.overrides)
+                    .map_err(|error| HostError::new("persistence-failed", error.to_string()))?;
+                self.refresh_runtime_targets().await?;
+                Ok(self.discovery_value(payload))
+            }
+            "runtime.removeOverride" => {
+                let override_id = required_string(payload, "overrideId")?;
+                let previous = self.overrides.len();
+                self.overrides.retain(|existing| existing.id != override_id);
+                if previous == self.overrides.len() {
+                    return Err(HostError::new(
+                        "not-found",
+                        "The runtime override no longer exists.",
+                    ));
+                }
+                self.override_store
+                    .save(&self.overrides)
+                    .map_err(|error| HostError::new("persistence-failed", error.to_string()))?;
+                self.refresh_runtime_targets().await?;
+                Ok(self.discovery_value(payload))
             }
             "runtime.connect" => self.connect_runtime(payload).await,
             "session.list" => {
@@ -376,11 +416,41 @@ impl HostState {
         }
     }
 
+    async fn refresh_runtime_targets(&mut self) -> Result<(), HostError> {
+        self.overrides = self
+            .override_store
+            .load()
+            .map_err(|error| HostError::new("persistence-failed", error.to_string()))?;
+        let overrides = self.overrides.clone();
+        self.targets = tokio::task::spawn_blocking(move || {
+            discover_runtime_targets_with_overrides(&overrides)
+        })
+        .await
+        .map_err(|error| HostError::new("discovery-failed", error.to_string()))?;
+        Ok(())
+    }
+
+    fn discovery_value(&self, payload: &Value) -> Value {
+        let binding = self.binding_store.load();
+        let selected_target_id = select_default_target(
+            &self.targets,
+            binding
+                .as_ref()
+                .map(|value| value.runtime_target_id.as_str()),
+            payload.get("lastSelectedTargetId").and_then(Value::as_str),
+        )
+        .map(|target| target.id.clone());
+        json!({
+            "targets": self.targets,
+            "selectedTargetId": selected_target_id,
+            "binding": binding,
+            "settings": runtime_discovery_settings(&self.targets, &self.overrides)
+        })
+    }
+
     async fn connect_runtime(&mut self, payload: &Value) -> Result<Value, HostError> {
         if self.targets.is_empty() {
-            self.targets = tokio::task::spawn_blocking(discover_runtime_targets)
-                .await
-                .map_err(|error| HostError::new("discovery-failed", error.to_string()))?;
+            self.refresh_runtime_targets().await?;
         }
         let binding = self.binding_store.load();
         let requested_target_id = payload
@@ -769,5 +839,26 @@ mod tests {
         let result = serde_json::to_value(action.response).expect("serialize response");
         assert_eq!(result["ok"], false);
         assert_eq!(result["error"]["code"], "unsupported-version");
+    }
+
+    #[tokio::test]
+    async fn rejects_non_object_runtime_overrides_without_crashing() {
+        let (event_tx, _events) = mpsc::unbounded_channel();
+        let mut host = HostState::new(event_tx);
+        let action = host
+            .handle(CoreRequest {
+                id: Some("4".into()),
+                protocol_version: Some(CORE_PROTOCOL_VERSION),
+                operation: Some("runtime.addOverride".into()),
+                payload: json!({"override": "not-an-object"}),
+            })
+            .await;
+        let result = serde_json::to_value(action.response).expect("serialize response");
+        assert_eq!(result["ok"], false);
+        assert_eq!(result["error"]["code"], "invalid-request");
+        assert_eq!(
+            result["error"]["message"],
+            "Runtime override must be an object."
+        );
     }
 }

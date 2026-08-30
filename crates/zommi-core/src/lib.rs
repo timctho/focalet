@@ -19,7 +19,8 @@ pub use broker_protocol::{
 };
 pub use context_handoff::{build_context_handoff, compact_accessibility_tree};
 pub use runtime_discovery::{
-    ExecutionHost, RuntimeCommand, RuntimeTarget, command_for_target, discover_runtime_targets,
-    select_default_target,
+    ConfiguredRuntimeOverride, ExecutionHost, RuntimeCommand, RuntimeOverrideStore, RuntimeTarget,
+    command_for_target, discover_runtime_targets, discover_runtime_targets_with_overrides,
+    runtime_discovery_settings, select_default_target, target_from_override,
 };
 pub use session_binding::{SessionBinding, SessionBindingStore};

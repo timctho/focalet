@@ -320,6 +320,62 @@ void main() {
     });
   });
 
+  test(
+    'Flutter persists and removes credential-free runtime overrides',
+    () async {
+      final executableName = Platform.isWindows
+          ? 'zommi-core-host.exe'
+          : 'zommi-core-host';
+      final executable = File(
+        '${Directory.current.path}/../../target/debug/$executableName',
+      ).absolute;
+      expect(executable.existsSync(), isTrue);
+      final temporary = await Directory.systemTemp.createTemp(
+        'zommi-runtime-override-',
+      );
+      addTearDown(() => temporary.delete(recursive: true));
+      final bridge = ProcessCoreBridge(
+        executablePath: executable.path,
+        environment: {
+          'ZOMMI_RUNTIME_OVERRIDES_PATH': '${temporary.path}/overrides.json',
+          'ZOMMI_CORE_STATE_PATH': '${temporary.path}/binding.json',
+        },
+      );
+      addTearDown(bridge.close);
+      await bridge.initialize();
+      final initial = await bridge.discoverRuntimeTargets();
+      final hosts = initial.settings['hosts'] as List<Object?>;
+      final nativeHost = hosts.whereType<Map>().firstWhere(
+        (host) => host['kind'] == 'native',
+      );
+      final path = Platform.isWindows ? r'C:\Tools\codex.cmd' : '/opt/codex';
+      final added = await bridge.addRuntimeOverride({
+        'id': '',
+        'adapterId': 'codex-app-server',
+        'executionHost': Map<String, Object?>.from(nativeHost),
+        'executablePath': path,
+      });
+      final overrides = added.settings['overrides'] as List<Object?>;
+      expect(overrides, hasLength(1));
+      final configured = Map<String, Object?>.from(overrides.single as Map);
+      expect(configured['executablePath'], path);
+      expect(jsonEncode(configured), isNot(contains('password')));
+      expect(jsonEncode(configured), isNot(contains('token')));
+      expect(
+        added.targets.any(
+          (target) =>
+              target.executablePath == path && target.source == 'configured-ui',
+        ),
+        isTrue,
+      );
+
+      final removed = await bridge.removeRuntimeOverride(
+        configured['id']!.toString(),
+      );
+      expect(removed.settings['overrides'], isEmpty);
+    },
+  );
+
   test('a busy exact binding falls back to one fresh Codex session', () async {
     final executableName = Platform.isWindows
         ? 'zommi-core-host.exe'

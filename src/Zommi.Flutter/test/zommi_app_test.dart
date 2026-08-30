@@ -74,7 +74,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.bySemanticsLabel('Exact Codex session bound'), findsOneWidget);
+    expect(find.bySemanticsLabel('Exact agent session bound'), findsOneWidget);
     expect(find.text('draft while processing'), findsOneWidget);
   });
 
@@ -165,6 +165,68 @@ void main() {
     await expectLater(
       find.byType(ZommiShell),
       matchesGoldenFile('goldens/zommi_shell_expanded.png'),
+    );
+  });
+
+  testWidgets('hover collapse waits 500 ms and returns to the anchored orb', (
+    tester,
+  ) async {
+    await _setDesktopSurface(tester);
+    await tester.pumpWidget(ZommiApp(core: FakeCoreBridge()));
+    await tester.pump();
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(mouse.removePointer);
+    await mouse.addPointer(location: Offset.zero);
+    await mouse.moveTo(
+      tester.getCenter(find.byKey(const ValueKey('zommi-surface'))),
+    );
+    await tester.pumpAndSettle();
+    await mouse.moveTo(const Offset(5, 5));
+    await tester.pump(const Duration(milliseconds: 499));
+    expect(
+      tester.getSize(find.byKey(const ValueKey('zommi-surface'))),
+      const Size(expandedPanelWidth, expandedPanelHeight),
+    );
+    await tester.pump(const Duration(milliseconds: 1));
+    await tester.pumpAndSettle();
+    expect(
+      tester.getSize(find.byKey(const ValueKey('zommi-surface'))),
+      const Size(compactOrbSize, compactOrbSize),
+    );
+  });
+
+  testWidgets('reduced motion freezes the working orb', (tester) async {
+    tester.binding.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(disableAnimations: true);
+    addTearDown(
+      tester.binding.platformDispatcher.clearAccessibilityFeaturesTestValue,
+    );
+    await _setDesktopSurface(tester);
+    final core = FakeCoreBridge();
+    await tester.pumpWidget(ZommiApp(core: core));
+    await tester.pump();
+    core.emit(
+      const CoreEvent(
+        name: 'turn.started',
+        sequence: 1,
+        runtimeTargetId: 'runtime-codex',
+        sessionId: 'thread-codex',
+        turnId: 'turn-codex',
+        payload: {'status': 'inProgress'},
+      ),
+    );
+    await tester.pump(const Duration(seconds: 3));
+    expect(find.byKey(const ValueKey('zommi-orb-canvas')), findsOneWidget);
+    expect(tester.hasRunningAnimations, isFalse);
+  });
+
+  testWidgets('compact orb matches the migration UX baseline', (tester) async {
+    await _setDesktopSurface(tester);
+    await tester.pumpWidget(ZommiApp(core: FakeCoreBridge()));
+    await tester.pump();
+    await expectLater(
+      find.byType(ZommiShell),
+      matchesGoldenFile('goldens/zommi_shell_compact.png'),
     );
   });
 }

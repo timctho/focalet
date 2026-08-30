@@ -3,6 +3,8 @@
 <plist version="1.0">
 <dict>
 	<key>com.apple.security.app-sandbox</key>
-	<true/>
+	<false/>
+	<!-- Required for local runtime processes, Accessibility/Apple Events context,
+	     and explicit region capture in the non-App-Store desktop build. -->
 </dict>
 </plist>

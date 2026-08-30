@@ -87,6 +87,12 @@ abstract interface class CoreBridge {
   Future<void> close();
 }
 
+abstract interface class RuntimeConfigurationBridge {
+  Future<RuntimeDiscovery> addRuntimeOverride(Map<String, Object?> override);
+
+  Future<RuntimeDiscovery> removeRuntimeOverride(String overrideId);
+}
+
 final class RuntimeTarget {
   const RuntimeTarget({
     required this.id,
@@ -96,6 +102,11 @@ final class RuntimeTarget {
     required this.protocolName,
     required this.executablePath,
     required this.executionHost,
+    this.status = 'detected',
+    this.priority = 0,
+    this.capabilityHints = const [],
+    this.runtimeHome,
+    this.source,
     this.endpoint,
     this.profileId,
   });
@@ -108,6 +119,13 @@ final class RuntimeTarget {
     protocolName: json['protocolName']?.toString() ?? '',
     executablePath: json['executablePath']?.toString() ?? '',
     executionHost: _map(json['executionHost']),
+    status: json['status']?.toString() ?? 'detected',
+    priority: json['priority'] as int? ?? 0,
+    capabilityHints: (json['capabilityHints'] as List<Object?>? ?? const [])
+        .map((value) => value.toString())
+        .toList(growable: false),
+    runtimeHome: json['runtimeHome']?.toString(),
+    source: json['source']?.toString(),
     endpoint: json['endpoint']?.toString(),
     profileId: json['profileId']?.toString(),
   );
@@ -119,15 +137,42 @@ final class RuntimeTarget {
   final String protocolName;
   final String executablePath;
   final Map<String, Object?> executionHost;
+  final String status;
+  final int priority;
+  final List<String> capabilityHints;
+  final String? runtimeHome;
+  final String? source;
   final String? endpoint;
   final String? profileId;
+
+  RuntimeTarget copyWith({String? status}) => RuntimeTarget(
+    id: id,
+    runtimeId: runtimeId,
+    adapterId: adapterId,
+    displayName: displayName,
+    protocolName: protocolName,
+    executablePath: executablePath,
+    executionHost: executionHost,
+    status: status ?? this.status,
+    priority: priority,
+    capabilityHints: capabilityHints,
+    runtimeHome: runtimeHome,
+    source: source,
+    endpoint: endpoint,
+    profileId: profileId,
+  );
 }
 
 final class RuntimeDiscovery {
-  const RuntimeDiscovery({required this.targets, this.selectedTargetId});
+  const RuntimeDiscovery({
+    required this.targets,
+    this.selectedTargetId,
+    this.settings = const <String, Object?>{},
+  });
 
   final List<RuntimeTarget> targets;
   final String? selectedTargetId;
+  final Map<String, Object?> settings;
 }
 
 final class RuntimeConnection {
@@ -242,7 +287,8 @@ final class CoreProtocolException implements Exception {
   String toString() => 'CoreProtocolException($code): $message';
 }
 
-final class ProcessCoreBridge implements CoreBridge {
+final class ProcessCoreBridge
+    implements CoreBridge, RuntimeConfigurationBridge {
   ProcessCoreBridge({
     this.executablePath,
     this.requestTimeout = const Duration(seconds: 30),
@@ -293,6 +339,37 @@ final class ProcessCoreBridge implements CoreBridge {
     return RuntimeDiscovery(
       targets: targets,
       selectedTargetId: result['selectedTargetId']?.toString(),
+      settings: _map(result['settings']),
+    );
+  }
+
+  @override
+  Future<RuntimeDiscovery> addRuntimeOverride(
+    Map<String, Object?> override,
+  ) async {
+    final result = await _request('runtime.addOverride', <String, Object?>{
+      'override': override,
+    });
+    return _runtimeDiscovery(result);
+  }
+
+  @override
+  Future<RuntimeDiscovery> removeRuntimeOverride(String overrideId) async {
+    final result = await _request('runtime.removeOverride', <String, Object?>{
+      'overrideId': overrideId,
+    });
+    return _runtimeDiscovery(result);
+  }
+
+  RuntimeDiscovery _runtimeDiscovery(Map<String, Object?> result) {
+    final targets = (result['targets'] as List<Object?>? ?? const [])
+        .map(_map)
+        .map(RuntimeTarget.fromJson)
+        .toList(growable: false);
+    return RuntimeDiscovery(
+      targets: targets,
+      selectedTargetId: result['selectedTargetId']?.toString(),
+      settings: _map(result['settings']),
     );
   }
 

@@ -1,13 +1,14 @@
 use std::{
     collections::{HashMap, HashSet},
     env, fs,
-    io::Read,
+    io::{self, Read},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     time::Duration,
 };
 
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use wait_timeout::ChildExt;
 
@@ -188,8 +189,210 @@ pub struct RuntimeCommand {
     pub working_directory: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ConfiguredRuntimeOverride {
+    pub id: String,
+    pub adapter_id: String,
+    pub execution_host: ExecutionHost,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub executable_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RuntimeOverrideStore {
+    path: PathBuf,
+}
+
+impl RuntimeOverrideStore {
+    pub fn platform_default() -> Self {
+        if let Some(path) = env::var_os("ZOMMI_RUNTIME_OVERRIDES_PATH") {
+            return Self { path: path.into() };
+        }
+        let path = if cfg!(target_os = "windows") {
+            env::var_os("LOCALAPPDATA")
+                .map(PathBuf::from)
+                .unwrap_or_else(env::temp_dir)
+                .join("Zommi")
+                .join("runtime-overrides.json")
+        } else if cfg!(target_os = "macos") {
+            env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(env::temp_dir)
+                .join("Library")
+                .join("Application Support")
+                .join("Zommi")
+                .join("runtime-overrides.json")
+        } else {
+            env::var_os("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
+                .unwrap_or_else(env::temp_dir)
+                .join("zommi")
+                .join("runtime-overrides.json")
+        };
+        Self { path }
+    }
+
+    pub fn at(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    pub fn load(&self) -> io::Result<Vec<ConfiguredRuntimeOverride>> {
+        let bytes = match fs::read(&self.path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error),
+        };
+        serde_json::from_slice(&bytes)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+    }
+
+    pub fn save(&self, overrides: &[ConfiguredRuntimeOverride]) -> io::Result<()> {
+        if let Some(parent) = self.path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let bytes = serde_json::to_vec_pretty(overrides).map_err(io::Error::other)?;
+        fs::write(&self.path, bytes)
+    }
+}
+
 pub fn discover_runtime_targets() -> Vec<RuntimeTarget> {
     discover_runtime_targets_with(&env::vars().collect(), env::consts::OS)
+}
+
+pub fn discover_runtime_targets_with_overrides(
+    overrides: &[ConfiguredRuntimeOverride],
+) -> Vec<RuntimeTarget> {
+    let mut targets = discover_runtime_targets();
+    targets.extend(
+        overrides
+            .iter()
+            .filter_map(|configured| target_from_override(configured, env::consts::OS).ok()),
+    );
+    deduplicate_targets(targets)
+}
+
+pub fn target_from_override(
+    configured: &ConfiguredRuntimeOverride,
+    platform: &str,
+) -> Result<RuntimeTarget, String> {
+    if configured.id.trim().is_empty() || configured.id.len() > 256 {
+        return Err("Runtime override id is invalid.".into());
+    }
+    if configured.adapter_id == "openclaw-gateway" {
+        let endpoint = configured
+            .endpoint
+            .as_deref()
+            .ok_or_else(|| "Direct Gateway override requires an endpoint.".to_owned())?;
+        let endpoint = validate_gateway_endpoint(endpoint).map_err(|_| {
+            "Gateway endpoint must be a credential-free ws:// or wss:// URL.".to_owned()
+        })?;
+        if configured
+            .profile_id
+            .as_deref()
+            .is_some_and(|value| !valid_profile_id(value))
+        {
+            return Err("Gateway profile id is invalid.".into());
+        }
+        let mut target = openclaw_gateway_target(endpoint, platform, configured.profile_id.clone());
+        target.source = Some("configured-ui".into());
+        return Ok(target);
+    }
+
+    let entry = RUNTIME_CATALOG
+        .iter()
+        .find(|entry| entry.adapter_id == configured.adapter_id)
+        .ok_or_else(|| "Runtime adapter is not supported.".to_owned())?;
+    let path = configured
+        .executable_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && value.len() <= 4096 && !value.contains('\0'))
+        .ok_or_else(|| "Runtime override requires an executable path.".to_owned())?;
+    match configured.execution_host.kind.as_str() {
+        "native" => {
+            if configured.execution_host.platform != platform || !Path::new(path).is_absolute() {
+                return Err(
+                    "Native runtime override requires an absolute path on this platform.".into(),
+                );
+            }
+        }
+        "wsl" => {
+            if platform != "windows"
+                || !path.starts_with('/')
+                || configured
+                    .execution_host
+                    .name
+                    .as_deref()
+                    .is_none_or(|name| !valid_profile_id(name))
+            {
+                return Err(
+                    "WSL runtime override requires a distribution and absolute Linux path.".into(),
+                );
+            }
+        }
+        _ => return Err("Runtime override host must be native or WSL.".into()),
+    }
+    Ok(target_for(
+        &configured.execution_host,
+        path,
+        entry,
+        None,
+        Some("configured-ui"),
+    ))
+}
+
+pub fn runtime_discovery_settings(
+    targets: &[RuntimeTarget],
+    overrides: &[ConfiguredRuntimeOverride],
+) -> Value {
+    let mut adapters = Vec::new();
+    let mut seen_adapters = HashSet::new();
+    for entry in RUNTIME_CATALOG {
+        if seen_adapters.insert(entry.adapter_id) {
+            adapters.push(json!({
+                "adapterId": entry.adapter_id,
+                "displayName": entry.display_name,
+                "protocolName": entry.protocol_name,
+                "acceptsEndpoint": false,
+                "hostKinds": ["native", "wsl"]
+            }));
+        }
+    }
+    adapters.push(json!({
+        "adapterId": "openclaw-gateway",
+        "displayName": "OpenClaw",
+        "protocolName": "Direct Gateway",
+        "acceptsEndpoint": true,
+        "hostKinds": ["remote"]
+    }));
+    let mut hosts = Vec::new();
+    let mut seen_hosts = HashSet::new();
+    for target in targets {
+        if seen_hosts.insert(target.execution_host.id.clone()) {
+            hosts.push(target.execution_host.clone());
+        }
+    }
+    if hosts.is_empty() {
+        hosts.push(ExecutionHost {
+            id: format!("native:{}", env::consts::OS),
+            kind: "native".into(),
+            platform: env::consts::OS.into(),
+            display_name: match env::consts::OS {
+                "windows" => "Windows".into(),
+                "macos" => "macOS".into(),
+                other => other.into(),
+            },
+            is_default: true,
+            name: None,
+        });
+    }
+    json!({"hosts": hosts, "adapters": adapters, "overrides": overrides})
 }
 
 pub fn discover_runtime_targets_with(
@@ -668,8 +871,9 @@ mod tests {
     use std::{collections::HashMap, fs};
 
     use super::{
-        ExecutionHost, RuntimeTarget, command_for_target, discover_runtime_targets_with,
-        select_default_target,
+        ConfiguredRuntimeOverride, ExecutionHost, RuntimeOverrideStore, RuntimeTarget,
+        command_for_target, discover_runtime_targets_with, runtime_discovery_settings,
+        select_default_target, target_from_override,
     };
 
     #[test]
@@ -810,5 +1014,85 @@ mod tests {
                 .iter()
                 .all(|target| target.adapter_id != "openclaw-gateway")
         );
+    }
+
+    #[test]
+    fn validates_and_persists_credential_free_runtime_overrides() {
+        let root = std::env::temp_dir().join(format!(
+            "zommi-runtime-overrides-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        let store = RuntimeOverrideStore::at(root.join("runtime-overrides.json"));
+        let configured = ConfiguredRuntimeOverride {
+            id: "override-codex".into(),
+            adapter_id: "codex-app-server".into(),
+            execution_host: ExecutionHost {
+                id: "native:linux".into(),
+                kind: "native".into(),
+                platform: "linux".into(),
+                display_name: "Linux".into(),
+                is_default: true,
+                name: None,
+            },
+            executable_path: Some("/opt/codex/bin/codex".into()),
+            endpoint: None,
+            profile_id: None,
+        };
+        let target = target_from_override(&configured, "linux").expect("valid override");
+        assert_eq!(target.source.as_deref(), Some("configured-ui"));
+        store
+            .save(std::slice::from_ref(&configured))
+            .expect("save override");
+        assert_eq!(
+            store.load().expect("load override"),
+            vec![configured.clone()]
+        );
+
+        let settings = runtime_discovery_settings(&[target], &[configured]);
+        assert!(
+            settings["adapters"]
+                .as_array()
+                .is_some_and(|items| !items.is_empty())
+        );
+        assert_eq!(settings["overrides"][0]["id"], "override-codex");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_credentials_and_mismatched_override_hosts() {
+        let gateway = ConfiguredRuntimeOverride {
+            id: "gateway".into(),
+            adapter_id: "openclaw-gateway".into(),
+            execution_host: ExecutionHost {
+                id: "remote:linux".into(),
+                kind: "remote".into(),
+                platform: "linux".into(),
+                display_name: "Remote".into(),
+                is_default: false,
+                name: None,
+            },
+            executable_path: None,
+            endpoint: Some("wss://gateway.example/?token=secret".into()),
+            profile_id: None,
+        };
+        assert!(target_from_override(&gateway, "linux").is_err());
+
+        let native = ConfiguredRuntimeOverride {
+            id: "native".into(),
+            adapter_id: "pi-rpc".into(),
+            execution_host: ExecutionHost {
+                id: "native:windows".into(),
+                kind: "native".into(),
+                platform: "windows".into(),
+                display_name: "Windows".into(),
+                is_default: true,
+                name: None,
+            },
+            executable_path: Some("relative/pi".into()),
+            endpoint: None,
+            profile_id: None,
+        };
+        assert!(target_from_override(&native, "linux").is_err());
     }
 }

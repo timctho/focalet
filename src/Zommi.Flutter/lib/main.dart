@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
+import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/zommi_app.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(ZommiApp(core: ProcessCoreBridge()));
+  final desktop = await FlutterDesktopBridge.bootstrap();
+  runApp(ZommiApp(core: ProcessCoreBridge(), desktop: desktop));
 }

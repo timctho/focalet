@@ -7,7 +7,8 @@ internal static class Program
     {
         RuntimeOptions.Apply(args);
 
-        if (args.Contains("--electron-host", StringComparer.OrdinalIgnoreCase))
+        if (args.Contains("--capture-host", StringComparer.OrdinalIgnoreCase) ||
+            args.Contains("--electron-host", StringComparer.OrdinalIgnoreCase))
         {
             return ElectronNativeHost.Run();
         }
@@ -22,7 +23,7 @@ internal static class Program
             return AcceptanceProbe.SelectedTextCapture();
         }
 
-        Console.Error.WriteLine("Zommi.Windows is the capture-only Electron native host. Start the packaged Zommi desktop application instead.");
+        Console.Error.WriteLine("Zommi.Windows is the capture-only desktop native host. Start the packaged Zommi desktop application instead.");
         return 2;
     }
 }
