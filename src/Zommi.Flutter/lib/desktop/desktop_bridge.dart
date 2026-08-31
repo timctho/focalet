@@ -33,6 +33,15 @@ final class DesktopInvocation {
   final bool warning;
 }
 
+DesktopInvocation? imageSelectionInvocation(ContextAttachment? attachment) {
+  if (attachment == null) return null;
+  return DesktopInvocation(
+    kind: DesktopInvocationKind.image,
+    attachment: attachment,
+    message: 'Image context attached',
+  );
+}
+
 final class DesktopReadiness {
   const DesktopReadiness({
     this.contextShortcut = false,
@@ -41,6 +50,34 @@ final class DesktopReadiness {
 
   final bool contextShortcut;
   final bool imageShortcut;
+}
+
+abstract interface class DesktopAcceptanceRecorder {
+  Future<void> record(String event, Map<String, Object?> details);
+}
+
+final class FileDesktopAcceptanceRecorder implements DesktopAcceptanceRecorder {
+  FileDesktopAcceptanceRecorder(this.path);
+
+  static FileDesktopAcceptanceRecorder? fromEnvironment() {
+    final path = Platform.environment['ZOMMI_ACCEPTANCE_LOG']?.trim();
+    return path == null || path.isEmpty
+        ? null
+        : FileDesktopAcceptanceRecorder(path);
+  }
+
+  final String path;
+
+  @override
+  Future<void> record(String event, Map<String, Object?> details) async {
+    final line = jsonEncode({
+      'event': event,
+      'observedAtUtc': DateTime.now().toUtc().toIso8601String(),
+      ...details,
+    });
+    await File(path)
+        .writeAsString('$line\n', mode: FileMode.append, flush: true);
+  }
 }
 
 abstract interface class DesktopBridge {
@@ -122,8 +159,13 @@ final class NoopDesktopBridge implements DesktopBridge {
 final class FlutterDesktopBridge
     with WindowListener, TrayListener
     implements DesktopBridge {
-  FlutterDesktopBridge({CaptureProvider? captureProvider})
-    : _captureProvider = captureProvider ?? platformCaptureProvider();
+  FlutterDesktopBridge({
+    CaptureProvider? captureProvider,
+    DesktopAcceptanceRecorder? acceptanceRecorder,
+  }) : _captureProvider = captureProvider ?? platformCaptureProvider(),
+       _acceptanceRecorder =
+           acceptanceRecorder ??
+           FileDesktopAcceptanceRecorder.fromEnvironment();
 
   static Future<FlutterDesktopBridge> bootstrap() async {
     await windowManager.ensureInitialized();
@@ -152,6 +194,7 @@ final class FlutterDesktopBridge
   }
 
   final CaptureProvider _captureProvider;
+  final DesktopAcceptanceRecorder? _acceptanceRecorder;
   final StreamController<DesktopInvocation> _invocations =
       StreamController<DesktopInvocation>.broadcast(sync: true);
   final HotKey _contextHotKey = HotKey(
@@ -207,6 +250,10 @@ final class FlutterDesktopBridge
       _emitWarning('Alt+Shift+A could not be registered: $error');
     }
     await _configureTray();
+    await _recordAcceptance('desktop.ready', {
+      'contextShortcut': contextRegistered,
+      'imageShortcut': imageRegistered,
+    });
     return DesktopReadiness(
       contextShortcut: contextRegistered,
       imageShortcut: imageRegistered,
@@ -218,6 +265,11 @@ final class FlutterDesktopBridge
       // Capture completes before Flutter is shown or focused. This ordering is
       // the Invocation Context boundary and must not be reversed.
       final attachment = await captureContext();
+      await _recordAcceptance('shortcut.context', {
+        'attached': attachment != null,
+        'application': attachment?.snapshot?['application'],
+        'windowTitle': attachment?.snapshot?['windowTitle'],
+      });
       _invocations.add(
         DesktopInvocation(
           kind: DesktopInvocationKind.context,
@@ -229,6 +281,9 @@ final class FlutterDesktopBridge
         ),
       );
     } on Object catch (error) {
+      await _recordAcceptance('shortcut.context.failed', {
+        'error': error.toString(),
+      });
       _invocations.add(
         DesktopInvocation(
           kind: DesktopInvocationKind.context,
@@ -242,14 +297,23 @@ final class FlutterDesktopBridge
   Future<void> _selectImageAndEmit() async {
     try {
       final attachment = await selectImageContext(includePointerContext: true);
-      _invocations.add(
-        DesktopInvocation(
-          kind: DesktopInvocationKind.image,
-          attachment: attachment,
-          message: attachment == null ? null : 'Image context attached',
-        ),
-      );
+      final invocation = imageSelectionInvocation(attachment);
+      if (invocation == null) {
+        await _recordAcceptance('shortcut.image.cancelled', const {});
+        return;
+      }
+      await _recordAcceptance('shortcut.image', {
+        'attached': true,
+        'hasImage': attachment?.imageDataUrl?.isNotEmpty == true,
+        'hasPointerContext': attachment?.snapshot != null,
+        'width': attachment?.bounds?['width'],
+        'height': attachment?.bounds?['height'],
+      });
+      _invocations.add(invocation);
     } on Object catch (error) {
+      await _recordAcceptance('shortcut.image.failed', {
+        'error': error.toString(),
+      });
       _invocations.add(
         DesktopInvocation(
           kind: DesktopInvocationKind.image,
@@ -269,6 +333,17 @@ final class FlutterDesktopBridge
           warning: true,
         ),
       );
+    }
+  }
+
+  Future<void> _recordAcceptance(
+    String event,
+    Map<String, Object?> details,
+  ) async {
+    try {
+      await _acceptanceRecorder?.record(event, details);
+    } on Object {
+      // Acceptance tracing is explicitly opt-in and must never affect UX.
     }
   }
 

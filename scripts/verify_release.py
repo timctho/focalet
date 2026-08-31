@@ -15,6 +15,14 @@ class ReleaseValidationError(RuntimeError):
     pass
 
 
+LINUX_RUNTIME_LIBRARIES = (
+    "lib/libayatana-appindicator3.so.1",
+    "lib/libayatana-indicator3.so.7",
+    "lib/libdbusmenu-glib.so.4",
+    "lib/libdbusmenu-gtk3.so.4",
+)
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -175,6 +183,16 @@ def verify_package(
     capture_host = None
     if manifest.get("platform") == "windows":
         capture_host = _inside(root, str(manifest.get("captureHost", "")), "Windows capture host")
+    if manifest.get("platform") == "linux":
+        _inside(root, "zommi-bin", "Packaged Linux Flutter binary")
+        try:
+            launcher = entrypoint.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as error:
+            raise ReleaseValidationError(f"Linux launcher is invalid: {error}") from error
+        if "LD_LIBRARY_PATH" not in launcher or "zommi-bin" not in launcher:
+            raise ReleaseValidationError("Linux launcher does not load bundled runtime libraries.")
+        for relative in LINUX_RUNTIME_LIBRARIES:
+            _inside(root, relative, "Bundled Linux runtime library")
     file_count = _verify_checksums(root)
     if smoke_processes:
         _smoke_core(core_host)

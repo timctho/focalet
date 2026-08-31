@@ -25,6 +25,10 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^6.0.0
 
+dependency_overrides:
+  hotkey_manager_linux:
+    path: ../../third_party/hotkey_manager_linux
+
 flutter:
   uses-material-design: true
   assets:

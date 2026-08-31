@@ -72,6 +72,12 @@ valid Authenticode certificate thumbprint is supplied. macOS uses the supplied
 Developer ID identity or records `ad-hoc`. Linux records `checksum-only` unless
 a later distribution-signing stage is configured.
 
+The Linux archive includes its non-baseline Ayatana tray libraries and launches
+through a relocatable `zommi` wrapper; users do not need the build sysroot.
+Global shortcuts are currently supported on X11. Wayland shortcut portals and
+real desktop selector availability remain environment-dependent and are shown
+as degraded states rather than reported as accepted.
+
 ## Build and test
 
 Required toolchains are Rust 1.93, Flutter 3.47.2, Python 3, and .NET 8 for the

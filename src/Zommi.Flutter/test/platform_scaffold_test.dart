@@ -133,6 +133,8 @@ void main() {
       './scripts/package-windows.ps1 -Runtime win-x64',
       'tests/test_release_package.py',
       'tests/test_linux_startup_smoke.py',
+      'Accept Linux X11 shortcuts and capture UX',
+      'scripts/accept-linux-x11.py',
     ]) {
       expect(workflow, contains(contract));
     }
@@ -149,6 +151,40 @@ void main() {
     ).readAsStringSync();
     expect(linuxPackager, contains('Ubuntu 20.04 only'));
     expect(linuxPackager, contains('PKG_CONFIG_SYSROOT_DIR'));
+    expect(linuxPackager, contains('ZOMMI_LINUX_RUNTIME_LIBRARY_DIRS'));
+
+    final unixPackager = File('${repository.path}/scripts/package-unix.sh')
+        .readAsStringSync();
+    expect(
+      unixPackager,
+      allOf(
+        contains('bundle_linux_runtime_libraries'),
+        contains('libayatana-appindicator3.so.1'),
+      ),
+    );
+    expect(
+      File('${repository.path}/src/Zommi.Flutter/linux/CMakeLists.txt')
+          .readAsStringSync(),
+      contains('CMAKE_BUILD_RPATH_USE_ORIGIN TRUE'),
+    );
+    expect(
+      File(
+        '${repository.path}/src/Zommi.Flutter/linux/runner/my_application.cc',
+      ).readAsStringSync(),
+      contains('gtk_window_set_default_size(window, 56, 56)'),
+    );
+    final hotkeyPlugin = File(
+      '${repository.path}/third_party/hotkey_manager_linux/linux/'
+      'hotkey_manager_linux_plugin.cc',
+    ).readAsStringSync();
+    expect(
+      hotkeyPlugin,
+      allOf(
+        contains('XGrabKey'),
+        contains('GDK_IS_X11_DISPLAY'),
+        contains('registration.modifiers == modifiers'),
+      ),
+    );
     expect(linuxPackager, contains('scripts/package-unix.sh'));
 
     final linuxSmoke = File('${repository.path}/scripts/smoke-linux-release.sh')
@@ -156,5 +192,18 @@ void main() {
     expect(linuxSmoke, contains('MissingPluginException'));
     expect(linuxSmoke, contains('rustCoreStarted'));
     expect(linuxSmoke, contains('hotkeyWarnings'));
+
+    final linuxAcceptance = File(
+      '${repository.path}/scripts/accept-linux-x11.py',
+    ).readAsStringSync();
+    expect(
+      linuxAcceptance,
+      allOf(
+        contains('XTestFakeKeyEvent'),
+        contains('shortcut.image.cancelled'),
+        contains('ZOMMI_X11_CONTEXT_FIXTURE'),
+        contains('pointerContextPaired'),
+      ),
+    );
   });
 }

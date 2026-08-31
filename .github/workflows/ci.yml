@@ -102,6 +102,11 @@ jobs:
           ZOMMI_LINUX_STARTUP_SMOKE: '1'
         run: bash scripts/package-linux-self-hosted.sh
 
+      - name: Accept Linux X11 shortcuts and capture UX
+        run: >-
+          xvfb-run -a -s "-screen 0 1280x960x24 +extension GLX +render -noreset"
+          python3 scripts/accept-linux-x11.py artifacts/zommi-linux-x64
+
       - name: Show release identity and signing state
         run: |
           python -c "import glob,json; p=glob.glob('artifacts/zommi-*/release-manifest.json'); assert len(p)==1, p; print(json.dumps(json.load(open(p[0], encoding='utf-8')), indent=2))"

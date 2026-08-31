@@ -190,6 +190,18 @@ def assemble(args: argparse.Namespace) -> tuple[Path, Path]:
             else:
                 entrypoint = "zommi"
                 core_relative = "zommi-core-host"
+                flutter_binary = pending / "zommi"
+                packaged_binary = pending / "zommi-bin"
+                flutter_binary.replace(packaged_binary)
+                flutter_binary.write_text(
+                    "#!/usr/bin/env sh\n"
+                    "set -eu\n"
+                    'app_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
+                    'export LD_LIBRARY_PATH="$app_dir/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\n'
+                    'exec "$app_dir/zommi-bin" "$@"\n',
+                    encoding="utf-8",
+                )
+                flutter_binary.chmod(0o755)
             core_destination = pending / core_relative
             shutil.copy2(args.core_host, core_destination)
             if args.platform == "linux":

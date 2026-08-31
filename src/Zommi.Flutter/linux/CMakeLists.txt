@@ -15,6 +15,10 @@ cmake_policy(SET CMP0063 NEW)
 
 # Load bundled libraries from the lib/ directory relative to the binary.
 set(CMAKE_INSTALL_RPATH "$ORIGIN/lib")
+# Flutter installs plugin build outputs as files rather than CMake targets.
+# Keep their build RPATH relative so the copied release plugins resolve the
+# runtime libraries beside them instead of the ephemeral build directory.
+set(CMAKE_BUILD_RPATH_USE_ORIGIN TRUE)
 
 # Root filesystem for cross-building.
 if(FLUTTER_TARGET_PLATFORM_SYSROOT)

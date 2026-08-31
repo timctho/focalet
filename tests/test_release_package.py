@@ -19,8 +19,15 @@ class ReleasePackageTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="zommi-release-test-")
         self.root = Path(self.temporary.name)
-        (self.root / "zommi").write_text("flutter", encoding="utf-8")
+        (self.root / "zommi").write_text(
+            "#!/bin/sh\nLD_LIBRARY_PATH=lib exec ./zommi-bin\n", encoding="utf-8"
+        )
+        (self.root / "zommi-bin").write_text("flutter", encoding="utf-8")
         (self.root / "zommi-core-host").write_text("rust", encoding="utf-8")
+        for relative in verify_release.LINUX_RUNTIME_LIBRARIES:
+            library = self.root / relative
+            library.parent.mkdir(parents=True, exist_ok=True)
+            library.write_text("runtime", encoding="utf-8")
         manifest = {
             "schemaVersion": 1,
             "product": "Zommi",
@@ -63,7 +70,25 @@ class ReleasePackageTests(unittest.TestCase):
             smoke_processes=False,
         )
         self.assertEqual(result["entrypoint"], "zommi")
-        self.assertEqual(result["files"], 3)
+        self.assertEqual(result["files"], 4 + len(verify_release.LINUX_RUNTIME_LIBRARIES))
+
+    def test_missing_linux_runtime_library_is_rejected(self) -> None:
+        (self.root / verify_release.LINUX_RUNTIME_LIBRARIES[0]).unlink()
+        self._write_checksums()
+        with self.assertRaisesRegex(
+            verify_release.ReleaseValidationError,
+            "Bundled Linux runtime library is missing",
+        ):
+            verify_release.verify_package(self.root, smoke_processes=False)
+
+    def test_linux_launcher_must_load_bundled_libraries(self) -> None:
+        (self.root / "zommi").write_text("#!/bin/sh\nexec ./zommi-bin\n", encoding="utf-8")
+        self._write_checksums()
+        with self.assertRaisesRegex(
+            verify_release.ReleaseValidationError,
+            "does not load bundled runtime libraries",
+        ):
+            verify_release.verify_package(self.root, smoke_processes=False)
 
     def test_tampered_file_fails_checksum_validation(self) -> None:
         (self.root / "zommi-core-host").write_text("tampered", encoding="utf-8")

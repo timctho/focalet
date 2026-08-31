@@ -6,7 +6,7 @@ repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 if command -v clang >/dev/null 2>&1 &&
   command -v clang++ >/dev/null 2>&1 &&
   command -v ninja >/dev/null 2>&1 &&
-  pkg-config --exists gtk+-3.0 keybinder-3.0 ayatana-appindicator3-0.1; then
+  pkg-config --exists gtk+-3.0 x11 ayatana-appindicator3-0.1; then
   exec bash "$repository_root/scripts/package-unix.sh" linux
 fi
 
@@ -35,7 +35,7 @@ mapfile -t development_packages < <(
     --no-replaces \
     --no-enhances \
     libgtk-3-dev \
-    libkeybinder-3.0-dev \
+    libx11-dev \
     libayatana-appindicator3-dev 2>/dev/null |
     awk '/^[[:alnum:]][[:alnum:].+:-]*$/ {print}' |
     sort -u |
@@ -62,7 +62,7 @@ runtime_packages=(
   libgcc-9-dev
   libstdc++-9-dev
   libgtk-3-0
-  libkeybinder-3.0-0
+  libx11-6
   libayatana-appindicator3-1
   libayatana-indicator3-7
   libdbusmenu-glib4
@@ -120,9 +120,10 @@ task_library_paths=$(IFS=:; printf '%s' "${library_paths[*]}${LD_LIBRARY_PATH:+:
 export LD_LIBRARY_PATH="$task_library_paths"
 export LIBRARY_PATH="$sysroot/usr/lib/$multiarch${LIBRARY_PATH:+:$LIBRARY_PATH}"
 export CMAKE_PREFIX_PATH="$sysroot/usr${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
+export ZOMMI_LINUX_RUNTIME_LIBRARY_DIRS="$sysroot/usr/lib/$multiarch"
 
 clang++ --version
-pkg-config --modversion gtk+-3.0 keybinder-3.0 ayatana-appindicator3-0.1
+pkg-config --modversion gtk+-3.0 x11 ayatana-appindicator3-0.1
 linux_build_directory="$repository_root/src/Zommi.Flutter/build/linux"
 if [[ -d "$linux_build_directory" ]]; then
   rm -r "$linux_build_directory"

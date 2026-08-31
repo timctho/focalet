@@ -2,12 +2,28 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
+import 'package:zommi_flutter/state/zommi_models.dart';
 
 void main() {
   test('Linux skips the unsupported native window shadow method', () {
     expect(supportsNativeWindowShadow('linux'), isFalse);
     expect(supportsNativeWindowShadow('windows'), isTrue);
     expect(supportsNativeWindowShadow('macos'), isTrue);
+  });
+
+  test('cancelled image selection emits no panel-opening invocation', () {
+    expect(imageSelectionInvocation(null), isNull);
+
+    final attachment = ContextAttachment(
+      id: 'image-1',
+      token: '',
+      imageDataUrl: 'data:image/png;base64,aGVsbG8=',
+      bounds: {'width': 1, 'height': 1},
+    );
+    final invocation = imageSelectionInvocation(attachment);
+    expect(invocation?.kind, DesktopInvocationKind.image);
+    expect(invocation?.attachment, same(attachment));
+    expect(invocation?.message, 'Image context attached');
   });
 
   test(

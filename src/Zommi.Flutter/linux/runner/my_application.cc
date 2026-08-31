@@ -52,7 +52,9 @@ static void my_application_activate(GApplication* application) {
     gtk_window_set_title(window, "Zommi");
   }
 
-  gtk_window_set_default_size(window, 900, 760);
+  // Match the compact orb before the asynchronous window-manager handshake so
+  // Linux never flashes the generated 900x760 template surface at startup.
+  gtk_window_set_default_size(window, 56, 56);
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
   fl_dart_project_set_dart_entrypoint_arguments(
