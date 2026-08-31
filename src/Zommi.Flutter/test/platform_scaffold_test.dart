@@ -127,10 +127,12 @@ void main() {
       'Native release (linux)',
       'runs-on: [self-hosted, Linux, X64, zommi-release]',
       'bash scripts/package-linux-self-hosted.sh',
+      "ZOMMI_LINUX_STARTUP_SMOKE: '1'",
       r'Native release (${{ matrix.target }})',
       'bash scripts/package-unix.sh macos',
       './scripts/package-windows.ps1 -Runtime win-x64',
       'tests/test_release_package.py',
+      'tests/test_linux_startup_smoke.py',
     ]) {
       expect(workflow, contains(contract));
     }
@@ -148,5 +150,11 @@ void main() {
     expect(linuxPackager, contains('Ubuntu 20.04 only'));
     expect(linuxPackager, contains('PKG_CONFIG_SYSROOT_DIR'));
     expect(linuxPackager, contains('scripts/package-unix.sh'));
+
+    final linuxSmoke = File('${repository.path}/scripts/smoke-linux-release.sh')
+        .readAsStringSync();
+    expect(linuxSmoke, contains('MissingPluginException'));
+    expect(linuxSmoke, contains('rustCoreStarted'));
+    expect(linuxSmoke, contains('hotkeyWarnings'));
   });
 }

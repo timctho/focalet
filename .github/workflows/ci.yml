@@ -65,7 +65,8 @@ jobs:
         run: |
           python3 -m py_compile scripts/assemble_release.py scripts/verify_release.py tests/test_release_package.py
           python3 tests/test_release_package.py -v
-          bash -n scripts/package-unix.sh scripts/package-linux-self-hosted.sh
+          python3 tests/test_linux_startup_smoke.py -v
+          bash -n scripts/package-unix.sh scripts/package-linux-self-hosted.sh scripts/smoke-linux-release.sh
 
       - name: Build Windows capture helper
         run: |
@@ -97,6 +98,8 @@ jobs:
           cache: true
 
       - name: Build and verify Linux release
+        env:
+          ZOMMI_LINUX_STARTUP_SMOKE: '1'
         run: bash scripts/package-linux-self-hosted.sh
 
       - name: Show release identity and signing state
