@@ -43,12 +43,22 @@ image-plus-pointer pairing, and the adjacent Flutter/Rust/two-helper process
 topology. Run it from an interactive desktop PowerShell; a process launched
 through WSL interop does not inherit an authoritative screen device context.
 
-The local Windows release job runs this full command from an unlocked,
-interactive user-session runner. A locked desktop or a runner installed as a
-non-interactive service must fail this gate rather than downgrade it silently.
-`-NonVisualOnly` remains available for capture-helper diagnostics, but it is not
-CI acceptance. Injected keys validate native registration and event delivery;
-they are still not physical keyboard evidence.
+Every local Windows release job runs the same script with `-NonVisualOnly`,
+which requires selected-text UIA capture and selector cancellation without
+claiming desktop pixels or shortcuts. Run the full gate explicitly from an
+unlocked, visible user session with:
+
+```sh
+gh workflow run ci.yml --ref <branch-or-sha> -f windows_interactive=true
+```
+
+That dispatch also runs the non-visual subset first, then executes the full
+command above. The full step is skipped when `windows_interactive` is false; a
+green ordinary push therefore does not claim interactive Windows acceptance.
+RDP sessions can remain `Active` while losing their GDI surface when the client
+is minimized or hidden, so silently attempting the full gate on every push is
+not authoritative. Injected keys validate native registration and event
+delivery; they are still not physical keyboard evidence.
 
 ## Window and interaction
 

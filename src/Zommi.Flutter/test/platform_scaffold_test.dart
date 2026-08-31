@@ -129,6 +129,8 @@ void main() {
         .readAsStringSync();
     for (final contract in [
       'Native release (linux)',
+      'windows_interactive:',
+      'type: boolean',
       'runs-on: [self-hosted, Linux, X64, zommi-release]',
       'bash scripts/package-linux-self-hosted.sh',
       "ZOMMI_LINUX_STARTUP_SMOKE: '1'",
@@ -147,7 +149,10 @@ void main() {
       r'if: ${{ false }}',
       'runs-on: [self-hosted, macOS, zommi-release]',
       './scripts/package-windows.ps1 -Runtime win-x64',
+      'Accept Windows non-visual capture contracts',
+      '-NonVisualOnly',
       'Accept Windows shortcuts and capture UX',
+      "if: github.event_name == 'workflow_dispatch' && inputs.windows_interactive",
       'scripts/accept-windows-capture.ps1',
       'tests/test_release_package.py',
       'tests/test_linux_startup_smoke.py',
@@ -158,7 +163,6 @@ void main() {
     }
     expect(workflow, isNot(contains('npm ')));
     expect(workflow, isNot(contains('src/Zommi.Electron')));
-    expect(workflow, isNot(contains('-NonVisualOnly')));
     expect(workflow, isNot(contains('windows-2025')));
     expect(workflow, isNot(contains('macos-15')));
 

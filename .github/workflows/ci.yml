@@ -6,6 +6,12 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      windows_interactive:
+        description: Run the full Windows desktop shortcut and capture gate
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -184,7 +190,12 @@ jobs:
           ZOMMI_WINDOWS_SIGNING_THUMBPRINT: ${{ secrets.ZOMMI_WINDOWS_SIGNING_THUMBPRINT }}
         run: ./scripts/package-windows.ps1 -Runtime win-x64
 
+      - name: Accept Windows non-visual capture contracts
+        shell: pwsh
+        run: ./scripts/accept-windows-capture.ps1 -PackageDirectory ./artifacts/zommi-windows-x64 -NonVisualOnly
+
       - name: Accept Windows shortcuts and capture UX
+        if: github.event_name == 'workflow_dispatch' && inputs.windows_interactive
         shell: pwsh
         run: ./scripts/accept-windows-capture.ps1 -PackageDirectory ./artifacts/zommi-windows-x64
 
