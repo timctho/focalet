@@ -67,6 +67,12 @@ cargo build \
   --manifest-path "$repository_root/Cargo.toml" \
   --release \
   --bin zommi-core-host
+if [[ "$target_platform" == linux ]]; then
+  cargo build \
+    --manifest-path "$repository_root/Cargo.toml" \
+    --release \
+    --bin zommi-x11-capture
+fi
 
 if [[ "$target_platform" == linux ]]; then
   flutter_output="$flutter_directory/build/linux/$release_architecture/release/bundle"
@@ -90,6 +96,10 @@ if [[ "$target_platform" == macos && -n "${ZOMMI_MACOS_SIGNING_IDENTITY:-}" ]]; 
   assembler_arguments+=(--macos-signing-identity "$ZOMMI_MACOS_SIGNING_IDENTITY")
 elif [[ "$target_platform" == linux ]]; then
   assembler_arguments+=(--signing-status checksum-only --signing-mechanism sha256)
+  assembler_arguments+=(
+    --linux-capture-host
+    "${CARGO_TARGET_DIR:-$repository_root/target}/release/zommi-x11-capture"
+  )
 fi
 python3 "${assembler_arguments[@]}"
 

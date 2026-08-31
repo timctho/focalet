@@ -640,8 +640,11 @@ final class ImageSelection {
   final Map<String, Object?>? bounds;
 }
 
-CaptureProvider platformCaptureProvider() =>
-    Platform.isWindows ? WindowsCaptureProvider() : PortableCaptureProvider();
+CaptureProvider platformCaptureProvider() => Platform.isWindows
+    ? WindowsCaptureProvider()
+    : Platform.isLinux
+    ? LinuxCaptureProvider()
+    : PortableCaptureProvider();
 
 final class WindowsCaptureProvider implements CaptureProvider {
   WindowsCaptureProvider({
@@ -699,13 +702,110 @@ final class WindowsCaptureProvider implements CaptureProvider {
   }
 }
 
+typedef CaptureCommandRunner = Future<ProcessResult> Function(
+  String executable,
+  List<String> arguments,
+  Duration timeout,
+);
+
+final class LinuxCaptureProvider implements CaptureProvider {
+  LinuxCaptureProvider({
+    String? executablePath,
+    CaptureCommandRunner? runCommand,
+  }) : _executablePath = executablePath ?? resolveLinuxCaptureExecutable(),
+       _runCommand = runCommand ?? _runProcess;
+
+  final String _executablePath;
+  final CaptureCommandRunner _runCommand;
+
+  @override
+  Future<void> initialize() async {}
+
+  @override
+  Future<CaptureResult> capture({Offset? point}) async {
+    final response = await _request(const [
+      'context',
+    ], const Duration(seconds: 5));
+    return portableCaptureResult(
+      application: response['application']?.toString() ?? 'X11 application',
+      processName: response['processName']?.toString(),
+      windowTitle: response['windowTitle']?.toString() ?? '',
+      url: '',
+      limitation:
+          response['limitation']?.toString() ??
+          'X11 semantic enrichment depends on AT-SPI.',
+    );
+  }
+
+  @override
+  Future<ImageSelection?> selectImage() async {
+    final temporary = File(
+      '${Directory.systemTemp.path}${Platform.pathSeparator}'
+      'zommi-region-${DateTime.now().microsecondsSinceEpoch}.png',
+    );
+    try {
+      final response = await _request([
+        'region',
+        '--output',
+        temporary.path,
+      ], const Duration(minutes: 5));
+      if (response['cancelled'] == true) return null;
+      if (!await temporary.exists()) {
+        throw StateError('The X11 selector did not produce an image.');
+      }
+      final bytes = await temporary.readAsBytes();
+      if (bytes.isEmpty) {
+        throw StateError('The X11 selector produced an empty image.');
+      }
+      return ImageSelection(
+        dataUrl: 'data:image/png;base64,${base64Encode(bytes)}',
+        bounds: _nullableMap(response['bounds']),
+      );
+    } finally {
+      if (await temporary.exists()) await temporary.delete();
+    }
+  }
+
+  Future<Map<String, Object?>> _request(
+    List<String> arguments,
+    Duration timeout,
+  ) async {
+    final result = await _runCommand(_executablePath, arguments, timeout);
+    if (result.exitCode != 0) {
+      throw StateError(
+        'Linux X11 capture failed: ${result.stderr.toString().trim()}',
+      );
+    }
+    for (final line in result.stdout.toString().split('\n').reversed) {
+      if (line.trim().isEmpty) continue;
+      try {
+        final value = jsonDecode(line);
+        final mapped = _nullableMap(value);
+        if (mapped != null) return mapped;
+      } on FormatException {
+        continue;
+      }
+    }
+    throw StateError('Linux X11 capture returned no JSON result.');
+  }
+
+  static Future<ProcessResult> _runProcess(
+    String executable,
+    List<String> arguments,
+    Duration timeout,
+  ) => Process.run(executable, arguments).timeout(timeout);
+
+  @override
+  Future<void> close() async {}
+}
+
 final class PortableCaptureProvider implements CaptureProvider {
   @override
   Future<void> initialize() async {}
 
   @override
   Future<CaptureResult> capture({Offset? point}) async {
-    return Platform.isMacOS ? _captureMac() : _captureLinux();
+    return _captureMac();
   }
 
   Future<CaptureResult> _captureMac() async {
@@ -734,84 +834,12 @@ return appName & linefeed & windowTitle & linefeed & pageUrl
       throw StateError('macOS foreground capture failed: ${result.stderr}');
     }
     final fields = result.stdout.toString().trimRight().split('\n');
-    return _portableResult(
+    return portableCaptureResult(
       application: fields.isEmpty ? 'macOS application' : fields[0],
       windowTitle: fields.length > 1 ? fields[1] : '',
       url: fields.length > 2 ? fields[2] : '',
       limitation: 'macOS captures the front application, title, and supported browser URL. Accessibility enrichment depends on permission.',
     );
-  }
-
-  Future<CaptureResult> _captureLinux() async {
-    try {
-      final id = await _runText('xdotool', const ['getactivewindow']);
-      final values = await Future.wait([
-        _runText('xdotool', ['getwindowname', id]),
-        _runText('xdotool', ['getwindowpid', id]),
-      ]);
-      final processName = await _runText('ps', [
-        '-p',
-        values[1],
-        '-o',
-        'comm=',
-      ]);
-      return _portableResult(
-        application: processName.isEmpty ? 'Linux application' : processName,
-        windowTitle: values[0],
-        url: '',
-        limitation: 'Linux semantic enrichment depends on AT-SPI. Wayland shortcut and active-window support depend on the compositor portal.',
-      );
-    } on Object catch (error) {
-      return _portableResult(
-        application: 'Linux desktop',
-        windowTitle: '',
-        url: '',
-        limitation: 'The active window was not exposed: $error',
-      );
-    }
-  }
-
-  Future<String> _runText(String executable, List<String> arguments) async {
-    final result = await Process.run(
-      executable,
-      arguments,
-    ).timeout(const Duration(seconds: 3));
-    if (result.exitCode != 0) throw StateError(result.stderr.toString().trim());
-    return result.stdout.toString().trim();
-  }
-
-  CaptureResult _portableResult({
-    required String application,
-    required String windowTitle,
-    required String url,
-    required String limitation,
-  }) {
-    final now = DateTime.now().toUtc();
-    final snapshot = <String, Object?>{
-      'snapshotId': _nextAttachmentId(),
-      'observedAtUtc': now.toIso8601String(),
-      'expiresAtUtc': now.add(const Duration(seconds: 30)).toIso8601String(),
-      'surfaceKind': url.isEmpty ? 'Window' : 'Browser',
-      'application': application,
-      'processName': application.toLowerCase().replaceAll(' ', '-'),
-      'windowTitle': windowTitle.isEmpty ? null : windowTitle,
-      'locator': url.isEmpty ? null : {'kind': 'URL', 'value': url},
-      'selection': <Object?>[],
-      'visibleText': <Object?>[],
-      'accessibilityTree': null,
-      'indicatedTarget': null,
-      'confidence': url.isNotEmpty || windowTitle.isNotEmpty
-          ? 'medium'
-          : 'limited',
-      'limitation': limitation,
-    };
-    final preview = [
-      'Surface: ${snapshot['surfaceKind']} in $application',
-      if (windowTitle.isNotEmpty) 'Window: $windowTitle',
-      if (url.isNotEmpty) 'URL: $url',
-      'Limitation: $limitation',
-    ].join('\n');
-    return CaptureResult(snapshot: snapshot, previewText: preview);
   }
 
   @override
@@ -847,6 +875,63 @@ return appName & linefeed & windowTitle & linefeed & pageUrl
 
   @override
   Future<void> close() async {}
+}
+
+CaptureResult portableCaptureResult({
+  required String application,
+  String? processName,
+  required String windowTitle,
+  required String url,
+  required String limitation,
+}) {
+  final now = DateTime.now().toUtc();
+  final snapshot = <String, Object?>{
+    'snapshotId': _nextAttachmentId(),
+    'observedAtUtc': now.toIso8601String(),
+    'expiresAtUtc': now.add(const Duration(seconds: 30)).toIso8601String(),
+    'surfaceKind': url.isEmpty ? 'Window' : 'Browser',
+    'application': application,
+    'processName':
+        processName ?? application.toLowerCase().replaceAll(' ', '-'),
+    'windowTitle': windowTitle.isEmpty ? null : windowTitle,
+    'locator': url.isEmpty ? null : {'kind': 'URL', 'value': url},
+    'selection': <Object?>[],
+    'visibleText': <Object?>[],
+    'accessibilityTree': null,
+    'indicatedTarget': null,
+    'confidence': url.isNotEmpty || windowTitle.isNotEmpty
+        ? 'medium'
+        : 'limited',
+    'limitation': limitation,
+  };
+  final preview = [
+    'Surface: ${snapshot['surfaceKind']} in $application',
+    if (windowTitle.isNotEmpty) 'Window: $windowTitle',
+    if (url.isNotEmpty) 'URL: $url',
+    'Limitation: $limitation',
+  ].join('\n');
+  return CaptureResult(snapshot: snapshot, previewText: preview);
+}
+
+String resolveLinuxCaptureExecutable({
+  String? configured,
+  Map<String, String>? environment,
+  String? resolvedExecutable,
+  String? applicationDirectory,
+  String? pathSeparator,
+  bool Function(String path)? exists,
+}) {
+  if (configured?.trim().isNotEmpty == true) return configured!.trim();
+  final processEnvironment = environment ?? Platform.environment;
+  final environmentPath = processEnvironment['ZOMMI_X11_CAPTURE_HOST']?.trim();
+  if (environmentPath?.isNotEmpty == true) return environmentPath!;
+  final separator = pathSeparator ?? Platform.pathSeparator;
+  final executableDirectory =
+      applicationDirectory ??
+      File(resolvedExecutable ?? Platform.resolvedExecutable).parent.path;
+  final candidate = '$executableDirectory${separator}zommi-x11-capture';
+  if (exists?.call(candidate) ?? File(candidate).existsSync()) return candidate;
+  return 'zommi-x11-capture';
 }
 
 abstract interface class NativeCaptureClient {

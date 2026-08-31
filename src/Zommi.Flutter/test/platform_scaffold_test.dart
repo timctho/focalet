@@ -55,7 +55,8 @@ void main() {
       'Zommi.Capture.exe',
       "_selectorClient.request('selectImage')",
       "Process.run('osascript'",
-      "_runText('xdotool'",
+      'LinuxCaptureProvider',
+      'zommi-x11-capture',
     ]) {
       expect(bridge, contains(contract));
     }
@@ -192,6 +193,9 @@ void main() {
     expect(linuxSmoke, contains('MissingPluginException'));
     expect(linuxSmoke, contains('rustCoreStarted'));
     expect(linuxSmoke, contains('hotkeyWarnings'));
+
+    expect(unixPackager, contains('--linux-capture-host'));
+    expect(unixPackager, contains('--bin zommi-x11-capture'));
 
     final linuxAcceptance = File(
       '${repository.path}/scripts/accept-linux-x11.py',

@@ -130,7 +130,7 @@ def _smoke_core(core_host: Path) -> None:
         raise ReleaseValidationError("Rust core shutdown smoke did not succeed.")
 
 
-def _smoke_capture(capture_host: Path) -> None:
+def _smoke_windows_capture(capture_host: Path) -> None:
     values = _request_process(
         capture_host,
         [
@@ -142,6 +142,32 @@ def _smoke_capture(capture_host: Path) -> None:
         response = next((value for value in values if value.get("id") == identifier), None)
         if response is None or response.get("ok") is not True:
             raise ReleaseValidationError(f"Windows capture {identifier} smoke did not succeed.")
+
+
+def _smoke_linux_capture(capture_host: Path) -> None:
+    try:
+        completed = subprocess.run(
+            [str(capture_host), "probe"],
+            text=True,
+            capture_output=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ReleaseValidationError(
+            f"Process smoke failed for {capture_host.name}: {error}"
+        ) from error
+    if completed.returncode != 0:
+        raise ReleaseValidationError(
+            f"Process smoke exited {completed.returncode} for {capture_host.name}: "
+            f"{completed.stderr[-1000:]}"
+        )
+    try:
+        value = json.loads(completed.stdout)
+    except json.JSONDecodeError as error:
+        raise ReleaseValidationError("Linux X11 capture smoke returned invalid JSON.") from error
+    if value != {"ok": True, "provider": "x11"}:
+        raise ReleaseValidationError("Linux X11 capture smoke did not succeed.")
 
 
 def verify_package(
@@ -185,6 +211,11 @@ def verify_package(
         capture_host = _inside(root, str(manifest.get("captureHost", "")), "Windows capture host")
     if manifest.get("platform") == "linux":
         _inside(root, "zommi-bin", "Packaged Linux Flutter binary")
+        capture_host = _inside(
+            root,
+            str(manifest.get("captureHost", "")),
+            "Linux X11 capture host",
+        )
         try:
             launcher = entrypoint.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as error:
@@ -197,13 +228,17 @@ def verify_package(
     if smoke_processes:
         _smoke_core(core_host)
         if capture_host:
-            _smoke_capture(capture_host)
+            if manifest.get("platform") == "windows":
+                _smoke_windows_capture(capture_host)
+            else:
+                _smoke_linux_capture(capture_host)
     return {
         "platform": manifest.get("platform"),
         "architecture": manifest.get("architecture"),
         "gitCommit": manifest.get("gitCommit"),
         "entrypoint": entrypoint.relative_to(root).as_posix(),
         "coreHost": core_host.relative_to(root).as_posix(),
+        "captureHost": capture_host.relative_to(root).as_posix() if capture_host else None,
         "files": file_count,
         "signing": manifest.get("signing"),
     }

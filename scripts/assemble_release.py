@@ -190,6 +190,12 @@ def assemble(args: argparse.Namespace) -> tuple[Path, Path]:
             else:
                 entrypoint = "zommi"
                 core_relative = "zommi-core-host"
+                capture_relative = "zommi-x11-capture"
+                if args.linux_capture_host is None:
+                    raise ValueError("Linux releases require --linux-capture-host.")
+                capture_destination = pending / capture_relative
+                shutil.copy2(args.linux_capture_host, capture_destination)
+                capture_destination.chmod(capture_destination.stat().st_mode | 0o111)
                 flutter_binary = pending / "zommi"
                 packaged_binary = pending / "zommi-bin"
                 flutter_binary.replace(packaged_binary)
@@ -242,6 +248,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--architecture", choices=("x64", "arm64"), required=True)
     parser.add_argument("--flutter-output", type=Path, required=True)
     parser.add_argument("--core-host", type=Path, required=True)
+    parser.add_argument("--linux-capture-host", type=Path)
     parser.add_argument("--capture-host", type=Path)
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--git-commit", required=True)

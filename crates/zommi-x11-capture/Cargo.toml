@@ -1,0 +1,10 @@
+[package]
+name = "zommi-x11-capture"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+png.workspace = true
+serde_json.workspace = true
+x11rb.workspace = true

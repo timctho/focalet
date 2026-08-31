@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import base64
 import ctypes
 from ctypes import byref, c_bool, c_char_p, c_int, c_long, c_uint, c_ulong, c_void_p
 import json
 import os
 from pathlib import Path
-import shlex
 import signal
 import subprocess
 import sys
@@ -15,9 +13,6 @@ import tempfile
 import time
 
 
-ONE_PIXEL_PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-)
 CURRENT_TIME = 0
 REVERT_TO_PARENT = 2
 IS_VIEWABLE = 2
@@ -140,6 +135,21 @@ class X11:
         lib.XSync.argtypes = [c_void_p, c_bool]
         self.xtest.XTestFakeKeyEvent.argtypes = [c_void_p, c_uint, c_int, c_ulong]
         self.xtest.XTestFakeKeyEvent.restype = c_int
+        self.xtest.XTestFakeMotionEvent.argtypes = [
+            c_void_p,
+            c_int,
+            c_int,
+            c_int,
+            c_ulong,
+        ]
+        self.xtest.XTestFakeMotionEvent.restype = c_int
+        self.xtest.XTestFakeButtonEvent.argtypes = [
+            c_void_p,
+            c_uint,
+            c_int,
+            c_ulong,
+        ]
+        self.xtest.XTestFakeButtonEvent.restype = c_int
 
     def close(self) -> None:
         if self.display:
@@ -331,6 +341,34 @@ class X11:
             self.lib.XSync(self.display, False)
             time.sleep(0.05)
 
+    def send_key(self, keysym: int) -> None:
+        keycode = self.lib.XKeysymToKeycode(self.display, keysym)
+        if keycode == 0:
+            raise RuntimeError(f"X11 could not resolve keysym {keysym}.")
+        self.xtest.XTestFakeKeyEvent(self.display, keycode, True, CURRENT_TIME)
+        self.lib.XSync(self.display, False)
+        self.xtest.XTestFakeKeyEvent(self.display, keycode, False, CURRENT_TIME)
+        self.lib.XSync(self.display, False)
+
+    def drag_region(self, start: tuple[int, int], end: tuple[int, int]) -> None:
+        self.xtest.XTestFakeMotionEvent(
+            self.display, self.screen, start[0], start[1], CURRENT_TIME
+        )
+        self.xtest.XTestFakeButtonEvent(
+            self.display, 1, True, CURRENT_TIME
+        )
+        self.lib.XSync(self.display, False)
+        time.sleep(0.05)
+        self.xtest.XTestFakeMotionEvent(
+            self.display, self.screen, end[0], end[1], CURRENT_TIME
+        )
+        self.lib.XSync(self.display, False)
+        time.sleep(0.05)
+        self.xtest.XTestFakeButtonEvent(
+            self.display, 1, False, CURRENT_TIME
+        )
+        self.lib.XSync(self.display, False)
+
 
 def wait_until(description: str, predicate, timeout: float = 20.0):
     deadline = time.monotonic() + timeout
@@ -361,54 +399,30 @@ def event(path: Path, name: str) -> dict[str, object] | None:
     )
 
 
-def write_tool_wrapper(path: Path, tool: str) -> None:
-    command = " ".join(
-        [
-            shlex.quote(sys.executable),
-            shlex.quote(str(Path(__file__).resolve())),
-            "--tool",
-            shlex.quote(tool),
-            '"$@"',
-        ]
-    )
-    path.write_text(f"#!/bin/sh\nexec {command}\n", encoding="utf-8")
-    path.chmod(0o755)
-
-
-def run_tool(tool: str, arguments: list[str]) -> int:
-    if tool == "gnome-screenshot":
-        control = Path(os.environ["ZOMMI_CAPTURE_FIXTURE_CONTROL"])
-        if control.read_text(encoding="utf-8").strip() != "success":
-            return 0
+def descendant_pids(process_id: int) -> list[int]:
+    result = []
+    pending = [process_id]
+    while pending:
+        parent = pending.pop()
+        children_path = Path(f"/proc/{parent}/task/{parent}/children")
         try:
-            image_index = arguments.index("-f") + 1
-            Path(arguments[image_index]).write_bytes(ONE_PIXEL_PNG)
-        except (ValueError, IndexError):
-            return 2
-        return 0
+            children = [int(value) for value in children_path.read_text().split()]
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        result.extend(children)
+        pending.extend(children)
+    return result
 
-    if tool != "xdotool":
-        return 2
-    x11 = X11()
-    try:
-        if arguments == ["getactivewindow"]:
-            print(x11.focused_window())
-            return 0
-        if len(arguments) != 2:
-            return 2
-        window = int(arguments[1], 0)
-        if arguments[0] == "getwindowname":
-            print(x11.title(window))
-            return 0
-        if arguments[0] == "getwindowpid":
-            pid = x11.pid(window)
-            if pid is None:
-                return 1
-            print(pid)
-            return 0
-        return 2
-    finally:
-        x11.close()
+
+def capture_helper_running(process_id: int) -> bool:
+    for child in descendant_pids(process_id):
+        try:
+            executable = Path(f"/proc/{child}/exe").resolve()
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        if executable.name == "zommi-x11-capture":
+            return True
+    return False
 
 
 def stop_process(process: subprocess.Popen[str]) -> None:
@@ -430,20 +444,16 @@ def run_case(
     name: str,
     *,
     shortcut_shift: bool,
-    capture_mode: str,
+    selection_action: str | None,
     expected_event: str,
     expect_expanded: bool,
 ) -> dict[str, object]:
     trace = temporary / f"{name}.jsonl"
     runtime_log = temporary / f"{name}.log"
-    control = temporary / "capture-control"
-    control.write_text(capture_mode, encoding="utf-8")
     environment = os.environ.copy()
-    environment["PATH"] = f"{temporary}:{environment.get('PATH', '')}"
     environment["GDK_BACKEND"] = "x11"
     environment["LIBGL_ALWAYS_SOFTWARE"] = "1"
     environment["ZOMMI_ACCEPTANCE_LOG"] = str(trace)
-    environment["ZOMMI_CAPTURE_FIXTURE_CONTROL"] = str(control)
     with runtime_log.open("w", encoding="utf-8") as output:
         process = subprocess.Popen(
             [str(package / "zommi")],
@@ -474,6 +484,18 @@ def run_case(
         if x11.focused_window() != fixture:
             raise RuntimeError("The external context fixture did not receive X11 focus.")
         x11.send_shortcut(shift=shortcut_shift)
+        if selection_action is not None:
+            wait_until(
+                "the Rust X11 region selector",
+                lambda: capture_helper_running(process.pid),
+            )
+            time.sleep(0.15)
+            if selection_action == "cancel":
+                x11.send_key(0xFF1B)
+            elif selection_action == "drag":
+                x11.drag_region((100, 100), (140, 130))
+            else:
+                raise RuntimeError(f"Unknown selector action: {selection_action}")
         result = wait_until(expected_event, lambda: event(trace, expected_event))
 
         if expect_expanded:
@@ -515,10 +537,13 @@ def run_case(
 def run_acceptance(package: Path) -> int:
     application = package / "zommi"
     core = package / "zommi-core-host"
+    capture = package / "zommi-x11-capture"
     if not application.is_file() or not os.access(application, os.X_OK):
         raise RuntimeError(f"Executable Flutter entrypoint not found in {package}.")
     if not core.is_file() or not os.access(core, os.X_OK):
         raise RuntimeError(f"Executable Rust core not found in {package}.")
+    if not capture.is_file() or not os.access(capture, os.X_OK):
+        raise RuntimeError(f"Executable Rust X11 capture host not found in {package}.")
     if not os.environ.get("DISPLAY"):
         raise RuntimeError("Run Linux X11 acceptance under xvfb-run or a dedicated X11 session.")
 
@@ -528,9 +553,6 @@ def run_acceptance(package: Path) -> int:
     try:
         with tempfile.TemporaryDirectory(prefix="zommi-x11-acceptance-") as directory:
             temporary = Path(directory)
-            write_tool_wrapper(temporary / "xdotool", "xdotool")
-            write_tool_wrapper(temporary / "gnome-screenshot", "gnome-screenshot")
-
             context = run_case(
                 package,
                 x11,
@@ -538,7 +560,7 @@ def run_acceptance(package: Path) -> int:
                 temporary,
                 "context",
                 shortcut_shift=False,
-                capture_mode="cancel",
+                selection_action=None,
                 expected_event="shortcut.context",
                 expect_expanded=True,
             )
@@ -552,7 +574,7 @@ def run_acceptance(package: Path) -> int:
                 temporary,
                 "image-cancel",
                 shortcut_shift=True,
-                capture_mode="cancel",
+                selection_action="cancel",
                 expected_event="shortcut.image.cancelled",
                 expect_expanded=False,
             )
@@ -564,7 +586,7 @@ def run_acceptance(package: Path) -> int:
                 temporary,
                 "image-success",
                 shortcut_shift=True,
-                capture_mode="success",
+                selection_action="drag",
                 expected_event="shortcut.image",
                 expect_expanded=True,
             )
@@ -572,8 +594,8 @@ def run_acceptance(package: Path) -> int:
                 "attached": True,
                 "hasImage": True,
                 "hasPointerContext": True,
-                "width": 1,
-                "height": 1,
+                "width": 40,
+                "height": 30,
             }
             for key, value in expected_image.items():
                 if image.get(key) != value:
@@ -599,8 +621,6 @@ def run_acceptance(package: Path) -> int:
 
 
 def main() -> int:
-    if len(sys.argv) >= 3 and sys.argv[1] == "--tool":
-        return run_tool(sys.argv[2], sys.argv[3:])
     if len(sys.argv) != 2:
         print("usage: scripts/accept-linux-x11.py <package-directory>", file=sys.stderr)
         return 2

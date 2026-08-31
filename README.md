@@ -20,7 +20,8 @@ project terminology is defined in [CONTEXT.md](CONTEXT.md).
 ```text
 Flutter desktop app
   ├── orb, composer, history, approvals, previews, tray, and hotkeys
-  ├── macOS/Linux platform capture
+  ├── macOS platform capture
+  ├── Linux Rust X11 context and region-capture helper
   └── Windows Zommi.Capture helper (UIA and explicit region selection only)
           ↕
 Rust zommi-core-host
@@ -51,8 +52,10 @@ Electron, Node module, or `.mjs` payload.
 Capture fidelity is not a migration gate. Windows `Alt+A` still uses the rich
 UIA provider. Windows `Alt+Shift+A` now uses native region capture rather than
 Chromium compositor capture, so GPU-composited pixels can differ or be blank.
-macOS and Linux use their platform selectors; Wayland and OS permissions remain
-explicit limitations. See [docs/flutter-rust-migration.md](docs/flutter-rust-migration.md).
+macOS uses its platform selector. Linux packages a Rust X11 helper for active-
+window metadata and direct region capture; Wayland portals and OS permissions
+remain explicit limitations. See
+[docs/flutter-rust-migration.md](docs/flutter-rust-migration.md).
 
 ## Native packages
 
@@ -65,7 +68,8 @@ explicit limitations. See [docs/flutter-rust-migration.md](docs/flutter-rust-mig
 Each archive contains `release-manifest.json` and `SHA256SUMS.txt`; the archive
 also has a sibling `.sha256`. The verifier checks complete file inventory,
 component identity, checksums, absence of legacy payloads, and a real Rust-core
-initialize/shutdown exchange. Windows also pings the packaged capture helper.
+initialize/shutdown exchange. Windows pings the packaged capture helper, and
+Linux probes its packaged X11 helper without requiring a live display.
 
 Signing is reported, not inferred. Windows is `distribution-signed` only when a
 valid Authenticode certificate thumbprint is supplied. macOS uses the supplied
@@ -73,10 +77,11 @@ Developer ID identity or records `ad-hoc`. Linux records `checksum-only` unless
 a later distribution-signing stage is configured.
 
 The Linux archive includes its non-baseline Ayatana tray libraries and launches
-through a relocatable `zommi` wrapper; users do not need the build sysroot.
-Global shortcuts are currently supported on X11. Wayland shortcut portals and
-real desktop selector availability remain environment-dependent and are shown
-as degraded states rather than reported as accepted.
+through a relocatable `zommi` wrapper; users do not need the build sysroot. It
+also carries `zommi-x11-capture`, so neither `xdotool` nor `gnome-screenshot` is
+required. Global shortcuts, active-window metadata, and region capture are
+currently supported on X11. Wayland shortcut and screenshot portals are not yet
+implemented and are shown as degraded rather than reported as accepted.
 
 ## Build and test
 

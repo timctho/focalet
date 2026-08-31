@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 
 SCRIPT = Path(__file__).parents[1] / "scripts" / "verify_release.py"
@@ -24,6 +25,7 @@ class ReleasePackageTests(unittest.TestCase):
         )
         (self.root / "zommi-bin").write_text("flutter", encoding="utf-8")
         (self.root / "zommi-core-host").write_text("rust", encoding="utf-8")
+        (self.root / "zommi-x11-capture").write_text("x11", encoding="utf-8")
         for relative in verify_release.LINUX_RUNTIME_LIBRARIES:
             library = self.root / relative
             library.parent.mkdir(parents=True, exist_ok=True)
@@ -36,6 +38,7 @@ class ReleasePackageTests(unittest.TestCase):
             "architecture": "x64",
             "entrypoint": "zommi",
             "coreHost": "zommi-core-host",
+            "captureHost": "zommi-x11-capture",
             "components": {
                 "desktopUi": "flutter",
                 "runtimeCore": "rust",
@@ -70,7 +73,8 @@ class ReleasePackageTests(unittest.TestCase):
             smoke_processes=False,
         )
         self.assertEqual(result["entrypoint"], "zommi")
-        self.assertEqual(result["files"], 4 + len(verify_release.LINUX_RUNTIME_LIBRARIES))
+        self.assertEqual(result["captureHost"], "zommi-x11-capture")
+        self.assertEqual(result["files"], 5 + len(verify_release.LINUX_RUNTIME_LIBRARIES))
 
     def test_missing_linux_runtime_library_is_rejected(self) -> None:
         (self.root / verify_release.LINUX_RUNTIME_LIBRARIES[0]).unlink()
@@ -80,6 +84,31 @@ class ReleasePackageTests(unittest.TestCase):
             "Bundled Linux runtime library is missing",
         ):
             verify_release.verify_package(self.root, smoke_processes=False)
+
+    def test_missing_linux_capture_host_is_rejected(self) -> None:
+        (self.root / "zommi-x11-capture").unlink()
+        self._write_checksums()
+        with self.assertRaisesRegex(
+            verify_release.ReleaseValidationError,
+            "Linux X11 capture host is missing",
+        ):
+            verify_release.verify_package(self.root, smoke_processes=False)
+
+    def test_linux_capture_smoke_uses_display_independent_probe(self) -> None:
+        completed = mock.Mock(
+            returncode=0,
+            stdout='{"ok":true,"provider":"x11"}\n',
+            stderr="",
+        )
+        with mock.patch.object(verify_release.subprocess, "run", return_value=completed) as run:
+            verify_release._smoke_linux_capture(self.root / "zommi-x11-capture")
+        run.assert_called_once_with(
+            [str(self.root / "zommi-x11-capture"), "probe"],
+            text=True,
+            capture_output=True,
+            timeout=15,
+            check=False,
+        )
 
     def test_linux_launcher_must_load_bundled_libraries(self) -> None:
         (self.root / "zommi").write_text("#!/bin/sh\nexec ./zommi-bin\n", encoding="utf-8")
