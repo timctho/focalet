@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
@@ -7,6 +9,32 @@ import 'package:zommi_flutter/state/zommi_models.dart';
 import 'test_support.dart';
 
 void main() {
+  test('portal authorization does not block Rust runtime discovery', () async {
+    final core = RichFakeCore()..historyCount = 0;
+    final desktopReady = Completer<DesktopReadiness>();
+    final desktop = FakeDesktopBridge()..initializeGate = desktopReady.future;
+    final controller = ZommiController(core: core, desktop: desktop);
+
+    final initialization = controller.initialize();
+    for (
+      var attempt = 0;
+      attempt < 10 && controller.activeRuntime == null;
+      attempt++
+    ) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(controller.activeRuntime?.id, core.activeTargetId);
+    expect(controller.contextShortcutRegistered, isFalse);
+
+    desktopReady.complete(
+      const DesktopReadiness(contextShortcut: true, imageShortcut: true),
+    );
+    await initialization;
+    expect(controller.contextShortcutRegistered, isTrue);
+    expect(controller.imageShortcutRegistered, isTrue);
+    await controller.close();
+  });
+
   test(
     'three hundred stream deltas stay in one identity-bearing block',
     () async {

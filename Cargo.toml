@@ -12,6 +12,7 @@ edition = "2024"
 rust-version = "1.93"
 
 [workspace.dependencies]
+ashpd = { version = "0.13.13", default-features = false, features = ["global_shortcuts", "screenshot", "tokio"] }
 base64 = "0.22.1"
 ed25519-dalek = { version = "2.2.0", features = ["rand_core"] }
 futures-util = "0.3.31"

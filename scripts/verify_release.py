@@ -165,9 +165,13 @@ def _smoke_linux_capture(capture_host: Path) -> None:
     try:
         value = json.loads(completed.stdout)
     except json.JSONDecodeError as error:
-        raise ReleaseValidationError("Linux X11 capture smoke returned invalid JSON.") from error
-    if value != {"ok": True, "provider": "x11"}:
-        raise ReleaseValidationError("Linux X11 capture smoke did not succeed.")
+        raise ReleaseValidationError("Linux capture smoke returned invalid JSON.") from error
+    if (
+        not isinstance(value, dict)
+        or value.get("ok") is not True
+        or value.get("providers") != ["x11", "wayland-portal"]
+    ):
+        raise ReleaseValidationError("Linux capture smoke did not succeed.")
 
 
 def verify_package(
@@ -214,7 +218,7 @@ def verify_package(
         capture_host = _inside(
             root,
             str(manifest.get("captureHost", "")),
-            "Linux X11 capture host",
+            "Linux capture host",
         )
         try:
             launcher = entrypoint.read_text(encoding="utf-8")

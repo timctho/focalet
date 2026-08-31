@@ -162,7 +162,15 @@ final class FlutterDesktopBridge
   FlutterDesktopBridge({
     CaptureProvider? captureProvider,
     DesktopAcceptanceRecorder? acceptanceRecorder,
+    WaylandPortalShortcutClient? waylandPortalShortcutClient,
+    bool? useWaylandPortals,
   }) : _captureProvider = captureProvider ?? platformCaptureProvider(),
+       _waylandPortalShortcutClient =
+           waylandPortalShortcutClient ??
+           ProcessWaylandPortalShortcutClient(resolveLinuxCaptureExecutable()),
+       _useWaylandPortals =
+           useWaylandPortals ??
+           (Platform.isLinux && shouldUseWaylandPortals(Platform.environment)),
        _acceptanceRecorder =
            acceptanceRecorder ??
            FileDesktopAcceptanceRecorder.fromEnvironment();
@@ -194,6 +202,8 @@ final class FlutterDesktopBridge
   }
 
   final CaptureProvider _captureProvider;
+  final WaylandPortalShortcutClient _waylandPortalShortcutClient;
+  final bool _useWaylandPortals;
   final DesktopAcceptanceRecorder? _acceptanceRecorder;
   final StreamController<DesktopInvocation> _invocations =
       StreamController<DesktopInvocation>.broadcast(sync: true);
@@ -208,6 +218,10 @@ final class FlutterDesktopBridge
     scope: HotKeyScope.system,
   );
   bool _initialized = false;
+  bool _nativeContextRegistered = false;
+  bool _nativeImageRegistered = false;
+  DesktopReadiness _readiness = const DesktopReadiness();
+  StreamSubscription<String>? _portalShortcutSubscription;
   String? _trayIconPath;
 
   @override
@@ -216,7 +230,7 @@ final class FlutterDesktopBridge
   @override
   Future<DesktopReadiness> initialize() async {
     if (_initialized) {
-      return const DesktopReadiness(contextShortcut: true, imageShortcut: true);
+      return _readiness;
     }
     _initialized = true;
     windowManager.addListener(this);
@@ -231,33 +245,53 @@ final class FlutterDesktopBridge
 
     var contextRegistered = false;
     var imageRegistered = false;
-    try {
-      await hotKeyManager.register(
-        _contextHotKey,
-        keyDownHandler: (_) => unawaited(_captureAndEmit()),
-      );
-      contextRegistered = true;
-    } on Object catch (error) {
-      _emitWarning('Alt+A could not be registered: $error');
-    }
-    try {
-      await hotKeyManager.register(
-        _imageHotKey,
-        keyDownHandler: (_) => unawaited(_selectImageAndEmit()),
-      );
-      imageRegistered = true;
-    } on Object catch (error) {
-      _emitWarning('Alt+Shift+A could not be registered: $error');
+    if (_useWaylandPortals) {
+      try {
+        final registration = await registerWaylandPortalShortcuts(
+          _waylandPortalShortcutClient,
+          onContext: () => unawaited(_captureAndEmit()),
+          onImage: () => unawaited(_selectImageAndEmit()),
+          onError: (error) =>
+              _emitWarning('Wayland global shortcuts stopped: $error'),
+        );
+        _portalShortcutSubscription = registration.subscription;
+        contextRegistered = registration.readiness.contextShortcut;
+        imageRegistered = registration.readiness.imageShortcut;
+      } on Object catch (error) {
+        _emitWarning('Wayland global shortcuts are unavailable: $error');
+      }
+    } else {
+      try {
+        await hotKeyManager.register(
+          _contextHotKey,
+          keyDownHandler: (_) => unawaited(_captureAndEmit()),
+        );
+        contextRegistered = true;
+        _nativeContextRegistered = true;
+      } on Object catch (error) {
+        _emitWarning('Alt+A could not be registered: $error');
+      }
+      try {
+        await hotKeyManager.register(
+          _imageHotKey,
+          keyDownHandler: (_) => unawaited(_selectImageAndEmit()),
+        );
+        imageRegistered = true;
+        _nativeImageRegistered = true;
+      } on Object catch (error) {
+        _emitWarning('Alt+Shift+A could not be registered: $error');
+      }
     }
     await _configureTray();
     await _recordAcceptance('desktop.ready', {
       'contextShortcut': contextRegistered,
       'imageShortcut': imageRegistered,
     });
-    return DesktopReadiness(
+    _readiness = DesktopReadiness(
       contextShortcut: contextRegistered,
       imageShortcut: imageRegistered,
     );
+    return _readiness;
   }
 
   Future<void> _captureAndEmit() async {
@@ -598,8 +632,14 @@ final class FlutterDesktopBridge
   Future<void> close() async {
     windowManager.removeListener(this);
     trayManager.removeListener(this);
-    await hotKeyManager.unregister(_contextHotKey);
-    await hotKeyManager.unregister(_imageHotKey);
+    await _portalShortcutSubscription?.cancel();
+    await _waylandPortalShortcutClient.close();
+    if (_nativeContextRegistered) {
+      await hotKeyManager.unregister(_contextHotKey);
+    }
+    if (_nativeImageRegistered) {
+      await hotKeyManager.unregister(_imageHotKey);
+    }
     await trayManager.destroy();
     await _captureProvider.close();
     if (_trayIconPath case final path?) {
@@ -615,6 +655,157 @@ final class FlutterDesktopBridge
 
 bool supportsNativeWindowShadow(String operatingSystem) =>
     operatingSystem == 'windows' || operatingSystem == 'macos';
+
+bool shouldUseWaylandPortals(Map<String, String> environment) {
+  final sessionType = environment['XDG_SESSION_TYPE']?.trim().toLowerCase();
+  final waylandDisplay = environment['WAYLAND_DISPLAY']?.trim();
+  final x11Display = environment['DISPLAY']?.trim();
+  return sessionType == 'wayland' ||
+      (waylandDisplay?.isNotEmpty == true && x11Display?.isNotEmpty != true);
+}
+
+abstract interface class WaylandPortalShortcutClient {
+  Stream<String> get activations;
+
+  Future<DesktopReadiness> initialize();
+
+  Future<void> close();
+}
+
+final class WaylandPortalShortcutRegistration {
+  const WaylandPortalShortcutRegistration({
+    required this.readiness,
+    required this.subscription,
+  });
+
+  final DesktopReadiness readiness;
+  final StreamSubscription<String> subscription;
+}
+
+Future<WaylandPortalShortcutRegistration> registerWaylandPortalShortcuts(
+  WaylandPortalShortcutClient client, {
+  required void Function() onContext,
+  required void Function() onImage,
+  required void Function(Object error) onError,
+}) async {
+  final subscription = client.activations.listen((shortcut) {
+    switch (shortcut) {
+      case 'context':
+        onContext();
+      case 'image':
+        onImage();
+    }
+  }, onError: onError);
+  try {
+    final readiness = await client.initialize();
+    return WaylandPortalShortcutRegistration(
+      readiness: readiness,
+      subscription: subscription,
+    );
+  } on Object {
+    await subscription.cancel();
+    rethrow;
+  }
+}
+
+final class ProcessWaylandPortalShortcutClient
+    implements WaylandPortalShortcutClient {
+  ProcessWaylandPortalShortcutClient(
+    this.executablePath, {
+    this.argumentsBeforeCommand = const [],
+  });
+
+  final String executablePath;
+  final List<String> argumentsBeforeCommand;
+  final StreamController<String> _activations =
+      StreamController<String>.broadcast(sync: true);
+  final StringBuffer _stderr = StringBuffer();
+  Process? _process;
+  StreamSubscription<String>? _stdoutSubscription;
+  StreamSubscription<String>? _stderrSubscription;
+  bool _closing = false;
+
+  @override
+  Stream<String> get activations => _activations.stream;
+
+  @override
+  Future<DesktopReadiness> initialize() async {
+    if (_process != null) {
+      throw StateError('The Wayland shortcut helper is already running.');
+    }
+    final ready = Completer<DesktopReadiness>();
+    final process = await Process.start(executablePath, [
+      ...argumentsBeforeCommand,
+      'portal-shortcuts',
+    ]);
+    _process = process;
+    _stdoutSubscription = process.stdout
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .listen((line) {
+          try {
+            final value = jsonDecode(line);
+            final message = _nullableMap(value);
+            if (message?['event'] == 'ready' && !ready.isCompleted) {
+              ready.complete(
+                DesktopReadiness(
+                  contextShortcut: message?['contextShortcut'] == true,
+                  imageShortcut: message?['imageShortcut'] == true,
+                ),
+              );
+            } else if (message?['event'] == 'activated') {
+              final shortcut = message?['shortcutId']?.toString();
+              if (shortcut == 'context' || shortcut == 'image') {
+                _activations.add(shortcut!);
+              }
+            }
+          } on FormatException {
+            // Native diagnostics may be written around the JSONL protocol.
+          }
+        });
+    _stderrSubscription = process.stderr
+        .transform(utf8.decoder)
+        .listen(_stderr.write);
+    unawaited(
+      process.exitCode.then((exitCode) async {
+        final message =
+            'Wayland shortcut helper exited $exitCode: ${_stderr.toString().trim()}';
+        if (!ready.isCompleted) ready.completeError(StateError(message));
+        if (!_closing && !_activations.isClosed) {
+          _activations.addError(StateError(message));
+          await _activations.close();
+        }
+      }),
+    );
+    return ready.future.timeout(
+      const Duration(minutes: 2),
+      onTimeout: () {
+        process.kill();
+        throw TimeoutException(
+          'Timed out waiting for Wayland portal shortcut authorization.',
+        );
+      },
+    );
+  }
+
+  @override
+  Future<void> close() async {
+    if (_closing) return;
+    _closing = true;
+    final process = _process;
+    if (process != null && process.kill()) {
+      try {
+        await process.exitCode.timeout(const Duration(seconds: 3));
+      } on TimeoutException {
+        process.kill(ProcessSignal.sigkill);
+        await process.exitCode;
+      }
+    }
+    await _stdoutSubscription?.cancel();
+    await _stderrSubscription?.cancel();
+    if (!_activations.isClosed) await _activations.close();
+  }
+}
 
 abstract interface class CaptureProvider {
   Future<void> initialize();
@@ -643,7 +834,9 @@ final class ImageSelection {
 CaptureProvider platformCaptureProvider() => Platform.isWindows
     ? WindowsCaptureProvider()
     : Platform.isLinux
-    ? LinuxCaptureProvider()
+    ? LinuxCaptureProvider(
+        useWaylandPortals: shouldUseWaylandPortals(Platform.environment),
+      )
     : PortableCaptureProvider();
 
 final class WindowsCaptureProvider implements CaptureProvider {
@@ -712,22 +905,28 @@ final class LinuxCaptureProvider implements CaptureProvider {
   LinuxCaptureProvider({
     String? executablePath,
     CaptureCommandRunner? runCommand,
+    bool? useWaylandPortals,
   }) : _executablePath = executablePath ?? resolveLinuxCaptureExecutable(),
-       _runCommand = runCommand ?? _runProcess;
+       _runCommand = runCommand ?? _runProcess,
+       _useWaylandPortals =
+           useWaylandPortals ?? shouldUseWaylandPortals(Platform.environment);
 
   final String _executablePath;
   final CaptureCommandRunner _runCommand;
+  final bool _useWaylandPortals;
 
   @override
   Future<void> initialize() async {}
 
   @override
   Future<CaptureResult> capture({Offset? point}) async {
-    final response = await _request(const [
-      'context',
+    final response = await _request([
+      _useWaylandPortals ? 'portal-context' : 'context',
     ], const Duration(seconds: 5));
     return portableCaptureResult(
-      application: response['application']?.toString() ?? 'X11 application',
+      application:
+          response['application']?.toString() ??
+          (_useWaylandPortals ? 'Linux desktop' : 'X11 application'),
       processName: response['processName']?.toString(),
       windowTitle: response['windowTitle']?.toString() ?? '',
       url: '',
@@ -745,17 +944,17 @@ final class LinuxCaptureProvider implements CaptureProvider {
     );
     try {
       final response = await _request([
-        'region',
+        _useWaylandPortals ? 'portal-region' : 'region',
         '--output',
         temporary.path,
       ], const Duration(minutes: 5));
       if (response['cancelled'] == true) return null;
       if (!await temporary.exists()) {
-        throw StateError('The X11 selector did not produce an image.');
+        throw StateError('The Linux selector did not produce an image.');
       }
       final bytes = await temporary.readAsBytes();
       if (bytes.isEmpty) {
-        throw StateError('The X11 selector produced an empty image.');
+        throw StateError('The Linux selector produced an empty image.');
       }
       return ImageSelection(
         dataUrl: 'data:image/png;base64,${base64Encode(bytes)}',
@@ -773,7 +972,7 @@ final class LinuxCaptureProvider implements CaptureProvider {
     final result = await _runCommand(_executablePath, arguments, timeout);
     if (result.exitCode != 0) {
       throw StateError(
-        'Linux X11 capture failed: ${result.stderr.toString().trim()}',
+        'Linux capture failed: ${result.stderr.toString().trim()}',
       );
     }
     for (final line in result.stdout.toString().split('\n').reversed) {
@@ -786,7 +985,7 @@ final class LinuxCaptureProvider implements CaptureProvider {
         continue;
       }
     }
-    throw StateError('Linux X11 capture returned no JSON result.');
+    throw StateError('Linux capture returned no JSON result.');
   }
 
   static Future<ProcessResult> _runProcess(

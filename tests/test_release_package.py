@@ -90,14 +90,14 @@ class ReleasePackageTests(unittest.TestCase):
         self._write_checksums()
         with self.assertRaisesRegex(
             verify_release.ReleaseValidationError,
-            "Linux X11 capture host is missing",
+            "Linux capture host is missing",
         ):
             verify_release.verify_package(self.root, smoke_processes=False)
 
     def test_linux_capture_smoke_uses_display_independent_probe(self) -> None:
         completed = mock.Mock(
             returncode=0,
-            stdout='{"ok":true,"provider":"x11"}\n',
+            stdout='{"ok":true,"providers":["x11","wayland-portal"]}\n',
             stderr="",
         )
         with mock.patch.object(verify_release.subprocess, "run", return_value=completed) as run:

@@ -130,14 +130,7 @@ final class ZommiController extends ChangeNotifier {
     _desktopEvents = desktop.invocations.listen((invocation) {
       unawaited(_handleDesktopInvocation(invocation));
     });
-    try {
-      final readiness = await desktop.initialize();
-      contextShortcutRegistered = readiness.contextShortcut;
-      imageShortcutRegistered = readiness.imageShortcut;
-      _notify();
-    } on Object catch (error) {
-      _setStatus('Desktop integration unavailable · $error', warning: true);
-    }
+    final desktopInitialization = _initializeDesktopIntegration();
     try {
       final coreStatus = await core.initialize();
       _setStatus('Finding agent runtimes…');
@@ -162,6 +155,19 @@ final class ZommiController extends ChangeNotifier {
       }
     } on Object catch (error) {
       _setStatus('Rust core unavailable · $error', warning: true);
+    } finally {
+      await desktopInitialization;
+    }
+  }
+
+  Future<void> _initializeDesktopIntegration() async {
+    try {
+      final readiness = await desktop.initialize();
+      contextShortcutRegistered = readiness.contextShortcut;
+      imageShortcutRegistered = readiness.imageShortcut;
+      _notify();
+    } on Object catch (error) {
+      _setStatus('Desktop integration unavailable · $error', warning: true);
     }
   }
 

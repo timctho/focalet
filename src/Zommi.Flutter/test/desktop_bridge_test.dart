@@ -135,6 +135,150 @@ void main() {
     expect(await provider.selectImage(), isNull);
   });
 
+  test(
+    'Wayland capture uses portal commands and preserves degraded context',
+    () async {
+      final calls = <List<String>>[];
+      final provider = LinuxCaptureProvider(
+        executablePath: '/opt/zommi/zommi-x11-capture',
+        useWaylandPortals: true,
+        runCommand: (_, arguments, _) async {
+          calls.add(arguments);
+          if (arguments.first == 'portal-context') {
+            return ProcessResult(
+              20,
+              0,
+              jsonEncode({
+                'application': 'Linux desktop',
+                'processName': 'wayland-session',
+                'windowTitle': '',
+                'degraded': true,
+                'limitation': 'Wayland active-window metadata is unavailable',
+              }),
+              '',
+            );
+          }
+          await File(arguments.last).writeAsBytes([4, 5, 6]);
+          return ProcessResult(
+            21,
+            0,
+            jsonEncode({
+              'cancelled': false,
+              'provider': 'wayland-portal',
+              'bounds': {'width': 80, 'height': 60},
+            }),
+            '',
+          );
+        },
+      );
+
+      final context = await provider.capture();
+      expect(context.snapshot?['application'], 'Linux desktop');
+      expect(context.snapshot?['confidence'], 'limited');
+      expect(
+        context.previewText,
+        contains('active-window metadata is unavailable'),
+      );
+      final image = await provider.selectImage();
+      expect(image?.dataUrl, 'data:image/png;base64,BAUG');
+      expect(image?.bounds?['width'], 80);
+      expect(calls, [
+        ['portal-context'],
+        ['portal-region', '--output', isA<String>()],
+      ]);
+    },
+  );
+
+  test('Wayland screenshot portal cancellation adds no image', () async {
+    final provider = LinuxCaptureProvider(
+      executablePath: '/opt/zommi/zommi-x11-capture',
+      useWaylandPortals: true,
+      runCommand: (_, arguments, _) async {
+        expect(arguments.first, 'portal-region');
+        return ProcessResult(22, 0, '{"cancelled":true}', '');
+      },
+    );
+    expect(await provider.selectImage(), isNull);
+  });
+
+  test(
+    'Wayland portal shortcut activations keep exact gesture identity',
+    () async {
+      final client = _FakeWaylandPortalShortcutClient();
+      var contextInvocations = 0;
+      var imageInvocations = 0;
+      final errors = <Object>[];
+      final registration = await registerWaylandPortalShortcuts(
+        client,
+        onContext: () => contextInvocations += 1,
+        onImage: () => imageInvocations += 1,
+        onError: errors.add,
+      );
+      expect(registration.readiness.contextShortcut, isTrue);
+      expect(registration.readiness.imageShortcut, isTrue);
+
+      client.emit('context');
+      client.emit('image');
+      client.emit('unknown');
+      expect(contextInvocations, 1);
+      expect(imageInvocations, 1);
+      expect(errors, isEmpty);
+
+      await registration.subscription.cancel();
+      await client.close();
+    },
+  );
+
+  test(
+    'Wayland portal process client parses readiness and activations',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'zommi-wayland-shortcut-test-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final script = File('${directory.path}/portal-fixture.sh');
+      await script.writeAsString('''
+printf '%s\n' '{"event":"ready","contextShortcut":true,"imageShortcut":true}'
+printf '%s\n' '{"event":"activated","shortcutId":"context"}'
+printf '%s\n' '{"event":"activated","shortcutId":"image"}'
+while read -r line; do :; done
+''');
+      final client = ProcessWaylandPortalShortcutClient(
+        '/bin/sh',
+        argumentsBeforeCommand: [script.path],
+      );
+      final activations = client.activations.take(2).toList();
+
+      final readiness = await client.initialize();
+      expect(readiness.contextShortcut, isTrue);
+      expect(readiness.imageShortcut, isTrue);
+      expect(await activations, ['context', 'image']);
+      await client.close();
+    },
+  );
+
+  test('Wayland portal selection follows the desktop session authority', () {
+    expect(
+      shouldUseWaylandPortals(const {
+        'XDG_SESSION_TYPE': 'wayland',
+        'DISPLAY': ':1',
+        'WAYLAND_DISPLAY': 'wayland-0',
+      }),
+      isTrue,
+    );
+    expect(
+      shouldUseWaylandPortals(const {
+        'DISPLAY': ':0',
+        'WAYLAND_DISPLAY': 'wayland-0',
+      }),
+      isFalse,
+    );
+    expect(
+      shouldUseWaylandPortals(const {'WAYLAND_DISPLAY': 'wayland-0'}),
+      isTrue,
+    );
+  });
+
   test('Linux capture helper resolves beside the packaged Flutter binary', () {
     expect(
       resolveLinuxCaptureExecutable(
@@ -175,4 +319,22 @@ final class _FakeNativeCaptureClient implements NativeCaptureClient {
   Future<void> close() async {
     closed = true;
   }
+}
+
+final class _FakeWaylandPortalShortcutClient
+    implements WaylandPortalShortcutClient {
+  final StreamController<String> _controller =
+      StreamController<String>.broadcast(sync: true);
+
+  void emit(String shortcut) => _controller.add(shortcut);
+
+  @override
+  Stream<String> get activations => _controller.stream;
+
+  @override
+  Future<DesktopReadiness> initialize() async =>
+      const DesktopReadiness(contextShortcut: true, imageShortcut: true);
+
+  @override
+  Future<void> close() => _controller.close();
 }

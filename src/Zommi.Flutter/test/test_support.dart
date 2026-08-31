@@ -369,6 +369,7 @@ final class FakeDesktopBridge implements DesktopBridge {
   String? copiedText;
   String? copiedImage;
   bool closed = false;
+  Future<DesktopReadiness>? initializeGate;
 
   @override
   Stream<DesktopInvocation> get invocations => _invocations.stream;
@@ -378,6 +379,7 @@ final class FakeDesktopBridge implements DesktopBridge {
   @override
   Future<DesktopReadiness> initialize() async {
     calls.add('initialize');
+    if (initializeGate case final gate?) return gate;
     return const DesktopReadiness(contextShortcut: true, imageShortcut: true);
   }
 

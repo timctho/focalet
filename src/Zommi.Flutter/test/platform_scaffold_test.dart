@@ -57,6 +57,9 @@ void main() {
       "Process.run('osascript'",
       'LinuxCaptureProvider',
       'zommi-x11-capture',
+      'portal-shortcuts',
+      'portal-region',
+      'shouldUseWaylandPortals',
     ]) {
       expect(bridge, contains(contract));
     }
@@ -196,6 +199,17 @@ void main() {
 
     expect(unixPackager, contains('--linux-capture-host'));
     expect(unixPackager, contains('--bin zommi-x11-capture'));
+    final linuxCapture = File(
+      '${repository.path}/crates/zommi-x11-capture/src/main.rs',
+    ).readAsStringSync();
+    expect(
+      linuxCapture,
+      allOf(
+        contains('GlobalShortcuts'),
+        contains('AvailableTargets::Area'),
+        contains('Wayland portals do not expose active-window metadata'),
+      ),
+    );
 
     final linuxAcceptance = File(
       '${repository.path}/scripts/accept-linux-x11.py',
