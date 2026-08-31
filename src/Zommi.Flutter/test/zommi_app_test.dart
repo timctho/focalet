@@ -73,7 +73,7 @@ void main() {
         clientOperationId: 'client:test',
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
     expect(find.bySemanticsLabel('Exact agent session bound'), findsOneWidget);
     expect(find.text('draft while processing'), findsOneWidget);
   });

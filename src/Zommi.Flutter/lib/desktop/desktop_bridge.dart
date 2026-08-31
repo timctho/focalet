@@ -463,10 +463,11 @@ final class FlutterDesktopBridge
 
   @override
   Future<void> showPanel() async {
-    await setSurface(expanded: true);
-    await windowManager.show();
-    await windowManager.focus();
-    await windowManager.setAlwaysOnTop(true);
+    await presentPanelWithoutResizing(
+      show: windowManager.show,
+      focus: windowManager.focus,
+      keepOnTop: () => windowManager.setAlwaysOnTop(true),
+    );
   }
 
   @override
@@ -651,6 +652,16 @@ final class FlutterDesktopBridge
     }
     if (!_invocations.isClosed) await _invocations.close();
   }
+}
+
+Future<void> presentPanelWithoutResizing({
+  required Future<void> Function() show,
+  required Future<void> Function() focus,
+  required Future<void> Function() keepOnTop,
+}) async {
+  await show();
+  await focus();
+  await keepOnTop();
 }
 
 bool supportsNativeWindowShadow(String operatingSystem) =>

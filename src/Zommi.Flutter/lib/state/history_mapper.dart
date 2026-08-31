@@ -328,8 +328,10 @@ String mergeActivityText(
   String current,
   String incoming,
   TranscriptKind kind,
-  TranscriptLifecycle lifecycle,
-) {
+  TranscriptLifecycle lifecycle, {
+  bool replace = false,
+}) {
+  if (replace) return incoming;
   if (incoming.isEmpty) return current;
   if (lifecycle == TranscriptLifecycle.completed &&
       (kind == TranscriptKind.thinking || kind == TranscriptKind.plan)) {

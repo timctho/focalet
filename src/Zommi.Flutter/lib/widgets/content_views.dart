@@ -32,8 +32,8 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
   Widget build(BuildContext context) {
     final base = DefaultTextStyle.of(context).style.copyWith(
       color: const Color(0xff272b38),
-      fontSize: widget.compact ? 13 : 14.5,
-      height: 1.45,
+      fontSize: widget.compact ? 11.5 : 12.5,
+      height: 1.38,
     );
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
@@ -49,12 +49,12 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
               builders: {'pre': _CodeBlockBuilder(onCopy: widget.onCopy)},
               styleSheet: MarkdownStyleSheet(
                 p: base,
-                h1: base.copyWith(fontSize: 22, fontWeight: FontWeight.w700),
-                h2: base.copyWith(fontSize: 19, fontWeight: FontWeight.w700),
-                h3: base.copyWith(fontSize: 16, fontWeight: FontWeight.w700),
+                h1: base.copyWith(fontSize: 18, fontWeight: FontWeight.w700),
+                h2: base.copyWith(fontSize: 16, fontWeight: FontWeight.w700),
+                h3: base.copyWith(fontSize: 14, fontWeight: FontWeight.w700),
                 code: base.copyWith(
                   fontFamily: 'monospace',
-                  fontSize: widget.compact ? 12 : 13,
+                  fontSize: widget.compact ? 10.5 : 11.5,
                   backgroundColor: const Color(0xffeef0f6),
                 ),
                 codeblockDecoration: BoxDecoration(
@@ -155,8 +155,8 @@ class _CopyableCodeBlockState extends State<_CopyableCodeBlock> {
                 style: const TextStyle(
                   color: Color(0xff272b38),
                   fontFamily: 'monospace',
-                  fontSize: 13,
-                  height: 1.4,
+                  fontSize: 11.5,
+                  height: 1.35,
                 ),
               ),
             ),
@@ -198,7 +198,7 @@ class SafeHtmlView extends StatelessWidget {
           margin: Margins.zero,
           padding: HtmlPaddings.zero,
           color: const Color(0xff272b38),
-          fontSize: FontSize(compact ? 12 : 14),
+          fontSize: FontSize(compact ? 11 : 12.5),
           backgroundColor: const Color(0x00000000),
         ),
         'table': Style(border: Border.all(color: const Color(0xffd7dbe5))),

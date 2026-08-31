@@ -480,7 +480,11 @@ final class ZommiController extends ChangeNotifier {
     focusComposerEpoch++;
   }
 
-  Future<void> submit(String message) async {
+  Future<void> submit(
+    String message, {
+    String? inlineMessage,
+    List<String>? attachmentOrder,
+  }) async {
     final text = message.trim();
     final runtimeTargetId = activeRuntime?.id;
     final sessionId = activeSessionId;
@@ -493,7 +497,7 @@ final class ZommiController extends ChangeNotifier {
       return;
     }
     if (_activeTurns.containsKey(sessionId)) return;
-    final sendingAttachments = List<ContextAttachment>.of(attachments);
+    final sendingAttachments = _orderedAttachments(attachmentOrder);
     attachments.clear();
     previewAttachment = null;
     final operationId =
@@ -502,7 +506,12 @@ final class ZommiController extends ChangeNotifier {
       id: operationId,
       number: (_turnsBySession[sessionId]?.length ?? 0) + 1,
       userText: text,
-      contextTokens: sendingAttachments.map((item) => item.token).toList(),
+      inlineUserText: inlineMessage,
+      contextTokens: sendingAttachments
+          .where((item) => !item.hasImage)
+          .map((item) => item.token)
+          .toList(),
+      attachments: sendingAttachments,
     );
     _turnsBySession.putIfAbsent(sessionId, () => []).add(localTurn);
     _activeTurns[sessionId] = operationId;
@@ -547,6 +556,24 @@ final class ZommiController extends ChangeNotifier {
       submitting = false;
       _notify();
     }
+  }
+
+  List<ContextAttachment> _orderedAttachments(List<String>? order) {
+    if (order == null || order.isEmpty) {
+      return List<ContextAttachment>.of(attachments);
+    }
+    final byId = {
+      for (final attachment in attachments) attachment.id: attachment,
+    };
+    final result = <ContextAttachment>[];
+    for (final id in order) {
+      final attachment = byId.remove(id);
+      if (attachment != null) result.add(attachment);
+    }
+    result.addAll(
+      attachments.where((attachment) => byId.containsKey(attachment.id)),
+    );
+    return result;
   }
 
   Future<void> interrupt() async {
@@ -755,6 +782,24 @@ final class ZommiController extends ChangeNotifier {
     _notify();
   }
 
+  void dismissSessionPanel() {
+    if (!sessionPanelOpen) return;
+    sessionPanelOpen = false;
+    _notify();
+  }
+
+  void dismissRuntimePanel() {
+    if (!runtimePanelOpen) return;
+    runtimePanelOpen = false;
+    _notify();
+  }
+
+  void dismissModelPanel() {
+    if (!modelPanelOpen) return;
+    modelPanelOpen = false;
+    _notify();
+  }
+
   Future<void> setExpanded(bool value, {bool focus = false}) async {
     expanded = value;
     if (value && focus) focusComposerEpoch++;
@@ -956,6 +1001,7 @@ final class ZommiController extends ChangeNotifier {
       event.payload['text']?.toString() ?? '',
       kind,
       lifecycle,
+      replace: event.payload['replace'] == true,
     );
     block.lifecycle = lifecycle;
     block.status = event.payload['status']?.toString() ?? block.status;

@@ -1,10 +1,13 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
+import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
 import 'package:zommi_flutter/zommi_app.dart';
 
 import 'test_support.dart';
@@ -30,10 +33,13 @@ void main() {
           message: 'Context attached',
         ),
       );
-      await tester.pumpAndSettle();
+      await tester.pump();
 
       expect(find.byKey(const ValueKey('zommi-composer')), findsOneWidget);
-      expect(find.text('[example.com]'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('inline-attachment-capture-1')),
+        findsOneWidget,
+      );
       expect(
         desktop.calls,
         containsAllInOrder(['surface:true:false', 'showPanel']),
@@ -53,24 +59,26 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('[example.com 2]'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('inline-attachment-capture-2')),
+        findsOneWidget,
+      );
 
       final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
       addTearDown(mouse.removePointer);
       await mouse.addPointer(location: Offset.zero);
       await mouse.moveTo(
-        tester.getCenter(find.byKey(const ValueKey('attachment-capture-1'))),
+        tester.getCenter(
+          find.byKey(const ValueKey('inline-attachment-capture-1')),
+        ),
       );
       await tester.pump();
       expect(find.byKey(const ValueKey('context-preview')), findsOneWidget);
       expect(find.textContaining('PRIMARY SURFACE SELECTION'), findsOneWidget);
 
-      await tester.enterText(
-        find.byKey(const ValueKey('zommi-composer')),
-        'compare captures',
-      );
+      _appendComposerText(tester, 'compare captures');
       await tester.tap(find.byKey(const ValueKey('send-message')));
-      await tester.pumpAndSettle();
+      await tester.pump();
       expect(core.lastMessage, 'compare captures');
       expect(core.lastSnapshots, hasLength(2));
       expect(core.lastImages, isEmpty);
@@ -78,7 +86,7 @@ void main() {
   );
 
   testWidgets(
-    'explicit image selection keeps pointer context and can be removed',
+    'image previews stay inline at the cursor, submit in order, and can be removed',
     (tester) async {
       final core = RichFakeCore()..historyCount = 0;
       final desktop = FakeDesktopBridge()
@@ -93,19 +101,47 @@ void main() {
       await _pumpApp(tester, core: core, desktop: desktop);
       await _expand(tester);
 
+      await tester.enterText(
+        find.byKey(const ValueKey('zommi-composer')),
+        'hey i own ',
+      );
       await tester.tap(find.byKey(const ValueKey('select-image')));
       await tester.pumpAndSettle();
       expect(desktop.calls, contains('selectImage:false'));
-      expect(find.text('[image]'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('inline-image-image-1')),
+        findsOneWidget,
+      );
+      expect(find.text('[image]'), findsNothing);
+      expect(find.byKey(const ValueKey('context-chips')), findsNothing);
 
-      await tester.enterText(
-        find.byKey(const ValueKey('zommi-composer')),
-        'inspect the image',
+      _appendComposerText(tester, " and i'd like to consider to buy ");
+      desktop.nextImage = ContextAttachment(
+        id: 'image-2',
+        token: '',
+        imageDataUrl: _onePixelPng,
+      );
+      await tester.tap(find.byKey(const ValueKey('select-image')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('inline-image-image-2')),
+        findsOneWidget,
       );
       await tester.tap(find.byKey(const ValueKey('send-message')));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      expect(core.lastMessage, "hey i own and i'd like to consider to buy");
       expect(core.lastSnapshots, hasLength(1));
-      expect(core.lastImages, [_onePixelPng]);
+      expect(core.lastImages, [_onePixelPng, _onePixelPng]);
+      expect(find.byType(InlineAttachmentMessage), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('sent-inline-image-image-1')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('sent-inline-image-image-2')),
+        findsOneWidget,
+      );
+      expect(find.text('[image]'), findsNothing);
 
       desktop.emit(
         DesktopInvocation(
@@ -113,10 +149,14 @@ void main() {
           attachment: desktop.nextImage,
         ),
       );
-      await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Remove [image]'));
       await tester.pump();
-      expect(find.byKey(const ValueKey('attachment-image-1')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('zommi-composer')));
+      await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('inline-attachment-image-2')),
+        findsNothing,
+      );
     },
   );
 
@@ -166,6 +206,145 @@ void main() {
       expect(find.byKey(const ValueKey('session-sidebar')), findsNothing);
     },
   );
+
+  testWidgets('runtime, model, and session overlays dismiss on outside click', (
+    tester,
+  ) async {
+    final core = RichFakeCore()..historyCount = 0;
+    await _pumpApp(tester, core: core, desktop: FakeDesktopBridge());
+    await _expand(tester);
+    final composer = find.byKey(const ValueKey('zommi-composer'));
+
+    await tester.tap(find.byKey(const ValueKey('runtime-summary')));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('runtime-panel')), findsOneWidget);
+    await tester.tap(composer);
+    await tester.pump();
+    expect(find.byKey(const ValueKey('runtime-panel')), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('model-summary')));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('model-panel')), findsOneWidget);
+    await tester.tap(composer);
+    await tester.pump();
+    expect(find.byKey(const ValueKey('model-panel')), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('session-sidebar')), findsOneWidget);
+    await tester.tap(composer);
+    await tester.pump();
+    expect(find.byKey(const ValueKey('session-sidebar')), findsNothing);
+  });
+
+  testWidgets('large panel stays large when the window is shown again', (
+    tester,
+  ) async {
+    final core = RichFakeCore()..historyCount = 0;
+    final desktop = FakeDesktopBridge();
+    await _pumpApp(tester, core: core, desktop: desktop);
+    await _expand(tester);
+    desktop.calls.clear();
+
+    await tester.tap(find.byKey(const ValueKey('expand-zommi')));
+    await tester.pumpAndSettle();
+    expect(
+      tester.getSize(find.byKey(const ValueKey('zommi-surface'))),
+      largeWindowSize,
+    );
+    expect(desktop.calls, contains('surface:true:true'));
+
+    desktop.emit(const DesktopInvocation(kind: DesktopInvocationKind.open));
+    await tester.pumpAndSettle();
+    expect(
+      desktop.calls,
+      containsAllInOrder([
+        'surface:true:true',
+        'surface:true:true',
+        'showPanel',
+      ]),
+    );
+    expect(desktop.calls, isNot(contains('surface:true:false')));
+    expect(
+      tester.getSize(find.byKey(const ValueKey('zommi-surface'))),
+      largeWindowSize,
+    );
+  });
+
+  testWidgets('compact typography preserves transcript and composer layout', (
+    tester,
+  ) async {
+    final core = RichFakeCore()..historyCount = 0;
+    await _pumpApp(tester, core: core, desktop: FakeDesktopBridge());
+    await _expand(tester);
+    await tester.enterText(
+      find.byKey(const ValueKey('zommi-composer')),
+      'compact type',
+    );
+    await tester.tap(find.byKey(const ValueKey('send-message')));
+    await tester.pump();
+    core.emit(
+      _event(
+        1,
+        'item.update',
+        payload: const {
+          'kind': 'assistant',
+          'lifecycle': 'delta',
+          'text': '# Compact heading\nReadable body',
+          'itemId': 'answer',
+        },
+      ),
+    );
+    await tester.pump();
+
+    final field = tester.widget<TextField>(
+      find.byKey(const ValueKey('zommi-composer')),
+    );
+    expect(field.style?.fontSize, 13);
+    final markdown = tester.widgetList<MarkdownBody>(find.byType(MarkdownBody));
+    expect(markdown, isNotEmpty);
+    expect(
+      markdown.every(
+        (body) => (body.styleSheet?.p?.fontSize ?? double.infinity) <= 12.5,
+      ),
+      isTrue,
+    );
+  });
+
+  testWidgets('working orb remains visible and advances in the open panel', (
+    tester,
+  ) async {
+    final core = RichFakeCore()..historyCount = 0;
+    await _pumpApp(tester, core: core, desktop: FakeDesktopBridge());
+    await _expand(tester);
+    await tester.enterText(
+      find.byKey(const ValueKey('zommi-composer')),
+      'please think',
+    );
+    await tester.tap(find.byKey(const ValueKey('send-message')));
+    await tester.pump();
+
+    final orb = find.byKey(const ValueKey('panel-orb'));
+    expect(orb, findsOneWidget);
+    expect(tester.widget<ZommiOrb>(orb).working, isTrue);
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Semantics &&
+            widget.properties.label == 'Zommi is thinking',
+      ),
+      findsOneWidget,
+    );
+    final canvas = find.descendant(
+      of: orb,
+      matching: find.byKey(const ValueKey('zommi-orb-canvas')),
+    );
+    final firstPainter = tester.widget<CustomPaint>(canvas).painter;
+    await tester.pump(const Duration(milliseconds: 350));
+    final secondPainter = tester.widget<CustomPaint>(canvas).painter;
+    expect(secondPainter, isNot(same(firstPainter)));
+    expect(secondPainter!.shouldRepaint(firstPainter!), isTrue);
+  });
 
   testWidgets(
     'advanced runtime overrides use host paths or credential-free endpoints',
@@ -258,7 +437,7 @@ void main() {
         'stream please',
       );
       await tester.tap(find.byKey(const ValueKey('send-message')));
-      await tester.pumpAndSettle();
+      await tester.pump();
 
       core.emit(
         _event(
@@ -338,7 +517,8 @@ void main() {
           },
         ),
       );
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
 
       expect(
         find.byKey(const ValueKey('activity-turn-thinking')),
@@ -354,10 +534,11 @@ void main() {
       );
       expect(find.byTooltip('Copy code'), findsOneWidget);
       await tester.ensureVisible(find.byTooltip('Copy code'));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 200));
       await tester.tap(find.byTooltip('Copy code'));
       await tester.pump();
       expect(desktop.copiedText, contains('copy me'));
+      await tester.pump(const Duration(seconds: 1));
       final copyImageButton = tester.widget<IconButton>(
         find.ancestor(
           of: find.byTooltip('Copy image'),
@@ -374,7 +555,8 @@ void main() {
         ),
       );
       htmlPreviewButton.onPressed!();
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
       final viewer = find.byKey(const ValueKey('artifact-viewer'));
       expect(viewer, findsOneWidget);
       expect(
@@ -386,7 +568,7 @@ void main() {
         ),
       );
       await tester.tap(find.byTooltip('Close artifact preview'));
-      await tester.pumpAndSettle();
+      await tester.pump();
 
       core.emit(
         _event(
@@ -409,13 +591,13 @@ void main() {
           },
         ),
       );
-      await tester.pumpAndSettle();
+      await tester.pump();
       expect(
         find.bySemanticsLabel(RegExp('Agent requests permission')),
         findsOneWidget,
       );
       await tester.tap(find.byKey(const ValueKey('approval-allow-once')));
-      await tester.pumpAndSettle();
+      await tester.pump();
       expect(core.approvalResolution, (
         'runtime-codex',
         'session-1',
@@ -446,14 +628,14 @@ void main() {
           },
         ),
       );
-      await tester.pumpAndSettle();
+      await tester.pump();
       expect(
         find.bySemanticsLabel(RegExp('Agent asks a question')),
         findsOneWidget,
       );
       await tester.tap(find.text('Fast'));
       await tester.tap(find.byKey(const ValueKey('question-submit')));
-      await tester.pumpAndSettle();
+      await tester.pump();
       expect(core.questionResolution?.$3, 'question-1');
       expect(core.questionResolution?.$4, {
         'answers': {
@@ -625,6 +807,19 @@ Future<void> _pumpApp(
 Future<void> _expand(WidgetTester tester) async {
   await tester.tap(find.byKey(const ValueKey('zommi-orb')));
   await tester.pumpAndSettle();
+}
+
+void _appendComposerText(WidgetTester tester, String value) {
+  final field = tester.widget<TextField>(
+    find.byKey(const ValueKey('zommi-composer')),
+  );
+  final controller = field.controller!;
+  final updated = '${controller.text}$value';
+  controller.value = controller.value.copyWith(
+    text: updated,
+    selection: TextSelection.collapsed(offset: updated.length),
+    composing: TextRange.empty,
+  );
 }
 
 ContextAttachment _browserAttachment(String id) => ContextAttachment(

@@ -91,6 +91,50 @@ void main() {
     },
   );
 
+  test(
+    'authoritative cumulative stream frames replace instead of duplicate',
+    () async {
+      final core = RichFakeCore()..historyCount = 0;
+      final controller = ZommiController(
+        core: core,
+        desktop: FakeDesktopBridge(),
+      );
+      await controller.initialize();
+      await controller.submit('stream once');
+
+      core.emit(
+        _event(
+          1,
+          'item.update',
+          payload: const {
+            'kind': 'assistant',
+            'lifecycle': 'delta',
+            'text': 'Hello',
+            'itemId': 'answer',
+          },
+        ),
+      );
+      core.emit(
+        _event(
+          2,
+          'item.update',
+          payload: const {
+            'kind': 'assistant',
+            'lifecycle': 'completed',
+            'text': 'Hello from Codex',
+            'replace': true,
+            'itemId': 'answer',
+          },
+        ),
+      );
+
+      final answer = controller.turns.single.blocks.single.text;
+      expect(answer, 'Hello from Codex');
+      expect(RegExp('Hello').allMatches(answer), hasLength(1));
+      await controller.close();
+    },
+  );
+
   test('desktop invocation attaches context before requesting focus', () async {
     final core = RichFakeCore()..historyCount = 0;
     final desktop = FakeDesktopBridge();

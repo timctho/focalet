@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/widgets/content_views.dart';
+import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
 
 class TranscriptPane extends StatefulWidget {
   const TranscriptPane({required this.controller, super.key});
@@ -111,12 +112,12 @@ class _TranscriptPaneState extends State<TranscriptPane> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ZommiMiniOrb(working: widget.controller.turnActive, size: 44),
-            const SizedBox(height: 18),
+            const SizedBox(height: 14),
             const Text(
               'Point, ask, keep moving.',
               style: TextStyle(
                 color: Color(0xff43495a),
-                fontSize: 17,
+                fontSize: 15,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -142,7 +143,7 @@ class _TranscriptPaneState extends State<TranscriptPane> {
           child: ListView.builder(
             key: const ValueKey('zommi-transcript'),
             controller: _scroll,
-            padding: const EdgeInsets.fromLTRB(28, 18, 28, 26),
+            padding: const EdgeInsets.fromLTRB(24, 14, 24, 20),
             itemCount: visible.length,
             itemBuilder: (context, index) => ConversationTurnView(
               turn: visible[index],
@@ -192,7 +193,7 @@ class ConversationTurnView extends StatelessWidget {
       container: true,
       label: 'Conversation turn ${turn.number}',
       child: Padding(
-        padding: const EdgeInsets.only(bottom: 20),
+        padding: const EdgeInsets.only(bottom: 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -202,8 +203,8 @@ class ConversationTurnView extends StatelessWidget {
                 key: ValueKey('user-message-${turn.id}'),
                 constraints: const BoxConstraints(maxWidth: 520),
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 15,
-                  vertical: 11,
+                  horizontal: 13,
+                  vertical: 9,
                 ),
                 decoration: BoxDecoration(
                   color: const Color(0xffe9e7f8),
@@ -212,7 +213,8 @@ class ConversationTurnView extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (turn.contextTokens.isNotEmpty)
+                    if (turn.contextTokens.isNotEmpty &&
+                        turn.attachments.isEmpty)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 5),
                         child: Text(
@@ -224,16 +226,27 @@ class ConversationTurnView extends StatelessWidget {
                           ),
                         ),
                       ),
-                    CopyableMarkdown(
-                      text: turn.userText,
-                      compact: true,
-                      onCopy: controller.copyText,
-                    ),
+                    if (turn.attachments.isNotEmpty &&
+                        turn.inlineUserText.contains(inlineAttachmentMarker))
+                      InlineAttachmentMessage(
+                        key: ValueKey('inline-user-message-${turn.id}'),
+                        text: turn.inlineUserText,
+                        attachments: turn.attachments,
+                        onAttachmentEnter: controller.showAttachmentPreview,
+                        onAttachmentExit: (_) =>
+                            controller.hideAttachmentPreview(),
+                      )
+                    else
+                      CopyableMarkdown(
+                        text: turn.userText,
+                        compact: true,
+                        onCopy: controller.copyText,
+                      ),
                   ],
                 ),
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             for (final block in turn.blocks)
               Padding(
                 padding: const EdgeInsets.only(bottom: 9),
@@ -272,7 +285,7 @@ class AssistantBlockView extends StatelessWidget {
       child: Container(
         key: ValueKey('assistant-${block.id}'),
         constraints: const BoxConstraints(maxWidth: 620),
-        padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
         decoration: BoxDecoration(
           color: const Color(0xb3ffffff),
           borderRadius: BorderRadius.circular(18),

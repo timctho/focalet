@@ -29,6 +29,21 @@ void main() {
   });
 
   test(
+    'showing a panel focuses it without applying a second surface size',
+    () async {
+      final calls = <String>[];
+      await presentPanelWithoutResizing(
+        show: () async => calls.add('show'),
+        focus: () async => calls.add('focus'),
+        keepOnTop: () async => calls.add('topmost'),
+      );
+
+      expect(calls, ['show', 'focus', 'topmost']);
+      expect(calls, isNot(contains('resize')));
+    },
+  );
+
+  test(
     'Windows region selection is not queued behind slow UIA capture',
     () async {
       final captureResult = Completer<Map<String, Object?>>();
