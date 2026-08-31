@@ -34,19 +34,21 @@ Before the physical walkthrough, run the packaged helper gate:
 ```
 
 It verifies an exact selected-text UIA fixture, selector cancellation, a
-DPI-aware 40 by 30 region, and the returned PNG dimensions. It then launches
-the exact packaged Flutter application and checks topmost compact/expanded
-window bounds, real operating-system shortcut registration, injected
+DPI-aware region within one physical pixel of 40 by 30, and exact agreement
+between the reported bounds and returned PNG dimensions. It then launches the
+exact packaged Flutter application and checks topmost compact/expanded window
+bounds, real operating-system shortcut registration, injected
 `Alt+A`/`Alt+Shift+A` activation, context attachment, image cancellation,
 image-plus-pointer pairing, and the adjacent Flutter/Rust/two-helper process
 topology. Run it from an interactive desktop PowerShell; a process launched
 through WSL interop does not inherit an authoritative screen device context.
 
-The hosted Windows job runs the same command with `-NonVisualOnly` because CI
-has no authoritative interactive desktop. That subset still exercises
-selected-text capture and selector cancellation; it does not replace the full
-gate or the walkthrough. Injected keys validate native registration and event
-delivery, but they are still not physical keyboard evidence.
+The local Windows release job runs this full command from an unlocked,
+interactive user-session runner. A locked desktop or a runner installed as a
+non-interactive service must fail this gate rather than downgrade it silently.
+`-NonVisualOnly` remains available for capture-helper diagnostics, but it is not
+CI acceptance. Injected keys validate native registration and event delivery;
+they are still not physical keyboard evidence.
 
 ## Window and interaction
 

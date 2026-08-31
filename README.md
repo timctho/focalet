@@ -123,9 +123,10 @@ On Windows PowerShell:
 ```
 
 To require real signing, set `ZOMMI_WINDOWS_SIGNING_THUMBPRINT` or
-`ZOMMI_MACOS_SIGNING_IDENTITY` in the native build environment. The CI matrix
-builds and verifies one native release on Windows, Linux, and macOS and uploads
-only the archive plus checksum.
+`ZOMMI_MACOS_SIGNING_IDENTITY` in the native build environment. CI builds and
+verifies native Windows and Linux releases on separate local runners and
+uploads only each archive plus checksum. The native macOS job is explicitly
+skipped until a local macOS builder is available.
 
 ## Launch
 

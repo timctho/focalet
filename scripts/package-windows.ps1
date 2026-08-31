@@ -53,6 +53,59 @@ if (-not $SkipBuild) {
         if ($Runtime -eq 'win-arm64') {
             $flutterArguments += '--target-platform=windows-arm64'
         }
+
+        if (-not [string]::IsNullOrWhiteSpace($env:CMAKE_GENERATOR_INSTANCE)) {
+            $generatorInstance = [IO.Path]::GetFullPath($env:CMAKE_GENERATOR_INSTANCE)
+            $cmake = Join-Path $generatorInstance 'Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe'
+            if (-not (Test-Path -LiteralPath $cmake -PathType Leaf)) {
+                throw "CMake was not found in the requested Visual Studio instance: $generatorInstance"
+            }
+
+            # Flutter generates its ephemeral CMake inputs only through its own
+            # build command. Configure once, replace the auto-selected instance,
+            # and leave that authoritative cache for the real build below.
+            & flutter @flutterArguments --config-only
+            if ($LASTEXITCODE -ne 0) {
+                throw "Flutter Windows configuration failed with exit code $LASTEXITCODE."
+            }
+
+            $windowsBuild = Join-Path $flutterDirectory "build/windows/$architecture"
+            if (Test-Path -LiteralPath $windowsBuild) {
+                Remove-Item -LiteralPath $windowsBuild -Recurse -Force
+            }
+            $generator = if ([string]::IsNullOrWhiteSpace($env:CMAKE_GENERATOR)) {
+                'Visual Studio 17 2022'
+            }
+            else {
+                $env:CMAKE_GENERATOR
+            }
+            $cmakeArchitecture = if ($Runtime -eq 'win-arm64') { 'ARM64' } else { 'x64' }
+            $flutterTarget = if ($Runtime -eq 'win-arm64') { 'windows-arm64' } else { 'windows-x64' }
+            & $cmake `
+                -S (Join-Path $flutterDirectory 'windows') `
+                -B $windowsBuild `
+                -G $generator `
+                -A $cmakeArchitecture `
+                "-DCMAKE_GENERATOR_INSTANCE=$generatorInstance" `
+                "-DFLUTTER_TARGET_PLATFORM=$flutterTarget"
+            if ($LASTEXITCODE -ne 0) {
+                throw "Visual Studio CMake configuration failed with exit code $LASTEXITCODE."
+            }
+
+            $cache = Join-Path $windowsBuild 'CMakeCache.txt'
+            $cacheEntry = Get-Content -LiteralPath $cache |
+                Where-Object { $_ -match '^CMAKE_GENERATOR_INSTANCE:[^=]+=' } |
+                Select-Object -First 1
+            if ([string]::IsNullOrWhiteSpace($cacheEntry)) {
+                throw 'CMake did not record the requested Visual Studio instance.'
+            }
+            $actualInstance = ($cacheEntry -replace '^CMAKE_GENERATOR_INSTANCE:[^=]+=', '').Replace('\', '/')
+            $expectedInstance = $generatorInstance.Replace('\', '/')
+            if (-not [string]::Equals($actualInstance, $expectedInstance, [StringComparison]::OrdinalIgnoreCase)) {
+                throw "CMake selected '$actualInstance' instead of '$expectedInstance'."
+            }
+        }
+
         & flutter @flutterArguments
         if ($LASTEXITCODE -ne 0) {
             throw "Flutter Windows build failed with exit code $LASTEXITCODE."

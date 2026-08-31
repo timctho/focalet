@@ -132,12 +132,23 @@ void main() {
       'runs-on: [self-hosted, Linux, X64, zommi-release]',
       'bash scripts/package-linux-self-hosted.sh',
       "ZOMMI_LINUX_STARTUP_SMOKE: '1'",
-      r'Native release (${{ matrix.target }})',
+      'Native release (windows)',
+      'runs-on: [self-hosted, Windows, X64, zommi-release]',
+      'CMAKE_GENERATOR=Visual Studio 17 2022',
+      'CMAKE_GENERATOR_INSTANCE',
+      r'Git\bin\bash.exe',
+      'jq-windows-amd64.exe',
+      '23cb60a1354eed6bcc8d9b9735e8c7b388cd1fdcb75726b93bc299ef22dd9334',
+      'Verify local Python',
+      'Verify local .NET capture publisher',
+      'cache: false',
       'bash scripts/package-unix.sh macos',
+      'Native release (macOS, temporarily skipped)',
+      r'if: ${{ false }}',
+      'runs-on: [self-hosted, macOS, zommi-release]',
       './scripts/package-windows.ps1 -Runtime win-x64',
-      'Accept Windows non-visual capture contracts',
+      'Accept Windows shortcuts and capture UX',
       'scripts/accept-windows-capture.ps1',
-      '-NonVisualOnly',
       'tests/test_release_package.py',
       'tests/test_linux_startup_smoke.py',
       'Accept Linux X11 shortcuts and capture UX',
@@ -147,6 +158,9 @@ void main() {
     }
     expect(workflow, isNot(contains('npm ')));
     expect(workflow, isNot(contains('src/Zommi.Electron')));
+    expect(workflow, isNot(contains('-NonVisualOnly')));
+    expect(workflow, isNot(contains('windows-2025')));
+    expect(workflow, isNot(contains('macos-15')));
 
     final verifier = File('${repository.path}/scripts/verify_release.py')
         .readAsStringSync();
@@ -193,6 +207,29 @@ void main() {
       ),
     );
     expect(linuxPackager, contains('scripts/package-unix.sh'));
+
+    final windowsPackager = File(
+      '${repository.path}/scripts/package-windows.ps1',
+    ).readAsStringSync();
+    expect(
+      windowsPackager,
+      allOf(
+        contains('--config-only'),
+        contains('CMAKE_GENERATOR_INSTANCE'),
+        contains('CMakeCache.txt'),
+      ),
+    );
+    final windowsAcceptance = File(
+      '${repository.path}/scripts/accept-windows-capture.ps1',
+    ).readAsStringSync();
+    expect(
+      windowsAcceptance,
+      allOf(
+        contains('Assert-ProbeRegionSize'),
+        contains('PNG dimensions'),
+        contains(r'$width -ne $selected.bounds.width'),
+      ),
+    );
 
     final linuxSmoke = File('${repository.path}/scripts/smoke-linux-release.sh')
         .readAsStringSync();

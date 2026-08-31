@@ -418,6 +418,27 @@ function Assert-DesktopCaptureSurface {
     }
 }
 
+function Assert-ProbeRegionSize {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int] $Width,
+
+        [Parameter(Mandatory = $true)]
+        [int] $Height,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Source
+    )
+
+    # A DPI-unaware automation process can land one physical pixel on either
+    # side of the requested size when Windows virtualizes coordinates across
+    # mixed-scale monitors. Keep that rounding tolerance narrow and require the
+    # returned PNG to match the reported bounds exactly below.
+    if ([Math]::Abs($Width - 40) -gt 1 -or [Math]::Abs($Height - 30) -gt 1) {
+        throw "$Source region is outside the 40 by 30 DPI tolerance: ${Width}x${Height}."
+    }
+}
+
 function Invoke-PackagedApplicationAcceptance {
     param(
         [Parameter(Mandatory = $true)]
@@ -536,11 +557,13 @@ function Invoke-PackagedApplicationAcceptance {
             -Name 'shortcut.image' `
             -After $eventCount
         $image = $imageResult.Event
+        Assert-ProbeRegionSize `
+            -Width $image.width `
+            -Height $image.height `
+            -Source 'Packaged image shortcut'
         if ($image.attached -ne $true -or
             $image.hasImage -ne $true -or
-            $image.hasPointerContext -ne $true -or
-            $image.width -ne 40 -or
-            $image.height -ne 30) {
+            $image.hasPointerContext -ne $true) {
             throw "Packaged image shortcut contract failed: $($image | ConvertTo-Json -Compress)"
         }
 
@@ -676,9 +699,10 @@ $selected = Invoke-CaptureRequest -Executable $capture -Method 'selectImage' -In
 if ($selected.cancelled -eq $true) {
     throw "Region selector cancelled the scripted selection: $($selected.errorMessage)"
 }
-if ($selected.bounds.width -ne 40 -or $selected.bounds.height -ne 30) {
-    throw "Unexpected selected bounds: $($selected.bounds | ConvertTo-Json -Compress)"
-}
+Assert-ProbeRegionSize `
+    -Width $selected.bounds.width `
+    -Height $selected.bounds.height `
+    -Source 'Capture helper'
 
 $prefix = 'data:image/png;base64,'
 if (-not $selected.dataUrl.StartsWith($prefix, [StringComparison]::Ordinal)) {
@@ -696,8 +720,8 @@ for ($index = 0; $index -lt $signature.Length; $index++) {
 }
 $width = Read-PngDimension -Bytes $png -Offset 16
 $height = Read-PngDimension -Bytes $png -Offset 20
-if ($width -ne 40 -or $height -ne 30) {
-    throw "PNG dimension mismatch: ${width}x${height}."
+if ($width -ne $selected.bounds.width -or $height -ne $selected.bounds.height) {
+    throw "PNG dimensions ${width}x${height} do not match the reported bounds $($selected.bounds.width)x$($selected.bounds.height)."
 }
 
 $applicationResult = Invoke-PackagedApplicationAcceptance `

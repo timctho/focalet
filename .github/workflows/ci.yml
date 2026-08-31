@@ -122,33 +122,99 @@ jobs:
           compression-level: 0
           retention-days: 14
 
-  release_hosted:
-    name: Native release (${{ matrix.target }})
+  release_windows:
+    name: Native release (windows)
     needs: test
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-2025
-            target: windows
-          - os: macos-15
-            target: macos
-    runs-on: ${{ matrix.os }}
+    runs-on: [self-hosted, Windows, X64, zommi-release]
     timeout-minutes: 45
     steps:
       - name: Check out source
         uses: actions/checkout@v7
 
-      - name: Ensure Windows ATL build tools
-        if: runner.os == 'Windows'
+      - name: Select local Windows build tools
         shell: pwsh
         run: |
-          $installer = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vs_installer.exe'
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-          $installPath = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
-          if ([string]::IsNullOrWhiteSpace($installPath)) { throw 'Visual Studio C++ tools were not found.' }
-          & $installer modify --installPath $installPath --add Microsoft.VisualStudio.Component.VC.ATL --quiet --norestart
-          if ($LASTEXITCODE -notin @(0, 3010)) { throw "Visual Studio ATL installation failed with $LASTEXITCODE." }
+          $installPath = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.ATL -property installationPath).Trim()
+          if ([string]::IsNullOrWhiteSpace($installPath)) { throw 'An ATL-capable Visual Studio instance was not found.' }
+          $gitBash = Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
+          if (-not (Test-Path -LiteralPath $gitBash -PathType Leaf)) { throw 'Git for Windows bash was not found.' }
+          $jqDirectory = Join-Path $env:RUNNER_TOOL_CACHE 'jq\1.8.1\x64'
+          $jq = Join-Path $jqDirectory 'jq.exe'
+          $jqHash = '23cb60a1354eed6bcc8d9b9735e8c7b388cd1fdcb75726b93bc299ef22dd9334'
+          if (-not (Test-Path -LiteralPath $jq -PathType Leaf)) {
+            New-Item -ItemType Directory -Path $jqDirectory -Force | Out-Null
+            $download = "$jq.download"
+            Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-windows-amd64.exe' -OutFile $download
+            if ((Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash.ToLowerInvariant() -ne $jqHash) { throw 'jq download hash mismatch.' }
+            Move-Item -LiteralPath $download -Destination $jq
+          }
+          if ((Get-FileHash -LiteralPath $jq -Algorithm SHA256).Hash.ToLowerInvariant() -ne $jqHash) { throw 'Cached jq hash mismatch.' }
+          'CMAKE_GENERATOR=Visual Studio 17 2022' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CMAKE_GENERATOR_INSTANCE=$installPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          (Split-Path -Parent $gitBash) | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $jqDirectory | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Verify local Python
+        shell: pwsh
+        run: python -c "import sys; assert sys.version_info >= (3, 10), sys.version; print(sys.version)"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@1.93.0
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.2
+          # The self-hosted runner's tool cache is durable. Uploading a second
+          # multi-gigabyte GitHub cache makes the post-job slower than the build.
+          cache: false
+
+      - name: Verify local .NET capture publisher
+        shell: pwsh
+        run: |
+          $sdks = @(dotnet --list-sdks)
+          if ($LASTEXITCODE -ne 0 -or -not ($sdks -match '^8\.')) { throw ".NET 8 SDK was not found: $($sdks -join ', ')" }
+          $sdks
+
+      - name: Build and verify Windows release
+        shell: pwsh
+        env:
+          ZOMMI_WINDOWS_SIGNING_THUMBPRINT: ${{ secrets.ZOMMI_WINDOWS_SIGNING_THUMBPRINT }}
+        run: ./scripts/package-windows.ps1 -Runtime win-x64
+
+      - name: Accept Windows shortcuts and capture UX
+        shell: pwsh
+        run: ./scripts/accept-windows-capture.ps1 -PackageDirectory ./artifacts/zommi-windows-x64
+
+      - name: Show release identity and signing state
+        shell: bash
+        run: |
+          python -c "import glob,json; p=glob.glob('artifacts/zommi-*/release-manifest.json'); assert len(p)==1, p; print(json.dumps(json.load(open(p[0], encoding='utf-8')), indent=2))"
+
+      - name: Upload native release
+        uses: actions/upload-artifact@v7
+        with:
+          name: zommi-windows-${{ runner.arch }}-${{ github.sha }}
+          path: |
+            artifacts/zommi-windows-*.zip
+            artifacts/zommi-windows-*.zip.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  release_macos:
+    name: Native release (macOS, temporarily skipped)
+    needs: test
+    # User-approved boundary on 2026-08-31: no local macOS builder is available.
+    # Keep the native job visible as skipped instead of scheduling a hosted runner.
+    if: ${{ false }}
+    runs-on: [self-hosted, macOS, zommi-release]
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -165,47 +231,18 @@ jobs:
           flutter-version: 3.47.2
           cache: true
 
-      - name: Set up .NET capture publisher
-        if: runner.os == 'Windows'
-        uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: 8.0.x
-
       - name: Build and verify macOS release
-        if: runner.os == 'macOS'
         env:
           ZOMMI_MACOS_SIGNING_IDENTITY: ${{ secrets.ZOMMI_MACOS_SIGNING_IDENTITY }}
         run: bash scripts/package-unix.sh macos
 
-      - name: Build and verify Windows release
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          ZOMMI_WINDOWS_SIGNING_THUMBPRINT: ${{ secrets.ZOMMI_WINDOWS_SIGNING_THUMBPRINT }}
-        run: ./scripts/package-windows.ps1 -Runtime win-x64
-
-      - name: Accept Windows non-visual capture contracts
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: >-
-          ./scripts/accept-windows-capture.ps1
-          -PackageDirectory ./artifacts/zommi-windows-x64
-          -NonVisualOnly
-
-      - name: Show release identity and signing state
-        shell: bash
-        run: |
-          python -c "import glob,json; p=glob.glob('artifacts/zommi-*/release-manifest.json'); assert len(p)==1, p; print(json.dumps(json.load(open(p[0], encoding='utf-8')), indent=2))"
-
       - name: Upload native release
         uses: actions/upload-artifact@v7
         with:
-          name: zommi-${{ matrix.target }}-${{ runner.arch }}-${{ github.sha }}
+          name: zommi-macos-${{ runner.arch }}-${{ github.sha }}
           path: |
-            artifacts/zommi-${{ matrix.target }}-*.zip
-            artifacts/zommi-${{ matrix.target }}-*.zip.sha256
-            artifacts/zommi-${{ matrix.target }}-*.tar.gz
-            artifacts/zommi-${{ matrix.target }}-*.tar.gz.sha256
+            artifacts/zommi-macos-*.zip
+            artifacts/zommi-macos-*.zip.sha256
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
