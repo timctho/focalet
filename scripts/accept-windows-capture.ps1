@@ -1,0 +1,715 @@
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)]
+    [string] $PackageDirectory,
+
+    [switch] $NonVisualOnly,
+
+    [string] $ResultPath
+)
+
+$ErrorActionPreference = 'Stop'
+
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class ZommiWindowsAcceptanceNative
+{
+    private delegate bool EnumWindowsProc(IntPtr window, IntPtr state);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr state);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int GetWindowText(IntPtr window, StringBuilder text, int maximum);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool PostMessage(IntPtr window, uint message, IntPtr word, IntPtr data);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SendMessage(IntPtr window, uint message, IntPtr word, IntPtr data);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr window);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr window);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetWindowRect(IntPtr window, out NativeRect bounds);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int GetWindowLong(IntPtr window, int index);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetCursorPos(int x, int y);
+
+    [DllImport("user32.dll")]
+    private static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    public static IntPtr FindWindow(int processId, string title)
+    {
+        IntPtr match = IntPtr.Zero;
+        EnumWindows((window, state) =>
+        {
+            uint owner;
+            GetWindowThreadProcessId(window, out owner);
+            if (owner != processId)
+            {
+                return true;
+            }
+
+            var text = new StringBuilder(256);
+            GetWindowText(window, text, text.Capacity);
+            if (text.ToString() == title)
+            {
+                match = window;
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+        return match;
+    }
+
+    public static IntPtr FindVisibleWindow(int processId)
+    {
+        IntPtr match = IntPtr.Zero;
+        EnumWindows((window, state) =>
+        {
+            uint owner;
+            GetWindowThreadProcessId(window, out owner);
+            if (owner == processId && IsWindowVisible(window))
+            {
+                match = window;
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+        return match;
+    }
+
+    public static int[] Bounds(IntPtr window)
+    {
+        NativeRect bounds;
+        if (!GetWindowRect(window, out bounds))
+        {
+            return new int[0];
+        }
+        return new[]
+        {
+            bounds.Left,
+            bounds.Top,
+            bounds.Right - bounds.Left,
+            bounds.Bottom - bounds.Top,
+        };
+    }
+
+    public static bool Visible(IntPtr window)
+    {
+        return IsWindowVisible(window);
+    }
+
+    public static bool TopMost(IntPtr window)
+    {
+        const int extendedStyle = -20;
+        const int topMost = 0x00000008;
+        return (GetWindowLong(window, extendedStyle) & topMost) != 0;
+    }
+
+    public static void SendAltA(bool shift)
+    {
+        const byte alt = 0x12;
+        const byte shiftKey = 0x10;
+        const byte a = 0x41;
+        const uint keyUp = 0x0002;
+        keybd_event(alt, 0, 0, UIntPtr.Zero);
+        if (shift)
+        {
+            keybd_event(shiftKey, 0, 0, UIntPtr.Zero);
+        }
+        keybd_event(a, 0, 0, UIntPtr.Zero);
+        System.Threading.Thread.Sleep(40);
+        keybd_event(a, 0, keyUp, UIntPtr.Zero);
+        if (shift)
+        {
+            keybd_event(shiftKey, 0, keyUp, UIntPtr.Zero);
+        }
+        keybd_event(alt, 0, keyUp, UIntPtr.Zero);
+    }
+
+    public static bool CancelSelection(IntPtr window)
+    {
+        const uint keyDown = 0x0100;
+        const uint keyUp = 0x0101;
+        const int escape = 0x1B;
+        return PostMessage(window, keyDown, new IntPtr(escape), IntPtr.Zero) &&
+            PostMessage(window, keyUp, new IntPtr(escape), IntPtr.Zero);
+    }
+
+    public static bool DragSelection(IntPtr window, int startX, int startY, int endX, int endY)
+    {
+        const uint leftDown = 0x0201;
+        const uint mouseMove = 0x0200;
+        const uint leftUp = 0x0202;
+        const int leftButton = 0x0001;
+        SendMessage(window, leftDown, new IntPtr(leftButton), Point(startX, startY));
+        System.Threading.Thread.Sleep(100);
+        SendMessage(window, mouseMove, new IntPtr(leftButton), Point(endX, endY));
+        System.Threading.Thread.Sleep(100);
+        SendMessage(window, leftUp, IntPtr.Zero, Point(endX, endY));
+        return true;
+    }
+
+    public static uint WindowDpi(IntPtr window)
+    {
+        var dpi = GetDpiForWindow(window);
+        return dpi == 0 ? 96 : dpi;
+    }
+
+    private static IntPtr Point(int x, int y)
+    {
+        return new IntPtr((y << 16) | (x & 0xffff));
+    }
+}
+'@
+
+function Wait-ForWindow {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int] $ProcessId,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Title
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $window = [ZommiWindowsAcceptanceNative]::FindWindow($ProcessId, $Title)
+        if ($window -ne [IntPtr]::Zero) {
+            return $window
+        }
+        Start-Sleep -Milliseconds 50
+    }
+    throw "Timed out waiting for '$Title' from process $ProcessId."
+}
+
+function Wait-ForVisibleProcessWindow {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int] $ProcessId
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $window = [ZommiWindowsAcceptanceNative]::FindVisibleWindow($ProcessId)
+        if ($window -ne [IntPtr]::Zero) {
+            return $window
+        }
+        Start-Sleep -Milliseconds 50
+    }
+    throw "Timed out waiting for a visible window from process $ProcessId."
+}
+
+function Wait-ForPackagedSelector {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $CaptureExecutable
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $helpers = Get-CimInstance Win32_Process | Where-Object {
+            $_.ExecutablePath -eq $CaptureExecutable
+        }
+        foreach ($helper in $helpers) {
+            $window = [ZommiWindowsAcceptanceNative]::FindWindow(
+                $helper.ProcessId,
+                'Zommi image selection'
+            )
+            if ($window -ne [IntPtr]::Zero) {
+                return $window
+            }
+        }
+        Start-Sleep -Milliseconds 50
+    }
+    throw 'Timed out waiting for the packaged application region selector.'
+}
+
+function Wait-ForAcceptanceEvent {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Path,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Name,
+
+        [int] $After = 0
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        if (Test-Path -LiteralPath $Path) {
+            $events = @(Get-Content -LiteralPath $Path | ForEach-Object {
+                try {
+                    $_ | ConvertFrom-Json
+                }
+                catch {
+                    $null
+                }
+            } | Where-Object { $null -ne $_ })
+            for ($index = $After; $index -lt $events.Count; $index++) {
+                if ($events[$index].event -eq $Name) {
+                    return [pscustomobject]@{
+                        Event = $events[$index]
+                        Count = $events.Count
+                    }
+                }
+            }
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    throw "Timed out waiting for acceptance event '$Name'."
+}
+
+function Invoke-CaptureRequest {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Executable,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Method,
+
+        [hashtable] $Parameters = @{},
+
+        [scriptblock] $Interact
+    )
+
+    $start = [System.Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $Executable
+    $start.Arguments = '--capture-host'
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardInput = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $start
+    if (-not $process.Start()) {
+        throw "Could not start capture helper $Executable."
+    }
+
+    try {
+        $request = @{
+            id = 'acceptance'
+            method = $Method
+            params = $Parameters
+        } | ConvertTo-Json -Compress -Depth 8
+        $process.StandardInput.WriteLine($request)
+        $process.StandardInput.Flush()
+        if ($null -ne $Interact) {
+            & $Interact $process
+        }
+
+        $read = $process.StandardOutput.ReadLineAsync()
+        if (-not $read.Wait([TimeSpan]::FromSeconds(20))) {
+            throw "Timed out waiting for capture response to $Method."
+        }
+        $response = $read.Result | ConvertFrom-Json
+        if ($response.id -ne 'acceptance' -or $response.ok -ne $true) {
+            throw "Capture request $Method failed: $($response.error)"
+        }
+
+        $shutdown = @{
+            id = 'shutdown'
+            method = 'shutdown'
+            params = @{}
+        } | ConvertTo-Json -Compress
+        $process.StandardInput.WriteLine($shutdown)
+        $process.StandardInput.Flush()
+        $null = $process.StandardOutput.ReadLine()
+        $process.StandardInput.Close()
+        if (-not $process.WaitForExit(5000)) {
+            throw 'Capture helper did not stop after shutdown.'
+        }
+        if ($process.ExitCode -ne 0) {
+            throw "Capture helper exited $($process.ExitCode): $($process.StandardError.ReadToEnd())"
+        }
+        return $response.result
+    }
+    finally {
+        if (-not $process.HasExited) {
+            $process.Kill()
+            $process.WaitForExit()
+        }
+        $process.Dispose()
+    }
+}
+
+function Invoke-CaptureSelectedTextProbe {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Executable
+    )
+
+    $start = [System.Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $Executable
+    $start.Arguments = '--acceptance-selected-text'
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $start
+    if (-not $process.Start()) {
+        throw "Could not start selected-text probe $Executable."
+    }
+
+    try {
+        $stdout = $process.StandardOutput.ReadToEnd()
+        $stderr = $process.StandardError.ReadToEnd()
+        if (-not $process.WaitForExit(15000)) {
+            throw 'Selected-text probe did not stop.'
+        }
+        if ($process.ExitCode -ne 0) {
+            throw "Selected-text probe exited $($process.ExitCode): $stderr"
+        }
+        $result = $stdout | ConvertFrom-Json
+        if ($result.marker -notin @($result.selection)) {
+            throw 'Packaged selected-text probe did not preserve its exact marker.'
+        }
+        return $result
+    }
+    finally {
+        if (-not $process.HasExited) {
+            $process.Kill()
+            $process.WaitForExit()
+        }
+        $process.Dispose()
+    }
+}
+
+function Assert-DesktopCaptureSurface {
+    Add-Type -AssemblyName System.Drawing
+    $bitmap = [Drawing.Bitmap]::new(1, 1)
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $graphics.CopyFromScreen(0, 0, 0, 0, [Drawing.Size]::new(1, 1))
+    }
+    catch {
+        throw "Windows desktop capture surface is unavailable. Keep the RDP client visible and the session unlocked, then retry. $($_.Exception.Message)"
+    }
+    finally {
+        $graphics.Dispose()
+        $bitmap.Dispose()
+    }
+}
+
+function Invoke-PackagedApplicationAcceptance {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Package,
+
+        [Parameter(Mandatory = $true)]
+        [string] $CaptureExecutable
+    )
+
+    $entrypoint = Join-Path $Package 'Zommi.exe'
+    $core = Join-Path $Package 'zommi-core-host.exe'
+    foreach ($required in @($entrypoint, $core, $CaptureExecutable)) {
+        if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+            throw "Packaged application input is missing: $required"
+        }
+    }
+    $packageExecutables = @($entrypoint, $core, $CaptureExecutable)
+
+    $existing = @(Get-CimInstance Win32_Process | Where-Object {
+        $_.ExecutablePath -in $packageExecutables
+    })
+    if ($existing.Count -ne 0) {
+        throw "Package already has running processes: $($existing.ProcessId -join ',')."
+    }
+
+    $acceptanceLog = Join-Path $env:TEMP (
+        "zommi-windows-acceptance-$([Guid]::NewGuid().ToString('N')).jsonl"
+    )
+    $start = [System.Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $entrypoint
+    $start.WorkingDirectory = $Package
+    $start.UseShellExecute = $false
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $start.EnvironmentVariables['ZOMMI_ACCEPTANCE_LOG'] = $acceptanceLog
+    $application = [System.Diagnostics.Process]::new()
+    $application.StartInfo = $start
+    if (-not $application.Start()) {
+        throw "Could not start packaged Flutter application $entrypoint."
+    }
+
+    try {
+        $readyResult = Wait-ForAcceptanceEvent -Path $acceptanceLog -Name 'desktop.ready'
+        $ready = $readyResult.Event
+        $eventCount = $readyResult.Count
+        if ($ready.contextShortcut -ne $true -or $ready.imageShortcut -ne $true) {
+            throw "Packaged shortcuts were not both registered: $($ready | ConvertTo-Json -Compress)"
+        }
+
+        $window = Wait-ForVisibleProcessWindow -ProcessId $application.Id
+        $compactBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
+        if ($compactBounds.Count -ne 4 -or $compactBounds[2] -le 0 -or $compactBounds[3] -le 0) {
+            throw 'Packaged Flutter window has invalid compact bounds.'
+        }
+        if (-not [ZommiWindowsAcceptanceNative]::Visible($window) -or
+            -not [ZommiWindowsAcceptanceNative]::TopMost($window)) {
+            throw 'Packaged Flutter window is not visible and topmost.'
+        }
+
+        if (-not [ZommiWindowsAcceptanceNative]::SetCursorPos(300, 300)) {
+            throw 'Could not place the pointer for packaged context capture.'
+        }
+        [ZommiWindowsAcceptanceNative]::SendAltA($false)
+        $contextResult = Wait-ForAcceptanceEvent `
+            -Path $acceptanceLog `
+            -Name 'shortcut.context' `
+            -After $eventCount
+        $context = $contextResult.Event
+        $eventCount = $contextResult.Count
+        if ($context.attached -ne $true) {
+            throw "Packaged context shortcut did not attach context: $($context | ConvertTo-Json -Compress)"
+        }
+
+        $expandedDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        do {
+            $expandedBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
+            if ($expandedBounds.Count -eq 4 -and
+                $expandedBounds[2] -gt $compactBounds[2] -and
+                $expandedBounds[3] -gt $compactBounds[3]) {
+                break
+            }
+            Start-Sleep -Milliseconds 50
+        } while ([DateTime]::UtcNow -lt $expandedDeadline)
+        if ($expandedBounds[2] -le $compactBounds[2] -or
+            $expandedBounds[3] -le $compactBounds[3]) {
+            throw 'Packaged context shortcut did not expand the Flutter surface.'
+        }
+
+        [ZommiWindowsAcceptanceNative]::SendAltA($true)
+        $selector = Wait-ForPackagedSelector -CaptureExecutable $CaptureExecutable
+        if (-not [ZommiWindowsAcceptanceNative]::CancelSelection($selector)) {
+            throw 'Could not cancel the packaged application region selector.'
+        }
+        $cancelResult = Wait-ForAcceptanceEvent `
+            -Path $acceptanceLog `
+            -Name 'shortcut.image.cancelled' `
+            -After $eventCount
+        $eventCount = $cancelResult.Count
+
+        [ZommiWindowsAcceptanceNative]::SendAltA($true)
+        $selector = Wait-ForPackagedSelector -CaptureExecutable $CaptureExecutable
+        $dpi = [double][ZommiWindowsAcceptanceNative]::WindowDpi($selector)
+        $logicalWidth = [int][Math]::Max(4, [Math]::Round(40 * 96 / $dpi))
+        $logicalHeight = [int][Math]::Max(4, [Math]::Round(30 * 96 / $dpi))
+        if (-not [ZommiWindowsAcceptanceNative]::DragSelection(
+            $selector,
+            100,
+            100,
+            100 + $logicalWidth,
+            100 + $logicalHeight
+        )) {
+            throw 'Could not drag the packaged application region selector.'
+        }
+        $imageResult = Wait-ForAcceptanceEvent `
+            -Path $acceptanceLog `
+            -Name 'shortcut.image' `
+            -After $eventCount
+        $image = $imageResult.Event
+        if ($image.attached -ne $true -or
+            $image.hasImage -ne $true -or
+            $image.hasPointerContext -ne $true -or
+            $image.width -ne 40 -or
+            $image.height -ne 30) {
+            throw "Packaged image shortcut contract failed: $($image | ConvertTo-Json -Compress)"
+        }
+
+        Start-Sleep -Milliseconds 300
+        if ($application.HasExited -or -not [ZommiWindowsAcceptanceNative]::Visible($window)) {
+            throw 'Packaged Flutter application did not survive capture acceptance.'
+        }
+        $processes = @(Get-CimInstance Win32_Process | Where-Object {
+            $_.ExecutablePath -in $packageExecutables
+        })
+        $coreProcesses = @($processes | Where-Object { $_.ExecutablePath -eq $core })
+        $captureProcesses = @($processes | Where-Object {
+            $_.ExecutablePath -eq $CaptureExecutable
+        })
+        if ($coreProcesses.Count -ne 1 -or $captureProcesses.Count -ne 2) {
+            throw "Unexpected packaged process topology: $($processes | Select-Object Name,ProcessId,ExecutablePath | ConvertTo-Json -Compress)"
+        }
+
+        return @{
+            contextAttached = $true
+            contextApplication = $context.application
+            contextWindowTitle = $context.windowTitle
+            imageCancelled = $true
+            imageDimensions = @($image.width, $image.height)
+            imagePointerContext = $true
+            compactBounds = @($compactBounds)
+            expandedBounds = @($expandedBounds)
+            processCount = $processes.Count
+            shortcutsRegistered = $true
+            topMost = $true
+        }
+    }
+    finally {
+        $processes = @(Get-CimInstance Win32_Process | Where-Object {
+            $_.ExecutablePath -in $packageExecutables
+        })
+        foreach ($process in ($processes | Sort-Object ProcessId -Descending)) {
+            Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+        if (-not $application.HasExited) {
+            $application.WaitForExit(3000) | Out-Null
+        }
+        $application.Dispose()
+        if (Test-Path -LiteralPath $acceptanceLog) {
+            Remove-Item -LiteralPath $acceptanceLog -Force
+        }
+    }
+}
+
+function Read-PngDimension {
+    param(
+        [Parameter(Mandatory = $true)]
+        [byte[]] $Bytes,
+
+        [Parameter(Mandatory = $true)]
+        [int] $Offset
+    )
+
+    return ([int]$Bytes[$Offset] -shl 24) -bor
+        ([int]$Bytes[$Offset + 1] -shl 16) -bor
+        ([int]$Bytes[$Offset + 2] -shl 8) -bor
+        [int]$Bytes[$Offset + 3]
+}
+
+function Write-AcceptanceResult {
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable] $Result
+    )
+
+    $json = $Result | ConvertTo-Json -Compress
+    if (-not [string]::IsNullOrWhiteSpace($ResultPath)) {
+        $absoluteResult = [IO.Path]::GetFullPath($ResultPath)
+        $parent = Split-Path -Parent $absoluteResult
+        if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
+            throw "Acceptance result parent directory is missing: $parent"
+        }
+        $encoding = New-Object Text.UTF8Encoding($false)
+        [IO.File]::WriteAllText($absoluteResult, "$json`r`n", $encoding)
+    }
+    Write-Output $json
+}
+
+$package = [IO.Path]::GetFullPath($PackageDirectory)
+$capture = Join-Path $package 'native/Zommi.Capture.exe'
+if (-not (Test-Path -LiteralPath $capture -PathType Leaf)) {
+    throw "Packaged capture helper is missing: $capture"
+}
+
+$selectedText = Invoke-CaptureSelectedTextProbe -Executable $capture
+Write-Host "selected-text: ok ($($selectedText.marker))"
+
+$cancelled = Invoke-CaptureRequest -Executable $capture -Method 'selectImage' -Interact {
+    param($process)
+    $window = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi image selection'
+    if (-not [ZommiWindowsAcceptanceNative]::CancelSelection($window)) {
+        throw 'Could not post Escape to the region selector.'
+    }
+}
+if ($cancelled.cancelled -ne $true) {
+    throw 'Region selector did not preserve cancellation.'
+}
+Write-Host 'region-cancel: ok'
+
+if ($NonVisualOnly) {
+    Write-AcceptanceResult -Result @{
+        captureHelper = $capture
+        selectedText = $true
+        cancellation = $true
+        regionPixels = 'not-requested'
+    }
+    exit 0
+}
+
+Assert-DesktopCaptureSurface
+
+$selected = Invoke-CaptureRequest -Executable $capture -Method 'selectImage' -Interact {
+    param($process)
+    $window = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi image selection'
+    $dpi = [double][ZommiWindowsAcceptanceNative]::WindowDpi($window)
+    $logicalWidth = [int][Math]::Max(4, [Math]::Round(40 * 96 / $dpi))
+    $logicalHeight = [int][Math]::Max(4, [Math]::Round(30 * 96 / $dpi))
+    if (-not [ZommiWindowsAcceptanceNative]::DragSelection(
+        $window,
+        100,
+        100,
+        100 + $logicalWidth,
+        100 + $logicalHeight
+    )) {
+        throw 'Could not post the region drag to the selector.'
+    }
+}
+if ($selected.cancelled -eq $true) {
+    throw "Region selector cancelled the scripted selection: $($selected.errorMessage)"
+}
+if ($selected.bounds.width -ne 40 -or $selected.bounds.height -ne 30) {
+    throw "Unexpected selected bounds: $($selected.bounds | ConvertTo-Json -Compress)"
+}
+
+$prefix = 'data:image/png;base64,'
+if (-not $selected.dataUrl.StartsWith($prefix, [StringComparison]::Ordinal)) {
+    throw 'Region selector did not return an inline PNG.'
+}
+$png = [Convert]::FromBase64String($selected.dataUrl.Substring($prefix.Length))
+$signature = [byte[]](137, 80, 78, 71, 13, 10, 26, 10)
+if ($png.Length -lt 24) {
+    throw 'Region selector returned an invalid PNG signature.'
+}
+for ($index = 0; $index -lt $signature.Length; $index++) {
+    if ($png[$index] -ne $signature[$index]) {
+        throw 'Region selector returned an invalid PNG signature.'
+    }
+}
+$width = Read-PngDimension -Bytes $png -Offset 16
+$height = Read-PngDimension -Bytes $png -Offset 20
+if ($width -ne 40 -or $height -ne 30) {
+    throw "PNG dimension mismatch: ${width}x${height}."
+}
+
+$applicationResult = Invoke-PackagedApplicationAcceptance `
+    -Package $package `
+    -CaptureExecutable $capture
+
+Write-AcceptanceResult -Result @{
+    captureHelper = $capture
+    selectedText = $true
+    cancellation = $true
+    selectedBounds = @($selected.bounds.x, $selected.bounds.y, $selected.bounds.width, $selected.bounds.height)
+    pngDimensions = @($width, $height)
+    pngBytes = $png.Length
+    application = $applicationResult
+}

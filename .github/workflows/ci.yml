@@ -184,6 +184,14 @@ jobs:
           ZOMMI_WINDOWS_SIGNING_THUMBPRINT: ${{ secrets.ZOMMI_WINDOWS_SIGNING_THUMBPRINT }}
         run: ./scripts/package-windows.ps1 -Runtime win-x64
 
+      - name: Accept Windows non-visual capture contracts
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          ./scripts/accept-windows-capture.ps1
+          -PackageDirectory ./artifacts/zommi-windows-x64
+          -NonVisualOnly
+
       - name: Show release identity and signing state
         shell: bash
         run: |

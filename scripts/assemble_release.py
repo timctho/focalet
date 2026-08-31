@@ -13,6 +13,8 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import time
+import uuid
 import zipfile
 
 
@@ -157,6 +159,57 @@ def _archive(root: Path, target_platform: str) -> Path:
     return final
 
 
+def _replace_path(source: Path, destination: Path) -> None:
+    attempts = 6 if os.name == "nt" else 1
+    for attempt in range(attempts):
+        try:
+            source.replace(destination)
+            return
+        except PermissionError:
+            if attempt + 1 == attempts:
+                raise
+            time.sleep(0.05 * (2**attempt))
+
+
+def _replace_directory(pending: Path, destination: Path) -> None:
+    """Atomically install pending without leaving a partially deleted package."""
+    if not destination.exists():
+        _replace_path(pending, destination)
+        return
+
+    previous = destination.with_name(
+        f".{destination.name}-previous-{uuid.uuid4().hex}"
+    )
+    try:
+        _replace_path(destination, previous)
+    except OSError as error:
+        raise RuntimeError(
+            "The existing package is in use and was left unchanged. "
+            "Stop processes launched from the package and retry."
+        ) from error
+    try:
+        _replace_path(pending, destination)
+    except BaseException:
+        _replace_path(previous, destination)
+        raise
+
+    try:
+        shutil.rmtree(previous)
+    except OSError as error:
+        failed_new = destination.with_name(
+            f".{destination.name}-failed-{uuid.uuid4().hex}"
+        )
+        try:
+            _replace_path(destination, failed_new)
+            _replace_path(previous, destination)
+        finally:
+            shutil.rmtree(failed_new, ignore_errors=True)
+        raise RuntimeError(
+            "The existing package is in use; the original package was restored. "
+            "Stop processes launched from the package and retry."
+        ) from error
+
+
 def assemble(args: argparse.Namespace) -> tuple[Path, Path]:
     output_root = args.output_root.resolve()
     output_root.mkdir(parents=True, exist_ok=True)
@@ -232,9 +285,7 @@ def assemble(args: argparse.Namespace) -> tuple[Path, Path]:
             signing=signing,
         )
         _write_checksums(pending)
-        if destination.exists():
-            shutil.rmtree(destination)
-        pending.replace(destination)
+        _replace_directory(pending, destination)
         archive = _archive(destination, args.platform)
         return destination, archive
     except BaseException:

@@ -9,11 +9,20 @@ import unittest
 from unittest import mock
 
 
-SCRIPT = Path(__file__).parents[1] / "scripts" / "verify_release.py"
-SPEC = importlib.util.spec_from_file_location("verify_release", SCRIPT)
-assert SPEC and SPEC.loader
-verify_release = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(verify_release)
+SCRIPTS = Path(__file__).parents[1] / "scripts"
+
+
+def _load_script(name: str):
+    script = SCRIPTS / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(name, script)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+verify_release = _load_script("verify_release")
+assemble_release = _load_script("assemble_release")
 
 
 class ReleasePackageTests(unittest.TestCase):
@@ -140,6 +149,110 @@ class ReleasePackageTests(unittest.TestCase):
         self._write_checksums()
         with self.assertRaisesRegex(verify_release.ReleaseValidationError, "escapes"):
             verify_release.verify_package(self.root, smoke_processes=False)
+
+
+class ReleaseAssemblyTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory(prefix="zommi-assembly-test-")
+        self.root = Path(self.temporary.name)
+        self.pending = self.root / "pending"
+        self.destination = self.root / "zommi-windows-x64"
+        self.pending.mkdir()
+        self.destination.mkdir()
+        (self.pending / "identity.txt").write_text("new", encoding="utf-8")
+        (self.destination / "identity.txt").write_text("old", encoding="utf-8")
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def test_directory_replacement_is_complete(self) -> None:
+        assemble_release._replace_directory(self.pending, self.destination)
+        self.assertEqual(
+            (self.destination / "identity.txt").read_text(encoding="utf-8"),
+            "new",
+        )
+        self.assertFalse(self.pending.exists())
+        self.assertEqual(list(self.root.glob(".*-previous-*")), [])
+
+    def test_transient_windows_rename_is_retried(self) -> None:
+        source = self.root / "rename-source"
+        destination = self.root / "rename-destination"
+        source.write_text("complete", encoding="utf-8")
+        real_replace = type(source).replace
+        calls = 0
+
+        def fail_once(path, target):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise PermissionError("transient scanner lock")
+            return real_replace(path, target)
+
+        with (
+            mock.patch.object(assemble_release.os, "name", "nt"),
+            mock.patch.object(
+                type(source),
+                "replace",
+                autospec=True,
+                side_effect=fail_once,
+            ),
+            mock.patch.object(assemble_release.time, "sleep") as sleep,
+        ):
+            assemble_release._replace_path(source, destination)
+
+        self.assertEqual(destination.read_text(encoding="utf-8"), "complete")
+        self.assertEqual(calls, 2)
+        sleep.assert_called_once_with(0.05)
+
+    def test_locked_destination_is_left_unchanged(self) -> None:
+        real_replace = type(self.destination).replace
+
+        def fail_destination(path, target):
+            if path == self.destination:
+                raise PermissionError("locked working directory")
+            return real_replace(path, target)
+
+        with mock.patch.object(
+            type(self.destination),
+            "replace",
+            autospec=True,
+            side_effect=fail_destination,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "was left unchanged"):
+                assemble_release._replace_directory(self.pending, self.destination)
+
+        self.assertEqual(
+            (self.destination / "identity.txt").read_text(encoding="utf-8"),
+            "old",
+        )
+        self.assertEqual(
+            (self.pending / "identity.txt").read_text(encoding="utf-8"),
+            "new",
+        )
+        self.assertEqual(list(self.root.glob(".*-previous-*")), [])
+
+    def test_locked_previous_package_is_restored(self) -> None:
+        real_rmtree = assemble_release.shutil.rmtree
+
+        def fail_previous(path, *args, **kwargs):
+            if "-previous-" in Path(path).name:
+                raise PermissionError("locked executable")
+            return real_rmtree(path, *args, **kwargs)
+
+        with mock.patch.object(
+            assemble_release.shutil,
+            "rmtree",
+            side_effect=fail_previous,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "original package was restored"):
+                assemble_release._replace_directory(self.pending, self.destination)
+
+        self.assertEqual(
+            (self.destination / "identity.txt").read_text(encoding="utf-8"),
+            "old",
+        )
+        self.assertEqual(list(self.root.glob(".*-previous-*")), [])
+        self.assertEqual(list(self.root.glob(".*-failed-*")), [])
 
 
 if __name__ == "__main__":

@@ -26,6 +26,28 @@ the package is Authenticode-signed.
 4. If signing is required, verify all three executable signatures and require
    manifest status `distribution-signed`.
 
+Before the physical walkthrough, run the packaged helper gate:
+
+```powershell
+.\scripts\accept-windows-capture.ps1 `
+  -PackageDirectory .\artifacts\zommi-windows-x64
+```
+
+It verifies an exact selected-text UIA fixture, selector cancellation, a
+DPI-aware 40 by 30 region, and the returned PNG dimensions. It then launches
+the exact packaged Flutter application and checks topmost compact/expanded
+window bounds, real operating-system shortcut registration, injected
+`Alt+A`/`Alt+Shift+A` activation, context attachment, image cancellation,
+image-plus-pointer pairing, and the adjacent Flutter/Rust/two-helper process
+topology. Run it from an interactive desktop PowerShell; a process launched
+through WSL interop does not inherit an authoritative screen device context.
+
+The hosted Windows job runs the same command with `-NonVisualOnly` because CI
+has no authoritative interactive desktop. That subset still exercises
+selected-text capture and selector cancellation; it does not replace the full
+gate or the walkthrough. Injected keys validate native registration and event
+delivery, but they are still not physical keyboard evidence.
+
 ## Window and interaction
 
 1. Start the exact extracted `Zommi.exe`.
