@@ -5,8 +5,10 @@ import importlib.util
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
+import zipfile
 
 
 SCRIPTS = Path(__file__).parents[1] / "scripts"
@@ -203,6 +205,136 @@ class ReleaseAssemblyTests(unittest.TestCase):
         self.assertEqual(destination.read_text(encoding="utf-8"), "complete")
         self.assertEqual(calls, 2)
         sleep.assert_called_once_with(0.05)
+
+    def test_macos_bundle_contains_flutter_core_manifest_and_archive(self) -> None:
+        flutter_app = self.root / "input" / "Zommi.app"
+        flutter_binary = flutter_app / "Contents" / "MacOS" / "Zommi"
+        flutter_binary.parent.mkdir(parents=True)
+        flutter_binary.write_text("flutter", encoding="utf-8")
+        flutter_binary.chmod(0o755)
+        framework = (
+            flutter_app
+            / "Contents"
+            / "Frameworks"
+            / "FlutterMacOS.framework"
+            / "Versions"
+            / "A"
+            / "FlutterMacOS"
+        )
+        framework.parent.mkdir(parents=True)
+        framework.write_text("framework", encoding="utf-8")
+        core_host = self.root / "zommi-core-host"
+        core_host.write_text("rust", encoding="utf-8")
+        document = self.root / "README.md"
+        document.write_text("release", encoding="utf-8")
+        output_root = self.root / "artifacts"
+        arguments = SimpleNamespace(
+            platform="macos",
+            architecture="x64",
+            flutter_output=flutter_app,
+            core_host=core_host,
+            output_root=output_root,
+            git_commit="macos-contract-sha",
+            document=[document],
+            macos_signing_identity=None,
+            signing_status="unsigned",
+            signing_mechanism="none",
+            capture_host=None,
+            linux_capture_host=None,
+        )
+
+        with mock.patch.object(
+            assemble_release,
+            "_sign_macos",
+            return_value={"status": "ad-hoc", "mechanism": "codesign"},
+        ) as sign:
+            package, archive = assemble_release.assemble(arguments)
+
+        result = verify_release.verify_package(
+            package,
+            expected_platform="macos",
+            expected_commit="macos-contract-sha",
+            smoke_processes=False,
+        )
+        self.assertEqual(result["entrypoint"], "Zommi.app/Contents/MacOS/Zommi")
+        self.assertEqual(
+            result["coreHost"],
+            "Zommi.app/Contents/MacOS/zommi-core-host",
+        )
+        self.assertIsNone(result["captureHost"])
+        self.assertEqual(result["signing"], {"status": "ad-hoc", "mechanism": "codesign"})
+        manifest = json.loads((package / "release-manifest.json").read_text())
+        self.assertEqual(manifest["components"]["captureProvider"], "platform-native")
+        self.assertTrue((package / result["coreHost"]).stat().st_mode & 0o111)
+        self.assertEqual((package / "docs" / "README.md").read_text(), "release")
+        sign.assert_called_once()
+        self.assertEqual(sign.call_args.args[0].name, "Zommi.app")
+        self.assertIsNone(sign.call_args.args[1])
+
+        self.assertTrue(archive.is_file())
+        self.assertTrue(Path(f"{archive}.sha256").is_file())
+        with zipfile.ZipFile(archive) as zipped:
+            names = set(zipped.namelist())
+        self.assertIn(
+            "zommi-macos-x64/Zommi.app/Contents/MacOS/Zommi",
+            names,
+        )
+        self.assertIn(
+            "zommi-macos-x64/Zommi.app/Contents/MacOS/zommi-core-host",
+            names,
+        )
+
+    def test_macos_distribution_signing_requests_hardened_runtime(self) -> None:
+        application = self.root / "Zommi.app"
+        identity = "Developer ID Application: Zommi Test"
+        with mock.patch.object(assemble_release.subprocess, "run") as run:
+            result = assemble_release._sign_macos(application, identity)
+
+        self.assertEqual(
+            result,
+            {"status": "distribution-signed", "mechanism": "codesign"},
+        )
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(
+            run.call_args_list[0].args[0],
+            [
+                "codesign",
+                "--force",
+                "--deep",
+                "--sign",
+                identity,
+                "--options",
+                "runtime",
+                "--timestamp",
+                str(application),
+            ],
+        )
+        self.assertEqual(
+            run.call_args_list[1].args[0],
+            ["codesign", "--verify", "--deep", "--strict", str(application)],
+        )
+
+    def test_macos_without_identity_is_ad_hoc_signed_and_verified(self) -> None:
+        application = self.root / "Zommi.app"
+        with mock.patch.object(assemble_release.subprocess, "run") as run:
+            result = assemble_release._sign_macos(application, None)
+
+        self.assertEqual(result, {"status": "ad-hoc", "mechanism": "codesign"})
+        self.assertEqual(
+            run.call_args_list[0].args[0],
+            [
+                "codesign",
+                "--force",
+                "--deep",
+                "--sign",
+                "-",
+                str(application),
+            ],
+        )
+        self.assertEqual(
+            run.call_args_list[1].args[0],
+            ["codesign", "--verify", "--deep", "--strict", str(application)],
+        )
 
     def test_locked_destination_is_left_unchanged(self) -> None:
         real_replace = type(self.destination).replace
