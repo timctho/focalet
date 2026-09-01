@@ -64,7 +64,7 @@ TranscriptBlock? _historyBlock(Map<String, Object?> item, String? cwd) {
         text: item['text']?.toString() ?? '',
         lifecycle: lifecycle,
         status: status,
-        expanded: phase == 'commentary' && !completed,
+        expanded: false,
         artifacts: artifacts,
       );
     case 'reasoning':
@@ -78,7 +78,7 @@ TranscriptBlock? _historyBlock(Map<String, Object?> item, String? cwd) {
         ]),
         lifecycle: lifecycle,
         status: status,
-        expanded: !completed,
+        expanded: false,
         artifacts: artifacts,
       );
     case 'plan':
@@ -89,7 +89,7 @@ TranscriptBlock? _historyBlock(Map<String, Object?> item, String? cwd) {
         text: item['text']?.toString() ?? '',
         lifecycle: lifecycle,
         status: status,
-        expanded: !completed,
+        expanded: false,
         artifacts: artifacts,
       );
     case 'commandExecution':
@@ -195,7 +195,7 @@ TranscriptBlock _toolBlock(
       .join('\n'),
   lifecycle: lifecycle,
   status: status,
-  expanded: lifecycle != TranscriptLifecycle.completed,
+  expanded: false,
   artifacts: artifacts,
 );
 

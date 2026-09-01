@@ -4,23 +4,55 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
+import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/zommi_app.dart';
 
 void main() {
-  test('surface morph geometry has exact compact and expanded endpoints', () {
+  test('surface morph geometry has symmetric exact endpoints', () {
     expect(
-      surfaceMorphProgress(
+      surfaceTransitionSize(
         const Size(compactOrbSize, compactOrbSize),
         const Size(expandedPanelWidth, expandedPanelHeight),
+        0,
       ),
-      0,
+      const Size(compactOrbSize, compactOrbSize),
     );
     expect(
-      surfaceMorphProgress(
+      surfaceTransitionSize(
+        const Size(compactOrbSize, compactOrbSize),
         const Size(expandedPanelWidth, expandedPanelHeight),
-        const Size(expandedPanelWidth, expandedPanelHeight),
+        1,
       ),
-      1,
+      const Size(expandedPanelWidth, expandedPanelHeight),
+    );
+    final forward = surfaceTransitionSize(
+      compactWindowSize,
+      normalWindowSize,
+      0.35,
+    );
+    final reverse = surfaceTransitionSize(
+      normalWindowSize,
+      compactWindowSize,
+      0.65,
+    );
+    expect(forward.width, closeTo(reverse.width, 0.001));
+    expect(forward.height, closeTo(reverse.height, 0.001));
+    expect(
+      surfaceTransitionCompactness(compactWindowSize, normalWindowSize, 0.35),
+      closeTo(
+        surfaceTransitionCompactness(normalWindowSize, compactWindowSize, 0.65),
+        0.001,
+      ),
+    );
+    final midpoint = surfaceTransitionSize(
+      compactWindowSize,
+      normalWindowSize,
+      0.5,
+    );
+    expect(
+      surfaceTransitionCornerRadius(midpoint, 0.5),
+      greaterThan(60),
+      reason: 'The intermediate morph must remain rounded, not a hard box.',
     );
   });
 
@@ -93,6 +125,43 @@ void main() {
     await tester.pump();
     expect(find.bySemanticsLabel('Exact agent session bound'), findsOneWidget);
     expect(find.text('draft while processing'), findsOneWidget);
+  });
+
+  testWidgets('stop during startup reaches the exact runtime turn', (
+    tester,
+  ) async {
+    await _setDesktopSurface(tester);
+    final pending = Completer<TurnReceipt>();
+    final core = FakeCoreBridge(turn: pending.future);
+    await tester.pumpWidget(ZommiApp(core: core));
+    await tester.pump();
+    await _expand(tester);
+    await tester.enterText(
+      find.byKey(const ValueKey('zommi-composer')),
+      'cancel immediately',
+    );
+    await tester.tap(find.byKey(const ValueKey('send-message')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('stop-turn')));
+    await tester.pump();
+    expect(core.interruptedIdentity, isNull);
+    expect(find.byIcon(Icons.hourglass_top_rounded), findsOneWidget);
+
+    pending.complete(
+      const TurnReceipt(
+        accepted: true,
+        runtimeTargetId: 'runtime-codex',
+        sessionId: 'thread-codex',
+        turnId: 'exact-runtime-turn',
+        clientOperationId: 'client:test',
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(core.interruptedIdentity, (
+      'runtime-codex',
+      'thread-codex',
+      'exact-runtime-turn',
+    ));
   });
 
   testWidgets('stream events render and stop targets the exact active turn', (

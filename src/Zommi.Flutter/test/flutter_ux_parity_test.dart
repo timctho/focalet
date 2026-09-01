@@ -57,6 +57,11 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('zommi-orb')));
     await tester.pump();
     expect(find.byKey(const ValueKey('surface-transition')), findsOneWidget);
+    expect(
+      tester.getSize(find.byKey(const ValueKey('surface-transition'))),
+      compactWindowSize,
+    );
+    expect(find.byType(ZommiOrb), findsNothing);
     expect(find.byKey(const ValueKey('zommi-transcript')), findsNothing);
     expect(find.byKey(const ValueKey('zommi-composer')), findsNothing);
     expect(
@@ -68,6 +73,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('surface-transition')), findsNothing);
     expect(find.byKey(const ValueKey('zommi-composer')), findsOneWidget);
+    expect(desktop.surfaceAnimations, everyElement(isFalse));
   });
 
   testWidgets('single-line and fenced markdown copy controls never overlap', (
@@ -128,7 +134,7 @@ void main() {
           message: 'Context attached',
         ),
       );
-      await tester.pump();
+      await tester.pumpAndSettle();
 
       expect(find.byKey(const ValueKey('zommi-composer')), findsOneWidget);
       expect(
@@ -282,6 +288,18 @@ void main() {
     'runtime, model, effort, and provider-owned sessions stay exact',
     (tester) async {
       final core = RichFakeCore()..historyCount = 0;
+      core.discoveredTargets.add(
+        const RuntimeTarget(
+          id: 'runtime-not-detected',
+          runtimeId: 'missing',
+          adapterId: 'pi-rpc',
+          displayName: 'Not detected',
+          protocolName: 'Pi RPC',
+          executablePath: '/missing/pi',
+          executionHost: {'id': 'native:linux', 'kind': 'native'},
+          status: 'unavailable',
+        ),
+      );
       final desktop = FakeDesktopBridge();
       await _pumpApp(tester, core: core, desktop: desktop);
       await _expand(tester);
@@ -291,6 +309,7 @@ void main() {
       expect(find.text('Codex app-server · Linux'), findsOneWidget);
       expect(find.text('Pi RPC · WSL · Ubuntu'), findsOneWidget);
       expect(find.text('Compatible'), findsOneWidget);
+      expect(find.text('Not detected'), findsNothing);
 
       final switchGate = Completer<void>();
       core.connectGate = switchGate.future;
@@ -347,6 +366,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('session-session-2')));
       await tester.pumpAndSettle();
       expect(core.activeSessionId, 'session-2');
+      expect(find.textContaining('Fixture Mini · Medium'), findsOneWidget);
       expect(find.byKey(const ValueKey('session-sidebar')), findsNothing);
     },
   );
@@ -454,7 +474,11 @@ void main() {
           .map((body) => body.styleSheet?.p?.fontSize)
           .whereType<double>()
           .toSet();
-      expect(bodySizes, containsAll(<double>[12, 13]));
+      expect(bodySizes, containsAll(<double>[13, 14]));
+      expect(
+        markdown.map((body) => body.styleSheet?.p?.fontFamily),
+        contains(codexUiFontFamily),
+      );
     },
   );
 
@@ -501,14 +525,16 @@ void main() {
   });
 
   testWidgets(
-    'advanced runtime overrides use host paths or credential-free endpoints',
+    'advanced runtime setup uses supported choices and a file picker only',
     (tester) async {
       final core = RichFakeCore()..historyCount = 0;
-      await _pumpApp(tester, core: core, desktop: FakeDesktopBridge());
+      final desktop = FakeDesktopBridge()
+        ..nextRuntimeExecutable = '/custom/codex';
+      await _pumpApp(tester, core: core, desktop: desktop);
       await _expand(tester);
       await tester.tap(find.byKey(const ValueKey('runtime-summary')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Advanced overrides'));
+      await tester.tap(find.text('Advanced runtime setup'));
       await tester.pumpAndSettle();
 
       expect(
@@ -516,17 +542,19 @@ void main() {
         findsOneWidget,
       );
       expect(
-        find.byWidgetPredicate(
-          (widget) => widget is TextField && widget.obscureText,
-        ),
+        find.byKey(const ValueKey('runtime-override-locator')),
         findsNothing,
       );
-      await tester.enterText(
-        find.byKey(const ValueKey('runtime-override-locator')),
-        '/custom/codex',
-      );
-      await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('save-runtime-override')));
+      expect(find.text('OpenClaw · Direct Gateway'), findsNothing);
+      final choose = find.byKey(const ValueKey('select-runtime-executable'));
+      await tester.ensureVisible(choose);
+      await tester.tap(choose);
+      await tester.pumpAndSettle();
+      expect(desktop.calls, contains('selectRuntimeExecutable'));
+      expect(find.text('/custom/codex'), findsOneWidget);
+      final save = find.byKey(const ValueKey('save-runtime-override'));
+      await tester.ensureVisible(save);
+      await tester.tap(save);
       await tester.pumpAndSettle();
       expect(
         core.configuredOverrides.any(
@@ -534,13 +562,13 @@ void main() {
         ),
         isTrue,
       );
-
-      await tester.tap(find.byKey(const ValueKey('runtime-override-adapter')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('OpenClaw · Direct Gateway').last);
-      await tester.pumpAndSettle();
-      expect(find.text('Gateway endpoint'), findsOneWidget);
-      expect(find.byKey(const ValueKey('runtime-override-host')), findsNothing);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('runtime-advanced')),
+          matching: find.byType(TextField),
+        ),
+        findsNothing,
+      );
     },
   );
 
@@ -678,8 +706,32 @@ void main() {
         find.byKey(const ValueKey('activity-turn-thinking')),
         findsOneWidget,
       );
-      expect(find.text('Reading the selected table.'), findsOneWidget);
       expect(find.byKey(const ValueKey('activity-tool-1')), findsOneWidget);
+      final thinkingFold = find.descendant(
+        of: find.byKey(const ValueKey('activity-turn-thinking')),
+        matching: find.byType(AnimatedCrossFade),
+      );
+      final toolFold = find.descendant(
+        of: find.byKey(const ValueKey('activity-tool-1')),
+        matching: find.byType(AnimatedCrossFade),
+      );
+      expect(
+        tester.widget<AnimatedCrossFade>(thinkingFold).crossFadeState,
+        CrossFadeState.showFirst,
+      );
+      expect(
+        tester.widget<AnimatedCrossFade>(toolFold).crossFadeState,
+        CrossFadeState.showFirst,
+      );
+      final thinkingCard = find.byKey(const ValueKey('activity-turn-thinking'));
+      await tester.ensureVisible(thinkingCard);
+      await tester.pumpAndSettle();
+      await tester.tap(thinkingCard);
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<AnimatedCrossFade>(thinkingFold).crossFadeState,
+        CrossFadeState.showSecond,
+      );
       expect(find.byKey(const ValueKey('assistant-answer-1')), findsOneWidget);
       expect(find.byKey(const ValueKey('artifact-html-1')), findsOneWidget);
       expect(
@@ -862,7 +914,8 @@ void main() {
         _event(
           1,
           'turn.started',
-          sessionId: 'session-2',
+          runtimeTargetId: 'runtime-pi',
+          sessionId: 'pi-background',
           turnId: 'background-turn',
           payload: const {'status': 'inProgress'},
         ),
@@ -874,7 +927,8 @@ void main() {
         _event(
           2,
           'turn.completed',
-          sessionId: 'session-2',
+          runtimeTargetId: 'runtime-pi',
+          sessionId: 'pi-background',
           turnId: 'background-turn',
           payload: const {'status': 'completed'},
         ),
@@ -990,13 +1044,14 @@ ContextAttachment _browserAttachment(String id) => ContextAttachment(
 CoreEvent _event(
   int sequence,
   String name, {
+  String runtimeTargetId = 'runtime-codex',
   String sessionId = 'session-1',
   String? turnId,
   required Map<String, Object?> payload,
 }) => CoreEvent(
   name: name,
   sequence: sequence,
-  runtimeTargetId: 'runtime-codex',
+  runtimeTargetId: runtimeTargetId,
   sessionId: sessionId,
   turnId: turnId,
   clientOperationId: 'flutter:test',

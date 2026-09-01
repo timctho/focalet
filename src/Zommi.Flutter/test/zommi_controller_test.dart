@@ -203,7 +203,9 @@ void main() {
         ),
       ),
     );
-    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(
+      surfaceTransitionDuration + const Duration(milliseconds: 20),
+    );
 
     expect(observations.first.$1, 1);
     expect(observations.first.$2, isNot(contains('showPanel')));
@@ -212,6 +214,7 @@ void main() {
       containsAllInOrder(['surface:true:false', 'showPanel']),
     );
     expect(controller.attachments.single.token, '[example.com]');
+    expect(desktop.surfaceAnimations, everyElement(isFalse));
     await controller.close();
   });
 
@@ -302,18 +305,190 @@ void main() {
       await controller.close();
     },
   );
+
+  test('stop waits for the runtime turn id before cancelling', () async {
+    final core = RichFakeCore()..historyCount = 0;
+    final startGate = Completer<void>();
+    core.startTurnGate = startGate.future;
+    final controller = ZommiController(
+      core: core,
+      desktop: FakeDesktopBridge(),
+    );
+    await controller.initialize();
+
+    final submission = controller.submit('hold this turn');
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.activeTurnId, startsWith('flutter:'));
+    await controller.interrupt();
+    expect(controller.activeTurnStopping, isTrue);
+    expect(core.interrupted, isNull);
+
+    startGate.complete();
+    await submission;
+    expect(core.interrupted, (
+      'runtime-codex',
+      'session-1',
+      'session-1-live-turn',
+    ));
+    await controller.close();
+  });
+
+  test('model choice survives session and runtime round trips', () async {
+    final core = RichFakeCore()..historyCount = 0;
+    final controller = ZommiController(
+      core: core,
+      desktop: FakeDesktopBridge(),
+    );
+    await controller.initialize();
+    controller.setModel('fixture-mini');
+    controller.setEffort('medium');
+
+    await controller.switchSession('session-2');
+    expect(controller.selectedModel, 'fixture-mini');
+    expect(controller.selectedEffort, 'medium');
+
+    await controller.selectRuntime('runtime-pi');
+    controller.setModel('fixture-pro');
+    controller.setEffort('low');
+    await controller.selectRuntime('runtime-codex');
+    expect(controller.selectedModel, 'fixture-mini');
+    expect(controller.selectedEffort, 'medium');
+    await controller.close();
+  });
+
+  test(
+    'running transcript survives leaving and reopening its session',
+    () async {
+      final core = RichFakeCore()..historyCount = 1;
+      final controller = ZommiController(
+        core: core,
+        desktop: FakeDesktopBridge(),
+      );
+      await controller.initialize();
+      await controller.submit('keep my live message');
+      core.emit(
+        _event(
+          1,
+          'item.update',
+          payload: const {
+            'kind': 'assistant',
+            'lifecycle': 'delta',
+            'text': 'still streaming',
+            'itemId': 'answer-live',
+          },
+        ),
+      );
+      expect(controller.turns.last.blocks.single.text, 'still streaming');
+
+      await controller.switchSession('session-2');
+      core.emit(
+        _event(
+          2,
+          'turn.completed',
+          sessionId: 'session-1',
+          payload: const {'status': 'completed'},
+        ),
+      );
+      await controller.switchSession('session-1');
+      expect(controller.turns, hasLength(2));
+      expect(controller.turns.last.userText, 'keep my live message');
+      expect(controller.turns.last.blocks.single.text, 'still streaming');
+      expect(controller.turnActive, isFalse);
+      await controller.close();
+    },
+  );
+
+  test('background runtimes keep the global working state alive', () async {
+    final core = RichFakeCore()..historyCount = 0;
+    final controller = ZommiController(
+      core: core,
+      desktop: FakeDesktopBridge(),
+    );
+    await controller.initialize();
+    core.emit(
+      _event(
+        1,
+        'turn.started',
+        runtimeTargetId: 'runtime-codex',
+        sessionId: 'session-1',
+        turnId: 'codex-background',
+        payload: const {'status': 'inProgress'},
+      ),
+    );
+    await controller.selectRuntime('runtime-pi');
+    expect(controller.anyTurnActive, isTrue);
+    expect(controller.turnActive, isFalse);
+
+    core.emit(
+      _event(
+        2,
+        'turn.completed',
+        runtimeTargetId: 'runtime-codex',
+        sessionId: 'session-1',
+        turnId: 'codex-background',
+        payload: const {'status': 'completed'},
+      ),
+    );
+    expect(controller.anyTurnActive, isFalse);
+    await controller.close();
+  });
+
+  test('undetected runtime targets are excluded from the main list', () async {
+    final core = RichFakeCore()..historyCount = 0;
+    core.discoveredTargets.add(
+      const RuntimeTarget(
+        id: 'runtime-missing',
+        runtimeId: 'missing',
+        adapterId: 'pi-rpc',
+        displayName: 'Missing runtime',
+        protocolName: 'Pi RPC',
+        executablePath: '/missing/pi',
+        executionHost: {'id': 'native:linux', 'kind': 'native'},
+        status: 'unavailable',
+      ),
+    );
+    final controller = ZommiController(
+      core: core,
+      desktop: FakeDesktopBridge(),
+    );
+    await controller.initialize();
+    expect(
+      controller.visibleRuntimeTargets.map((target) => target.id),
+      isNot(contains('runtime-missing')),
+    );
+    await controller.close();
+  });
+
+  test('WSL file picker paths normalize to the CLI path only', () {
+    expect(
+      normalizeRuntimeExecutablePath(
+        r'\\wsl.localhost\Ubuntu\home\example\.local\bin\codex',
+        const {'kind': 'wsl', 'name': 'Ubuntu'},
+      ),
+      '/home/example/.local/bin/codex',
+    );
+    expect(
+      normalizeRuntimeExecutablePath(r'C:\tools\codex.exe', const {
+        'kind': 'native',
+      }),
+      r'C:\tools\codex.exe',
+    );
+  });
 }
 
 CoreEvent _event(
   int sequence,
   String name, {
+  String runtimeTargetId = 'runtime-codex',
+  String sessionId = 'session-1',
+  String turnId = 'session-1-live-turn',
   required Map<String, Object?> payload,
 }) => CoreEvent(
   name: name,
   sequence: sequence,
-  runtimeTargetId: 'runtime-codex',
-  sessionId: 'session-1',
-  turnId: 'session-1-live-turn',
+  runtimeTargetId: runtimeTargetId,
+  sessionId: sessionId,
+  turnId: turnId,
   clientOperationId: 'flutter:test',
   payload: payload,
 );

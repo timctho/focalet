@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/services.dart';
+import 'package:file_selector/file_selector.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
 import 'package:screen_capturer/screen_capturer.dart';
 import 'package:screen_retriever/screen_retriever.dart';
@@ -17,7 +18,7 @@ const Size compactWindowSize = Size(56, 56);
 const Size normalWindowSize = Size(720, 620);
 const Size largeWindowSize = Size(920, 760);
 const double windowBottomInset = 18;
-const Duration surfaceTransitionDuration = Duration(milliseconds: 240);
+const Duration surfaceTransitionDuration = Duration(milliseconds: 280);
 const int surfaceTransitionFrameCount = 16;
 const MethodChannel _windowAnimationChannel = MethodChannel(
   'zommi/window_animation',
@@ -97,7 +98,11 @@ abstract interface class DesktopBridge {
     bool includePointerContext = false,
   });
 
-  Future<void> setSurface({required bool expanded, bool large = false});
+  Future<void> setSurface({
+    required bool expanded,
+    bool large = false,
+    bool animate = true,
+  });
 
   Future<void> showPanel();
 
@@ -108,6 +113,8 @@ abstract interface class DesktopBridge {
   Future<void> startDragging();
 
   Future<void> openRuntimeSignIn(RuntimeTarget target);
+
+  Future<String?> selectRuntimeExecutable();
 
   Future<void> copyText(String value);
 
@@ -134,7 +141,11 @@ final class NoopDesktopBridge implements DesktopBridge {
   }) async => null;
 
   @override
-  Future<void> setSurface({required bool expanded, bool large = false}) async {}
+  Future<void> setSurface({
+    required bool expanded,
+    bool large = false,
+    bool animate = true,
+  }) async {}
 
   @override
   Future<void> showPanel() async {}
@@ -150,6 +161,9 @@ final class NoopDesktopBridge implements DesktopBridge {
 
   @override
   Future<void> openRuntimeSignIn(RuntimeTarget target) async {}
+
+  @override
+  Future<String?> selectRuntimeExecutable() async => null;
 
   @override
   Future<void> copyText(String value) =>
@@ -438,7 +452,11 @@ final class FlutterDesktopBridge
   }
 
   @override
-  Future<void> setSurface({required bool expanded, bool large = false}) async {
+  Future<void> setSurface({
+    required bool expanded,
+    bool large = false,
+    bool animate = true,
+  }) async {
     final size = expanded
         ? (large ? largeWindowSize : normalWindowSize)
         : compactWindowSize;
@@ -478,7 +496,7 @@ final class FlutterDesktopBridge
     // jumping directly to 640x500 on the first animated frame.
     await windowManager.setMinimumSize(compactWindowSize);
     await windowManager.setResizable(expanded);
-    if (shouldAnimate) {
+    if (animate && shouldAnimate) {
       final nativeResult = await animateNativeSurfaceBounds(
         from: current,
         to: bounds,
@@ -585,6 +603,12 @@ final class FlutterDesktopBridge
       mode: ProcessStartMode.detached,
     );
     unawaited(process.exitCode);
+  }
+
+  @override
+  Future<String?> selectRuntimeExecutable() async {
+    final selected = await openFile(confirmButtonText: 'Use this CLI');
+    return selected?.path;
   }
 
   @override

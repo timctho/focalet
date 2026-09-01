@@ -59,6 +59,79 @@ void main() {
     },
   );
 
+  test(
+    'Rust host keeps background runtime adapters alive across switches',
+    () async {
+      final executableName = Platform.isWindows
+          ? 'zommi-core-host.exe'
+          : 'zommi-core-host';
+      final executable = File(
+        '${Directory.current.path}/../../target/debug/$executableName',
+      ).absolute;
+      expect(executable.existsSync(), isTrue);
+      final fixtureRoot = Directory(
+        '${Directory.current.path}/../../crates/zommi-core-host/tests',
+      ).absolute;
+      final codexFixture = File('${fixtureRoot.path}/fake_codex_app_server.py');
+      final piFixture = File('${fixtureRoot.path}/fake_pi_rpc.py');
+      final python = await _findPython();
+      final temporary = await Directory.systemTemp.createTemp(
+        'zommi-multi-runtime-',
+      );
+      addTearDown(() => temporary.delete(recursive: true));
+      final bridge = ProcessCoreBridge(
+        executablePath: executable.path,
+        environment: {
+          'ZOMMI_CODEX_COMMAND': python,
+          'ZOMMI_CODEX_ARGS_JSON': jsonEncode([codexFixture.path]),
+          'ZOMMI_PI_COMMAND': python,
+          'ZOMMI_PI_ARGS_JSON': jsonEncode([piFixture.path]),
+          'ZOMMI_CORE_STATE_PATH': '${temporary.path}/binding.json',
+          'ZOMMI_RUNTIME_OVERRIDES_PATH': '${temporary.path}/overrides.json',
+        },
+      );
+      addTearDown(bridge.close);
+      await bridge.initialize();
+      final discovery = await bridge.discoverRuntimeTargets();
+      final codex = discovery.targets.singleWhere(
+        (target) => target.runtimeId == 'codex',
+      );
+      final pi = discovery.targets.singleWhere(
+        (target) => target.runtimeId == 'pi',
+      );
+      final codexConnection = await bridge.connectRuntime(
+        runtimeTargetId: codex.id,
+        cwd: temporary.path,
+      );
+      final interrupted = bridge.events.firstWhere(
+        (event) =>
+            event.runtimeTargetId == codex.id &&
+            event.name == 'turn.completed' &&
+            event.payload['status'] == 'interrupted',
+      );
+      final held = await bridge.startTurn(
+        runtimeTargetId: codex.id,
+        sessionId: codexConnection.sessionId,
+        message: 'hold-for-interrupt',
+        clientOperationId: 'client:background-codex',
+      );
+
+      final piConnection = await bridge.connectRuntime(
+        runtimeTargetId: pi.id,
+        cwd: temporary.path,
+      );
+      expect(piConnection.runtimeTargetId, pi.id);
+      await bridge.interruptTurn(
+        runtimeTargetId: codex.id,
+        sessionId: held.sessionId,
+        turnId: held.turnId,
+      );
+      expect((await interrupted).turnId, held.turnId);
+      expect(await bridge.listSessions(runtimeTargetId: pi.id), isNotEmpty);
+      expect(await bridge.listSessions(runtimeTargetId: codex.id), isNotEmpty);
+    },
+  );
+
   test('Flutter drives discovery, exact binding, streaming, and interrupt through Rust', () async {
     final executableName = Platform.isWindows
         ? 'zommi-core-host.exe'

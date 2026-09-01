@@ -32,7 +32,7 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
   Widget build(BuildContext context) {
     final base = DefaultTextStyle.of(context).style.copyWith(
       color: const Color(0xff272b38),
-      fontSize: widget.compact ? 12 : 13,
+      fontSize: widget.compact ? 13 : 14,
       height: 1.38,
     );
     return MouseRegion(
@@ -53,17 +53,17 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
                 styleSheet: MarkdownStyleSheet(
                   p: base,
                   h1: base.copyWith(
-                    fontSize: 17.5,
+                    fontSize: 18.5,
                     fontWeight: FontWeight.w700,
                   ),
                   h2: base.copyWith(
-                    fontSize: 15.5,
+                    fontSize: 16.5,
                     fontWeight: FontWeight.w700,
                   ),
-                  h3: base.copyWith(fontSize: 14, fontWeight: FontWeight.w700),
+                  h3: base.copyWith(fontSize: 15, fontWeight: FontWeight.w700),
                   code: base.copyWith(
                     fontFamily: 'monospace',
-                    fontSize: widget.compact ? 10.5 : 11.5,
+                    fontSize: widget.compact ? 11.5 : 12.5,
                     backgroundColor: const Color(0xffeef0f6),
                   ),
                   codeblockPadding: EdgeInsets.zero,
@@ -222,7 +222,7 @@ class SafeHtmlView extends StatelessWidget {
           margin: Margins.zero,
           padding: HtmlPaddings.zero,
           color: const Color(0xff272b38),
-          fontSize: FontSize(compact ? 11 : 12.5),
+          fontSize: FontSize(compact ? 12 : 13.5),
           backgroundColor: const Color(0x00000000),
         ),
         'table': Style(border: Border.all(color: const Color(0xffd7dbe5))),

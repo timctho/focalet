@@ -64,7 +64,7 @@ struct HostAction {
 
 struct HostState {
     targets: Vec<zommi_core::RuntimeTarget>,
-    adapter: Option<RuntimeAdapter>,
+    adapters: HashMap<String, RuntimeAdapter>,
     binding_store: SessionBindingStore,
     override_store: RuntimeOverrideStore,
     overrides: Vec<ConfiguredRuntimeOverride>,
@@ -82,7 +82,7 @@ impl HostState {
     fn new(event_tx: EventSender) -> Self {
         Self {
             targets: Vec::new(),
-            adapter: None,
+            adapters: HashMap::new(),
             binding_store: SessionBindingStore::platform_default(),
             override_store: RuntimeOverrideStore::platform_default(),
             overrides: Vec::new(),
@@ -404,7 +404,7 @@ impl HostState {
                     .await?)
             }
             "core.shutdown" => {
-                if let Some(adapter) = self.adapter.take() {
+                for (_, adapter) in std::mem::take(&mut self.adapters) {
                     adapter.shutdown().await;
                 }
                 Ok(json!({"stopped": true}))
@@ -479,9 +479,6 @@ impl HostState {
             )
         })?;
 
-        if let Some(adapter) = self.adapter.take() {
-            adapter.shutdown().await;
-        }
         let requested_cwd = payload
             .get("cwd")
             .and_then(Value::as_str)
@@ -529,6 +526,19 @@ impl HostState {
                     .and_then(Value::as_str)
                     .map(str::to_owned)
             });
+        if let Some(adapter) = self.adapters.get(&target.id).cloned() {
+            let connection = adapter.connection_value().await?;
+            let session_id = adapter.active_session_id().await?;
+            self.binding_store
+                .save(&SessionBinding {
+                    runtime_target_id: adapter.target_id().to_owned(),
+                    session_id,
+                    cwd: cwd.to_string_lossy().into_owned(),
+                    session_metadata: adapter.binding_metadata().await,
+                })
+                .map_err(|error| HostError::new("persistence-failed", error.to_string()))?;
+            return Ok(connection);
+        }
         let mut runtime_command = command_for_target(&target);
         let adapter_override = format!(
             "ZOMMI_{}_ARGS_JSON",
@@ -563,30 +573,24 @@ impl HostState {
         let session_metadata = adapter.binding_metadata().await;
         self.binding_store
             .save(&SessionBinding {
-                runtime_target_id,
+                runtime_target_id: runtime_target_id.clone(),
                 session_id,
                 cwd: cwd.to_string_lossy().into_owned(),
                 session_metadata,
             })
             .map_err(|error| HostError::new("persistence-failed", error.to_string()))?;
-        self.adapter = Some(adapter);
+        self.adapters.insert(runtime_target_id, adapter);
         Ok(connection)
     }
 
     fn exact_adapter(&self, payload: &Value) -> Result<RuntimeAdapter, HostError> {
-        let adapter = self.adapter.as_ref().ok_or_else(|| {
+        let requested = required_string(payload, "runtimeTargetId")?;
+        let adapter = self.adapters.get(requested).ok_or_else(|| {
             HostError::new(
                 "runtime-unavailable",
-                "Connect an exact runtime target before using sessions or turns.",
+                "Connect this exact runtime target before using its sessions or turns.",
             )
         })?;
-        let requested = required_string(payload, "runtimeTargetId")?;
-        if requested != adapter.target_id() {
-            return Err(HostError::new(
-                "identity-mismatch",
-                "The request runtimeTargetId does not match the connected target.",
-            ));
-        }
         Ok(adapter.clone())
     }
 
@@ -708,7 +712,7 @@ async fn main() -> io::Result<()> {
             break;
         }
     }
-    if let Some(adapter) = state.adapter.take() {
+    for (_, adapter) in std::mem::take(&mut state.adapters) {
         adapter.shutdown().await;
     }
     drop(state);

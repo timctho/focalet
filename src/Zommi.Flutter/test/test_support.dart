@@ -11,6 +11,8 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
   String activeTargetId = 'runtime-codex';
   String activeSessionId = 'session-1';
   String? lastMessage;
+  String? lastModel;
+  String? lastEffort;
   List<Map<String, Object?>> lastSnapshots = [];
   List<String> lastImages = [];
   (String, String, String)? interrupted;
@@ -21,6 +23,9 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
   String? connectErrorCode;
   Future<void>? initializeGate;
   Future<void>? connectGate;
+  Future<void>? startTurnGate;
+  final Map<String, String> activeSessionsByRuntime = {};
+  final Map<String, Map<String, Object?>> historyBySession = {};
   final List<Map<String, Object?>> configuredOverrides = [
     {
       'id': 'override-existing',
@@ -95,6 +100,7 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
       capabilityHints: ['turn.stream.v1'],
     ),
   ];
+  late final List<RuntimeTarget> discoveredTargets = [...targets];
 
   static const models = [
     {
@@ -132,7 +138,7 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
   Future<RuntimeDiscovery> discoverRuntimeTargets({
     String? lastSelectedTargetId,
   }) async => RuntimeDiscovery(
-    targets: targets,
+    targets: discoveredTargets,
     selectedTargetId: lastSelectedTargetId ?? activeTargetId,
     settings: _settings(),
   );
@@ -180,7 +186,7 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
   ) async {
     configuredOverrides.add({...override, 'id': 'override-added'});
     return RuntimeDiscovery(
-      targets: targets,
+      targets: discoveredTargets,
       selectedTargetId: activeTargetId,
       settings: _settings(),
     );
@@ -190,7 +196,7 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
   Future<RuntimeDiscovery> removeRuntimeOverride(String overrideId) async {
     configuredOverrides.removeWhere((value) => value['id'] == overrideId);
     return RuntimeDiscovery(
-      targets: targets,
+      targets: discoveredTargets,
       selectedTargetId: activeTargetId,
       settings: _settings(),
     );
@@ -209,7 +215,9 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
     activeTargetId = runtimeTargetId;
     activeSessionId =
         preferredSessionId ??
+        activeSessionsByRuntime[runtimeTargetId] ??
         (runtimeTargetId == 'runtime-pi' ? 'pi-session' : 'session-1');
+    activeSessionsByRuntime[runtimeTargetId] = activeSessionId;
     return _connection();
   }
 
@@ -247,6 +255,7 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
     String? effort,
   }) async {
     activeSessionId = 'created-session';
+    activeSessionsByRuntime[runtimeTargetId] = activeSessionId;
     return _connection();
   }
 
@@ -256,6 +265,7 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
     required String sessionId,
   }) async {
     activeSessionId = sessionId;
+    activeSessionsByRuntime[runtimeTargetId] = sessionId;
     return _connection();
   }
 
@@ -263,32 +273,34 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
   Future<Map<String, Object?>> readSession({
     required String runtimeTargetId,
     required String sessionId,
-  }) async => {
-    'thread': {
-      'id': sessionId,
-      'cwd': '/workspace',
-      'turns': [
-        for (var index = 1; index <= historyCount; index++)
-          {
-            'id': '$sessionId-turn-$index',
-            'items': [
+  }) async =>
+      historyBySession['$runtimeTargetId\u0000$sessionId'] ??
+      {
+        'thread': {
+          'id': sessionId,
+          'cwd': '/workspace',
+          'turns': [
+            for (var index = 1; index <= historyCount; index++)
               {
-                'type': 'userMessage',
-                'content': [
-                  {'type': 'text', 'text': 'history user $index'},
+                'id': '$sessionId-turn-$index',
+                'items': [
+                  {
+                    'type': 'userMessage',
+                    'content': [
+                      {'type': 'text', 'text': 'history user $index'},
+                    ],
+                  },
+                  {
+                    'id': '$sessionId-answer-$index',
+                    'type': 'agentMessage',
+                    'text': 'history answer $index',
+                    'status': 'completed',
+                  },
                 ],
               },
-              {
-                'id': '$sessionId-answer-$index',
-                'type': 'agentMessage',
-                'text': 'history answer $index',
-                'status': 'completed',
-              },
-            ],
-          },
-      ],
-    },
-  };
+          ],
+        },
+      };
 
   @override
   Future<TurnReceipt> startTurn({
@@ -301,7 +313,10 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
     String? model,
     String? effort,
   }) async {
+    if (startTurnGate case final gate?) await gate;
     lastMessage = message;
+    lastModel = model;
+    lastEffort = effort;
     lastSnapshots = snapshots;
     lastImages = images;
     return TurnReceipt(
@@ -370,10 +385,12 @@ final class FakeDesktopBridge implements DesktopBridge {
   final StreamController<DesktopInvocation> _invocations =
       StreamController<DesktopInvocation>.broadcast(sync: true);
   final List<String> calls = [];
+  final List<bool> surfaceAnimations = [];
   ContextAttachment? nextContext;
   ContextAttachment? nextImage;
   String? copiedText;
   String? copiedImage;
+  String? nextRuntimeExecutable;
   bool closed = false;
   Future<DesktopReadiness>? initializeGate;
   Future<void>? surfaceGate;
@@ -405,8 +422,13 @@ final class FakeDesktopBridge implements DesktopBridge {
   }
 
   @override
-  Future<void> setSurface({required bool expanded, bool large = false}) async {
+  Future<void> setSurface({
+    required bool expanded,
+    bool large = false,
+    bool animate = true,
+  }) async {
     calls.add('surface:$expanded:$large');
+    surfaceAnimations.add(animate);
     if (surfaceGate case final gate?) await gate;
   }
 
@@ -433,6 +455,12 @@ final class FakeDesktopBridge implements DesktopBridge {
   @override
   Future<void> openRuntimeSignIn(RuntimeTarget target) async {
     calls.add('signIn:${target.id}');
+  }
+
+  @override
+  Future<String?> selectRuntimeExecutable() async {
+    calls.add('selectRuntimeExecutable');
+    return nextRuntimeExecutable;
   }
 
   @override

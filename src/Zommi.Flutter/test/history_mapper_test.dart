@@ -55,7 +55,9 @@ void main() {
       expect(turns.single.blocks, hasLength(3));
       expect(turns.single.blocks[0].kind, TranscriptKind.thinking);
       expect(turns.single.blocks[0].text, 'Inspecting the selected table');
+      expect(turns.single.blocks[0].expanded, isFalse);
       expect(turns.single.blocks[1].title, 'Command');
+      expect(turns.single.blocks[1].expanded, isFalse);
       expect(turns.single.blocks[2].artifacts.single.path, 'report.html');
       expect(turns.single.blocks[2].artifacts.single.cwd, '/workspace');
     },
