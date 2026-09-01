@@ -213,10 +213,11 @@ final class FlutterDesktopBridge
         if (supportsNativeWindowShadow(Platform.operatingSystem)) {
           await windowManager.setHasShadow(false);
         }
-        // Zommi owns its two panel sizes. Changing the native resize style on
+        // Zommi owns its surface sizes. Changing the native resize style on
         // every orb morph forces a Win32 frame recalculation and produces a
         // visible one-frame wobble even though the window is frameless.
         await windowManager.setResizable(false);
+        await configureNativeSurfaceWindow();
         await windowManager.setAlwaysOnTop(true);
         await windowManager.setSkipTaskbar(true);
         await windowManager.show();
@@ -782,6 +783,18 @@ Future<bool?> animateNativeSurfaceBounds({
     return null;
   } on PlatformException {
     return null;
+  }
+}
+
+Future<void> configureNativeSurfaceWindow() async {
+  if (!Platform.isWindows) return;
+  try {
+    await _windowAnimationChannel.invokeMethod<void>('configureSurfaceWindow');
+  } on MissingPluginException {
+    // Non-Windows and test runners do not install the custom Win32 host.
+  } on PlatformException {
+    // The app still remains usable; packaged acceptance verifies the exact
+    // frameless endpoint so release builds cannot silently keep this fallback.
   }
 }
 

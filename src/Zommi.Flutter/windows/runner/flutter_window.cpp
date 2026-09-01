@@ -125,6 +125,36 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
 void FlutterWindow::HandleWindowAnimationMethodCall(
     const flutter::MethodCall<flutter::EncodableValue> &call,
     std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+  if (call.method_name() == "configureSurfaceWindow") {
+    CancelWindowAnimation();
+    const auto window = GetHandle();
+    SetLastError(ERROR_SUCCESS);
+    const LONG_PTR style = GetWindowLongPtr(window, GWL_STYLE);
+    if (style == 0 && GetLastError() != ERROR_SUCCESS) {
+      result->Error("window_unavailable", "Could not read the Zommi window style.");
+      return;
+    }
+    const LONG_PTR surface_style =
+        (style & ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX |
+                   WS_MAXIMIZEBOX | WS_SYSMENU)) |
+        WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+    SetLastError(ERROR_SUCCESS);
+    if (SetWindowLongPtr(window, GWL_STYLE, surface_style) == 0 &&
+        GetLastError() != ERROR_SUCCESS) {
+      result->Error("window_style_failed",
+                    "Could not apply the frameless Zommi window style.");
+      return;
+    }
+    if (!SetWindowPos(window, nullptr, 0, 0, 0, 0,
+                      SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE |
+                          SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER)) {
+      result->Error("window_style_failed",
+                    "Could not refresh the frameless Zommi window style.");
+      return;
+    }
+    result->Success();
+    return;
+  }
   if (call.method_name() != "animateBounds") {
     result->NotImplemented();
     return;

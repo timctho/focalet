@@ -588,6 +588,9 @@ function Invoke-PackagedApplicationAcceptance {
         if ($compactBounds.Count -ne 4 -or $compactBounds[2] -le 0 -or $compactBounds[3] -le 0) {
             throw 'Packaged Flutter window has invalid compact bounds.'
         }
+        if ($compactBounds[2] -ne $compactBounds[3]) {
+            throw "Packaged compact surface retained a native frame: $($compactBounds -join ',')."
+        }
         if (-not [ZommiWindowsAcceptanceNative]::Visible($window) -or
             -not [ZommiWindowsAcceptanceNative]::TopMost($window)) {
             throw 'Packaged Flutter window is not visible and topmost.'
@@ -620,6 +623,14 @@ function Invoke-PackagedApplicationAcceptance {
         if ($expandedBounds[2] -le $compactBounds[2] -or
             $expandedBounds[3] -le $compactBounds[3]) {
             throw 'Packaged context shortcut did not expand the Flutter surface.'
+        }
+        $compactCenterX = $compactBounds[0] + $compactBounds[2] / 2.0
+        $expandedCenterX = $expandedBounds[0] + $expandedBounds[2] / 2.0
+        $compactBottom = $compactBounds[1] + $compactBounds[3]
+        $expandedBottom = $expandedBounds[1] + $expandedBounds[3]
+        if ([Math]::Abs($compactCenterX - $expandedCenterX) -gt 1 -or
+            [Math]::Abs($compactBottom - $expandedBottom) -gt 1) {
+            throw "Packaged surface endpoints do not preserve one anchor: compact=$($compactBounds -join ','), expanded=$($expandedBounds -join ',')."
         }
 
         [ZommiWindowsAcceptanceNative]::SendAltA($true)
