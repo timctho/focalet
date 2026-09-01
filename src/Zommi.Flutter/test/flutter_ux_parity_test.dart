@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -1155,9 +1154,9 @@ Future<_RasterFrame> _captureSurfaceTransition(WidgetTester tester) async {
   while (renderObject is! RenderRepaintBoundary) {
     final parent = renderObject.parent;
     expect(parent, isA<RenderObject>());
-    renderObject = parent! as RenderObject;
+    renderObject = parent!;
   }
-  final boundary = renderObject as RenderRepaintBoundary;
+  final boundary = renderObject;
   final image = await tester.runAsync(() => boundary.toImage(pixelRatio: 1));
   final data = await tester.runAsync(
     () => image!.toByteData(format: ImageByteFormat.rawRgba),
