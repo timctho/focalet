@@ -218,6 +218,11 @@ final class FlutterDesktopBridge
         // visible one-frame wobble even though the window is frameless.
         await windowManager.setResizable(false);
         await configureNativeSurfaceWindow();
+        // WindowOptions applies 56px before the Win32 caption is removed, so
+        // Windows may clamp the initial width to SM_CXMINTRACK. Reapply the
+        // compact size with the popup style active while preserving the
+        // requested top-left anchor.
+        await windowManager.setSize(compactWindowSize, animate: false);
         await windowManager.setAlwaysOnTop(true);
         await windowManager.setSkipTaskbar(true);
         await windowManager.show();
