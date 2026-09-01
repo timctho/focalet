@@ -326,6 +326,9 @@ function Wait-ForPackagedSelector {
     )
 
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    $lastWindow = [IntPtr]::Zero
+    $lastTopMost = $false
+    $lastForeground = $false
     while ([DateTime]::UtcNow -lt $deadline) {
         $helpers = Get-CimInstance Win32_Process | Where-Object {
             $_.ExecutablePath -eq $CaptureExecutable
@@ -336,12 +339,17 @@ function Wait-ForPackagedSelector {
                 'Zommi image selection'
             )
             if ($window -ne [IntPtr]::Zero) {
-                return $window
+                $lastWindow = $window
+                $lastTopMost = [ZommiWindowsAcceptanceNative]::TopMost($window)
+                $lastForeground = [ZommiWindowsAcceptanceNative]::Foreground($window)
+                if ($lastTopMost -and $lastForeground) {
+                    return $window
+                }
             }
         }
         Start-Sleep -Milliseconds 50
     }
-    throw 'Timed out waiting for the packaged application region selector.'
+    throw "Timed out waiting for the packaged application region selector to activate: window=$lastWindow topMost=$lastTopMost foreground=$lastForeground."
 }
 
 function Wait-ForAcceptanceEvent {
@@ -754,10 +762,6 @@ function Invoke-PackagedApplicationAcceptance {
 
         [ZommiWindowsAcceptanceNative]::SendAltA($true)
         $selector = Wait-ForPackagedSelector -CaptureExecutable $CaptureExecutable
-        if (-not [ZommiWindowsAcceptanceNative]::TopMost($selector) -or
-            -not [ZommiWindowsAcceptanceNative]::Foreground($selector)) {
-            throw 'Packaged image selector is not topmost and foreground.'
-        }
         $selectorBounds = [ZommiWindowsAcceptanceNative]::Bounds($selector)
         $probeX = $selectorBounds[0] + 40
         $probeY = $selectorBounds[1] + 40

@@ -153,6 +153,20 @@ class ReleasePackageTests(unittest.TestCase):
         ):
             self.assertIn(contract, script)
 
+    def test_windows_selector_forces_initial_foreground_and_stays_topmost(self) -> None:
+        source = (SCRIPTS.parent / "src/Zommi.Windows/RegionSelectionForm.cs").read_text(
+            encoding="utf-8"
+        )
+        for contract in (
+            "flags |= NoActivate",
+            "ForceForeground();",
+            "AttachThreadInput(currentThread, foregroundThread, true)",
+            "BringWindowToTop(Handle)",
+            "SetForegroundWindow(Handle)",
+            "topMostGuard.Start()",
+        ):
+            self.assertIn(contract, source)
+
     def test_manifest_component_cannot_escape_package_root(self) -> None:
         manifest_path = self.root / "release-manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

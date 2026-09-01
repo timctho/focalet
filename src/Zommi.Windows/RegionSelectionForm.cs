@@ -214,6 +214,11 @@ internal sealed class RegionSelectionForm : Form
     private void KeepAboveOtherWindows(bool activate)
     {
         TopMost = true;
+        var flags = NoMove | NoSize | ShowWindow;
+        if (!activate)
+        {
+            flags |= NoActivate;
+        }
         SetWindowPos(
             Handle,
             TopMostWindow,
@@ -221,11 +226,36 @@ internal sealed class RegionSelectionForm : Form
             0,
             0,
             0,
-            NoMove | NoSize | NoActivate | ShowWindow);
+            flags);
         if (activate)
         {
+            ForceForeground();
+        }
+    }
+
+    private void ForceForeground()
+    {
+        var foreground = GetForegroundWindow();
+        var foregroundThread = foreground == nint.Zero
+            ? 0
+            : GetWindowThreadProcessId(foreground, out _);
+        var currentThread = GetCurrentThreadId();
+        var attached = foregroundThread != 0 &&
+            foregroundThread != currentThread &&
+            AttachThreadInput(currentThread, foregroundThread, true);
+        try
+        {
+            BringWindowToTop(Handle);
             Activate();
             SetForegroundWindow(Handle);
+            SetFocus(Handle);
+        }
+        finally
+        {
+            if (attached)
+            {
+                AttachThreadInput(currentThread, foregroundThread, false);
+            }
         }
     }
 
@@ -241,5 +271,23 @@ internal sealed class RegionSelectionForm : Form
 
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(nint window);
+
+    [DllImport("user32.dll")]
+    private static extern nint GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint attach, uint attachTo, bool value);
+
+    [DllImport("user32.dll")]
+    private static extern bool BringWindowToTop(nint window);
+
+    [DllImport("user32.dll")]
+    private static extern nint SetFocus(nint window);
 
 }
