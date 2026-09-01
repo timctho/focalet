@@ -143,6 +143,16 @@ class ReleasePackageTests(unittest.TestCase):
         with self.assertRaisesRegex(verify_release.ReleaseValidationError, "Legacy Electron"):
             verify_release.verify_package(self.root, smoke_processes=False)
 
+    def test_windows_interactive_acceptance_restores_the_deployed_app(self) -> None:
+        script = (SCRIPTS / "accept-windows-capture.ps1").read_text(encoding="utf-8")
+        for contract in (
+            "Suspend-ConflictingZommiApplications",
+            "Restore-SuspendedZommiApplications",
+            "Remove-Item Env:RUNNER_TRACKING_ID",
+            "Restore-SuspendedZommiApplications -ExecutablePaths $suspendedApplications",
+        ):
+            self.assertIn(contract, script)
+
     def test_manifest_component_cannot_escape_package_root(self) -> None:
         manifest_path = self.root / "release-manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

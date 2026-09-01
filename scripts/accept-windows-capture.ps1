@@ -534,6 +534,109 @@ function Assert-ProbeRegionSize {
     }
 }
 
+function Suspend-ConflictingZommiApplications {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $EntryPoint
+    )
+
+    $normalizedEntryPoint = [IO.Path]::GetFullPath($EntryPoint)
+    $applications = @(Get-CimInstance Win32_Process | Where-Object {
+        $_.Name -eq 'Zommi.exe' -and
+        $_.ExecutablePath -and
+        -not [string]::Equals(
+            [IO.Path]::GetFullPath($_.ExecutablePath),
+            $normalizedEntryPoint,
+            [StringComparison]::OrdinalIgnoreCase)
+    } | Sort-Object ProcessId)
+    $applicationPaths = @($applications | ForEach-Object {
+        [IO.Path]::GetFullPath($_.ExecutablePath)
+    } | Select-Object -Unique)
+    if ($applicationPaths.Count -eq 0) {
+        return @()
+    }
+
+    $rootPrefixes = @($applicationPaths | ForEach-Object {
+        [IO.Path]::GetDirectoryName($_).TrimEnd('\') + '\'
+    } | Select-Object -Unique)
+    $relatedProcesses = @(Get-CimInstance Win32_Process | Where-Object {
+        if (-not $_.ExecutablePath) {
+            return $false
+        }
+        $processPath = [IO.Path]::GetFullPath($_.ExecutablePath)
+        foreach ($prefix in $rootPrefixes) {
+            if ($processPath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+                return $true
+            }
+        }
+        return $false
+    })
+    foreach ($process in ($relatedProcesses | Sort-Object ProcessId -Descending)) {
+        Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop
+    }
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        $remaining = @(Get-CimInstance Win32_Process | Where-Object {
+            $_.Name -eq 'Zommi.exe' -and $_.ExecutablePath -and
+            $applicationPaths -contains ([IO.Path]::GetFullPath($_.ExecutablePath))
+        })
+        if ($remaining.Count -eq 0) {
+            break
+        }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if ($remaining.Count -ne 0) {
+        throw "Could not suspend conflicting Zommi process: $($remaining.ProcessId -join ',')."
+    }
+    Start-Sleep -Milliseconds 300
+    return $applicationPaths
+}
+
+function Restore-SuspendedZommiApplications {
+    param(
+        [string[]] $ExecutablePaths
+    )
+
+    if ($ExecutablePaths.Count -eq 0) {
+        return
+    }
+    $expectedPaths = @($ExecutablePaths | Where-Object {
+        Test-Path -LiteralPath $_ -PathType Leaf
+    } | Select-Object -Unique)
+    $runnerTrackingId = $env:RUNNER_TRACKING_ID
+    try {
+        Remove-Item Env:RUNNER_TRACKING_ID -ErrorAction SilentlyContinue
+        foreach ($path in $expectedPaths) {
+            Start-Process `
+                -FilePath $path `
+                -WorkingDirectory ([IO.Path]::GetDirectoryName($path)) | Out-Null
+        }
+    }
+    finally {
+        if ($null -ne $runnerTrackingId) {
+            $env:RUNNER_TRACKING_ID = $runnerTrackingId
+        }
+    }
+    if ($expectedPaths.Count -eq 0) {
+        return
+    }
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $runningPaths = @(Get-CimInstance Win32_Process | Where-Object {
+            $_.Name -eq 'Zommi.exe' -and $_.ExecutablePath -and
+            $expectedPaths -contains ([IO.Path]::GetFullPath($_.ExecutablePath))
+        } | ForEach-Object {
+            [IO.Path]::GetFullPath($_.ExecutablePath)
+        } | Select-Object -Unique)
+        if ($runningPaths.Count -eq $expectedPaths.Count) {
+            return
+        }
+        Start-Sleep -Milliseconds 200
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw "Could not restore suspended Zommi application: $($expectedPaths -join ',')."
+}
+
 function Invoke-PackagedApplicationAcceptance {
     param(
         [Parameter(Mandatory = $true)]
@@ -552,10 +655,19 @@ function Invoke-PackagedApplicationAcceptance {
     }
     $packageExecutables = @($entrypoint, $core, $CaptureExecutable)
 
+    # The product deliberately owns one global mutex and two global hotkeys.
+    # An already deployed Zommi would redirect this probe to itself, so an
+    # explicit interactive gate temporarily suspends it and restores the exact
+    # executable after the isolated package has been cleaned up.
+    $suspendedApplications = @(
+        Suspend-ConflictingZommiApplications -EntryPoint $entrypoint
+    )
+
     $existing = @(Get-CimInstance Win32_Process | Where-Object {
         $_.ExecutablePath -in $packageExecutables
     })
     if ($existing.Count -ne 0) {
+        Restore-SuspendedZommiApplications -ExecutablePaths $suspendedApplications
         throw "Package already has running processes: $($existing.ProcessId -join ',')."
     }
 
@@ -571,8 +683,15 @@ function Invoke-PackagedApplicationAcceptance {
     $start.EnvironmentVariables['ZOMMI_ACCEPTANCE_LOG'] = $acceptanceLog
     $application = [System.Diagnostics.Process]::new()
     $application.StartInfo = $start
-    if (-not $application.Start()) {
-        throw "Could not start packaged Flutter application $entrypoint."
+    try {
+        if (-not $application.Start()) {
+            throw "Could not start packaged Flutter application $entrypoint."
+        }
+    }
+    catch {
+        $application.Dispose()
+        Restore-SuspendedZommiApplications -ExecutablePaths $suspendedApplications
+        throw
     }
 
     try {
@@ -736,18 +855,23 @@ function Invoke-PackagedApplicationAcceptance {
         }
     }
     finally {
-        $processes = @(Get-CimInstance Win32_Process | Where-Object {
-            $_.ExecutablePath -in $packageExecutables
-        })
-        foreach ($process in ($processes | Sort-Object ProcessId -Descending)) {
-            Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+        try {
+            $processes = @(Get-CimInstance Win32_Process | Where-Object {
+                $_.ExecutablePath -in $packageExecutables
+            })
+            foreach ($process in ($processes | Sort-Object ProcessId -Descending)) {
+                Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+            }
+            if (-not $application.HasExited) {
+                $application.WaitForExit(3000) | Out-Null
+            }
+            $application.Dispose()
+            if (Test-Path -LiteralPath $acceptanceLog) {
+                Remove-Item -LiteralPath $acceptanceLog -Force
+            }
         }
-        if (-not $application.HasExited) {
-            $application.WaitForExit(3000) | Out-Null
-        }
-        $application.Dispose()
-        if (Test-Path -LiteralPath $acceptanceLog) {
-            Remove-Item -LiteralPath $acceptanceLog -Force
+        finally {
+            Restore-SuspendedZommiApplications -ExecutablePaths $suspendedApplications
         }
     }
 }
