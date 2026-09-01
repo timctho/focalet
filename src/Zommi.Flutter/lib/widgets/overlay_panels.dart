@@ -33,7 +33,7 @@ class SessionSidebar extends StatelessWidget {
           borderRadius: BorderRadius.circular(18),
           child: SizedBox(
             width: 250,
-            height: 280,
+            height: 250,
             child: Column(
               children: [
                 Padding(
@@ -86,6 +86,12 @@ class SessionSidebar extends StatelessWidget {
                               child: ListTile(
                                 key: ValueKey('session-${session.id}'),
                                 dense: true,
+                                visualDensity: const VisualDensity(
+                                  vertical: -3,
+                                ),
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                ),
                                 selected: selected,
                                 selectedTileColor: const Color(0xffebe9f7),
                                 shape: RoundedRectangleBorder(
@@ -96,6 +102,7 @@ class SessionSidebar extends StatelessWidget {
                                   session.title,
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 11),
                                 ),
                                 onTap: controller.sessionBusy
                                     ? null
@@ -164,7 +171,7 @@ class RuntimePanel extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         child: SizedBox(
           width: 420,
-          height: 450,
+          height: 410,
           child: Column(
             children: [
               Padding(
@@ -228,20 +235,33 @@ class RuntimePanel extends StatelessWidget {
                                 '${target.displayName}, ${target.protocolName}, $host, ${target.status}',
                             child: ListTile(
                               key: ValueKey('runtime-${target.id}'),
+                              dense: true,
+                              visualDensity: const VisualDensity(vertical: -3),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                              ),
                               selected: selected,
                               selectedTileColor: const Color(0xffebe9f7),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               leading: _RuntimeStatusDot(status: target.status),
-                              title: Text(target.displayName),
-                              subtitle: Text('${target.protocolName} · $host'),
+                              title: Text(
+                                target.displayName,
+                                style: const TextStyle(fontSize: 11.5),
+                              ),
+                              subtitle: Text(
+                                '${target.protocolName} · $host',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 10),
+                              ),
                               trailing: Text(
                                 target.adapterId == 'pty-compatibility'
                                     ? 'Compatible'
                                     : _runtimeStatus(target.status),
                                 style: const TextStyle(
-                                  fontSize: 11,
+                                  fontSize: 10,
                                   color: Color(0xff747988),
                                 ),
                               ),
@@ -349,7 +369,8 @@ class _RuntimeOverrideEditorState extends State<RuntimeOverrideEditor> {
           initialValue: adapterId.isEmpty ? null : adapterId,
           isDense: true,
           isExpanded: true,
-          decoration: const InputDecoration(labelText: 'Agent'),
+          style: const TextStyle(fontSize: 11),
+          decoration: const InputDecoration(labelText: 'Agent', isDense: true),
           items: [
             for (final adapter in adapters)
               DropdownMenuItem(
@@ -357,6 +378,7 @@ class _RuntimeOverrideEditorState extends State<RuntimeOverrideEditor> {
                 child: Text(
                   '${adapter['displayName']} · ${adapter['protocolName']}',
                   overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11),
                 ),
               ),
           ],
@@ -371,12 +393,19 @@ class _RuntimeOverrideEditorState extends State<RuntimeOverrideEditor> {
             initialValue: selectedHost.isEmpty ? null : selectedHost,
             isDense: true,
             isExpanded: true,
-            decoration: const InputDecoration(labelText: 'Execution host'),
+            style: const TextStyle(fontSize: 11),
+            decoration: const InputDecoration(
+              labelText: 'Execution host',
+              isDense: true,
+            ),
             items: [
               for (final host in hosts)
                 DropdownMenuItem(
                   value: host['id']?.toString(),
-                  child: Text(host['displayName']?.toString() ?? 'Local'),
+                  child: Text(
+                    host['displayName']?.toString() ?? 'Local',
+                    style: const TextStyle(fontSize: 11),
+                  ),
                 ),
             ],
             onChanged: (value) => setState(() => _hostId = value ?? ''),
@@ -508,7 +537,7 @@ class _ModelPanelState extends State<ModelPanel> {
       borderRadius: BorderRadius.circular(18),
       child: SizedBox(
         width: 390,
-        height: 420,
+        height: 380,
         child: Column(
           children: [
             Padding(
@@ -518,10 +547,16 @@ class _ModelPanelState extends State<ModelPanel> {
                 controller: _search,
                 autofocus: true,
                 onChanged: (_) => setState(() {}),
+                style: const TextStyle(fontSize: 11.5),
                 decoration: const InputDecoration(
-                  prefixIcon: Icon(Icons.search_rounded),
+                  prefixIcon: Icon(Icons.search_rounded, size: 17),
+                  prefixIconConstraints: BoxConstraints(minWidth: 34),
                   hintText: 'Search models',
                   isDense: true,
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 9,
+                  ),
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -550,13 +585,24 @@ class _ModelPanelState extends State<ModelPanel> {
                           child: RadioListTile<String>(
                             key: ValueKey('model-$id'),
                             value: id,
-                            title: Text(model['displayName']?.toString() ?? id),
+                            dense: true,
+                            visualDensity: const VisualDensity(vertical: -3),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                            ),
+                            title: Text(
+                              model['displayName']?.toString() ?? id,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 11.5),
+                            ),
                             subtitle: model['description'] == null
                                 ? null
                                 : Text(
                                     model['description'].toString(),
-                                    maxLines: 2,
+                                    maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontSize: 10),
                                   ),
                             selected: selected,
                           ),
@@ -578,20 +624,45 @@ class _ModelPanelState extends State<ModelPanel> {
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                child: Wrap(
-                  spacing: 6,
-                  children: [
-                    for (final effort in widget.controller.selectedModelEfforts)
-                      ChoiceChip(
-                        key: ValueKey('effort-$effort'),
-                        label: Text(effort),
-                        selected: effort == widget.controller.selectedEffort,
-                        onSelected: (_) {
-                          widget.controller.setEffort(effort);
-                          setState(() {});
-                        },
-                      ),
-                  ],
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    key: const ValueKey('reasoning-options-row'),
+                    children: [
+                      for (
+                        var index = 0;
+                        index < widget.controller.selectedModelEfforts.length;
+                        index++
+                      ) ...[
+                        if (index > 0) const SizedBox(width: 5),
+                        ChoiceChip(
+                          key: ValueKey(
+                            'effort-${widget.controller.selectedModelEfforts[index]}',
+                          ),
+                          label: Text(
+                            widget.controller.selectedModelEfforts[index],
+                          ),
+                          labelStyle: const TextStyle(fontSize: 10),
+                          visualDensity: const VisualDensity(
+                            horizontal: -3,
+                            vertical: -3,
+                          ),
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          padding: const EdgeInsets.symmetric(horizontal: 3),
+                          selected:
+                              widget.controller.selectedModelEfforts[index] ==
+                              widget.controller.selectedEffort,
+                          onSelected: (_) {
+                            widget.controller.setEffort(
+                              widget.controller.selectedModelEfforts[index],
+                            );
+                            setState(() {});
+                          },
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -655,11 +726,18 @@ class ContextPreviewPanel extends StatelessWidget {
                   ),
                 ),
                 if (image != null)
-                  Flexible(
-                    child: Image.memory(
-                      image,
-                      fit: BoxFit.contain,
-                      semanticLabel: 'Attached visual context preview',
+                  SizedBox(
+                    key: const ValueKey('context-preview-image-frame'),
+                    width: double.infinity,
+                    height: 220,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Image.memory(
+                        image,
+                        fit: BoxFit.contain,
+                        gaplessPlayback: true,
+                        semanticLabel: 'Attached visual context preview',
+                      ),
                     ),
                   ),
                 if (attachment.previewText.isNotEmpty)
@@ -671,7 +749,7 @@ class ContextPreviewPanel extends StatelessWidget {
                         key: const ValueKey('context-preview-text'),
                         style: const TextStyle(
                           fontFamily: 'monospace',
-                          fontSize: 12,
+                          fontSize: 10.5,
                           height: 1.4,
                         ),
                       ),

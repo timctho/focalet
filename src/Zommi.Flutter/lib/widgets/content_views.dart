@@ -32,7 +32,7 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
   Widget build(BuildContext context) {
     final base = DefaultTextStyle.of(context).style.copyWith(
       color: const Color(0xff272b38),
-      fontSize: widget.compact ? 11.5 : 12.5,
+      fontSize: widget.compact ? 10.5 : 11.5,
       height: 1.38,
     );
     return MouseRegion(
@@ -49,12 +49,12 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
               builders: {'pre': _CodeBlockBuilder(onCopy: widget.onCopy)},
               styleSheet: MarkdownStyleSheet(
                 p: base,
-                h1: base.copyWith(fontSize: 18, fontWeight: FontWeight.w700),
-                h2: base.copyWith(fontSize: 16, fontWeight: FontWeight.w700),
-                h3: base.copyWith(fontSize: 14, fontWeight: FontWeight.w700),
+                h1: base.copyWith(fontSize: 16, fontWeight: FontWeight.w700),
+                h2: base.copyWith(fontSize: 14, fontWeight: FontWeight.w700),
+                h3: base.copyWith(fontSize: 12.5, fontWeight: FontWeight.w700),
                 code: base.copyWith(
                   fontFamily: 'monospace',
-                  fontSize: widget.compact ? 10.5 : 11.5,
+                  fontSize: widget.compact ? 9.5 : 10.5,
                   backgroundColor: const Color(0xffeef0f6),
                 ),
                 codeblockDecoration: BoxDecoration(
@@ -155,7 +155,7 @@ class _CopyableCodeBlockState extends State<_CopyableCodeBlock> {
                 style: const TextStyle(
                   color: Color(0xff272b38),
                   fontFamily: 'monospace',
-                  fontSize: 11.5,
+                  fontSize: 10.5,
                   height: 1.35,
                 ),
               ),

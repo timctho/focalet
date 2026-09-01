@@ -89,6 +89,24 @@ void main() {
       ),
       'part 1 part 2',
     );
+    expect(
+      mergeActivityText(
+        'Hello',
+        'Hello from Codex',
+        TranscriptKind.assistant,
+        TranscriptLifecycle.delta,
+      ),
+      'Hello from Codex',
+    );
+    expect(
+      mergeActivityText(
+        'The answer is ready',
+        'ready now',
+        TranscriptKind.assistant,
+        TranscriptLifecycle.delta,
+      ),
+      'The answer is ready now',
+    );
   });
 
   test('artifact HTML strips executable and navigation surfaces', () {

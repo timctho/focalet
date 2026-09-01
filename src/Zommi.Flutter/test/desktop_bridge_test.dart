@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
@@ -55,6 +56,59 @@ void main() {
 
       expect(calls, ['show', 'focus', 'topmost']);
       expect(calls, isNot(contains('resize')));
+    },
+  );
+
+  test('surface bounds preserve a dragged bottom-center anchor', () {
+    const workArea = Rect.fromLTWH(100, 50, 1200, 800);
+    final initial = anchoredSurfaceBounds(
+      current: const Rect.fromLTWH(10, 10, 900, 760),
+      workArea: workArea,
+      size: compactWindowSize,
+      preserveCurrentAnchor: false,
+    );
+    expect(initial.center.dx, workArea.center.dx);
+    expect(initial.bottom, workArea.bottom - windowBottomInset);
+
+    const dragged = Rect.fromLTWH(622, 724, 56, 56);
+    final expanded = anchoredSurfaceBounds(
+      current: dragged,
+      workArea: workArea,
+      size: normalWindowSize,
+      preserveCurrentAnchor: true,
+    );
+    expect(expanded.center.dx, dragged.center.dx);
+    expect(expanded.bottom, dragged.bottom);
+
+    final clamped = anchoredSurfaceBounds(
+      current: const Rect.fromLTWH(110, 60, 56, 56),
+      workArea: workArea,
+      size: normalWindowSize,
+      preserveCurrentAnchor: true,
+    );
+    expect(clamped.left, workArea.left);
+    expect(clamped.top, workArea.top);
+    expect(workArea.contains(clamped.topLeft), isTrue);
+    expect(workArea.contains(clamped.bottomRight), isTrue);
+  });
+
+  test(
+    'surface transition advances through eased frames to exact bounds',
+    () async {
+      const from = Rect.fromLTWH(100, 500, 56, 56);
+      const to = Rect.fromLTWH(20, 40, 720, 620);
+      final frames = <Rect>[];
+      await animateSurfaceBounds(
+        from: from,
+        to: to,
+        duration: const Duration(microseconds: 4),
+        frames: 4,
+        setBounds: (value) async => frames.add(value),
+        cancelled: () => false,
+      );
+      expect(frames, hasLength(4));
+      expect(frames.first.width, greaterThan(from.width));
+      expect(frames.last, to);
     },
   );
 

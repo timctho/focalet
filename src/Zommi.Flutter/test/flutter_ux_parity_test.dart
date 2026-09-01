@@ -8,6 +8,7 @@ import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
+import 'package:zommi_flutter/widgets/transcript_view.dart';
 import 'package:zommi_flutter/zommi_app.dart';
 
 import 'test_support.dart';
@@ -143,6 +144,29 @@ void main() {
       );
       expect(find.text('[image]'), findsNothing);
 
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      addTearDown(mouse.removePointer);
+      await mouse.addPointer(location: Offset.zero);
+      await mouse.moveTo(
+        tester.getCenter(
+          find.byKey(const ValueKey('sent-inline-image-image-1')),
+        ),
+      );
+      await tester.pump();
+      final preview = find.byKey(const ValueKey('context-preview'));
+      expect(preview, findsOneWidget);
+      final previewOrigin = tester.getTopLeft(preview);
+      await mouse.moveTo(tester.getCenter(preview));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(preview, findsOneWidget);
+      expect(tester.getTopLeft(preview), previewOrigin);
+      expect(
+        tester
+            .getSize(find.byKey(const ValueKey('context-preview-image-frame')))
+            .height,
+        220,
+      );
+
       desktop.emit(
         DesktopInvocation(
           kind: DesktopInvocationKind.image,
@@ -181,12 +205,26 @@ void main() {
 
       await tester.tap(find.byKey(const ValueKey('model-summary')));
       await tester.pumpAndSettle();
+      final reasoningRow = find.byKey(const ValueKey('reasoning-options-row'));
+      expect(reasoningRow, findsOneWidget);
+      expect(tester.getSize(reasoningRow).height, lessThan(34));
+      final effortTopEdges = ['low', 'medium', 'high', 'xhigh']
+          .map(
+            (effort) =>
+                tester.getTopLeft(find.byKey(ValueKey('effort-$effort'))).dy,
+          )
+          .toSet();
+      expect(effortTopEdges, hasLength(1));
       await tester.enterText(
         find.byKey(const ValueKey('model-search')),
         'Mini',
       );
       await tester.pump();
       expect(find.text('Fixture Mini'), findsOneWidget);
+      expect(
+        tester.widget<Text>(find.text('Fixture Mini')).style?.fontSize,
+        lessThanOrEqualTo(11.5),
+      );
       await tester.tap(find.byKey(const ValueKey('model-fixture-mini')));
       await tester.pump();
       await tester.tap(find.byKey(const ValueKey('effort-medium')));
@@ -300,18 +338,19 @@ void main() {
     final field = tester.widget<TextField>(
       find.byKey(const ValueKey('zommi-composer')),
     );
-    expect(field.style?.fontSize, 13);
+    expect(field.style?.fontSize, 12);
+    expect(field.textAlignVertical, TextAlignVertical.center);
     final markdown = tester.widgetList<MarkdownBody>(find.byType(MarkdownBody));
     expect(markdown, isNotEmpty);
     expect(
       markdown.every(
-        (body) => (body.styleSheet?.p?.fontSize ?? double.infinity) <= 12.5,
+        (body) => (body.styleSheet?.p?.fontSize ?? double.infinity) <= 11.5,
       ),
       isTrue,
     );
   });
 
-  testWidgets('working orb remains visible and advances in the open panel', (
+  testWidgets('expanded header does not repeat the compact orb', (
     tester,
   ) async {
     final core = RichFakeCore()..historyCount = 0;
@@ -324,26 +363,33 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('send-message')));
     await tester.pump();
 
-    final orb = find.byKey(const ValueKey('panel-orb'));
-    expect(orb, findsOneWidget);
-    expect(tester.widget<ZommiOrb>(orb).working, isTrue);
-    expect(
-      find.byWidgetPredicate(
-        (widget) =>
-            widget is Semantics &&
-            widget.properties.label == 'Zommi is thinking',
+    expect(find.byKey(const ValueKey('panel-orb')), findsNothing);
+    expect(find.byType(ZommiOrb), findsNothing);
+    expect(find.byKey(const ValueKey('stop-turn')), findsOneWidget);
+  });
+
+  test('duplicate assistant blocks collapse to one visible message', () {
+    final blocks = [
+      TranscriptBlock(
+        id: 'first',
+        kind: TranscriptKind.assistant,
+        title: 'Codex',
+        text: 'same answer',
       ),
-      findsOneWidget,
-    );
-    final canvas = find.descendant(
-      of: orb,
-      matching: find.byKey(const ValueKey('zommi-orb-canvas')),
-    );
-    final firstPainter = tester.widget<CustomPaint>(canvas).painter;
-    await tester.pump(const Duration(milliseconds: 350));
-    final secondPainter = tester.widget<CustomPaint>(canvas).painter;
-    expect(secondPainter, isNot(same(firstPainter)));
-    expect(secondPainter!.shouldRepaint(firstPainter!), isTrue);
+      TranscriptBlock(
+        id: 'second',
+        kind: TranscriptKind.assistant,
+        title: 'Codex',
+        text: 'same answer',
+      ),
+      TranscriptBlock(
+        id: 'tool',
+        kind: TranscriptKind.tool,
+        title: 'Tool',
+        text: 'same answer',
+      ),
+    ];
+    expect(distinctTranscriptBlocks(blocks), [blocks.first, blocks.last]);
   });
 
   testWidgets(

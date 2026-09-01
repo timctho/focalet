@@ -8,9 +8,16 @@ import 'package:zommi_flutter/widgets/content_views.dart';
 import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
 
 class TranscriptPane extends StatefulWidget {
-  const TranscriptPane({required this.controller, super.key});
+  const TranscriptPane({
+    required this.controller,
+    required this.onAttachmentEnter,
+    required this.onAttachmentExit,
+    super.key,
+  });
 
   final ZommiController controller;
+  final ValueChanged<ContextAttachment> onAttachmentEnter;
+  final ValueChanged<ContextAttachment> onAttachmentExit;
 
   @override
   State<TranscriptPane> createState() => _TranscriptPaneState();
@@ -22,6 +29,7 @@ class _TranscriptPaneState extends State<TranscriptPane> {
   bool _autoFollow = true;
   bool _loadScheduled = false;
   int _knownTurnCount = 0;
+  int _knownContentRevision = 0;
 
   @override
   void initState() {
@@ -35,6 +43,7 @@ class _TranscriptPaneState extends State<TranscriptPane> {
   void didUpdateWidget(covariant TranscriptPane oldWidget) {
     super.didUpdateWidget(oldWidget);
     final turns = widget.controller.turns;
+    final contentRevision = transcriptContentRevision(turns);
     if (oldWidget.controller.activeSessionId !=
         widget.controller.activeSessionId) {
       _resetRange();
@@ -43,15 +52,17 @@ class _TranscriptPaneState extends State<TranscriptPane> {
     }
     if (turns.length < _knownTurnCount) _resetRange();
     _knownTurnCount = turns.length;
-    if (_autoFollow) {
+    if (_knownContentRevision != contentRevision && _autoFollow) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToLatest());
     }
+    _knownContentRevision = contentRevision;
   }
 
   void _resetRange() {
     final count = widget.controller.turns.length;
     _start = math.max(0, count - historyPageSize);
     _knownTurnCount = count;
+    _knownContentRevision = transcriptContentRevision(widget.controller.turns);
     _autoFollow = true;
   }
 
@@ -117,14 +128,14 @@ class _TranscriptPaneState extends State<TranscriptPane> {
               'Point, ask, keep moving.',
               style: TextStyle(
                 color: Color(0xff43495a),
-                fontSize: 15,
+                fontSize: 13,
                 fontWeight: FontWeight.w600,
               ),
             ),
             const SizedBox(height: 4),
             const Text(
               'Ask about anything under your pointer.',
-              style: TextStyle(color: Color(0xff737887), fontSize: 12),
+              style: TextStyle(color: Color(0xff737887), fontSize: 10.5),
             ),
           ],
         ),
@@ -145,11 +156,17 @@ class _TranscriptPaneState extends State<TranscriptPane> {
             controller: _scroll,
             padding: const EdgeInsets.fromLTRB(24, 14, 24, 20),
             itemCount: visible.length,
-            itemBuilder: (context, index) => ConversationTurnView(
-              turn: visible[index],
-              runtimeName: widget.controller.activeRuntimeName,
-              controller: widget.controller,
-            ),
+            itemBuilder: (context, index) {
+              final turn = visible[index];
+              return ConversationTurnView(
+                key: ValueKey('turn-${turn.id}'),
+                turn: turn,
+                runtimeName: widget.controller.activeRuntimeName,
+                controller: widget.controller,
+                onAttachmentEnter: widget.onAttachmentEnter,
+                onAttachmentExit: widget.onAttachmentExit,
+              );
+            },
           ),
         ),
         Positioned(
@@ -180,12 +197,16 @@ class ConversationTurnView extends StatelessWidget {
     required this.turn,
     required this.runtimeName,
     required this.controller,
+    required this.onAttachmentEnter,
+    required this.onAttachmentExit,
     super.key,
   });
 
   final ConversationTurn turn;
   final String runtimeName;
   final ZommiController controller;
+  final ValueChanged<ContextAttachment> onAttachmentEnter;
+  final ValueChanged<ContextAttachment> onAttachmentExit;
 
   @override
   Widget build(BuildContext context) {
@@ -221,7 +242,7 @@ class ConversationTurnView extends StatelessWidget {
                           turn.contextTokens.join(' '),
                           style: const TextStyle(
                             color: Color(0xff6d639f),
-                            fontSize: 11,
+                            fontSize: 10,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
@@ -232,9 +253,8 @@ class ConversationTurnView extends StatelessWidget {
                         key: ValueKey('inline-user-message-${turn.id}'),
                         text: turn.inlineUserText,
                         attachments: turn.attachments,
-                        onAttachmentEnter: controller.showAttachmentPreview,
-                        onAttachmentExit: (_) =>
-                            controller.hideAttachmentPreview(),
+                        onAttachmentEnter: onAttachmentEnter,
+                        onAttachmentExit: onAttachmentExit,
                       )
                     else
                       CopyableMarkdown(
@@ -247,7 +267,7 @@ class ConversationTurnView extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
-            for (final block in turn.blocks)
+            for (final block in distinctTranscriptBlocks(turn.blocks))
               Padding(
                 padding: const EdgeInsets.only(bottom: 9),
                 child: block.kind == TranscriptKind.assistant
@@ -263,6 +283,46 @@ class ConversationTurnView extends StatelessWidget {
       ),
     );
   }
+}
+
+int transcriptContentRevision(Iterable<ConversationTurn> turns) =>
+    Object.hashAll(
+      turns.expand(
+        (turn) => <Object?>[
+          turn.id,
+          turn.userText,
+          turn.inlineUserText,
+          ...turn.attachments.map((attachment) => attachment.id),
+          ...turn.blocks.expand(
+            (block) => <Object?>[
+              block.id,
+              block.kind,
+              block.text,
+              block.lifecycle,
+              block.expanded,
+              ...block.artifacts.map((artifact) => artifact.identity),
+            ],
+          ),
+        ],
+      ),
+    );
+
+List<TranscriptBlock> distinctTranscriptBlocks(
+  Iterable<TranscriptBlock> blocks,
+) {
+  final result = <TranscriptBlock>[];
+  for (final block in blocks) {
+    final text = block.text.trim();
+    final duplicate =
+        block.kind == TranscriptKind.assistant &&
+        text.isNotEmpty &&
+        result.any(
+          (existing) =>
+              existing.kind == block.kind && existing.text.trim() == text,
+        );
+    if (!duplicate) result.add(block);
+  }
+  return result;
 }
 
 class AssistantBlockView extends StatelessWidget {
@@ -360,7 +420,7 @@ class ActivityBlockView extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: Color(0xff4b5060),
-                          fontSize: 12,
+                          fontSize: 11,
                           fontWeight: FontWeight.w700,
                         ),
                       ),

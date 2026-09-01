@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/services.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
@@ -16,6 +17,8 @@ const Size compactWindowSize = Size(56, 56);
 const Size normalWindowSize = Size(720, 620);
 const Size largeWindowSize = Size(920, 760);
 const double windowBottomInset = 18;
+const Duration surfaceTransitionDuration = Duration(milliseconds: 180);
+const int surfaceTransitionFrameCount = 12;
 
 enum DesktopInvocationKind { open, context, image, status }
 
@@ -218,6 +221,8 @@ final class FlutterDesktopBridge
     scope: HotKeyScope.system,
   );
   bool _initialized = false;
+  bool _surfacePositionInitialized = false;
+  int _surfaceTransitionEpoch = 0;
   bool _nativeContextRegistered = false;
   bool _nativeImageRegistered = false;
   DesktopReadiness _readiness = const DesktopReadiness();
@@ -447,17 +452,30 @@ final class FlutterDesktopBridge
     final workArea = selected.visibleSize ?? selected.size;
     final width = size.width.clamp(compactWindowSize.width, workArea.width);
     final height = size.height.clamp(compactWindowSize.height, workArea.height);
-    final bounds = Rect.fromLTWH(
-      origin.dx + (workArea.width - width) / 2,
-      origin.dy + workArea.height - height - windowBottomInset,
-      width,
-      height,
+    final workAreaBounds = origin & workArea;
+    final bounds = anchoredSurfaceBounds(
+      current: current,
+      workArea: workAreaBounds,
+      size: Size(width, height),
+      preserveCurrentAnchor: _surfacePositionInitialized,
     );
+    final shouldAnimate = _surfacePositionInitialized;
+    _surfacePositionInitialized = true;
+    final transitionEpoch = ++_surfaceTransitionEpoch;
     await windowManager.setMinimumSize(
       expanded ? const Size(640, 500) : compactWindowSize,
     );
     await windowManager.setResizable(expanded);
-    await windowManager.setBounds(bounds, animate: true);
+    if (shouldAnimate) {
+      await animateSurfaceBounds(
+        from: current,
+        to: bounds,
+        setBounds: (value) => windowManager.setBounds(value, animate: false),
+        cancelled: () => transitionEpoch != _surfaceTransitionEpoch,
+      );
+    } else {
+      await windowManager.setBounds(bounds, animate: false);
+    }
     await windowManager.setAlwaysOnTop(true);
   }
 
@@ -672,6 +690,46 @@ Future<void> presentPanelWithoutResizing({
   await show();
   await focus();
   await keepOnTop();
+}
+
+Rect anchoredSurfaceBounds({
+  required Rect current,
+  required Rect workArea,
+  required Size size,
+  required bool preserveCurrentAnchor,
+}) {
+  final anchor = preserveCurrentAnchor
+      ? Offset(current.center.dx, current.bottom)
+      : Offset(workArea.center.dx, workArea.bottom - windowBottomInset);
+  final maxLeft = math.max(workArea.left, workArea.right - size.width);
+  final maxTop = math.max(workArea.top, workArea.bottom - size.height);
+  final left = (anchor.dx - size.width / 2).clamp(workArea.left, maxLeft);
+  final top = (anchor.dy - size.height).clamp(workArea.top, maxTop);
+  return Rect.fromLTWH(left, top, size.width, size.height);
+}
+
+Future<void> animateSurfaceBounds({
+  required Rect from,
+  required Rect to,
+  required Future<void> Function(Rect value) setBounds,
+  required bool Function() cancelled,
+  Duration duration = surfaceTransitionDuration,
+  int frames = surfaceTransitionFrameCount,
+}) async {
+  if (from == to || duration == Duration.zero || frames <= 1) {
+    if (!cancelled()) await setBounds(to);
+    return;
+  }
+  final frameDelay = Duration(
+    microseconds: math.max(1, duration.inMicroseconds ~/ frames),
+  );
+  for (var frame = 1; frame <= frames; frame++) {
+    if (cancelled()) return;
+    final linear = frame / frames;
+    final eased = 1 - math.pow(1 - linear, 3).toDouble();
+    await setBounds(Rect.lerp(from, to, eased)!);
+    if (frame < frames) await Future<void>.delayed(frameDelay);
+  }
 }
 
 bool supportsNativeWindowShadow(String operatingSystem) =>

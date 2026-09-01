@@ -154,6 +154,7 @@ final class InlineAttachmentTextController extends TextEditingController {
       attachments: _attachments,
       style: style,
       tileBuilder: (attachment) => InlineAttachmentTile(
+        key: ValueKey('composer-inline-tile-${attachment.id}'),
         attachment: attachment,
         onDelete: () => onAttachmentRemoved(attachment),
         onEnter: onAttachmentEnter == null
@@ -190,7 +191,7 @@ class InlineAttachmentMessage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final style = DefaultTextStyle.of(context).style
-        .copyWith(color: const Color(0xff272b38), fontSize: 12, height: 1.35);
+        .copyWith(color: const Color(0xff272b38), fontSize: 11, height: 1.35);
     return SelectionArea(
       child: RichText(
         key: key,
@@ -201,6 +202,7 @@ class InlineAttachmentMessage extends StatelessWidget {
             attachments: attachments,
             style: style,
             tileBuilder: (attachment) => InlineAttachmentTile(
+              key: ValueKey('sent-inline-tile-${attachment.id}'),
               attachment: attachment,
               onEnter: onAttachmentEnter == null
                   ? null

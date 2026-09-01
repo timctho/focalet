@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +7,7 @@ import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/desktop/artifact_loader.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
+import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
 import 'package:zommi_flutter/widgets/overlay_panels.dart';
 import 'package:zommi_flutter/widgets/transcript_view.dart';
@@ -62,21 +62,21 @@ TextTheme _compactTextTheme(TextTheme base) {
   TextStyle sized(TextStyle? style, double size) =>
       (style ?? const TextStyle()).copyWith(fontSize: size);
   return base.copyWith(
-    displayLarge: sized(base.displayLarge, 50),
-    displayMedium: sized(base.displayMedium, 40),
-    displaySmall: sized(base.displaySmall, 32),
-    headlineLarge: sized(base.headlineLarge, 28),
-    headlineMedium: sized(base.headlineMedium, 24),
-    headlineSmall: sized(base.headlineSmall, 21),
-    titleLarge: sized(base.titleLarge, 19),
-    titleMedium: sized(base.titleMedium, 14),
-    titleSmall: sized(base.titleSmall, 12),
-    bodyLarge: sized(base.bodyLarge, 13),
-    bodyMedium: sized(base.bodyMedium, 12.5),
-    bodySmall: sized(base.bodySmall, 11),
-    labelLarge: sized(base.labelLarge, 12.5),
-    labelMedium: sized(base.labelMedium, 11),
-    labelSmall: sized(base.labelSmall, 10),
+    displayLarge: sized(base.displayLarge, 46),
+    displayMedium: sized(base.displayMedium, 36),
+    displaySmall: sized(base.displaySmall, 29),
+    headlineLarge: sized(base.headlineLarge, 25),
+    headlineMedium: sized(base.headlineMedium, 21),
+    headlineSmall: sized(base.headlineSmall, 18),
+    titleLarge: sized(base.titleLarge, 17),
+    titleMedium: sized(base.titleMedium, 13),
+    titleSmall: sized(base.titleSmall, 11.5),
+    bodyLarge: sized(base.bodyLarge, 12),
+    bodyMedium: sized(base.bodyMedium, 11.5),
+    bodySmall: sized(base.bodySmall, 10),
+    labelLarge: sized(base.labelLarge, 11.5),
+    labelMedium: sized(base.labelMedium, 10.5),
+    labelSmall: sized(base.labelSmall, 9.5),
   );
 }
 
@@ -107,6 +107,7 @@ class _ZommiShellState extends State<ZommiShell> {
   Timer? _previewTimer;
   Timer? _sessionTimer;
   int _lastFocusEpoch = 0;
+  bool _draggingWindow = false;
 
   @override
   void initState() {
@@ -119,10 +120,7 @@ class _ZommiShellState extends State<ZommiShell> {
     _composer = InlineAttachmentTextController(
       onAttachmentRemoved: (attachment) =>
           _controller.removeAttachment(attachment.id),
-      onAttachmentEnter: (attachment) {
-        _previewTimer?.cancel();
-        _controller.showAttachmentPreview(attachment);
-      },
+      onAttachmentEnter: _showAttachmentPreview,
       onAttachmentExit: (_) => _schedulePreviewClose(),
     );
     _controller.addListener(_onControllerChanged);
@@ -166,7 +164,7 @@ class _ZommiShellState extends State<ZommiShell> {
   void _scheduleCollapse() {
     _collapseTimer?.cancel();
     _collapseTimer = Timer(hoverCollapseDelay, () {
-      if (!mounted) return;
+      if (!mounted || _draggingWindow) return;
       _composerFocus.unfocus();
       _controller.closeTransientPanels();
       _controller.hideAttachmentPreview();
@@ -174,9 +172,24 @@ class _ZommiShellState extends State<ZommiShell> {
     });
   }
 
+  Future<void> _startWindowDrag() async {
+    _collapseTimer?.cancel();
+    _draggingWindow = true;
+    try {
+      await _controller.startDragging();
+    } finally {
+      _draggingWindow = false;
+    }
+  }
+
   void _schedulePreviewClose() {
     _previewTimer?.cancel();
     _previewTimer = Timer(previewHideDelay, _controller.hideAttachmentPreview);
+  }
+
+  void _showAttachmentPreview(ContextAttachment attachment) {
+    _previewTimer?.cancel();
+    _controller.showAttachmentPreview(attachment);
   }
 
   void _openSessions() {
@@ -261,7 +274,7 @@ class _ZommiShellState extends State<ZommiShell> {
                   key: const ValueKey('zommi-surface'),
                   duration: MediaQuery.disableAnimationsOf(context)
                       ? Duration.zero
-                      : const Duration(milliseconds: 220),
+                      : surfaceTransitionDuration,
                   curve: Curves.easeOutCubic,
                   width: width,
                   height: height,
@@ -292,113 +305,112 @@ class _ZommiShellState extends State<ZommiShell> {
   Widget _buildPanel(double width, double height) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(34),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: const Color(0xeaf9fbff),
-            borderRadius: BorderRadius.circular(34),
-            border: Border.all(color: const Color(0xccffffff)),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x240d172a),
-                blurRadius: 42,
-                offset: Offset(0, 18),
-              ),
-            ],
-          ),
-          child: Column(
-            children: [
-              _buildHeader(),
-              Expanded(
-                child: Stack(
-                  children: [
-                    Positioned.fill(
-                      child: TranscriptPane(
-                        key: ValueKey(
-                          'transcript-${_controller.activeSessionId}',
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: const Color(0xeaf9fbff),
+          borderRadius: BorderRadius.circular(34),
+          border: Border.all(color: const Color(0xccffffff)),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x240d172a),
+              blurRadius: 42,
+              offset: Offset(0, 18),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            _buildHeader(),
+            Expanded(
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: TranscriptPane(
+                      key: ValueKey(
+                        'transcript-${_controller.activeSessionId}',
+                      ),
+                      controller: _controller,
+                      onAttachmentEnter: _showAttachmentPreview,
+                      onAttachmentExit: (_) => _schedulePreviewClose(),
+                    ),
+                  ),
+                  if (_controller.sessionPanelOpen)
+                    Positioned(
+                      left: 18,
+                      top: 2,
+                      child: TapRegion(
+                        groupId: _sessionTapGroup,
+                        child: SessionSidebar(
+                          controller: _controller,
+                          onPointerEnter: () => _sessionTimer?.cancel(),
+                          onPointerExit: _scheduleSessionsClose,
                         ),
-                        controller: _controller,
                       ),
                     ),
-                    if (_controller.sessionPanelOpen)
-                      Positioned(
-                        left: 18,
-                        top: 2,
-                        child: TapRegion(
-                          groupId: _sessionTapGroup,
-                          child: SessionSidebar(
+                  if (_controller.runtimePanelOpen)
+                    Positioned(
+                      top: 2,
+                      left: math.max(18, (width - 420) / 2),
+                      child: TapRegion(
+                        groupId: _runtimeTapGroup,
+                        child: RuntimePanel(controller: _controller),
+                      ),
+                    ),
+                  if (_controller.modelPanelOpen)
+                    Positioned(
+                      top: 2,
+                      right: 20,
+                      child: TapRegion(
+                        groupId: _modelTapGroup,
+                        child: ModelPanel(controller: _controller),
+                      ),
+                    ),
+                  if (_controller.previewAttachment case final attachment?)
+                    Positioned(
+                      right: 22,
+                      bottom: 12,
+                      child: ContextPreviewPanel(
+                        attachment: attachment,
+                        onClose: _controller.hideAttachmentPreview,
+                        onPointerEnter: () => _previewTimer?.cancel(),
+                        onPointerExit: _schedulePreviewClose,
+                      ),
+                    ),
+                  if (_controller.approval != null)
+                    Positioned.fill(
+                      child: ColoredBox(
+                        color: const Color(0x220d172a),
+                        child: Center(
+                          child: ApprovalDialogCard(controller: _controller),
+                        ),
+                      ),
+                    ),
+                  if (_controller.question != null)
+                    Positioned.fill(
+                      child: ColoredBox(
+                        color: const Color(0x220d172a),
+                        child: Center(
+                          child: QuestionDialogCard(
+                            key: ValueKey(_controller.question!.id),
                             controller: _controller,
-                            onPointerEnter: () => _sessionTimer?.cancel(),
-                            onPointerExit: _scheduleSessionsClose,
                           ),
                         ),
                       ),
-                    if (_controller.runtimePanelOpen)
-                      Positioned(
-                        top: 2,
-                        left: math.max(18, (width - 420) / 2),
-                        child: TapRegion(
-                          groupId: _runtimeTapGroup,
-                          child: RuntimePanel(controller: _controller),
-                        ),
-                      ),
-                    if (_controller.modelPanelOpen)
-                      Positioned(
-                        top: 2,
-                        right: 20,
-                        child: TapRegion(
-                          groupId: _modelTapGroup,
-                          child: ModelPanel(controller: _controller),
-                        ),
-                      ),
-                    if (_controller.previewAttachment case final attachment?)
-                      Positioned(
-                        right: 22,
-                        bottom: 12,
-                        child: ContextPreviewPanel(
-                          attachment: attachment,
-                          onClose: _controller.hideAttachmentPreview,
-                          onPointerEnter: () => _previewTimer?.cancel(),
-                          onPointerExit: _schedulePreviewClose,
-                        ),
-                      ),
-                    if (_controller.approval != null)
-                      Positioned.fill(
-                        child: ColoredBox(
-                          color: const Color(0x220d172a),
-                          child: Center(
-                            child: ApprovalDialogCard(controller: _controller),
-                          ),
-                        ),
-                      ),
-                    if (_controller.question != null)
-                      Positioned.fill(
-                        child: ColoredBox(
-                          color: const Color(0x220d172a),
-                          child: Center(
-                            child: QuestionDialogCard(
-                              key: ValueKey(_controller.question!.id),
-                              controller: _controller,
-                            ),
-                          ),
-                        ),
-                      ),
-                    if (_controller.previewArtifact != null)
-                      ArtifactViewerDialog(controller: _controller),
-                  ],
-                ),
+                    ),
+                  if (_controller.previewArtifact != null)
+                    ArtifactViewerDialog(controller: _controller),
+                ],
               ),
-              _buildComposer(),
-              if (_controller.activeSessionId != null)
-                Semantics(
-                  container: true,
-                  label: 'Exact agent session bound',
-                  child: const SizedBox(width: 1, height: 1),
-                ),
-              _buildFooter(),
-            ],
-          ),
+            ),
+            _buildComposer(),
+            if (_controller.activeSessionId != null)
+              Semantics(
+                container: true,
+                label: 'Exact agent session bound',
+                child: const SizedBox(width: 1, height: 1),
+              ),
+            _buildFooter(),
+          ],
         ),
       ),
     );
@@ -435,21 +447,6 @@ class _ZommiShellState extends State<ZommiShell> {
                 ),
               ),
             ),
-            const SizedBox(width: 5),
-            SizedBox.square(
-              dimension: 31,
-              child: Semantics(
-                label: _controller.anyTurnActive
-                    ? 'Zommi is thinking'
-                    : 'Zommi is idle',
-                child: ZommiOrb(
-                  key: const ValueKey('panel-orb'),
-                  working: _controller.anyTurnActive,
-                  size: 31,
-                ),
-              ),
-            ),
-            const SizedBox(width: 5),
             TapRegion(
               groupId: _runtimeTapGroup,
               onTapOutside: (_) => _controller.dismissRuntimePanel(),
@@ -478,7 +475,7 @@ class _ZommiShellState extends State<ZommiShell> {
               child: GestureDetector(
                 key: const ValueKey('window-drag-region'),
                 behavior: HitTestBehavior.translucent,
-                onPanStart: (_) => unawaited(_controller.startDragging()),
+                onPanStart: (_) => unawaited(_startWindowDrag()),
                 child: const SizedBox.expand(),
               ),
             ),
@@ -503,7 +500,7 @@ class _ZommiShellState extends State<ZommiShell> {
       child: Padding(
         padding: const EdgeInsets.fromLTRB(22, 6, 22, 6),
         child: Container(
-          padding: const EdgeInsets.all(7),
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
           decoration: BoxDecoration(
             color: const Color(0xe6ffffff),
             borderRadius: BorderRadius.circular(24),
@@ -517,7 +514,7 @@ class _ZommiShellState extends State<ZommiShell> {
             ],
           ),
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Semantics(
                 button: true,
@@ -543,11 +540,13 @@ class _ZommiShellState extends State<ZommiShell> {
                   maxLines: 5,
                   keyboardType: TextInputType.multiline,
                   textInputAction: TextInputAction.newline,
-                  style: const TextStyle(fontSize: 13, height: 1.35),
+                  textAlignVertical: TextAlignVertical.center,
+                  style: const TextStyle(fontSize: 12, height: 1.3),
                   decoration: const InputDecoration(
                     hintText: 'Ask your agent',
                     border: InputBorder.none,
                     isDense: true,
+                    contentPadding: EdgeInsets.symmetric(vertical: 10),
                   ),
                 ),
               ),
@@ -695,6 +694,7 @@ class _SummaryButton extends StatelessWidget {
           foregroundColor: const Color(0xff4c5160),
           visualDensity: VisualDensity.compact,
           padding: const EdgeInsets.symmetric(horizontal: 8),
+          textStyle: const TextStyle(fontSize: 11),
         ),
         icon: Container(
           width: 7,
