@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -136,6 +138,59 @@ void main() {
       expect(morph.bottom, closeTo(viewport.bottom, 0.01));
 
       shrinkGate.complete();
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
+    'forward and reverse morph midpoints are pixel-symmetric and rounded',
+    (tester) async {
+      final core = RichFakeCore()..historyCount = 0;
+      await _pumpApp(tester, core: core, desktop: FakeDesktopBridge());
+
+      await tester.tap(find.byKey(const ValueKey('zommi-orb')));
+      await tester.pump();
+      await tester.pump(surfaceTransitionDuration * 0.5);
+      final forward = await _captureSurfaceTransition(tester);
+      await tester.pump(surfaceTransitionDuration * 0.5);
+      await tester.pumpAndSettle();
+
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      addTearDown(mouse.removePointer);
+      await mouse.addPointer(location: Offset.zero);
+      await mouse.moveTo(
+        tester.getCenter(find.byKey(const ValueKey('zommi-surface'))),
+      );
+      await tester.pump();
+      await mouse.moveTo(const Offset(5, 5));
+      await tester.pump(hoverCollapseDelay);
+      await tester.pump(surfaceTransitionDuration * 0.5);
+      final reverse = await _captureSurfaceTransition(tester);
+
+      expect(reverse.size, forward.size);
+      expect(reverse.pixels, orderedEquals(forward.pixels));
+
+      final midpointSize = surfaceTransitionSize(
+        compactWindowSize,
+        normalWindowSize,
+        0.5,
+      );
+      final outerLeft = (forward.size.width - midpointSize.width) / 2;
+      final outerTop = forward.size.height - midpointSize.height;
+      expect(
+        forward.alphaAt(Offset(outerLeft + 2, outerTop + 2)),
+        0,
+        reason: 'The midpoint must retain transparent rounded corners.',
+      );
+      expect(
+        forward.alphaAt(
+          Offset(forward.size.width / 2, outerTop + midpointSize.height / 2),
+        ),
+        greaterThan(200),
+        reason: 'The rounded midpoint must remain visibly filled.',
+      );
+
+      await tester.pump(surfaceTransitionDuration * 0.5);
       await tester.pumpAndSettle();
     },
   );
@@ -1091,6 +1146,42 @@ Future<void> _pumpApp(
 Future<void> _expand(WidgetTester tester) async {
   await tester.tap(find.byKey(const ValueKey('zommi-orb')));
   await tester.pumpAndSettle();
+}
+
+Future<_RasterFrame> _captureSurfaceTransition(WidgetTester tester) async {
+  var renderObject = tester.renderObject<RenderObject>(
+    find.byKey(const ValueKey('surface-transition')),
+  );
+  while (renderObject is! RenderRepaintBoundary) {
+    final parent = renderObject.parent;
+    expect(parent, isA<RenderObject>());
+    renderObject = parent! as RenderObject;
+  }
+  final boundary = renderObject as RenderRepaintBoundary;
+  final image = await tester.runAsync(() => boundary.toImage(pixelRatio: 1));
+  final data = await tester.runAsync(
+    () => image!.toByteData(format: ImageByteFormat.rawRgba),
+  );
+  final pixels = Uint8List.fromList(data!.buffer.asUint8List());
+  final frame = _RasterFrame(
+    size: Size(image!.width.toDouble(), image.height.toDouble()),
+    pixels: pixels,
+  );
+  image.dispose();
+  return frame;
+}
+
+final class _RasterFrame {
+  const _RasterFrame({required this.size, required this.pixels});
+
+  final Size size;
+  final Uint8List pixels;
+
+  int alphaAt(Offset point) {
+    final x = point.dx.round().clamp(0, size.width.toInt() - 1);
+    final y = point.dy.round().clamp(0, size.height.toInt() - 1);
+    return pixels[(y * size.width.toInt() + x) * 4 + 3];
+  }
 }
 
 void _appendComposerText(WidgetTester tester, String value) {
