@@ -170,19 +170,22 @@ class _TranscriptPaneState extends State<TranscriptPane> {
           ),
         ),
         Positioned(
-          right: 20,
+          left: 0,
+          right: 0,
           bottom: 12,
-          child: AnimatedScale(
-            scale: awayFromLatest ? 1 : 0,
-            duration: const Duration(milliseconds: 140),
-            child: Semantics(
-              button: true,
-              label: 'Scroll to latest message',
-              child: IconButton.filledTonal(
-                key: const ValueKey('scroll-to-latest'),
-                tooltip: 'Latest message',
-                onPressed: awayFromLatest ? _scrollToLatest : null,
-                icon: const Icon(Icons.keyboard_arrow_down_rounded),
+          child: Center(
+            child: AnimatedScale(
+              scale: awayFromLatest ? 1 : 0,
+              duration: const Duration(milliseconds: 140),
+              child: Semantics(
+                button: true,
+                label: 'Scroll to latest message',
+                child: IconButton.filledTonal(
+                  key: const ValueKey('scroll-to-latest'),
+                  tooltip: 'Latest message',
+                  onPressed: awayFromLatest ? _scrollToLatest : null,
+                  icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                ),
               ),
             ),
           ),

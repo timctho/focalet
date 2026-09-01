@@ -7,6 +7,23 @@ import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/zommi_app.dart';
 
 void main() {
+  test('surface morph geometry has exact compact and expanded endpoints', () {
+    expect(
+      surfaceMorphProgress(
+        const Size(compactOrbSize, compactOrbSize),
+        const Size(expandedPanelWidth, expandedPanelHeight),
+      ),
+      0,
+    );
+    expect(
+      surfaceMorphProgress(
+        const Size(expandedPanelWidth, expandedPanelHeight),
+        const Size(expandedPanelWidth, expandedPanelHeight),
+      ),
+      1,
+    );
+  });
+
   testWidgets('quiet orb expands into the anchored composer on hover', (
     tester,
   ) async {

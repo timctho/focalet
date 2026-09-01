@@ -40,6 +40,9 @@ public static class ZommiWindowsAcceptanceNative
     [DllImport("user32.dll")]
     private static extern bool IsWindowVisible(IntPtr window);
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool GetWindowRect(IntPtr window, out NativeRect bounds);
 
@@ -128,6 +131,11 @@ public static class ZommiWindowsAcceptanceNative
         const int extendedStyle = -20;
         const int topMost = 0x00000008;
         return (GetWindowLong(window, extendedStyle) & topMost) != 0;
+    }
+
+    public static bool Foreground(IntPtr window)
+    {
+        return GetForegroundWindow() == window;
     }
 
     public static void SendAltA(bool shift)
@@ -529,6 +537,10 @@ function Invoke-PackagedApplicationAcceptance {
 
         [ZommiWindowsAcceptanceNative]::SendAltA($true)
         $selector = Wait-ForPackagedSelector -CaptureExecutable $CaptureExecutable
+        if (-not [ZommiWindowsAcceptanceNative]::TopMost($selector) -or
+            -not [ZommiWindowsAcceptanceNative]::Foreground($selector)) {
+            throw 'Packaged image selector is not topmost and foreground.'
+        }
         if (-not [ZommiWindowsAcceptanceNative]::CancelSelection($selector)) {
             throw 'Could not cancel the packaged application region selector.'
         }
@@ -540,6 +552,10 @@ function Invoke-PackagedApplicationAcceptance {
 
         [ZommiWindowsAcceptanceNative]::SendAltA($true)
         $selector = Wait-ForPackagedSelector -CaptureExecutable $CaptureExecutable
+        if (-not [ZommiWindowsAcceptanceNative]::TopMost($selector) -or
+            -not [ZommiWindowsAcceptanceNative]::Foreground($selector)) {
+            throw 'Packaged image selector lost its topmost foreground state.'
+        }
         $dpi = [double][ZommiWindowsAcceptanceNative]::WindowDpi($selector)
         $logicalWidth = [int][Math]::Max(4, [Math]::Round(40 * 96 / $dpi))
         $logicalHeight = [int][Math]::Max(4, [Math]::Round(30 * 96 / $dpi))

@@ -8,6 +8,12 @@ internal sealed record RegionSelectionResult(Rectangle Bounds, byte[] Png);
 
 internal sealed class RegionSelectionForm : Form
 {
+    private static readonly nint TopMostWindow = new(-1);
+    private const uint NoMove = 0x0002;
+    private const uint NoSize = 0x0001;
+    private const uint NoActivate = 0x0010;
+    private const uint ShowWindow = 0x0040;
+
     private readonly Func<Rectangle, byte[]> captureRegion;
     private Point? anchor;
     private Rectangle selectedArea;
@@ -40,6 +46,27 @@ internal sealed class RegionSelectionForm : Form
     public RegionSelectionResult? Result { get; private set; }
 
     public string? ErrorMessage { get; private set; }
+
+    protected override void OnShown(EventArgs eventArgs)
+    {
+        base.OnShown(eventArgs);
+        KeepAboveOtherWindows(activate: true);
+    }
+
+    protected override void OnActivated(EventArgs eventArgs)
+    {
+        base.OnActivated(eventArgs);
+        KeepAboveOtherWindows(activate: false);
+    }
+
+    protected override void OnDeactivate(EventArgs eventArgs)
+    {
+        base.OnDeactivate(eventArgs);
+        if (Visible)
+        {
+            KeepAboveOtherWindows(activate: false);
+        }
+    }
 
     protected override void OnMouseDown(MouseEventArgs eventArgs)
     {
@@ -141,5 +168,37 @@ internal sealed class RegionSelectionForm : Form
         Math.Min(first.Y, second.Y),
         Math.Max(first.X, second.X),
         Math.Max(first.Y, second.Y));
+
+    private void KeepAboveOtherWindows(bool activate)
+    {
+        TopMost = true;
+        SetWindowPos(
+            Handle,
+            TopMostWindow,
+            0,
+            0,
+            0,
+            0,
+            NoMove | NoSize | NoActivate | ShowWindow);
+        BringToFront();
+        if (activate)
+        {
+            Activate();
+            SetForegroundWindow(Handle);
+        }
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(
+        nint window,
+        nint insertAfter,
+        int x,
+        int y,
+        int width,
+        int height,
+        uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(nint window);
 
 }

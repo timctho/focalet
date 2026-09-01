@@ -31,91 +31,84 @@ class SessionSidebar extends StatelessWidget {
           color: const Color(0xf6f6f8fc),
           elevation: 14,
           borderRadius: BorderRadius.circular(18),
-          child: SizedBox(
-            width: 250,
-            height: 250,
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
-                  child: Row(
-                    children: [
-                      const Expanded(
-                        child: Text(
-                          'Chats',
-                          style: TextStyle(fontWeight: FontWeight.w700),
-                        ),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Chats',
+                        style: TextStyle(fontWeight: FontWeight.w700),
                       ),
-                      if (controller.sessionCreationSupported)
-                        IconButton(
-                          key: const ValueKey('new-session'),
-                          tooltip: 'Create new chat',
-                          onPressed: controller.sessionBusy
-                              ? null
-                              : () => unawaited(controller.createSession()),
-                          icon: const Icon(Icons.add_rounded),
-                        ),
-                    ],
-                  ),
+                    ),
+                    if (controller.sessionCreationSupported)
+                      IconButton(
+                        key: const ValueKey('new-session'),
+                        tooltip: 'Create new chat',
+                        onPressed: controller.sessionBusy
+                            ? null
+                            : () => unawaited(controller.createSession()),
+                        icon: const Icon(Icons.add_rounded),
+                      ),
+                  ],
                 ),
-                Expanded(
-                  child: controller.sessions.isEmpty
-                      ? const Center(
-                          child: Padding(
-                            padding: EdgeInsets.all(18),
-                            child: Text(
-                              'No provider-owned chats are available.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: Color(0xff737887)),
-                            ),
+              ),
+              Expanded(
+                child: controller.sessions.isEmpty
+                    ? const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(18),
+                          child: Text(
+                            'No provider-owned chats are available.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Color(0xff737887)),
                           ),
-                        )
-                      : ListView.builder(
-                          key: const ValueKey('session-list'),
-                          padding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
-                          itemCount: controller.sessions.length,
-                          itemBuilder: (context, index) {
-                            final session = controller.sessions[index];
-                            final presence = controller.presenceFor(session.id);
-                            final selected =
-                                session.id == controller.activeSessionId;
-                            return Semantics(
-                              selected: selected,
-                              label:
-                                  '${session.title}, ${presence.name} session',
-                              child: ListTile(
-                                key: ValueKey('session-${session.id}'),
-                                dense: true,
-                                visualDensity: const VisualDensity(
-                                  vertical: -3,
-                                ),
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                ),
-                                selected: selected,
-                                selectedTileColor: const Color(0xffebe9f7),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                leading: _SessionStatusIcon(presence: presence),
-                                title: Text(
-                                  session.title,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 11),
-                                ),
-                                onTap: controller.sessionBusy
-                                    ? null
-                                    : () => unawaited(
-                                        controller.switchSession(session.id),
-                                      ),
-                              ),
-                            );
-                          },
                         ),
-                ),
-              ],
-            ),
+                      )
+                    : ListView.builder(
+                        key: const ValueKey('session-list'),
+                        padding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
+                        itemCount: controller.sessions.length,
+                        itemBuilder: (context, index) {
+                          final session = controller.sessions[index];
+                          final presence = controller.presenceFor(session.id);
+                          final selected =
+                              session.id == controller.activeSessionId;
+                          return Semantics(
+                            selected: selected,
+                            label: '${session.title}, ${presence.name} session',
+                            child: ListTile(
+                              key: ValueKey('session-${session.id}'),
+                              dense: true,
+                              visualDensity: const VisualDensity(vertical: -3),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
+                              selected: selected,
+                              selectedTileColor: const Color(0xffebe9f7),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              leading: _SessionStatusIcon(presence: presence),
+                              title: Text(
+                                session.title,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 11),
+                              ),
+                              onTap: controller.sessionBusy
+                                  ? null
+                                  : () => unawaited(
+                                      controller.switchSession(session.id),
+                                    ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
           ),
         ),
       ),

@@ -460,16 +460,14 @@ final class FlutterDesktopBridge
     final anchor =
         _surfaceAnchor ??
         (_surfacePositionInitialized
-            ? current.center
+            ? Offset(current.center.dx, current.bottom)
             : Offset(
                 workAreaBounds.center.dx,
-                workAreaBounds.bottom -
-                    windowBottomInset -
-                    compactWindowSize.height / 2,
+                workAreaBounds.bottom - windowBottomInset,
               ));
     _surfaceAnchor = anchor;
-    final bounds = centeredSurfaceBounds(
-      center: anchor,
+    final bounds = anchoredSurfaceBounds(
+      anchor: anchor,
       workArea: workAreaBounds,
       size: Size(width, height),
     );
@@ -529,7 +527,8 @@ final class FlutterDesktopBridge
   @override
   Future<void> startDragging() async {
     await windowManager.startDragging();
-    _surfaceAnchor = (await windowManager.getBounds()).center;
+    final bounds = await windowManager.getBounds();
+    _surfaceAnchor = Offset(bounds.center.dx, bounds.bottom);
   }
 
   @override
@@ -720,15 +719,15 @@ Future<void> presentPanelWithoutResizing({
   await keepOnTop();
 }
 
-Rect centeredSurfaceBounds({
-  required Offset center,
+Rect anchoredSurfaceBounds({
+  required Offset anchor,
   required Rect workArea,
   required Size size,
 }) {
   final maxLeft = math.max(workArea.left, workArea.right - size.width);
   final maxTop = math.max(workArea.top, workArea.bottom - size.height);
-  final left = (center.dx - size.width / 2).clamp(workArea.left, maxLeft);
-  final top = (center.dy - size.height / 2).clamp(workArea.top, maxTop);
+  final left = (anchor.dx - size.width / 2).clamp(workArea.left, maxLeft);
+  final top = (anchor.dy - size.height).clamp(workArea.top, maxTop);
   return Rect.fromLTWH(left, top, size.width, size.height);
 }
 

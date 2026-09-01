@@ -50,6 +50,9 @@ final class ZommiController extends ChangeNotifier {
   bool submitting = false;
   bool expanded = false;
   bool largePanel = false;
+  bool surfaceTransitioning = false;
+  bool transitionTargetExpanded = false;
+  bool transitionTargetLarge = false;
   bool sessionPanelOpen = false;
   bool runtimePanelOpen = false;
   bool modelPanelOpen = false;
@@ -63,6 +66,7 @@ final class ZommiController extends ChangeNotifier {
   bool resolvingPrompt = false;
   bool _closed = false;
   int _localTurnSequence = 0;
+  int _surfaceTransitionEpoch = 0;
 
   List<ConversationTurn> get turns =>
       _turnsBySession[activeSessionId] ?? const [];
@@ -818,24 +822,54 @@ final class ZommiController extends ChangeNotifier {
   }
 
   Future<void> setExpanded(bool value, {bool focus = false}) async {
-    expanded = value;
-    if (value && focus) focusComposerEpoch++;
+    if (!surfaceTransitioning && expanded == value) {
+      if (value && focus) {
+        focusComposerEpoch++;
+        _notify();
+        await desktop.showPanel();
+      }
+      return;
+    }
+    final transitionEpoch = ++_surfaceTransitionEpoch;
+    surfaceTransitioning = true;
+    transitionTargetExpanded = value;
+    transitionTargetLarge = largePanel;
     _notify();
     try {
       await desktop.setSurface(expanded: value, large: largePanel);
-      if (value && focus) await desktop.showPanel();
     } on Object catch (error) {
       _setStatus('Window presentation degraded · $error', warning: true);
+    } finally {
+      if (transitionEpoch == _surfaceTransitionEpoch) {
+        expanded = value;
+        surfaceTransitioning = false;
+        if (value && focus) focusComposerEpoch++;
+        _notify();
+      }
+    }
+    if (transitionEpoch == _surfaceTransitionEpoch && value && focus) {
+      await desktop.showPanel();
     }
   }
 
   Future<void> toggleLargePanel() async {
-    largePanel = !largePanel;
+    final targetLarge = !largePanel;
+    final transitionEpoch = ++_surfaceTransitionEpoch;
+    surfaceTransitioning = true;
+    transitionTargetExpanded = true;
+    transitionTargetLarge = targetLarge;
     _notify();
     try {
-      await desktop.setSurface(expanded: true, large: largePanel);
+      await desktop.setSurface(expanded: true, large: targetLarge);
     } on Object catch (error) {
       _setStatus('Window resize failed · $error', warning: true);
+    } finally {
+      if (transitionEpoch == _surfaceTransitionEpoch) {
+        expanded = true;
+        largePanel = targetLarge;
+        surfaceTransitioning = false;
+        _notify();
+      }
     }
   }
 

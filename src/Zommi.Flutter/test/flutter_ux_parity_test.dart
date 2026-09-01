@@ -45,6 +45,31 @@ void main() {
     expect(tester.widget<ZommiOrb>(find.byType(ZommiOrb)).loading, isFalse);
   });
 
+  testWidgets('native resize renders only the lightweight morph surface', (
+    tester,
+  ) async {
+    final core = RichFakeCore()..historyCount = 0;
+    final desktop = FakeDesktopBridge();
+    await _pumpApp(tester, core: core, desktop: desktop);
+    final resizeGate = Completer<void>();
+    desktop.surfaceGate = resizeGate.future;
+
+    await tester.tap(find.byKey(const ValueKey('zommi-orb')));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('surface-transition')), findsOneWidget);
+    expect(find.byKey(const ValueKey('zommi-transcript')), findsNothing);
+    expect(find.byKey(const ValueKey('zommi-composer')), findsNothing);
+    expect(
+      tester.getSize(find.byKey(const ValueKey('zommi-surface'))),
+      const Size(expandedPanelWidth, expandedPanelHeight),
+    );
+
+    resizeGate.complete();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('surface-transition')), findsNothing);
+    expect(find.byKey(const ValueKey('zommi-composer')), findsOneWidget);
+  });
+
   testWidgets('single-line and fenced markdown copy controls never overlap', (
     tester,
   ) async {
@@ -314,10 +339,11 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('session-sidebar')), findsOneWidget);
-      expect(
-        tester.getSize(find.byKey(const ValueKey('session-sidebar'))).height,
-        lessThan(expandedPanelHeight / 2),
+      final sessionPanelSize = tester.getSize(
+        find.byKey(const ValueKey('session-sidebar')),
       );
+      expect(sessionPanelSize.width, expandedPanelWidth / 2);
+      expect(sessionPanelSize.height, greaterThan(expandedPanelHeight / 2));
       await tester.tap(find.byKey(const ValueKey('session-session-2')));
       await tester.pumpAndSettle();
       expect(core.activeSessionId, 'session-2');
@@ -376,11 +402,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       desktop.calls,
-      containsAllInOrder([
-        'surface:true:true',
-        'surface:true:true',
-        'showPanel',
-      ]),
+      containsAllInOrder(['surface:true:true', 'showPanel']),
+    );
+    expect(
+      desktop.calls.where((call) => call == 'surface:true:true'),
+      hasLength(1),
     );
     expect(desktop.calls, isNot(contains('surface:true:false')));
     expect(
@@ -805,13 +831,11 @@ void main() {
         await tester.drag(transcript, const Offset(0, 2400));
         await tester.pumpAndSettle();
         if (page == 0) {
+          final latest = find.byKey(const ValueKey('scroll-to-latest'));
+          expect(tester.widget<IconButton>(latest).onPressed, isNotNull);
           expect(
-            tester
-                .widget<IconButton>(
-                  find.byKey(const ValueKey('scroll-to-latest')),
-                )
-                .onPressed,
-            isNotNull,
+            tester.getCenter(latest).dx,
+            closeTo(tester.getCenter(find.byType(TranscriptPane)).dx, 0.01),
           );
         }
       }

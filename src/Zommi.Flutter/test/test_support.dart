@@ -376,6 +376,7 @@ final class FakeDesktopBridge implements DesktopBridge {
   String? copiedImage;
   bool closed = false;
   Future<DesktopReadiness>? initializeGate;
+  Future<void>? surfaceGate;
 
   @override
   Stream<DesktopInvocation> get invocations => _invocations.stream;
@@ -406,6 +407,7 @@ final class FakeDesktopBridge implements DesktopBridge {
   @override
   Future<void> setSurface({required bool expanded, bool large = false}) async {
     calls.add('surface:$expanded:$large');
+    if (surfaceGate case final gate?) await gate;
   }
 
   @override

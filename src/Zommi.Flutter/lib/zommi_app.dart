@@ -250,13 +250,18 @@ class _ZommiShellState extends State<ZommiShell> {
 
   @override
   Widget build(BuildContext context) {
-    final width = _controller.expanded
-        ? (_controller.largePanel ? largeWindowSize.width : expandedPanelWidth)
+    final renderExpanded =
+        _controller.expanded ||
+        (_controller.surfaceTransitioning &&
+            _controller.transitionTargetExpanded);
+    final renderLarge =
+        _controller.largePanel ||
+        (_controller.surfaceTransitioning && _controller.transitionTargetLarge);
+    final width = renderExpanded
+        ? (renderLarge ? largeWindowSize.width : expandedPanelWidth)
         : compactOrbSize;
-    final height = _controller.expanded
-        ? (_controller.largePanel
-              ? largeWindowSize.height
-              : expandedPanelHeight)
+    final height = renderExpanded
+        ? (renderLarge ? largeWindowSize.height : expandedPanelHeight)
         : compactOrbSize;
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -275,7 +280,13 @@ class _ZommiShellState extends State<ZommiShell> {
                   width: width,
                   height: height,
                   child: ClipRect(
-                    child: _controller.expanded
+                    child: _controller.surfaceTransitioning
+                        ? _SurfaceTransitionView(
+                            targetSize: Size(width, height),
+                            working: _controller.anyTurnActive,
+                            loading: _controller.starting,
+                          )
+                        : _controller.expanded
                         ? OverflowBox(
                             alignment: Alignment.center,
                             minWidth: width,
@@ -335,6 +346,8 @@ class _ZommiShellState extends State<ZommiShell> {
                     Positioned(
                       left: 18,
                       top: 2,
+                      bottom: 12,
+                      width: width / 2,
                       child: TapRegion(
                         groupId: _sessionTapGroup,
                         child: SessionSidebar(
@@ -821,6 +834,63 @@ class _CompactOrbButton extends StatelessWidget {
       ),
     );
   }
+}
+
+class _SurfaceTransitionView extends StatelessWidget {
+  const _SurfaceTransitionView({
+    required this.targetSize,
+    required this.working,
+    required this.loading,
+  });
+
+  final Size targetSize;
+  final bool working;
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    return RepaintBoundary(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final size = constraints.biggest;
+          final progress = surfaceMorphProgress(size, targetSize);
+          final radius =
+              compactOrbSize / 2 + (34 - compactOrbSize / 2) * progress;
+          final orbOpacity = (1 - progress * 2.2).clamp(0.0, 1.0);
+          return DecoratedBox(
+            key: const ValueKey('surface-transition'),
+            decoration: BoxDecoration(
+              color: Color.lerp(
+                const Color(0xffeeeefa),
+                const Color(0xeaf9fbff),
+                progress,
+              ),
+              borderRadius: BorderRadius.circular(radius),
+              border: Border.all(color: const Color(0xccffffff)),
+            ),
+            child: Center(
+              child: Opacity(
+                opacity: orbOpacity,
+                child: ZommiOrb(
+                  working: working,
+                  loading: loading,
+                  size: math.min(compactOrbSize, size.shortestSide),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+double surfaceMorphProgress(Size current, Size target) {
+  final widthRange = math.max(1.0, target.width - compactOrbSize);
+  final heightRange = math.max(1.0, target.height - compactOrbSize);
+  final widthProgress = (current.width - compactOrbSize) / widthRange;
+  final heightProgress = (current.height - compactOrbSize) / heightRange;
+  return ((widthProgress + heightProgress) / 2).clamp(0.0, 1.0);
 }
 
 class ZommiOrb extends StatefulWidget {

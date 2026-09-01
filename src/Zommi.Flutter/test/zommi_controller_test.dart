@@ -216,6 +216,45 @@ void main() {
   });
 
   test(
+    'full chat stays unmounted until each surface transition completes',
+    () async {
+      final core = RichFakeCore()..historyCount = 0;
+      final desktop = FakeDesktopBridge();
+      final controller = ZommiController(core: core, desktop: desktop);
+      await controller.initialize();
+
+      final expandGate = Completer<void>();
+      desktop.surfaceGate = expandGate.future;
+      final expansion = controller.setExpanded(true, focus: true);
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.surfaceTransitioning, isTrue);
+      expect(controller.transitionTargetExpanded, isTrue);
+      expect(controller.expanded, isFalse);
+      expect(controller.focusComposerEpoch, 0);
+
+      expandGate.complete();
+      await expansion;
+      expect(controller.surfaceTransitioning, isFalse);
+      expect(controller.expanded, isTrue);
+      expect(controller.focusComposerEpoch, 1);
+
+      final collapseGate = Completer<void>();
+      desktop.surfaceGate = collapseGate.future;
+      final collapse = controller.setExpanded(false);
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.surfaceTransitioning, isTrue);
+      expect(controller.transitionTargetExpanded, isFalse);
+      expect(controller.expanded, isTrue);
+
+      collapseGate.complete();
+      await collapse;
+      expect(controller.surfaceTransitioning, isFalse);
+      expect(controller.expanded, isFalse);
+      await controller.close();
+    },
+  );
+
+  test(
     'terminal completion suppresses late frames and exposes unknown outcome',
     () async {
       final core = RichFakeCore()..historyCount = 0;
