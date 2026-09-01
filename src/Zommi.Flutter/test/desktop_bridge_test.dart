@@ -105,22 +105,43 @@ void main() {
   });
 
   test(
-    'surface transition advances through eased frames to exact bounds',
+    'surface transition frames are symmetric and preserve one anchor',
     () async {
-      const from = Rect.fromLTWH(100, 500, 56, 56);
-      const to = Rect.fromLTWH(20, 40, 720, 620);
-      final frames = <Rect>[];
-      await animateSurfaceBounds(
-        from: from,
-        to: to,
-        duration: const Duration(microseconds: 4),
-        frames: 4,
-        setBounds: (value) async => frames.add(value),
-        cancelled: () => false,
+      const compact = Rect.fromLTWH(332, 564, 56, 56);
+      const expanded = Rect.fromLTWH(0, 0, 720, 620);
+
+      Future<List<Rect>> sample(Rect from, Rect to) async {
+        final values = <Rect>[from];
+        await animateSurfaceBounds(
+          from: from,
+          to: to,
+          duration: const Duration(microseconds: 8),
+          frames: 8,
+          setBounds: (value) async => values.add(value),
+          cancelled: () => false,
+        );
+        return values;
+      }
+
+      final forward = await sample(compact, expanded);
+      final reverse = await sample(expanded, compact);
+      expect(forward, hasLength(9));
+      expect(reverse, hasLength(9));
+      expect(
+        symmetricSurfaceEase(0.25),
+        closeTo(1 - symmetricSurfaceEase(0.75), 0.0000001),
       );
-      expect(frames, hasLength(4));
-      expect(frames.first.width, greaterThan(from.width));
-      expect(frames.last, to);
+      for (var index = 0; index < forward.length; index++) {
+        final matchingReverse = reverse[reverse.length - index - 1];
+        expect(forward[index].left, closeTo(matchingReverse.left, 0.001));
+        expect(forward[index].top, closeTo(matchingReverse.top, 0.001));
+        expect(forward[index].width, closeTo(matchingReverse.width, 0.001));
+        expect(forward[index].height, closeTo(matchingReverse.height, 0.001));
+        expect(forward[index].center.dx, closeTo(360, 0.001));
+        expect(forward[index].bottom, closeTo(620, 0.001));
+      }
+      expect(forward.last, expanded);
+      expect(reverse.last, compact);
     },
   );
 

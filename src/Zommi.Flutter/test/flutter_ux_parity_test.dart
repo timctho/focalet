@@ -142,16 +142,19 @@ void main() {
   );
 
   testWidgets(
-    'forward and reverse morph midpoints are pixel-symmetric and rounded',
+    'forward and reverse morph quarter frames are pixel-symmetric and rounded',
     (tester) async {
       final core = RichFakeCore()..historyCount = 0;
       await _pumpApp(tester, core: core, desktop: FakeDesktopBridge());
 
       await tester.tap(find.byKey(const ValueKey('zommi-orb')));
       await tester.pump();
-      await tester.pump(surfaceTransitionDuration * 0.5);
-      final forward = await _captureSurfaceTransition(tester);
-      await tester.pump(surfaceTransitionDuration * 0.5);
+      final forward = <_RasterFrame>[];
+      for (var quarter = 1; quarter <= 3; quarter++) {
+        await tester.pump(surfaceTransitionDuration * 0.25);
+        forward.add(await _captureSurfaceTransition(tester));
+      }
+      await tester.pump(surfaceTransitionDuration * 0.25);
       await tester.pumpAndSettle();
 
       final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
@@ -163,33 +166,41 @@ void main() {
       await tester.pump();
       await mouse.moveTo(const Offset(5, 5));
       await tester.pump(hoverCollapseDelay);
-      await tester.pump(surfaceTransitionDuration * 0.5);
-      final reverse = await _captureSurfaceTransition(tester);
+      final reverse = <_RasterFrame>[];
+      for (var quarter = 1; quarter <= 3; quarter++) {
+        await tester.pump(surfaceTransitionDuration * 0.25);
+        reverse.add(await _captureSurfaceTransition(tester));
+      }
 
-      expect(reverse.size, forward.size);
-      expect(reverse.pixels, orderedEquals(forward.pixels));
+      for (var index = 0; index < forward.length; index++) {
+        final matchingReverse = reverse[reverse.length - index - 1];
+        final frame = forward[index];
+        expect(matchingReverse.size, frame.size);
+        expect(matchingReverse.pixels, orderedEquals(frame.pixels));
 
-      final midpointSize = surfaceTransitionSize(
-        compactWindowSize,
-        normalWindowSize,
-        0.5,
-      );
-      final outerLeft = (forward.size.width - midpointSize.width) / 2;
-      final outerTop = forward.size.height - midpointSize.height;
-      expect(
-        forward.alphaAt(Offset(outerLeft + 2, outerTop + 2)),
-        0,
-        reason: 'The midpoint must retain transparent rounded corners.',
-      );
-      expect(
-        forward.alphaAt(
-          Offset(forward.size.width / 2, outerTop + midpointSize.height / 2),
-        ),
-        greaterThan(200),
-        reason: 'The rounded midpoint must remain visibly filled.',
-      );
+        final progress = (index + 1) * 0.25;
+        final frameSize = surfaceTransitionSize(
+          compactWindowSize,
+          normalWindowSize,
+          progress,
+        );
+        final outerLeft = (frame.size.width - frameSize.width) / 2;
+        final outerTop = frame.size.height - frameSize.height;
+        expect(
+          frame.alphaAt(Offset(outerLeft + 2, outerTop + 2)),
+          0,
+          reason: 'Every intermediate frame must retain rounded corners.',
+        );
+        expect(
+          frame.alphaAt(
+            Offset(frame.size.width / 2, outerTop + frameSize.height / 2),
+          ),
+          greaterThan(200),
+          reason: 'Every rounded frame must remain visibly filled.',
+        );
+      }
 
-      await tester.pump(surfaceTransitionDuration * 0.5);
+      await tester.pump(surfaceTransitionDuration * 0.25);
       await tester.pumpAndSettle();
     },
   );

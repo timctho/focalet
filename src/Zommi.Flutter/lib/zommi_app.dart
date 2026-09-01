@@ -881,13 +881,6 @@ class _CompactOrbButton extends StatelessWidget {
 Size zommiSurfaceSize({required bool expanded, required bool large}) =>
     expanded ? (large ? largeWindowSize : normalWindowSize) : compactWindowSize;
 
-double symmetricSurfaceEase(double progress) {
-  final value = progress.clamp(0.0, 1.0);
-  return value < 0.5
-      ? 4 * value * value * value
-      : 1 - math.pow(-2 * value + 2, 3).toDouble() / 2;
-}
-
 Size surfaceTransitionSize(Size from, Size to, double progress) =>
     Size.lerp(from, to, symmetricSurfaceEase(progress))!;
 

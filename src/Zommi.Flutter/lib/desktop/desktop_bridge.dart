@@ -24,6 +24,13 @@ const MethodChannel _windowAnimationChannel = MethodChannel(
   'zommi/window_animation',
 );
 
+double symmetricSurfaceEase(double progress) {
+  final value = progress.clamp(0.0, 1.0);
+  return value < 0.5
+      ? 4 * value * value * value
+      : 1 - math.pow(-2 * value + 2, 3).toDouble() / 2;
+}
+
 enum DesktopInvocationKind { open, context, image, status }
 
 final class DesktopInvocation {
@@ -823,7 +830,7 @@ Future<void> animateSurfaceBounds({
     if (remaining > Duration.zero) await Future<void>.delayed(remaining);
     if (cancelled()) return;
     final linear = frame / frames;
-    final eased = 1 - math.pow(1 - linear, 3).toDouble();
+    final eased = symmetricSurfaceEase(linear);
     await setBounds(Rect.lerp(from, to, eased)!);
   }
 }

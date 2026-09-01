@@ -17,6 +17,20 @@ namespace {
 constexpr UINT_PTR kWindowAnimationTimerId = 0x5A4D;
 constexpr UINT kWindowAnimationFrameMs = 15;
 
+constexpr double SymmetricSurfaceEase(double progress) {
+  if (progress < 0.5) {
+    return 4.0 * progress * progress * progress;
+  }
+  const double tail = -2.0 * progress + 2.0;
+  return 1.0 - tail * tail * tail / 2.0;
+}
+
+static_assert(SymmetricSurfaceEase(0.0) == 0.0);
+static_assert(SymmetricSurfaceEase(0.5) == 0.5);
+static_assert(SymmetricSurfaceEase(1.0) == 1.0);
+static_assert(SymmetricSurfaceEase(0.25) ==
+              1.0 - SymmetricSurfaceEase(0.75));
+
 std::optional<double> NumberArgument(const flutter::EncodableMap &arguments,
                                      const char *name) {
   const auto iterator =
@@ -214,7 +228,7 @@ void FlutterWindow::AdvanceWindowAnimation() {
   const auto elapsed = GetTickCount64() - animation_started_at_;
   const double linear =
       std::min(1.0, static_cast<double>(elapsed) / animation_duration_ms_);
-  const double eased = 1.0 - std::pow(1.0 - linear, 3.0);
+  const double eased = SymmetricSurfaceEase(linear);
   const auto interpolate = [eased](LONG from, LONG to) {
     return static_cast<LONG>(std::lround(from + (to - from) * eased));
   };

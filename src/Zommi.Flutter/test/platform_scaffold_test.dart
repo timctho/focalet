@@ -95,6 +95,7 @@ void main() {
         contains('"zommi/window_animation"'),
         contains('kWindowAnimationFrameMs'),
         contains('message == WM_TIMER'),
+        contains('SymmetricSurfaceEase(linear)'),
         contains('SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER'),
       ),
     );
