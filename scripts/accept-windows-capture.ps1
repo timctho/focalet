@@ -505,6 +505,24 @@ function Invoke-CaptureSelectedTextProbe {
     }
 }
 
+function Get-DesktopCaptureDiagnostics {
+    $process = [System.Diagnostics.Process]::GetCurrentProcess()
+    $sessionName = if ([string]::IsNullOrWhiteSpace($env:SESSIONNAME)) { '<unset>' } else { $env:SESSIONNAME }
+    $clientName = if ([string]::IsNullOrWhiteSpace($env:CLIENTNAME)) { '<unset>' } else { $env:CLIENTNAME }
+    $virtualScreen = '<unavailable>'
+
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+        $virtualScreen = "$($bounds.X),$($bounds.Y) $($bounds.Width)x$($bounds.Height)"
+    }
+    catch {
+        $virtualScreen = "<error: $($_.Exception.GetBaseException().Message)>"
+    }
+
+    return "runnerPid=$PID; sessionId=$($process.SessionId); sessionName=$sessionName; clientName=$clientName; userInteractive=$([Environment]::UserInteractive); virtualScreen=$virtualScreen"
+}
+
 function Assert-DesktopCaptureSurface {
     Add-Type -AssemblyName System.Drawing
     $bitmap = [Drawing.Bitmap]::new(1, 1)
@@ -513,7 +531,9 @@ function Assert-DesktopCaptureSurface {
         $graphics.CopyFromScreen(0, 0, 0, 0, [Drawing.Size]::new(1, 1))
     }
     catch {
-        throw "Windows desktop capture surface is unavailable. Keep the RDP client visible and the session unlocked, then retry. $($_.Exception.Message)"
+        $diagnostics = Get-DesktopCaptureDiagnostics
+        $copyError = $_.Exception.GetBaseException().Message
+        throw "The runner process cannot access a Windows desktop capture surface. This is a runner session/display attachment failure; it does not prove Windows was locked. $diagnostics; copyError=$copyError"
     }
     finally {
         $graphics.Dispose()

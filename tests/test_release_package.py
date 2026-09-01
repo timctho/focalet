@@ -153,6 +153,20 @@ class ReleasePackageTests(unittest.TestCase):
         ):
             self.assertIn(contract, script)
 
+    def test_windows_desktop_preflight_reports_runner_session_without_blame(self) -> None:
+        script = (SCRIPTS / "accept-windows-capture.ps1").read_text(encoding="utf-8")
+        for contract in (
+            "Get-DesktopCaptureDiagnostics",
+            "sessionId=$($process.SessionId)",
+            "sessionName=$sessionName",
+            "clientName=$clientName",
+            "userInteractive=$([Environment]::UserInteractive)",
+            "virtualScreen=$virtualScreen",
+            "it does not prove Windows was locked",
+        ):
+            self.assertIn(contract, script)
+        self.assertNotIn("Keep the RDP client visible and the session unlocked", script)
+
     def test_windows_selector_forces_initial_foreground_and_stays_topmost(self) -> None:
         source = (SCRIPTS.parent / "src/Zommi.Windows/RegionSelectionForm.cs").read_text(
             encoding="utf-8"
