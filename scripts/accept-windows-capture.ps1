@@ -49,6 +49,37 @@ public static class ZommiWindowsAcceptanceNative
     [DllImport("user32.dll", SetLastError = true)]
     private static extern int GetWindowLong(IntPtr window, int index);
 
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateWindowEx(
+        int extendedStyle,
+        string className,
+        string windowName,
+        uint style,
+        int x,
+        int y,
+        int width,
+        int height,
+        IntPtr parent,
+        IntPtr menu,
+        IntPtr instance,
+        IntPtr parameter);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool DestroyWindow(IntPtr window);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr WindowFromPoint(NativePoint point);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(
+        IntPtr window,
+        IntPtr insertAfter,
+        int x,
+        int y,
+        int width,
+        int height,
+        uint flags);
+
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool SetCursorPos(int x, int y);
 
@@ -62,6 +93,13 @@ public static class ZommiWindowsAcceptanceNative
         public int Top;
         public int Right;
         public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
     }
 
     public static IntPtr FindWindow(int processId, string title)
@@ -136,6 +174,55 @@ public static class ZommiWindowsAcceptanceNative
     public static bool Foreground(IntPtr window)
     {
         return GetForegroundWindow() == window;
+    }
+
+    public static IntPtr CreateCompetingTopMost(int x, int y, int width, int height)
+    {
+        const int topMost = 0x00000008;
+        const int toolWindow = 0x00000080;
+        const int noActivate = 0x08000000;
+        const uint popup = 0x80000000;
+        const uint visible = 0x10000000;
+        const uint noActivatePosition = 0x0010;
+        const uint showWindow = 0x0040;
+        var window = CreateWindowEx(
+            topMost | toolWindow | noActivate,
+            "STATIC",
+            "Zommi acceptance competing topmost",
+            popup | visible,
+            x,
+            y,
+            width,
+            height,
+            IntPtr.Zero,
+            IntPtr.Zero,
+            IntPtr.Zero,
+            IntPtr.Zero);
+        if (window != IntPtr.Zero)
+        {
+            SetWindowPos(
+                window,
+                new IntPtr(-1),
+                x,
+                y,
+                width,
+                height,
+                noActivatePosition | showWindow);
+        }
+        return window;
+    }
+
+    public static bool IsWindowAtPoint(IntPtr window, int x, int y)
+    {
+        return WindowFromPoint(new NativePoint { X = x, Y = y }) == window;
+    }
+
+    public static void CloseCompetingWindow(IntPtr window)
+    {
+        if (window != IntPtr.Zero)
+        {
+            DestroyWindow(window);
+        }
     }
 
     public static void SendAltA(bool shift)
@@ -540,6 +627,31 @@ function Invoke-PackagedApplicationAcceptance {
         if (-not [ZommiWindowsAcceptanceNative]::TopMost($selector) -or
             -not [ZommiWindowsAcceptanceNative]::Foreground($selector)) {
             throw 'Packaged image selector is not topmost and foreground.'
+        }
+        $selectorBounds = [ZommiWindowsAcceptanceNative]::Bounds($selector)
+        $probeX = $selectorBounds[0] + 40
+        $probeY = $selectorBounds[1] + 40
+        $competitor = [ZommiWindowsAcceptanceNative]::CreateCompetingTopMost(
+            $selectorBounds[0],
+            $selectorBounds[1],
+            160,
+            160
+        )
+        if ($competitor -eq [IntPtr]::Zero) {
+            throw 'Could not create the competing topmost acceptance window.'
+        }
+        try {
+            Start-Sleep -Milliseconds 400
+            if (-not [ZommiWindowsAcceptanceNative]::IsWindowAtPoint(
+                $selector,
+                $probeX,
+                $probeY
+            )) {
+                throw 'Packaged image selector was covered by another topmost window.'
+            }
+        }
+        finally {
+            [ZommiWindowsAcceptanceNative]::CloseCompetingWindow($competitor)
         }
         if (-not [ZommiWindowsAcceptanceNative]::CancelSelection($selector)) {
             throw 'Could not cancel the packaged application region selector.'

@@ -9,12 +9,15 @@ internal sealed record RegionSelectionResult(Rectangle Bounds, byte[] Png);
 internal sealed class RegionSelectionForm : Form
 {
     private static readonly nint TopMostWindow = new(-1);
+    private const int ExtendedStyleTopMost = 0x00000008;
+    private const int ExtendedStyleToolWindow = 0x00000080;
     private const uint NoMove = 0x0002;
     private const uint NoSize = 0x0001;
     private const uint NoActivate = 0x0010;
     private const uint ShowWindow = 0x0040;
 
     private readonly Func<Rectangle, byte[]> captureRegion;
+    private readonly System.Windows.Forms.Timer topMostGuard;
     private Point? anchor;
     private Rectangle selectedArea;
 
@@ -33,6 +36,19 @@ internal sealed class RegionSelectionForm : Form
         BackColor = Color.Black;
         Opacity = 0.28;
 
+        // Screen selection is a short-lived modal desktop operation. A
+        // different always-on-top app can otherwise enter the topmost band
+        // after this form and cover part of the selectable surface. Reassert
+        // the z-order while selection is active, just like native snipping UI.
+        topMostGuard = new System.Windows.Forms.Timer { Interval = 120 };
+        topMostGuard.Tick += (_, _) =>
+        {
+            if (Visible)
+            {
+                KeepAboveOtherWindows(activate: false);
+            }
+        };
+
         KeyDown += (_, eventArgs) =>
         {
             if (eventArgs.KeyCode == Keys.Escape)
@@ -47,10 +63,21 @@ internal sealed class RegionSelectionForm : Form
 
     public string? ErrorMessage { get; private set; }
 
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var parameters = base.CreateParams;
+            parameters.ExStyle |= ExtendedStyleTopMost | ExtendedStyleToolWindow;
+            return parameters;
+        }
+    }
+
     protected override void OnShown(EventArgs eventArgs)
     {
         base.OnShown(eventArgs);
         KeepAboveOtherWindows(activate: true);
+        topMostGuard.Start();
     }
 
     protected override void OnActivated(EventArgs eventArgs)
@@ -66,6 +93,21 @@ internal sealed class RegionSelectionForm : Form
         {
             KeepAboveOtherWindows(activate: false);
         }
+    }
+
+    protected override void OnFormClosed(FormClosedEventArgs eventArgs)
+    {
+        topMostGuard.Stop();
+        base.OnFormClosed(eventArgs);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            topMostGuard.Dispose();
+        }
+        base.Dispose(disposing);
     }
 
     protected override void OnMouseDown(MouseEventArgs eventArgs)
@@ -180,7 +222,6 @@ internal sealed class RegionSelectionForm : Form
             0,
             0,
             NoMove | NoSize | NoActivate | ShowWindow);
-        BringToFront();
         if (activate)
         {
             Activate();

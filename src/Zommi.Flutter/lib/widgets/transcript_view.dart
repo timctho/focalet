@@ -180,11 +180,20 @@ class _TranscriptPaneState extends State<TranscriptPane> {
               child: Semantics(
                 button: true,
                 label: 'Scroll to latest message',
-                child: IconButton.filledTonal(
-                  key: const ValueKey('scroll-to-latest'),
-                  tooltip: 'Latest message',
-                  onPressed: awayFromLatest ? _scrollToLatest : null,
-                  icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                child: SizedBox.square(
+                  dimension: 36,
+                  child: IconButton.filledTonal(
+                    key: const ValueKey('scroll-to-latest'),
+                    tooltip: 'Latest message',
+                    padding: EdgeInsets.zero,
+                    alignment: Alignment.center,
+                    iconSize: 20,
+                    onPressed: awayFromLatest ? _scrollToLatest : null,
+                    icon: const Icon(
+                      Icons.keyboard_arrow_down_rounded,
+                      key: ValueKey('scroll-to-latest-glyph'),
+                    ),
+                  ),
                 ),
               ),
             ),

@@ -76,6 +76,70 @@ void main() {
     expect(desktop.surfaceAnimations, everyElement(isFalse));
   });
 
+  testWidgets(
+    'orb remains on the bottom-centre anchor while native growth is pending',
+    (tester) async {
+      await tester.binding.setSurfaceSize(compactWindowSize);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final core = RichFakeCore()..historyCount = 0;
+      final desktop = FakeDesktopBridge();
+      await tester.pumpWidget(ZommiApp(core: core, desktop: desktop));
+      await tester.pumpAndSettle();
+      final resizeGate = Completer<void>();
+      desktop.surfaceGate = resizeGate.future;
+
+      await tester.tap(find.byKey(const ValueKey('zommi-orb')));
+      await tester.pump();
+
+      final viewport = tester.getRect(find.byType(Scaffold));
+      final morph = tester.getRect(
+        find.byKey(const ValueKey('surface-transition')),
+      );
+      expect(morph.size, compactWindowSize);
+      expect(morph.center.dx, closeTo(viewport.center.dx, 0.01));
+      expect(morph.bottom, closeTo(viewport.bottom, 0.01));
+
+      resizeGate.complete();
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
+    'collapsed morph remains anchored while native shrink is pending',
+    (tester) async {
+      await tester.binding.setSurfaceSize(normalWindowSize);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final core = RichFakeCore()..historyCount = 0;
+      final desktop = FakeDesktopBridge();
+      await tester.pumpWidget(ZommiApp(core: core, desktop: desktop));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('zommi-orb')));
+      await tester.pumpAndSettle();
+
+      final shrinkGate = Completer<void>();
+      desktop.surfaceGate = shrinkGate.future;
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      addTearDown(mouse.removePointer);
+      await mouse.addPointer(location: normalWindowSize.center(Offset.zero));
+      await mouse.moveTo(const Offset(-10, -10));
+      await tester.pump(hoverCollapseDelay);
+      await tester.pump(surfaceTransitionDuration);
+      await tester.binding.setSurfaceSize(compactWindowSize);
+      await tester.pump();
+
+      final viewport = tester.getRect(find.byType(Scaffold));
+      final morph = tester.getRect(
+        find.byKey(const ValueKey('surface-transition')),
+      );
+      expect(morph.size, compactWindowSize);
+      expect(morph.center.dx, closeTo(viewport.center.dx, 0.01));
+      expect(morph.bottom, closeTo(viewport.bottom, 0.01));
+
+      shrinkGate.complete();
+      await tester.pumpAndSettle();
+    },
+  );
+
   testWidgets('single-line and fenced markdown copy controls never overlap', (
     tester,
   ) async {
@@ -362,7 +426,7 @@ void main() {
         find.byKey(const ValueKey('session-sidebar')),
       );
       expect(sessionPanelSize.width, expandedPanelWidth / 2);
-      expect(sessionPanelSize.height, greaterThan(expandedPanelHeight / 2));
+      expect(sessionPanelSize.height, expandedPanelHeight - 72);
       await tester.tap(find.byKey(const ValueKey('session-session-2')));
       await tester.pumpAndSettle();
       expect(core.activeSessionId, 'session-2');
@@ -396,7 +460,10 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
     await tester.pump();
     expect(find.byKey(const ValueKey('session-sidebar')), findsOneWidget);
-    await tester.tap(composer);
+    final composerBounds = tester.getRect(composer);
+    await tester.tapAt(
+      Offset(composerBounds.right - 12, composerBounds.center.dy),
+    );
     await tester.pump();
     expect(find.byKey(const ValueKey('session-sidebar')), findsNothing);
   });
@@ -884,10 +951,21 @@ void main() {
         await tester.pumpAndSettle();
         if (page == 0) {
           final latest = find.byKey(const ValueKey('scroll-to-latest'));
+          final latestGlyph = find.byKey(
+            const ValueKey('scroll-to-latest-glyph'),
+          );
           expect(tester.widget<IconButton>(latest).onPressed, isNotNull);
           expect(
             tester.getCenter(latest).dx,
             closeTo(tester.getCenter(find.byType(TranscriptPane)).dx, 0.01),
+          );
+          expect(
+            tester.getCenter(latestGlyph).dx,
+            closeTo(tester.getCenter(latest).dx, 0.01),
+          );
+          expect(
+            tester.getCenter(latestGlyph).dy,
+            closeTo(tester.getCenter(latest).dy, 0.01),
           );
         }
       }

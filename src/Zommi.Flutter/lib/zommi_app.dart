@@ -285,7 +285,14 @@ class _ZommiShellState extends State<ZommiShell> {
           fit: StackFit.expand,
           children: [
             Align(
-              alignment: Alignment.center,
+              // The native window grows upward from one bottom-centre anchor.
+              // Keep the Flutter surface on that same anchor even during the
+              // one frame where Win32 and Flutter have different sizes. If
+              // this is centred, the compact morph is clipped out before the
+              // enlarged backing surface arrives and appears to jump.
+              alignment: _controller.surfaceTransitioning
+                  ? Alignment.bottomCenter
+                  : Alignment.center,
               child: MouseRegion(
                 onEnter: (_) => unawaited(_expand()),
                 onExit: (_) => _scheduleCollapse(),
@@ -346,115 +353,122 @@ class _ZommiShellState extends State<ZommiShell> {
             ),
           ],
         ),
-        child: Column(
+        child: Stack(
+          fit: StackFit.expand,
           children: [
-            _buildHeader(),
-            Expanded(
-              child: Stack(
-                children: [
-                  Positioned.fill(
-                    child: TranscriptPane(
-                      key: ValueKey(
-                        'transcript-${_controller.activeSessionId}',
-                      ),
-                      controller: _controller,
-                      onAttachmentEnter: _showAttachmentPreview,
-                      onAttachmentExit: (_) => _schedulePreviewClose(),
-                    ),
-                  ),
-                  if (_controller.sessionPanelOpen)
-                    Positioned(
-                      left: 18,
-                      top: 2,
-                      bottom: 12,
-                      width: width / 2,
-                      child: TapRegion(
-                        groupId: _sessionTapGroup,
-                        child: SessionSidebar(
+            Column(
+              children: [
+                _buildHeader(),
+                Expanded(
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: TranscriptPane(
+                          key: ValueKey(
+                            'transcript-${_controller.activeSessionId}',
+                          ),
                           controller: _controller,
-                          onPointerEnter: () => _sessionTimer?.cancel(),
-                          onPointerExit: _scheduleSessionsClose,
+                          onAttachmentEnter: _showAttachmentPreview,
+                          onAttachmentExit: (_) => _schedulePreviewClose(),
                         ),
                       ),
-                    ),
-                  if (_controller.runtimePanelOpen)
-                    Positioned(
-                      top: 2,
-                      left: math.max(18, (width - 420) / 2),
-                      child: TapRegion(
-                        groupId: _runtimeTapGroup,
-                        child: RuntimePanel(controller: _controller),
-                      ),
-                    ),
-                  if (_controller.modelPanelOpen)
-                    Positioned(
-                      top: 2,
-                      right: 20,
-                      child: TapRegion(
-                        groupId: _modelTapGroup,
-                        child: ModelPanel(controller: _controller),
-                      ),
-                    ),
-                  if (_controller.previewAttachment case final attachment?)
-                    Positioned(
-                      right: 22,
-                      bottom: 12,
-                      child: ContextPreviewPanel(
-                        attachment: attachment,
-                        onClose: _controller.hideAttachmentPreview,
-                        onPointerEnter: () => _previewTimer?.cancel(),
-                        onPointerExit: _schedulePreviewClose,
-                      ),
-                    ),
-                  if (_controller.starting || _controller.runtimeBusy)
-                    Positioned(
-                      top: 10,
-                      left: 0,
-                      right: 0,
-                      child: IgnorePointer(
-                        child: Center(
-                          child: _LoadingPill(
-                            label: _controller.starting
-                                ? 'Waking Zommi…'
-                                : _controller.status,
+                      if (_controller.runtimePanelOpen)
+                        Positioned(
+                          top: 2,
+                          left: math.max(18, (width - 420) / 2),
+                          child: TapRegion(
+                            groupId: _runtimeTapGroup,
+                            child: RuntimePanel(controller: _controller),
                           ),
                         ),
-                      ),
-                    ),
-                  if (_controller.approval != null)
-                    Positioned.fill(
-                      child: ColoredBox(
-                        color: const Color(0x220d172a),
-                        child: Center(
-                          child: ApprovalDialogCard(controller: _controller),
-                        ),
-                      ),
-                    ),
-                  if (_controller.question != null)
-                    Positioned.fill(
-                      child: ColoredBox(
-                        color: const Color(0x220d172a),
-                        child: Center(
-                          child: QuestionDialogCard(
-                            key: ValueKey(_controller.question!.id),
-                            controller: _controller,
+                      if (_controller.modelPanelOpen)
+                        Positioned(
+                          top: 2,
+                          right: 20,
+                          child: TapRegion(
+                            groupId: _modelTapGroup,
+                            child: ModelPanel(controller: _controller),
                           ),
                         ),
-                      ),
-                    ),
-                  if (_controller.previewArtifact != null)
-                    ArtifactViewerDialog(controller: _controller),
-                ],
-              ),
+                      if (_controller.previewAttachment case final attachment?)
+                        Positioned(
+                          right: 22,
+                          bottom: 12,
+                          child: ContextPreviewPanel(
+                            attachment: attachment,
+                            onClose: _controller.hideAttachmentPreview,
+                            onPointerEnter: () => _previewTimer?.cancel(),
+                            onPointerExit: _schedulePreviewClose,
+                          ),
+                        ),
+                      if (_controller.starting || _controller.runtimeBusy)
+                        Positioned(
+                          top: 10,
+                          left: 0,
+                          right: 0,
+                          child: IgnorePointer(
+                            child: Center(
+                              child: _LoadingPill(
+                                label: _controller.starting
+                                    ? 'Waking Zommi…'
+                                    : _controller.status,
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (_controller.approval != null)
+                        Positioned.fill(
+                          child: ColoredBox(
+                            color: const Color(0x220d172a),
+                            child: Center(
+                              child: ApprovalDialogCard(
+                                controller: _controller,
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (_controller.question != null)
+                        Positioned.fill(
+                          child: ColoredBox(
+                            color: const Color(0x220d172a),
+                            child: Center(
+                              child: QuestionDialogCard(
+                                key: ValueKey(_controller.question!.id),
+                                controller: _controller,
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (_controller.previewArtifact != null)
+                        ArtifactViewerDialog(controller: _controller),
+                    ],
+                  ),
+                ),
+                _buildComposer(),
+                if (_controller.activeSessionId != null)
+                  Semantics(
+                    container: true,
+                    label: 'Exact agent session bound',
+                    child: const SizedBox(width: 1, height: 1),
+                  ),
+                _buildFooter(),
+              ],
             ),
-            _buildComposer(),
-            if (_controller.activeSessionId != null)
-              Semantics(
-                container: true,
-                label: 'Exact agent session bound',
-                child: const SizedBox(width: 1, height: 1),
+            if (_controller.sessionPanelOpen)
+              Positioned(
+                left: 18,
+                top: 58,
+                bottom: 14,
+                width: width / 2,
+                child: TapRegion(
+                  groupId: _sessionTapGroup,
+                  child: SessionSidebar(
+                    controller: _controller,
+                    onPointerEnter: () => _sessionTimer?.cancel(),
+                    onPointerExit: _scheduleSessionsClose,
+                  ),
+                ),
               ),
-            _buildFooter(),
           ],
         ),
       ),
