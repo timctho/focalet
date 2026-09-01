@@ -64,6 +64,37 @@ void main() {
       expect(bridge, contains(contract));
     }
     expect(
+      bridge,
+      allOf(
+        contains('void onTrayIconRightMouseDown()'),
+        contains('trayManager.popUpContextMenu()'),
+      ),
+    );
+
+    final windowsMain = File('${root.path}/windows/runner/main.cpp')
+        .readAsStringSync();
+    final windowsInstance = File('${root.path}/windows/runner/zommi_instance.h')
+        .readAsStringSync();
+    final windowsFlutterWindow = File(
+      '${root.path}/windows/runner/flutter_window.cpp',
+    ).readAsStringSync();
+    expect(
+      windowsMain,
+      allOf(
+        contains('CreateMutexW(nullptr, TRUE, kZommiInstanceMutexName)'),
+        contains('ERROR_ALREADY_EXISTS'),
+        contains('PostMessageW(HWND_BROADCAST, ZommiShowWindowMessage()'),
+      ),
+    );
+    expect(windowsInstance, contains('Zommi.Desktop.SingleInstance'));
+    expect(
+      windowsFlutterWindow,
+      allOf(
+        contains('message == ZommiShowWindowMessage()'),
+        contains('ShowWindow(hwnd, SW_RESTORE)'),
+      ),
+    );
+    expect(
       File('${root.path}/windows/flutter/generated_plugins.cmake')
           .readAsStringSync(),
       allOf(

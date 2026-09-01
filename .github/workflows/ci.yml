@@ -12,6 +12,11 @@ on:
         required: false
         default: false
         type: boolean
+      windows_deploy_downloads:
+        description: Atomically deploy the verified Windows package to Downloads
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -214,6 +219,11 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
+
+      - name: Deploy verified Windows release to Downloads
+        if: github.event_name == 'workflow_dispatch' && inputs.windows_deploy_downloads
+        shell: pwsh
+        run: ./scripts/deploy-windows-downloads.ps1 -Runtime win-x64
 
   release_macos:
     name: Native release (macOS, temporarily skipped)

@@ -13,6 +13,21 @@ void main() {
     expect(supportsNativeWindowShadow('macos'), isTrue);
   });
 
+  test(
+    'tray right-click explicitly opens the menu on supported desktops',
+    () async {
+      expect(supportsExplicitTrayContextMenu('windows'), isTrue);
+      expect(supportsExplicitTrayContextMenu('linux'), isTrue);
+      expect(supportsExplicitTrayContextMenu('macos'), isFalse);
+
+      var menuOpenCount = 0;
+      Future<void> show() async => menuOpenCount += 1;
+      await showExplicitTrayContextMenu(operatingSystem: 'windows', show: show);
+      await showExplicitTrayContextMenu(operatingSystem: 'macos', show: show);
+      expect(menuOpenCount, 1);
+    },
+  );
+
   test('cancelled image selection emits no panel-opening invocation', () {
     expect(imageSelectionInvocation(null), isNull);
 

@@ -606,6 +606,16 @@ final class FlutterDesktopBridge
   }
 
   @override
+  void onTrayIconRightMouseDown() {
+    unawaited(
+      showExplicitTrayContextMenu(
+        operatingSystem: Platform.operatingSystem,
+        show: () => trayManager.popUpContextMenu(),
+      ),
+    );
+  }
+
+  @override
   void onTrayMenuItemClick(MenuItem menuItem) {
     switch (menuItem.key) {
       case 'open':
@@ -666,6 +676,16 @@ Future<void> presentPanelWithoutResizing({
 
 bool supportsNativeWindowShadow(String operatingSystem) =>
     operatingSystem == 'windows' || operatingSystem == 'macos';
+
+bool supportsExplicitTrayContextMenu(String operatingSystem) =>
+    operatingSystem == 'windows' || operatingSystem == 'linux';
+
+Future<void> showExplicitTrayContextMenu({
+  required String operatingSystem,
+  required Future<void> Function() show,
+}) async {
+  if (supportsExplicitTrayContextMenu(operatingSystem)) await show();
+}
 
 bool shouldUseWaylandPortals(Map<String, String> environment) {
   final sessionType = environment['XDG_SESSION_TYPE']?.trim().toLowerCase();

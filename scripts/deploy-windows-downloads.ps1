@@ -94,6 +94,18 @@ function Get-TargetDirectoryProcesses {
     )
 }
 
+function Get-DownloadsZommiProcesses {
+    $zommiDownloadsPrefix = $downloadsRoot + '\zommi'
+    return @(
+        Get-CimInstance Win32_Process | Where-Object {
+            $_.ExecutablePath -and
+            [IO.Path]::GetFullPath($_.ExecutablePath).StartsWith(
+                $zommiDownloadsPrefix,
+                [StringComparison]::OrdinalIgnoreCase)
+        }
+    )
+}
+
 if (-not (Test-Path -LiteralPath $sourceDirectory -PathType Container) -or
     -not (Test-Path -LiteralPath $sourceArchive -PathType Leaf)) {
     throw "Build the package before deploying: $sourceDirectory"
@@ -121,16 +133,16 @@ try {
     }
 
     $targetExecutable = Join-Path $targetDirectory 'Zommi.exe'
-    # Stop the exact Flutter app, Rust core, and capture helper package tree so
-    # no child retains a file lock during the atomic replacement.
-    $targetProcesses = @(Get-TargetDirectoryProcesses $targetDirectory)
+    # Stop every Zommi package launched from Downloads, including older package
+    # folder names, so a stale UI or helper cannot survive the replacement.
+    $targetProcesses = @(Get-DownloadsZommiProcesses)
     $stoppedProcessCount = $targetProcesses.Count
     foreach ($process in $targetProcesses) {
         Stop-Process -Id $process.ProcessId -Force
     }
     Start-Sleep -Milliseconds 500
-    if (@(Get-TargetDirectoryProcesses $targetDirectory).Count -ne 0) {
-        throw 'A Zommi process inside the exact deployment directory remained running.'
+    if (@(Get-DownloadsZommiProcesses).Count -ne 0) {
+        throw 'A Zommi process inside Downloads remained running.'
     }
 
     if (Test-Path -LiteralPath $targetDirectory) {
@@ -155,6 +167,7 @@ try {
 
     $startedProcessId = $null
     $flutterProcessCount = 0
+    $singleInstanceVerified = $false
     if (-not $NoStart) {
         $startedProcess = Start-Process `
             -FilePath (Join-Path $targetDirectory 'Zommi.exe') `
@@ -186,6 +199,22 @@ try {
             throw "Expected the Flutter desktop process; found $($runningTargets.Count) exact-path processes."
         }
         $startedProcessId = $startedProcess.Id
+
+        $duplicateProcess = Start-Process `
+            -FilePath (Join-Path $targetDirectory 'Zommi.exe') `
+            -WorkingDirectory $targetDirectory `
+            -PassThru
+        if (-not $duplicateProcess.WaitForExit(5000)) {
+            Stop-Process -Id $duplicateProcess.Id -Force -ErrorAction SilentlyContinue
+            throw 'A duplicate Zommi launch did not exit within five seconds.'
+        }
+        Start-Sleep -Milliseconds 300
+        $runningTargets = @(Get-ExactTargetProcesses (Join-Path $targetDirectory 'Zommi.exe'))
+        if ($runningTargets.Count -ne 1 -or
+            $runningTargets.ProcessId -notcontains $startedProcess.Id) {
+            throw "Single-instance verification failed; found $($runningTargets.Count) exact-path processes."
+        }
+        $singleInstanceVerified = $true
         $flutterProcessCount = $runningTargets.Count
     }
 
@@ -205,6 +234,7 @@ try {
         stoppedProcesses = $stoppedProcessCount
         startedProcessId = $startedProcessId
         flutterProcessCount = $flutterProcessCount
+        singleInstanceVerified = $singleInstanceVerified
     } | ConvertTo-Json
 }
 catch {
