@@ -191,7 +191,7 @@ class InlineAttachmentMessage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final style = DefaultTextStyle.of(context).style
-        .copyWith(color: const Color(0xff272b38), fontSize: 11, height: 1.35);
+        .copyWith(color: const Color(0xff272b38), fontSize: 12, height: 1.35);
     return SelectionArea(
       child: RichText(
         key: key,

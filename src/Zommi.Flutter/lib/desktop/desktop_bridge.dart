@@ -17,8 +17,11 @@ const Size compactWindowSize = Size(56, 56);
 const Size normalWindowSize = Size(720, 620);
 const Size largeWindowSize = Size(920, 760);
 const double windowBottomInset = 18;
-const Duration surfaceTransitionDuration = Duration(milliseconds: 180);
-const int surfaceTransitionFrameCount = 12;
+const Duration surfaceTransitionDuration = Duration(milliseconds: 240);
+const int surfaceTransitionFrameCount = 16;
+const MethodChannel _windowAnimationChannel = MethodChannel(
+  'zommi/window_animation',
+);
 
 enum DesktopInvocationKind { open, context, image, status }
 
@@ -223,6 +226,7 @@ final class FlutterDesktopBridge
   bool _initialized = false;
   bool _surfacePositionInitialized = false;
   int _surfaceTransitionEpoch = 0;
+  Offset? _surfaceAnchor;
   bool _nativeContextRegistered = false;
   bool _nativeImageRegistered = false;
   DesktopReadiness _readiness = const DesktopReadiness();
@@ -453,29 +457,50 @@ final class FlutterDesktopBridge
     final width = size.width.clamp(compactWindowSize.width, workArea.width);
     final height = size.height.clamp(compactWindowSize.height, workArea.height);
     final workAreaBounds = origin & workArea;
-    final bounds = anchoredSurfaceBounds(
-      current: current,
+    final anchor =
+        _surfaceAnchor ??
+        (_surfacePositionInitialized
+            ? current.center
+            : Offset(
+                workAreaBounds.center.dx,
+                workAreaBounds.bottom -
+                    windowBottomInset -
+                    compactWindowSize.height / 2,
+              ));
+    _surfaceAnchor = anchor;
+    final bounds = centeredSurfaceBounds(
+      center: anchor,
       workArea: workAreaBounds,
       size: Size(width, height),
-      preserveCurrentAnchor: _surfacePositionInitialized,
     );
     final shouldAnimate = _surfacePositionInitialized;
     _surfacePositionInitialized = true;
     final transitionEpoch = ++_surfaceTransitionEpoch;
-    await windowManager.setMinimumSize(
-      expanded ? const Size(640, 500) : compactWindowSize,
-    );
+    // Keeping the compact minimum during the transition prevents Win32 from
+    // jumping directly to 640x500 on the first animated frame.
+    await windowManager.setMinimumSize(compactWindowSize);
     await windowManager.setResizable(expanded);
     if (shouldAnimate) {
-      await animateSurfaceBounds(
+      final nativeResult = await animateNativeSurfaceBounds(
         from: current,
         to: bounds,
-        setBounds: (value) => windowManager.setBounds(value, animate: false),
-        cancelled: () => transitionEpoch != _surfaceTransitionEpoch,
+        scaleFactor: selected.scaleFactor?.toDouble() ?? 1,
       );
+      if (nativeResult == null) {
+        await animateSurfaceBounds(
+          from: current,
+          to: bounds,
+          setBounds: (value) => windowManager.setBounds(value, animate: false),
+          cancelled: () => transitionEpoch != _surfaceTransitionEpoch,
+        );
+      }
     } else {
       await windowManager.setBounds(bounds, animate: false);
     }
+    if (transitionEpoch != _surfaceTransitionEpoch) return;
+    await windowManager.setMinimumSize(
+      expanded ? const Size(640, 500) : compactWindowSize,
+    );
     await windowManager.setAlwaysOnTop(true);
   }
 
@@ -502,7 +527,10 @@ final class FlutterDesktopBridge
   }
 
   @override
-  Future<void> startDragging() => windowManager.startDragging();
+  Future<void> startDragging() async {
+    await windowManager.startDragging();
+    _surfaceAnchor = (await windowManager.getBounds()).center;
+  }
 
   @override
   Future<void> openRuntimeSignIn(RuntimeTarget target) async {
@@ -692,20 +720,43 @@ Future<void> presentPanelWithoutResizing({
   await keepOnTop();
 }
 
-Rect anchoredSurfaceBounds({
-  required Rect current,
+Rect centeredSurfaceBounds({
+  required Offset center,
   required Rect workArea,
   required Size size,
-  required bool preserveCurrentAnchor,
 }) {
-  final anchor = preserveCurrentAnchor
-      ? Offset(current.center.dx, current.bottom)
-      : Offset(workArea.center.dx, workArea.bottom - windowBottomInset);
   final maxLeft = math.max(workArea.left, workArea.right - size.width);
   final maxTop = math.max(workArea.top, workArea.bottom - size.height);
-  final left = (anchor.dx - size.width / 2).clamp(workArea.left, maxLeft);
-  final top = (anchor.dy - size.height).clamp(workArea.top, maxTop);
+  final left = (center.dx - size.width / 2).clamp(workArea.left, maxLeft);
+  final top = (center.dy - size.height / 2).clamp(workArea.top, maxTop);
   return Rect.fromLTWH(left, top, size.width, size.height);
+}
+
+Future<bool?> animateNativeSurfaceBounds({
+  required Rect from,
+  required Rect to,
+  required double scaleFactor,
+  Duration duration = surfaceTransitionDuration,
+}) async {
+  if (!Platform.isWindows) return null;
+  try {
+    return await _windowAnimationChannel.invokeMethod<bool>('animateBounds', {
+      'fromX': from.left,
+      'fromY': from.top,
+      'fromWidth': from.width,
+      'fromHeight': from.height,
+      'toX': to.left,
+      'toY': to.top,
+      'toWidth': to.width,
+      'toHeight': to.height,
+      'scaleFactor': scaleFactor,
+      'durationMs': duration.inMilliseconds,
+    });
+  } on MissingPluginException {
+    return null;
+  } on PlatformException {
+    return null;
+  }
 }
 
 Future<void> animateSurfaceBounds({
@@ -720,15 +771,16 @@ Future<void> animateSurfaceBounds({
     if (!cancelled()) await setBounds(to);
     return;
   }
-  final frameDelay = Duration(
-    microseconds: math.max(1, duration.inMicroseconds ~/ frames),
-  );
+  final stopwatch = Stopwatch()..start();
   for (var frame = 1; frame <= frames; frame++) {
+    if (cancelled()) return;
+    final deadline = duration * (frame / frames);
+    final remaining = deadline - stopwatch.elapsed;
+    if (remaining > Duration.zero) await Future<void>.delayed(remaining);
     if (cancelled()) return;
     final linear = frame / frames;
     final eased = 1 - math.pow(1 - linear, 3).toDouble();
     await setBounds(Rect.lerp(from, to, eased)!);
-    if (frame < frames) await Future<void>.delayed(frameDelay);
   }
 }
 

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
+import 'package:zommi_flutter/widgets/content_views.dart';
 import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
 import 'package:zommi_flutter/widgets/transcript_view.dart';
 import 'package:zommi_flutter/zommi_app.dart';
@@ -18,6 +20,73 @@ const _onePixelPng =
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
 void main() {
+  testWidgets('startup orb has visible motion until runtime is ready', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(240, 180));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final startup = Completer<void>();
+    final core = RichFakeCore()
+      ..historyCount = 0
+      ..initializeGate = startup.future;
+    await tester.pumpWidget(ZommiApp(core: core, desktop: FakeDesktopBridge()));
+    await tester.pump();
+
+    expect(tester.widget<ZommiOrb>(find.byType(ZommiOrb)).loading, isTrue);
+    final canvas = find.byKey(const ValueKey('zommi-orb-canvas'));
+    final firstPainter = tester.widget<CustomPaint>(canvas).painter;
+    await tester.pump(const Duration(milliseconds: 180));
+    final secondPainter = tester.widget<CustomPaint>(canvas).painter;
+    expect(secondPainter, isNot(same(firstPainter)));
+    expect(secondPainter!.shouldRepaint(firstPainter!), isTrue);
+
+    startup.complete();
+    await tester.pumpAndSettle();
+    expect(tester.widget<ZommiOrb>(find.byType(ZommiOrb)).loading, isFalse);
+  });
+
+  testWidgets('single-line and fenced markdown copy controls never overlap', (
+    tester,
+  ) async {
+    const singleLine = 'A concise answer';
+    Future<void> pumpMarkdown(String text) => tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 360,
+            child: CopyableMarkdown(text: text, onCopy: (_) async {}),
+          ),
+        ),
+      ),
+    );
+
+    await pumpMarkdown(singleLine);
+    await tester.pump();
+    final responseCopy = find.byKey(ValueKey('copy-${singleLine.hashCode}'));
+    final layout = find.byKey(ValueKey('copy-layout-${singleLine.hashCode}'));
+    final responseCopyRect = tester.getRect(responseCopy);
+    final layoutRect = tester.getRect(layout);
+    expect(tester.getSize(responseCopy), const Size(30, 30));
+    expect(responseCopyRect.top, greaterThanOrEqualTo(layoutRect.top));
+    expect(responseCopyRect.bottom, lessThanOrEqualTo(layoutRect.bottom));
+
+    const fenced = '```text\ncopy me\n```';
+    await pumpMarkdown(fenced);
+    await tester.pump();
+    final fencedResponseCopy = find.byKey(ValueKey('copy-${fenced.hashCode}'));
+    final codeCopy = find.byTooltip('Copy code');
+    expect(
+      tester.getRect(fencedResponseCopy).overlaps(tester.getRect(codeCopy)),
+      isFalse,
+    );
+    final markdown = tester.widget<MarkdownBody>(find.byType(MarkdownBody));
+    final codeDecoration = markdown.styleSheet?.codeblockDecoration;
+    expect(codeDecoration, isA<BoxDecoration>());
+    final codeBoxDecoration = codeDecoration! as BoxDecoration;
+    expect(codeBoxDecoration.color, isNull);
+    expect(codeBoxDecoration.border, isNull);
+  });
+
   testWidgets(
     'shortcut capture accumulates selection-first tokens before panel focus',
     (tester) async {
@@ -198,7 +267,18 @@ void main() {
       expect(find.text('Pi RPC · WSL · Ubuntu'), findsOneWidget);
       expect(find.text('Compatible'), findsOneWidget);
 
+      final switchGate = Completer<void>();
+      core.connectGate = switchGate.future;
       await tester.tap(find.byKey(const ValueKey('runtime-runtime-pi')));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('runtime-panel')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('runtime-loading-indicator')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('loading-status')), findsOneWidget);
+      expect(core.activeTargetId, 'runtime-codex');
+      switchGate.complete();
       await tester.pumpAndSettle();
       expect(core.activeTargetId, 'runtime-pi');
       expect(find.textContaining('Pi 9.8.7 ready'), findsOneWidget);
@@ -309,46 +389,48 @@ void main() {
     );
   });
 
-  testWidgets('compact typography preserves transcript and composer layout', (
-    tester,
-  ) async {
-    final core = RichFakeCore()..historyCount = 0;
-    await _pumpApp(tester, core: core, desktop: FakeDesktopBridge());
-    await _expand(tester);
-    await tester.enterText(
-      find.byKey(const ValueKey('zommi-composer')),
-      'compact type',
-    );
-    await tester.tap(find.byKey(const ValueKey('send-message')));
-    await tester.pump();
-    core.emit(
-      _event(
-        1,
-        'item.update',
-        payload: const {
-          'kind': 'assistant',
-          'lifecycle': 'delta',
-          'text': '# Compact heading\nReadable body',
-          'itemId': 'answer',
-        },
-      ),
-    );
-    await tester.pump();
+  testWidgets(
+    'chat typography stays readable without changing composer layout',
+    (tester) async {
+      final core = RichFakeCore()..historyCount = 0;
+      await _pumpApp(tester, core: core, desktop: FakeDesktopBridge());
+      await _expand(tester);
+      await tester.enterText(
+        find.byKey(const ValueKey('zommi-composer')),
+        'compact type',
+      );
+      await tester.tap(find.byKey(const ValueKey('send-message')));
+      await tester.pump();
+      core.emit(
+        _event(
+          1,
+          'item.update',
+          payload: const {
+            'kind': 'assistant',
+            'lifecycle': 'delta',
+            'text': '# Compact heading\nReadable body',
+            'itemId': 'answer',
+          },
+        ),
+      );
+      await tester.pump();
 
-    final field = tester.widget<TextField>(
-      find.byKey(const ValueKey('zommi-composer')),
-    );
-    expect(field.style?.fontSize, 12);
-    expect(field.textAlignVertical, TextAlignVertical.center);
-    final markdown = tester.widgetList<MarkdownBody>(find.byType(MarkdownBody));
-    expect(markdown, isNotEmpty);
-    expect(
-      markdown.every(
-        (body) => (body.styleSheet?.p?.fontSize ?? double.infinity) <= 11.5,
-      ),
-      isTrue,
-    );
-  });
+      final field = tester.widget<TextField>(
+        find.byKey(const ValueKey('zommi-composer')),
+      );
+      expect(field.style?.fontSize, 12);
+      expect(field.textAlignVertical, TextAlignVertical.center);
+      final markdown = tester.widgetList<MarkdownBody>(
+        find.byType(MarkdownBody),
+      );
+      expect(markdown, isNotEmpty);
+      final bodySizes = markdown
+          .map((body) => body.styleSheet?.p?.fontSize)
+          .whereType<double>()
+          .toSet();
+      expect(bodySizes, containsAll(<double>[12, 13]));
+    },
+  );
 
   testWidgets('expanded header does not repeat the compact orb', (
     tester,

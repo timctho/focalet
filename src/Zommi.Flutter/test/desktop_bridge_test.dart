@@ -59,37 +59,49 @@ void main() {
     },
   );
 
-  test('surface bounds preserve a dragged bottom-center anchor', () {
+  test('surface bounds preserve one center across expand and collapse', () {
     const workArea = Rect.fromLTWH(100, 50, 1200, 800);
-    final initial = anchoredSurfaceBounds(
-      current: const Rect.fromLTWH(10, 10, 900, 760),
+    final initial = centeredSurfaceBounds(
+      center: Offset(
+        workArea.center.dx,
+        workArea.bottom - windowBottomInset - compactWindowSize.height / 2,
+      ),
       workArea: workArea,
       size: compactWindowSize,
-      preserveCurrentAnchor: false,
     );
     expect(initial.center.dx, workArea.center.dx);
     expect(initial.bottom, workArea.bottom - windowBottomInset);
 
-    const dragged = Rect.fromLTWH(622, 724, 56, 56);
-    final expanded = anchoredSurfaceBounds(
-      current: dragged,
+    const anchor = Offset(650, 400);
+    final expanded = centeredSurfaceBounds(
+      center: anchor,
       workArea: workArea,
       size: normalWindowSize,
-      preserveCurrentAnchor: true,
     );
-    expect(expanded.center.dx, dragged.center.dx);
-    expect(expanded.bottom, dragged.bottom);
+    final collapsed = centeredSurfaceBounds(
+      center: anchor,
+      workArea: workArea,
+      size: compactWindowSize,
+    );
+    expect(expanded.center, anchor);
+    expect(collapsed.center, anchor);
 
-    final clamped = anchoredSurfaceBounds(
-      current: const Rect.fromLTWH(110, 60, 56, 56),
+    final clamped = centeredSurfaceBounds(
+      center: const Offset(138, 88),
       workArea: workArea,
       size: normalWindowSize,
-      preserveCurrentAnchor: true,
     );
     expect(clamped.left, workArea.left);
     expect(clamped.top, workArea.top);
     expect(workArea.contains(clamped.topLeft), isTrue);
     expect(workArea.contains(clamped.bottomRight), isTrue);
+
+    final restoredOrb = centeredSurfaceBounds(
+      center: const Offset(138, 88),
+      workArea: workArea,
+      size: compactWindowSize,
+    );
+    expect(restoredOrb.center, const Offset(138, 88));
   });
 
   test(

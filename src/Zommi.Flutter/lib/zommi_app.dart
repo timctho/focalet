@@ -266,22 +266,18 @@ class _ZommiShellState extends State<ZommiShell> {
           fit: StackFit.expand,
           children: [
             Align(
-              alignment: Alignment.bottomCenter,
+              alignment: Alignment.center,
               child: MouseRegion(
                 onEnter: (_) => unawaited(_expand()),
                 onExit: (_) => _scheduleCollapse(),
-                child: AnimatedContainer(
+                child: SizedBox(
                   key: const ValueKey('zommi-surface'),
-                  duration: MediaQuery.disableAnimationsOf(context)
-                      ? Duration.zero
-                      : surfaceTransitionDuration,
-                  curve: Curves.easeOutCubic,
                   width: width,
                   height: height,
                   child: ClipRect(
                     child: _controller.expanded
                         ? OverflowBox(
-                            alignment: Alignment.bottomCenter,
+                            alignment: Alignment.center,
                             minWidth: width,
                             maxWidth: width,
                             minHeight: height,
@@ -290,6 +286,7 @@ class _ZommiShellState extends State<ZommiShell> {
                           )
                         : _CompactOrbButton(
                             working: _controller.anyTurnActive,
+                            loading: _controller.starting,
                             onPressed: () => unawaited(_expand()),
                           ),
                   ),
@@ -376,6 +373,21 @@ class _ZommiShellState extends State<ZommiShell> {
                         onPointerExit: _schedulePreviewClose,
                       ),
                     ),
+                  if (_controller.starting || _controller.runtimeBusy)
+                    Positioned(
+                      top: 10,
+                      left: 0,
+                      right: 0,
+                      child: IgnorePointer(
+                        child: Center(
+                          child: _LoadingPill(
+                            label: _controller.starting
+                                ? 'Waking Zommi…'
+                                : _controller.status,
+                          ),
+                        ),
+                      ),
+                    ),
                   if (_controller.approval != null)
                     Positioned.fill(
                       child: ColoredBox(
@@ -455,6 +467,7 @@ class _ZommiShellState extends State<ZommiShell> {
                 label: _controller.runtimeSummary,
                 semanticLabel: 'Choose agent runtime',
                 warning: _controller.statusWarning,
+                loading: _controller.runtimeBusy,
                 onPressed: _controller.toggleRuntimePanel,
               ),
             ),
@@ -669,12 +682,62 @@ class _HeaderButton extends StatelessWidget {
   }
 }
 
+class _LoadingPill extends StatelessWidget {
+  const _LoadingPill({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xf7ffffff),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: const Color(0xffdedbea)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x1f554b7a),
+            blurRadius: 18,
+            offset: Offset(0, 7),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 6, 14, 6),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ZommiOrb(
+              key: ValueKey('loading-orb'),
+              loading: true,
+              size: 28,
+            ),
+            const SizedBox(width: 7),
+            Text(
+              label,
+              key: const ValueKey('loading-status'),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Color(0xff514a70),
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _SummaryButton extends StatelessWidget {
   const _SummaryButton({
     required this.label,
     required this.semanticLabel,
     required this.onPressed,
     this.warning = false,
+    this.loading = false,
     super.key,
   });
 
@@ -682,6 +745,7 @@ class _SummaryButton extends StatelessWidget {
   final String semanticLabel;
   final VoidCallback onPressed;
   final bool warning;
+  final bool loading;
 
   @override
   Widget build(BuildContext context) {
@@ -696,13 +760,25 @@ class _SummaryButton extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 8),
           textStyle: const TextStyle(fontSize: 11),
         ),
-        icon: Container(
-          width: 7,
-          height: 7,
-          decoration: BoxDecoration(
-            color: warning ? const Color(0xffcf805f) : const Color(0xff66a27b),
-            shape: BoxShape.circle,
-          ),
+        icon: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 160),
+          child: loading
+              ? const SizedBox.square(
+                  key: ValueKey('runtime-loading-indicator'),
+                  dimension: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Container(
+                  key: const ValueKey('runtime-status-dot'),
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    color: warning
+                        ? const Color(0xffcf805f)
+                        : const Color(0xff66a27b),
+                    shape: BoxShape.circle,
+                  ),
+                ),
         ),
         label: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 170),
@@ -714,16 +790,25 @@ class _SummaryButton extends StatelessWidget {
 }
 
 class _CompactOrbButton extends StatelessWidget {
-  const _CompactOrbButton({required this.working, required this.onPressed});
+  const _CompactOrbButton({
+    required this.working,
+    required this.loading,
+    required this.onPressed,
+  });
 
   final bool working;
+  final bool loading;
   final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
     return Semantics(
       label: 'ZommiOrb',
-      hint: working ? 'Open Zommi chat, agent working' : 'Open Zommi chat',
+      hint: loading
+          ? 'Zommi is starting'
+          : working
+          ? 'Open Zommi chat, agent working'
+          : 'Open Zommi chat',
       button: true,
       child: Material(
         color: Colors.transparent,
@@ -731,7 +816,7 @@ class _CompactOrbButton extends StatelessWidget {
           key: const ValueKey('zommi-orb'),
           customBorder: const CircleBorder(),
           onTap: onPressed,
-          child: ZommiOrb(working: working),
+          child: ZommiOrb(working: working, loading: loading),
         ),
       ),
     );
@@ -739,9 +824,15 @@ class _CompactOrbButton extends StatelessWidget {
 }
 
 class ZommiOrb extends StatefulWidget {
-  const ZommiOrb({this.working = false, this.size = compactOrbSize, super.key});
+  const ZommiOrb({
+    this.working = false,
+    this.loading = false,
+    this.size = compactOrbSize,
+    super.key,
+  });
 
   final bool working;
+  final bool loading;
   final double size;
 
   @override
@@ -768,12 +859,13 @@ class _ZommiOrbState extends State<ZommiOrb>
   }
 
   void _syncMotion() {
-    if (widget.working && !MediaQuery.disableAnimationsOf(context)) {
+    if ((widget.working || widget.loading) &&
+        !MediaQuery.disableAnimationsOf(context)) {
       if (!_motion.isAnimating) _motion.repeat();
     } else {
       _motion
         ..stop()
-        ..value = widget.working ? 0.35 : 0;
+        ..value = widget.working || widget.loading ? 0.35 : 0;
     }
   }
 
@@ -794,6 +886,7 @@ class _ZommiOrbState extends State<ZommiOrb>
           painter: _NebulaOrbPainter(
             phase: _motion.value,
             working: widget.working,
+            loading: widget.loading,
           ),
         ),
       ),
@@ -802,16 +895,21 @@ class _ZommiOrbState extends State<ZommiOrb>
 }
 
 class _NebulaOrbPainter extends CustomPainter {
-  const _NebulaOrbPainter({required this.phase, required this.working});
+  const _NebulaOrbPainter({
+    required this.phase,
+    required this.working,
+    required this.loading,
+  });
 
   final double phase;
   final bool working;
+  final bool loading;
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = size.center(Offset.zero);
     final radius = size.shortestSide * 0.39;
-    if (working) {
+    if (working || loading) {
       final breath = 0.5 + 0.5 * math.sin(phase * math.pi * 2);
       final orbitRadius = radius + size.shortestSide * 0.07;
       final orbitBounds = Rect.fromCircle(center: center, radius: orbitRadius);
@@ -838,6 +936,31 @@ class _NebulaOrbPainter extends CustomPainter {
             breath,
           )!,
       );
+      if (loading) {
+        canvas.drawArc(
+          orbitBounds.inflate(size.shortestSide * 0.045),
+          -phase * math.pi * 2 + math.pi / 3,
+          math.pi * 0.48,
+          false,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.7
+            ..strokeCap = StrokeCap.round
+            ..color = Color.lerp(
+              const Color(0xffe28bd4),
+              const Color(0xff8fddda),
+              1 - breath,
+            )!,
+        );
+        canvas.drawCircle(
+          center,
+          radius + size.shortestSide * (0.11 + breath * 0.025),
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1
+            ..color = const Color(0x287f79c5),
+        );
+      }
       final angle = phase * math.pi * 2 + math.pi * 0.22;
       canvas.drawCircle(
         center.translate(
@@ -864,7 +987,9 @@ class _NebulaOrbPainter extends CustomPainter {
           stops: [0, 0.32, 0.68, 1],
         ).createShader(Rect.fromCircle(center: center, radius: radius)),
     );
-    final drift = working ? math.sin(phase * math.pi * 2) * radius * 0.28 : 0;
+    final drift = working || loading
+        ? math.sin(phase * math.pi * 2) * radius * 0.28
+        : 0;
     canvas.save();
     canvas.clipPath(
       Path()..addOval(Rect.fromCircle(center: center, radius: radius)),
@@ -890,7 +1015,7 @@ class _NebulaOrbPainter extends CustomPainter {
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 7),
     );
     canvas.restore();
-    if (working) {
+    if (working || loading) {
       final pulse = 0.5 + 0.5 * math.cos(phase * math.pi * 2);
       canvas.drawCircle(
         center.translate(radius * 0.15, -radius * 0.18),
@@ -910,5 +1035,7 @@ class _NebulaOrbPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _NebulaOrbPainter oldDelegate) =>
-      oldDelegate.phase != phase || oldDelegate.working != working;
+      oldDelegate.phase != phase ||
+      oldDelegate.working != working ||
+      oldDelegate.loading != loading;
 }

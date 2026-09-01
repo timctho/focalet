@@ -19,6 +19,8 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
   int historyCount = 45;
   bool closed = false;
   String? connectErrorCode;
+  Future<void>? initializeGate;
+  Future<void>? connectGate;
   final List<Map<String, Object?>> configuredOverrides = [
     {
       'id': 'override-existing',
@@ -117,11 +119,14 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
   void emit(CoreEvent event) => _events.add(event);
 
   @override
-  Future<CoreStatus> initialize() async => const CoreStatus(
-    version: '0.1.0',
-    protocolVersion: coreProtocolVersion,
-    capabilities: ['runtime.adapters.v1'],
-  );
+  Future<CoreStatus> initialize() async {
+    if (initializeGate case final gate?) await gate;
+    return const CoreStatus(
+      version: '0.1.0',
+      protocolVersion: coreProtocolVersion,
+      capabilities: ['runtime.adapters.v1'],
+    );
+  }
 
   @override
   Future<RuntimeDiscovery> discoverRuntimeTargets({
@@ -197,6 +202,7 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
     String? preferredSessionId,
     String? cwd,
   }) async {
+    if (connectGate case final gate?) await gate;
     if (connectErrorCode case final code?) {
       throw CoreProtocolException(code, 'Authentication required');
     }

@@ -2,7 +2,10 @@
 #define RUNNER_FLUTTER_WINDOW_H_
 
 #include <flutter/dart_project.h>
+#include <flutter/encodable_value.h>
 #include <flutter/flutter_view_controller.h>
+#include <flutter/method_channel.h>
+#include <flutter/method_result.h>
 
 #include <memory>
 
@@ -10,24 +13,39 @@
 
 // A window that does nothing but host a Flutter view.
 class FlutterWindow : public Win32Window {
- public:
+public:
   // Creates a new FlutterWindow hosting a Flutter view running |project|.
-  explicit FlutterWindow(const flutter::DartProject& project);
+  explicit FlutterWindow(const flutter::DartProject &project);
   virtual ~FlutterWindow();
 
- protected:
+protected:
   // Win32Window:
   bool OnCreate() override;
   void OnDestroy() override;
   LRESULT MessageHandler(HWND window, UINT const message, WPARAM const wparam,
                          LPARAM const lparam) noexcept override;
 
- private:
+private:
+  void HandleWindowAnimationMethodCall(
+      const flutter::MethodCall<flutter::EncodableValue> &call,
+      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+  void AdvanceWindowAnimation();
+  void CancelWindowAnimation();
+
   // The project to run.
   flutter::DartProject project_;
 
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      window_animation_channel_;
+  std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+      window_animation_result_;
+  RECT animation_from_{};
+  RECT animation_to_{};
+  ULONGLONG animation_started_at_ = 0;
+  DWORD animation_duration_ms_ = 0;
+  bool window_animation_active_ = false;
 };
 
-#endif  // RUNNER_FLUTTER_WINDOW_H_
+#endif // RUNNER_FLUTTER_WINDOW_H_

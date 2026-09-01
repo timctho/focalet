@@ -32,7 +32,7 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
   Widget build(BuildContext context) {
     final base = DefaultTextStyle.of(context).style.copyWith(
       color: const Color(0xff272b38),
-      fontSize: widget.compact ? 10.5 : 11.5,
+      fontSize: widget.compact ? 12 : 13,
       height: 1.38,
     );
     return MouseRegion(
@@ -40,36 +40,43 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
       onExit: (_) => setState(() => _hovered = false),
       child: Stack(
         children: [
-          Padding(
-            padding: const EdgeInsets.only(right: 28),
-            child: MarkdownBody(
-              data: widget.text,
-              selectable: true,
-              fitContent: false,
-              builders: {'pre': _CodeBlockBuilder(onCopy: widget.onCopy)},
-              styleSheet: MarkdownStyleSheet(
-                p: base,
-                h1: base.copyWith(fontSize: 16, fontWeight: FontWeight.w700),
-                h2: base.copyWith(fontSize: 14, fontWeight: FontWeight.w700),
-                h3: base.copyWith(fontSize: 12.5, fontWeight: FontWeight.w700),
-                code: base.copyWith(
-                  fontFamily: 'monospace',
-                  fontSize: widget.compact ? 9.5 : 10.5,
-                  backgroundColor: const Color(0xffeef0f6),
-                ),
-                codeblockDecoration: BoxDecoration(
-                  color: const Color(0xffeef0f6),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xffdce0e9)),
-                ),
-                blockquoteDecoration: const BoxDecoration(
-                  border: Border(
-                    left: BorderSide(color: Color(0xff8f83ce), width: 3),
+          ConstrainedBox(
+            key: ValueKey('copy-layout-${widget.text.hashCode}'),
+            constraints: const BoxConstraints(minHeight: 30),
+            child: Padding(
+              padding: const EdgeInsets.only(right: 34),
+              child: MarkdownBody(
+                data: widget.text,
+                selectable: true,
+                fitContent: false,
+                builders: {'pre': _CodeBlockBuilder(onCopy: widget.onCopy)},
+                styleSheet: MarkdownStyleSheet(
+                  p: base,
+                  h1: base.copyWith(
+                    fontSize: 17.5,
+                    fontWeight: FontWeight.w700,
                   ),
+                  h2: base.copyWith(
+                    fontSize: 15.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  h3: base.copyWith(fontSize: 14, fontWeight: FontWeight.w700),
+                  code: base.copyWith(
+                    fontFamily: 'monospace',
+                    fontSize: widget.compact ? 10.5 : 11.5,
+                    backgroundColor: const Color(0xffeef0f6),
+                  ),
+                  codeblockPadding: EdgeInsets.zero,
+                  codeblockDecoration: const BoxDecoration(),
+                  blockquoteDecoration: const BoxDecoration(
+                    border: Border(
+                      left: BorderSide(color: Color(0xff8f83ce), width: 3),
+                    ),
+                  ),
+                  blockquotePadding: const EdgeInsets.only(left: 12),
+                  tableBorder: TableBorder.all(color: const Color(0xffd7dbe5)),
+                  tableCellsPadding: const EdgeInsets.all(7),
                 ),
-                blockquotePadding: const EdgeInsets.only(left: 12),
-                tableBorder: TableBorder.all(color: const Color(0xffd7dbe5)),
-                tableCellsPadding: const EdgeInsets.all(7),
               ),
             ),
           ),
@@ -85,6 +92,16 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
                 child: IconButton(
                   key: ValueKey('copy-${widget.text.hashCode}'),
                   visualDensity: VisualDensity.compact,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 30,
+                    height: 30,
+                  ),
+                  style: IconButton.styleFrom(
+                    fixedSize: const Size(30, 30),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  padding: EdgeInsets.zero,
+                  splashRadius: 16,
                   tooltip: _copied ? 'Copied' : 'Copy response',
                   onPressed: () async {
                     await widget.onCopy(widget.text);
@@ -155,7 +172,7 @@ class _CopyableCodeBlockState extends State<_CopyableCodeBlock> {
                 style: const TextStyle(
                   color: Color(0xff272b38),
                   fontFamily: 'monospace',
-                  fontSize: 10.5,
+                  fontSize: 11.5,
                   height: 1.35,
                 ),
               ),
@@ -164,6 +181,13 @@ class _CopyableCodeBlockState extends State<_CopyableCodeBlock> {
           IconButton(
             key: ValueKey('copy-code-${widget.code.hashCode}'),
             visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints.tightFor(width: 30, height: 30),
+            style: IconButton.styleFrom(
+              fixedSize: const Size(30, 30),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            padding: EdgeInsets.zero,
+            splashRadius: 16,
             tooltip: _copied ? 'Copied code' : 'Copy code',
             onPressed: () async {
               await widget.onCopy(widget.code);

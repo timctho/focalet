@@ -42,7 +42,9 @@ final class ZommiController extends ChangeNotifier {
   String status = 'Connecting to Rust core…';
   bool statusWarning = false;
   bool initialized = false;
+  bool starting = true;
   bool runtimeBusy = false;
+  String? switchingRuntimeId;
   bool runtimeOverrideBusy = false;
   bool sessionBusy = false;
   bool submitting = false;
@@ -98,7 +100,18 @@ final class ZommiController extends ChangeNotifier {
 
   String get activeRuntimeName => activeRuntime?.displayName ?? 'Agent';
 
+  String? get switchingRuntimeName => runtimeTargets
+      .cast<RuntimeTarget?>()
+      .firstWhere(
+        (target) => target?.id == switchingRuntimeId,
+        orElse: () => null,
+      )
+      ?.displayName;
+
   String get runtimeSummary {
+    if (switchingRuntimeId != null) {
+      return 'Switching to ${switchingRuntimeName ?? 'agent'}…';
+    }
     final runtime = activeRuntime;
     if (runtime == null) {
       return runtimeBusy ? 'Finding agents…' : 'Choose agent';
@@ -157,6 +170,8 @@ final class ZommiController extends ChangeNotifier {
       _setStatus('Rust core unavailable · $error', warning: true);
     } finally {
       await desktopInitialization;
+      starting = false;
+      _notify();
     }
   }
 
@@ -208,19 +223,21 @@ final class ZommiController extends ChangeNotifier {
       return;
     }
     runtimeBusy = true;
+    switchingRuntimeId = targetId;
     approval = null;
     question = null;
     previewArtifact = null;
-    _setStatus('Switching agent runtime…');
+    closeTransientPanels();
+    _setStatus('Switching to ${switchingRuntimeName ?? 'agent'}…');
     try {
       await _connectRuntime(targetId);
-      closeTransientPanels();
     } on Object catch (error) {
       if (!_applyConnectionError(targetId, error)) {
         _setStatus('Could not switch agent · $error', warning: true);
       }
     } finally {
       runtimeBusy = false;
+      switchingRuntimeId = null;
       _notify();
     }
   }

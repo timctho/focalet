@@ -92,6 +92,10 @@ void main() {
       allOf(
         contains('message == ZommiShowWindowMessage()'),
         contains('ShowWindow(hwnd, SW_RESTORE)'),
+        contains('"zommi/window_animation"'),
+        contains('kWindowAnimationFrameMs'),
+        contains('message == WM_TIMER'),
+        contains('SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER'),
       ),
     );
     expect(
