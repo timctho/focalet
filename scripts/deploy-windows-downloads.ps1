@@ -106,6 +106,27 @@ function Get-DownloadsZommiProcesses {
     )
 }
 
+function Start-DurableZommiProcess {
+    param(
+        [string] $FilePath,
+        [string] $WorkingDirectory
+    )
+
+    $runnerTrackingId = $env:RUNNER_TRACKING_ID
+    try {
+        Remove-Item Env:RUNNER_TRACKING_ID -ErrorAction SilentlyContinue
+        return Start-Process `
+            -FilePath $FilePath `
+            -WorkingDirectory $WorkingDirectory `
+            -PassThru
+    }
+    finally {
+        if ($null -ne $runnerTrackingId) {
+            $env:RUNNER_TRACKING_ID = $runnerTrackingId
+        }
+    }
+}
+
 if (-not (Test-Path -LiteralPath $sourceDirectory -PathType Container) -or
     -not (Test-Path -LiteralPath $sourceArchive -PathType Leaf)) {
     throw "Build the package before deploying: $sourceDirectory"
@@ -169,10 +190,9 @@ try {
     $flutterProcessCount = 0
     $singleInstanceVerified = $false
     if (-not $NoStart) {
-        $startedProcess = Start-Process `
+        $startedProcess = Start-DurableZommiProcess `
             -FilePath (Join-Path $targetDirectory 'Zommi.exe') `
-            -WorkingDirectory $targetDirectory `
-            -PassThru
+            -WorkingDirectory $targetDirectory
         Start-Sleep -Seconds 2
         $startedProcess.Refresh()
         if ($startedProcess.HasExited) {
@@ -255,7 +275,7 @@ catch {
     }
     if ($stoppedProcessCount -gt 0 -and
         (Test-Path -LiteralPath (Join-Path $targetDirectory 'Zommi.exe') -PathType Leaf)) {
-        Start-Process `
+        Start-DurableZommiProcess `
             -FilePath (Join-Path $targetDirectory 'Zommi.exe') `
             -WorkingDirectory $targetDirectory | Out-Null
     }
