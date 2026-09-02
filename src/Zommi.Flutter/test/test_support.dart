@@ -398,6 +398,7 @@ final class FakeDesktopBridge implements DesktopBridge {
   bool closed = false;
   Future<DesktopReadiness>? initializeGate;
   Future<void>? surfaceGate;
+  bool pointerWithinSurface = false;
 
   @override
   Stream<DesktopInvocation> get invocations => _invocations.stream;
@@ -434,6 +435,12 @@ final class FakeDesktopBridge implements DesktopBridge {
     calls.add('surface:$expanded:$large');
     surfaceAnimations.add(animate);
     if (surfaceGate case final gate?) await gate;
+  }
+
+  @override
+  Future<bool> isPointerWithinSurface() async {
+    calls.add('isPointerWithinSurface');
+    return pointerWithinSurface;
   }
 
   @override

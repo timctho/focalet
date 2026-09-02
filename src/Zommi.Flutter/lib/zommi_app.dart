@@ -176,7 +176,13 @@ class _ZommiShellState extends State<ZommiShell> {
 
   void _scheduleCollapse() {
     _collapseTimer?.cancel();
-    _collapseTimer = Timer(hoverCollapseDelay, () {
+    _collapseTimer = Timer(hoverCollapseDelay, () async {
+      if (!mounted || _draggingWindow) return;
+      // Resizing a frameless native window can emit a synthetic mouse exit
+      // even though the stationary pointer is still over the enlarged
+      // surface. Trust the current screen-space pointer position before
+      // collapsing so a hover expansion cannot close itself after 500 ms.
+      if (await widget.desktop.isPointerWithinSurface()) return;
       if (!mounted || _draggingWindow) return;
       _composerFocus.unfocus();
       _controller.closeTransientPanels();

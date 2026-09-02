@@ -112,6 +112,8 @@ abstract interface class DesktopBridge {
     bool animate = true,
   });
 
+  Future<bool> isPointerWithinSurface();
+
   Future<void> showPanel();
 
   Future<void> hide();
@@ -156,6 +158,9 @@ final class NoopDesktopBridge implements DesktopBridge {
     bool large = false,
     bool animate = true,
   }) async {}
+
+  @override
+  Future<bool> isPointerWithinSurface() async => false;
 
   @override
   Future<void> showPanel() async {}
@@ -570,6 +575,17 @@ final class FlutterDesktopBridge
       await setSurface(expanded: true);
     } else {
       await windowManager.maximize();
+    }
+  }
+
+  @override
+  Future<bool> isPointerWithinSurface() async {
+    try {
+      final pointer = await screenRetriever.getCursorScreenPoint();
+      final bounds = await windowManager.getBounds();
+      return bounds.contains(pointer);
+    } on Object {
+      return false;
     }
   }
 

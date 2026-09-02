@@ -149,6 +149,37 @@ void main() {
   );
 
   testWidgets(
+    'synthetic resize exit cannot collapse under a stationary pointer',
+    (tester) async {
+      final core = RichFakeCore()..historyCount = 0;
+      final desktop = FakeDesktopBridge()..pointerWithinSurface = true;
+      await _pumpApp(tester, core: core, desktop: desktop);
+
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      addTearDown(mouse.removePointer);
+      await mouse.addPointer(location: Offset.zero);
+      await mouse.moveTo(
+        tester.getCenter(find.byKey(const ValueKey('zommi-surface'))),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('zommi-composer')), findsOneWidget);
+
+      // This exit models the event Win32 sends when the frameless window is
+      // resized around a pointer that did not physically leave the surface.
+      await mouse.moveTo(const Offset(-10, -10));
+      await tester.pump(hoverCollapseDelay);
+      await tester.pumpAndSettle();
+
+      expect(desktop.calls, contains('isPointerWithinSurface'));
+      expect(find.byKey(const ValueKey('zommi-composer')), findsOneWidget);
+      expect(
+        tester.getSize(find.byKey(const ValueKey('zommi-surface'))),
+        normalWindowSize,
+      );
+    },
+  );
+
+  testWidgets(
     'forward and reverse bloom layers are symmetric without a growing box',
     (tester) async {
       final core = RichFakeCore()..historyCount = 0;
