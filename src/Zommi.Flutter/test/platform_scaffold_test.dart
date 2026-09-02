@@ -115,7 +115,7 @@ void main() {
             contains('"isPointerWithinWindow"'),
             contains('GetCursorPos(&cursor)'),
             contains('WindowFromPoint(cursor)'),
-            contains('GetAncestor(hit_window, GA_ROOTOWNER)'),
+            contains('GetAncestor(hit_window, GA_ROOT)'),
           ),
           allOf(
             contains('"setBoundsWithoutCopy"'),
@@ -126,7 +126,6 @@ void main() {
               contains('BeginSurfaceFrameTransition(current)'),
               contains('DWMWA_CLOAK'),
               contains('STM_SETIMAGE'),
-              contains('height, GetHandle(),'),
               contains('SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER'),
             ),
           ),

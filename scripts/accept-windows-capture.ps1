@@ -304,16 +304,16 @@ public static class ZommiWindowsAcceptanceNative
 
     public static bool IsOwnedWindowAtPoint(IntPtr window, int x, int y)
     {
-        const uint rootOwner = 3;
-        var hit = WindowFromPoint(new NativePoint { X = x, Y = y });
-        return hit != IntPtr.Zero && GetAncestor(hit, rootOwner) == window;
+        const uint root = 2;
+        var hit = WindowFromPhysicalPoint(x, y);
+        return hit != IntPtr.Zero && GetAncestor(hit, root) == window;
     }
 
     public static string DescribeWindowAtPoint(int x, int y)
     {
         const uint root = 2;
         const uint rootOwner = 3;
-        var hit = WindowFromPoint(new NativePoint { X = x, Y = y });
+        var hit = WindowFromPhysicalPoint(x, y);
         var rootWindow = hit == IntPtr.Zero ? IntPtr.Zero : GetAncestor(hit, root);
         var ownerWindow = hit == IntPtr.Zero ? IntPtr.Zero : GetAncestor(hit, rootOwner);
         uint processId = 0;
@@ -340,9 +340,25 @@ public static class ZommiWindowsAcceptanceNative
     public static bool PostMouseLeaveAtPoint(int x, int y)
     {
         const uint mouseLeave = 0x02A3;
-        var hit = WindowFromPoint(new NativePoint { X = x, Y = y });
+        var hit = WindowFromPhysicalPoint(x, y);
         return hit != IntPtr.Zero &&
             PostMessage(hit, mouseLeave, IntPtr.Zero, IntPtr.Zero);
+    }
+
+    private static IntPtr WindowFromPhysicalPoint(int x, int y)
+    {
+        var previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
+        try
+        {
+            return WindowFromPoint(new NativePoint { X = x, Y = y });
+        }
+        finally
+        {
+            if (previous != IntPtr.Zero)
+            {
+                SetThreadDpiAwarenessContext(previous);
+            }
+        }
     }
 
     public static void CloseCompetingWindow(IntPtr window)

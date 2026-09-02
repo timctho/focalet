@@ -145,9 +145,8 @@ void FlutterWindow::HandleWindowAnimationMethodCall(
       return;
     }
     const HWND hit_window = WindowFromPoint(cursor);
-    const HWND root_window = hit_window == nullptr
-                                 ? nullptr
-                                 : GetAncestor(hit_window, GA_ROOTOWNER);
+    const HWND root_window =
+        hit_window == nullptr ? nullptr : GetAncestor(hit_window, GA_ROOT);
     result->Success(flutter::EncodableValue(root_window == GetHandle()));
     return;
   }
@@ -362,8 +361,8 @@ bool FlutterWindow::BeginSurfaceFrameTransition(const RECT &current_bounds) {
       WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_TRANSPARENT,
       L"STATIC", nullptr,
       WS_POPUP | WS_VISIBLE | SS_BITMAP | SS_REALSIZECONTROL,
-      current_bounds.left, current_bounds.top, width, height, GetHandle(),
-      nullptr, GetModuleHandleW(nullptr), nullptr);
+      current_bounds.left, current_bounds.top, width, height, nullptr, nullptr,
+      GetModuleHandleW(nullptr), nullptr);
   if (overlay == nullptr) {
     DeleteObject(bitmap);
     return false;
