@@ -263,11 +263,84 @@ jobs:
           if (-not $process.Responding) {
             throw "Deployed Zommi process $($process.Id) is not responding."
           }
+          $coreExecutable = Join-Path $targetDirectory 'zommi-core-host.exe'
+          $runtimeDeadline = [DateTime]::UtcNow.AddSeconds(20)
+          $coreProcess = $null
+          $proxyProcess = $null
+          do {
+            $snapshot = @(Get-CimInstance Win32_Process)
+            $coreProcess = @($snapshot | Where-Object {
+              $_.ParentProcessId -eq $process.Id -and
+              $_.ExecutablePath -and
+              [string]::Equals(
+                [IO.Path]::GetFullPath($_.ExecutablePath),
+                [IO.Path]::GetFullPath($coreExecutable),
+                [StringComparison]::OrdinalIgnoreCase)
+            }) | Select-Object -First 1
+            if ($null -ne $coreProcess) {
+              $proxyProcess = @($snapshot | Where-Object {
+                $_.ParentProcessId -eq $coreProcess.ProcessId -and
+                $_.ExecutablePath -and
+                [string]::Equals(
+                  [IO.Path]::GetFullPath($_.ExecutablePath),
+                  [IO.Path]::GetFullPath($coreExecutable),
+                  [StringComparison]::OrdinalIgnoreCase) -and
+                $_.CommandLine -match '(?:^|\s)--wsl-proxy(?:\s|$)'
+              }) | Select-Object -First 1
+            }
+            if ($null -ne $coreProcess -and $null -ne $proxyProcess) { break }
+            Start-Sleep -Milliseconds 250
+          } while ([DateTime]::UtcNow -lt $runtimeDeadline)
+          $cachePath = Join-Path $env:LOCALAPPDATA 'Zommi/runtime-targets.json'
+          $cache = Get-Content -LiteralPath $cachePath -Raw | ConvertFrom-Json
+          $cachedTarget = $cache.targets | Where-Object {
+            $_.executionHost.kind -eq 'wsl' -and $_.executionHost.isDefault
+          } | Select-Object -First 1
+          $distribution = $cachedTarget.executionHost.name
+          if ([string]::IsNullOrWhiteSpace($distribution)) {
+            throw 'The deployed runtime cache has no default WSL distribution.'
+          }
+          $probe = [Diagnostics.ProcessStartInfo]::new()
+          $probe.FileName = $coreExecutable
+          $probe.UseShellExecute = $false
+          $probe.CreateNoWindow = $true
+          $probe.RedirectStandardInput = $true
+          $probe.RedirectStandardOutput = $true
+          $probe.RedirectStandardError = $true
+          foreach ($argument in @(
+            '--wsl-proxy', '--distribution', $distribution,
+            '--cwd', '/', '--', '/bin/sh', '-c',
+            'printf ZOMMI_WINDOWS_WSL_RELAY_OK'
+          )) {
+            $probe.ArgumentList.Add($argument)
+          }
+          $probeProcess = [Diagnostics.Process]::Start($probe)
+          $probeProcess.StandardInput.Close()
+          if (-not $probeProcess.WaitForExit(15000)) {
+            $probeProcess.Kill($true)
+            throw 'The deployed WSL relay probe timed out.'
+          }
+          $probeOutput = $probeProcess.StandardOutput.ReadToEnd()
+          $probeError = $probeProcess.StandardError.ReadToEnd()
+          if ($probeProcess.ExitCode -ne 0 -or $probeOutput.Trim() -ne 'ZOMMI_WINDOWS_WSL_RELAY_OK') {
+            throw "The deployed WSL relay probe failed ($($probeProcess.ExitCode)): $probeError"
+          }
+          Write-Host "Persistent WSL relay probe succeeded for $distribution."
+          if ($null -eq $coreProcess) {
+            throw 'The deployed Flutter process did not retain its adjacent Rust core host.'
+          }
+          if ($null -eq $proxyProcess) {
+            throw 'The deployed Rust core did not establish its persistent WSL runtime proxy.'
+          }
           [ordered]@{
             gitCommit = $manifest.gitCommit
             processId = $process.Id
             processCount = $processes.Count
             responding = $process.Responding
+            coreProcessId = $coreProcess.ProcessId
+            proxyProcessId = $proxyProcess.ProcessId
+            wslDistribution = $distribution
+            relayProbe = $probeOutput.Trim()
           } | ConvertTo-Json
 
   release_macos:
