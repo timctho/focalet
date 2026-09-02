@@ -34,6 +34,7 @@ final class ZommiController extends ChangeNotifier {
   final Set<String> _completedTurnIds = {};
   final Map<String, int> _lastSequences = {};
   final Map<String, (String, String)> _modelSelections = {};
+  final Map<String, List<Map<String, Object?>>> _modelCatalogs = {};
 
   StreamSubscription<CoreEvent>? _coreEvents;
   StreamSubscription<DesktopInvocation>? _desktopEvents;
@@ -59,6 +60,7 @@ final class ZommiController extends ChangeNotifier {
   bool transitionTargetLarge = false;
   bool sessionPanelOpen = false;
   bool runtimePanelOpen = false;
+  bool runtimeSetupPanelOpen = false;
   bool modelPanelOpen = false;
   bool contextShortcutRegistered = false;
   bool imageShortcutRegistered = false;
@@ -393,9 +395,16 @@ final class ZommiController extends ChangeNotifier {
       ...?activeRuntime?.capabilityHints,
       ...connection.capabilities,
     };
+    if (connection.models.isNotEmpty) {
+      _modelCatalogs[connection.runtimeTargetId] = List.of(connection.models);
+    }
     models
       ..clear()
-      ..addAll(connection.models);
+      ..addAll(
+        connection.models.isNotEmpty
+            ? connection.models
+            : _modelCatalogs[connection.runtimeTargetId] ?? const [],
+      );
     sessions
       ..clear()
       ..addAll(_sessionSummaries(connection.sessions));
@@ -525,9 +534,12 @@ final class ZommiController extends ChangeNotifier {
     );
     capabilities = {...capabilities, ...connection.capabilities};
     if (connection.models.isNotEmpty) {
+      _modelCatalogs[connection.runtimeTargetId] = List.of(connection.models);
       models
         ..clear()
         ..addAll(connection.models);
+    } else if (models.isEmpty) {
+      models.addAll(_modelCatalogs[connection.runtimeTargetId] ?? const []);
     }
     if (connection.sessions.isNotEmpty) {
       sessions
@@ -874,6 +886,17 @@ final class ZommiController extends ChangeNotifier {
     runtimePanelOpen = !runtimePanelOpen;
     if (runtimePanelOpen) {
       sessionPanelOpen = false;
+      runtimeSetupPanelOpen = false;
+      modelPanelOpen = false;
+    }
+    _notify();
+  }
+
+  void toggleRuntimeSetupPanel([bool? open]) {
+    runtimeSetupPanelOpen = open ?? !runtimeSetupPanelOpen;
+    if (runtimeSetupPanelOpen) {
+      sessionPanelOpen = false;
+      runtimePanelOpen = false;
       modelPanelOpen = false;
     }
     _notify();
@@ -884,6 +907,7 @@ final class ZommiController extends ChangeNotifier {
     if (modelPanelOpen) {
       sessionPanelOpen = false;
       runtimePanelOpen = false;
+      runtimeSetupPanelOpen = false;
     }
     _notify();
   }
@@ -891,6 +915,7 @@ final class ZommiController extends ChangeNotifier {
   void closeTransientPanels() {
     sessionPanelOpen = false;
     runtimePanelOpen = false;
+    runtimeSetupPanelOpen = false;
     modelPanelOpen = false;
     _notify();
   }
@@ -904,6 +929,12 @@ final class ZommiController extends ChangeNotifier {
   void dismissRuntimePanel() {
     if (!runtimePanelOpen) return;
     runtimePanelOpen = false;
+    _notify();
+  }
+
+  void dismissRuntimeSetupPanel() {
+    if (!runtimeSetupPanelOpen) return;
+    runtimeSetupPanelOpen = false;
     _notify();
   }
 
@@ -1011,6 +1042,19 @@ final class ZommiController extends ChangeNotifier {
   Future<void> copyText(String value) => desktop.copyText(value);
 
   Future<void> copyImage(String dataUrl) => desktop.copyImage(dataUrl);
+
+  Future<void> openExternalLink(String value) async {
+    final uri = Uri.tryParse(value.trim());
+    if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
+      _setStatus('Only web links can be opened in the browser.', warning: true);
+      return;
+    }
+    try {
+      await desktop.openExternalUrl(uri);
+    } on Object catch (error) {
+      _setStatus('Could not open link · $error', warning: true);
+    }
+  }
 
   SessionPresence presenceFor(String sessionId) {
     final runtimeTargetId = activeRuntime?.id;
@@ -1181,6 +1225,18 @@ final class ZommiController extends ChangeNotifier {
     }
     final kind = _transcriptKind(event.payload['kind']?.toString());
     final lifecycle = _lifecycle(event.payload['lifecycle']?.toString());
+    if (kind == TranscriptKind.tool &&
+        !turn.blocks.any((block) => block.kind == TranscriptKind.thinking)) {
+      turn.blocks.add(
+        TranscriptBlock(
+          id: 'turn-thinking',
+          kind: TranscriptKind.thinking,
+          title: 'Thinking',
+          lifecycle: lifecycle,
+          expanded: false,
+        ),
+      );
+    }
     final nativeItemId = event.payload['itemId']?.toString() ?? '';
     final blockId = kind == TranscriptKind.thinking
         ? 'turn-thinking'
@@ -1388,6 +1444,13 @@ ConversationTurn mergeConversationTurn(
 ) {
   final blocks = List<TranscriptBlock>.of(primary.blocks);
   for (final candidate in secondary.blocks) {
+    if (candidate.kind == TranscriptKind.thinking) {
+      // Canonical history and the live cache can use different item IDs for
+      // commentary/reasoning. Keep both inputs here and consolidate them into
+      // one Thinking block below instead of dropping the canonical detail.
+      blocks.add(candidate);
+      continue;
+    }
     final duplicate = blocks.any(
       (block) =>
           block.id == candidate.id ||
@@ -1408,7 +1471,7 @@ ConversationTurn mergeConversationTurn(
     attachments: primary.attachments.isEmpty
         ? secondary.attachments
         : primary.attachments,
-    blocks: blocks,
+    blocks: normalizeTranscriptBlocks(blocks),
   );
 }
 

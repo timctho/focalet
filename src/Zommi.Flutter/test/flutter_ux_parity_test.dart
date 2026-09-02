@@ -211,7 +211,11 @@ void main() {
         home: Scaffold(
           body: SizedBox(
             width: 360,
-            child: CopyableMarkdown(text: text, onCopy: (_) async {}),
+            child: CopyableMarkdown(
+              text: text,
+              onCopy: (_) async {},
+              onOpenLink: (_) async {},
+            ),
           ),
         ),
       ),
@@ -530,6 +534,46 @@ void main() {
     expect(find.byKey(const ValueKey('session-sidebar')), findsNothing);
   });
 
+  testWidgets('Hermes model selector survives a runtime round trip', (
+    tester,
+  ) async {
+    const hermes = RuntimeTarget(
+      id: 'runtime-hermes',
+      runtimeId: 'hermes',
+      adapterId: 'hermes-gateway',
+      displayName: 'Hermes',
+      protocolName: 'Hermes Gateway',
+      executablePath: '/usr/bin/hermes',
+      executionHost: {
+        'id': 'native:linux',
+        'kind': 'native',
+        'displayName': 'Linux',
+      },
+      capabilityHints: RichFakeCore.capabilities,
+    );
+    final core = RichFakeCore()
+      ..historyCount = 0
+      ..activeTargetId = hermes.id
+      ..discoveredTargets.add(hermes)
+      ..modelCatalogByRuntime[hermes.id] = RichFakeCore.models;
+    await _pumpApp(tester, core: core, desktop: FakeDesktopBridge());
+    await _expand(tester);
+    expect(find.byKey(const ValueKey('model-summary')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('runtime-summary')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('runtime-runtime-pi')));
+    await tester.pumpAndSettle();
+    core.modelCatalogByRuntime[hermes.id] = const [];
+    await tester.tap(find.byKey(const ValueKey('runtime-summary')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('runtime-runtime-hermes')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('model-summary')), findsOneWidget);
+    expect(find.textContaining('Fixture Pro'), findsOneWidget);
+  });
+
   testWidgets('large panel stays large when the window is shown again', (
     tester,
   ) async {
@@ -568,7 +612,8 @@ void main() {
     'chat typography stays readable without changing composer layout',
     (tester) async {
       final core = RichFakeCore()..historyCount = 0;
-      await _pumpApp(tester, core: core, desktop: FakeDesktopBridge());
+      final desktop = FakeDesktopBridge();
+      await _pumpApp(tester, core: core, desktop: desktop);
       await _expand(tester);
       await tester.enterText(
         find.byKey(const ValueKey('zommi-composer')),
@@ -583,7 +628,7 @@ void main() {
           payload: const {
             'kind': 'assistant',
             'lifecycle': 'delta',
-            'text': '# Compact heading\nReadable body',
+            'text': '# Compact heading\nReadable body\n\n[Open site](https://example.com/item?q=1)',
             'itemId': 'answer',
           },
         ),
@@ -603,15 +648,44 @@ void main() {
           .map((body) => body.styleSheet?.p?.fontSize)
           .whereType<double>()
           .toSet();
-      expect(
-        bodySizes,
-        containsAll(<double>[userMessageFontSize, assistantMessageFontSize]),
-      );
+      expect(bodySizes, <double>{topBarAndChatFontSize});
+      expect(userMessageFontSize, assistantMessageFontSize);
+      expect(userMessageFontSize, topBarAndChatFontSize);
       expect(codexUiFontFamily, 'packages/fossui/Geist');
       expect(
         markdown.map((body) => body.styleSheet?.p?.fontFamily),
         contains(codexUiFontFamily),
       );
+      final userBox = tester.widget<Container>(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is Container &&
+              widget.key is ValueKey<String> &&
+              (widget.key! as ValueKey<String>).value.startsWith(
+                'user-message-',
+              ),
+        ),
+      );
+      final assistantBox = tester.widget<Container>(
+        find.byKey(const ValueKey('assistant-answer')),
+      );
+      expect(userMessageBoxWidth, 520 * 0.8);
+      expect(assistantMessageBoxWidth, 620 * 0.8);
+      expect(userBox.constraints?.maxWidth, userMessageBoxWidth);
+      expect(assistantBox.constraints?.maxWidth, assistantMessageBoxWidth);
+      final assistantMarkdown = tester.widget<MarkdownBody>(
+        find.descendant(
+          of: find.byKey(const ValueKey('assistant-answer')),
+          matching: find.byType(MarkdownBody),
+        ),
+      );
+      assistantMarkdown.onTapLink!(
+        'Open site',
+        'https://example.com/item?q=1',
+        '',
+      );
+      await tester.pump();
+      expect(desktop.openedUrl, Uri.parse('https://example.com/item?q=1'));
     },
   );
 
@@ -654,7 +728,15 @@ void main() {
         text: 'same answer',
       ),
     ];
-    expect(distinctTranscriptBlocks(blocks), [blocks.first, blocks.last]);
+    final distinct = distinctTranscriptBlocks(blocks);
+    expect(distinct.where((block) => block.kind == TranscriptKind.assistant), [
+      blocks.first,
+    ]);
+    expect(
+      distinct.where((block) => block.kind == TranscriptKind.thinking),
+      hasLength(1),
+    );
+    expect(distinct.last, blocks.last);
   });
 
   testWidgets(
@@ -667,18 +749,34 @@ void main() {
       await _expand(tester);
       await tester.tap(find.byKey(const ValueKey('runtime-summary')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Advanced runtime setup'));
+      await tester.tap(find.byKey(const ValueKey('open-runtime-setup')));
       await tester.pumpAndSettle();
 
-      expect(
-        find.byKey(const ValueKey('runtime-override-override-existing')),
-        findsOneWidget,
+      expect(find.byKey(const ValueKey('runtime-panel')), findsNothing);
+      expect(find.byKey(const ValueKey('runtime-setup-panel')), findsOneWidget);
+      await expectLater(
+        find.byKey(const ValueKey('runtime-setup-panel')),
+        matchesGoldenFile('goldens/runtime_setup_panel.png'),
       );
       expect(
         find.byKey(const ValueKey('runtime-override-locator')),
         findsNothing,
       );
       expect(find.text('OpenClaw · Direct Gateway'), findsNothing);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('runtime-setup-panel')),
+          matching: find.byType(DropdownButtonFormField<String>),
+        ),
+        findsNothing,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('runtime-setup-panel')),
+          matching: find.byType(TextField),
+        ),
+        findsNothing,
+      );
       final choose = find.byKey(const ValueKey('select-runtime-executable'));
       await tester.ensureVisible(choose);
       await tester.tap(choose);
@@ -695,13 +793,9 @@ void main() {
         ),
         isTrue,
       );
-      expect(
-        find.descendant(
-          of: find.byKey(const ValueKey('runtime-advanced')),
-          matching: find.byType(TextField),
-        ),
-        findsNothing,
-      );
+      await tester.tap(find.byKey(const ValueKey('close-runtime-setup')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('runtime-setup-panel')), findsNothing);
     },
   );
 
@@ -842,7 +936,7 @@ void main() {
       expect(find.byKey(const ValueKey('activity-tool-1')), findsOneWidget);
       final thinkingFold = find.descendant(
         of: find.byKey(const ValueKey('activity-turn-thinking')),
-        matching: find.byType(AnimatedCrossFade),
+        matching: find.byKey(const ValueKey('thinking-fold')),
       );
       final toolFold = find.descendant(
         of: find.byKey(const ValueKey('activity-tool-1')),
@@ -856,14 +950,29 @@ void main() {
         tester.widget<AnimatedCrossFade>(toolFold).crossFadeState,
         CrossFadeState.showFirst,
       );
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('activity-turn-thinking')),
+          matching: find.byKey(const ValueKey('activity-tool-1')),
+        ),
+        findsOneWidget,
+      );
       final thinkingCard = find.byKey(const ValueKey('activity-turn-thinking'));
       await tester.ensureVisible(thinkingCard);
       await tester.pumpAndSettle();
-      await tester.tap(thinkingCard);
+      await expectLater(
+        thinkingCard,
+        matchesGoldenFile('goldens/thinking_tools_collapsed.png'),
+      );
+      await tester.tap(find.byKey(const ValueKey('thinking-toggle')));
       await tester.pumpAndSettle();
       expect(
         tester.widget<AnimatedCrossFade>(thinkingFold).crossFadeState,
         CrossFadeState.showSecond,
+      );
+      await expectLater(
+        thinkingCard,
+        matchesGoldenFile('goldens/thinking_tools_expanded.png'),
       );
       expect(find.byKey(const ValueKey('assistant-answer-1')), findsOneWidget);
       expect(find.byKey(const ValueKey('artifact-html-1')), findsOneWidget);

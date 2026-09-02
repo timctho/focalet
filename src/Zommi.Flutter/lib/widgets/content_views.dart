@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -13,12 +14,14 @@ class CopyableMarkdown extends StatefulWidget {
   const CopyableMarkdown({
     required this.text,
     required this.onCopy,
+    required this.onOpenLink,
     this.compact = false,
     super.key,
   });
 
   final String text;
   final Future<void> Function(String value) onCopy;
+  final Future<void> Function(String value) onOpenLink;
   final bool compact;
 
   @override
@@ -52,6 +55,9 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
                 data: widget.text,
                 selectable: true,
                 fitContent: false,
+                onTapLink: (_, href, _) {
+                  if (href != null) unawaited(widget.onOpenLink(href));
+                },
                 builders: {'pre': _CodeBlockBuilder(onCopy: widget.onCopy)},
                 styleSheet: MarkdownStyleSheet(
                   p: base,

@@ -6,7 +6,8 @@ const List<String> codexUiFontFallback = [
   'Arial',
 ];
 
-const double userMessageFontSize = 14;
-const double assistantMessageFontSize = 15;
-const double chatCodeFontSize = 13.5;
-const double compactChatCodeFontSize = 12.5;
+const double topBarAndChatFontSize = 11;
+const double userMessageFontSize = topBarAndChatFontSize;
+const double assistantMessageFontSize = topBarAndChatFontSize;
+const double chatCodeFontSize = 11;
+const double compactChatCodeFontSize = 11;

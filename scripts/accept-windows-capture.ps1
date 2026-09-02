@@ -397,7 +397,7 @@ function Wait-ForVisibleProcessWindow {
         if ($window -ne [IntPtr]::Zero) {
             return $window
         }
-        Start-Sleep -Milliseconds 50
+        Start-Sleep -Milliseconds 10
     }
     throw "Timed out waiting for a visible window from process $ProcessId."
 }
@@ -576,6 +576,51 @@ function Invoke-CaptureSelectedTextProbe {
         $result = $stdout | ConvertFrom-Json
         if ($result.marker -notin @($result.selection)) {
             throw 'Packaged selected-text probe did not preserve its exact marker.'
+        }
+        return $result
+    }
+    finally {
+        if (-not $process.HasExited) {
+            $process.Kill()
+            $process.WaitForExit()
+        }
+        $process.Dispose()
+    }
+}
+
+function Invoke-CaptureWindowOwnershipProbe {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Executable
+    )
+
+    $start = [System.Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $Executable
+    $start.Arguments = '--acceptance-window-ownership'
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $start
+    if (-not $process.Start()) {
+        throw "Could not start window-ownership probe $Executable."
+    }
+    try {
+        $output = $process.StandardOutput.ReadToEnd()
+        $errorOutput = $process.StandardError.ReadToEnd()
+        if (-not $process.WaitForExit(15000)) {
+            throw 'Window-ownership probe did not stop.'
+        }
+        if ($process.ExitCode -ne 0) {
+            throw "Window-ownership probe exited $($process.ExitCode): $errorOutput"
+        }
+        $result = $output | ConvertFrom-Json
+        if ($result.ownWindowAccepted -ne $true -or
+            $result.siblingWindowRejected -ne $true -or
+            $result.matchingBrowserDocumentAccepted -ne $true -or
+            $result.siblingBrowserDocumentRejected -ne $true) {
+            throw "Window-ownership probe admitted a same-process sibling window: $output"
         }
         return $result
     }
@@ -811,6 +856,14 @@ function Invoke-PackagedApplicationAcceptance {
     }
 
     try {
+        $window = Wait-ForVisibleProcessWindow -ProcessId $application.Id
+        $firstVisibleBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
+        if ($firstVisibleBounds.Count -ne 4 -or
+            $firstVisibleBounds[2] -ne $firstVisibleBounds[3] -or
+            $firstVisibleBounds[2] -gt 100) {
+            throw "Packaged application exposed a template-sized first window: $($firstVisibleBounds -join ',')."
+        }
+
         $readyResult = Wait-ForAcceptanceEvent -Path $acceptanceLog -Name 'desktop.ready'
         $ready = $readyResult.Event
         $eventCount = $readyResult.Count
@@ -818,7 +871,6 @@ function Invoke-PackagedApplicationAcceptance {
             throw "Packaged shortcuts were not both registered: $($ready | ConvertTo-Json -Compress)"
         }
 
-        $window = Wait-ForVisibleProcessWindow -ProcessId $application.Id
         $compactBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
         if ($compactBounds.Count -ne 4 -or $compactBounds[2] -le 0 -or $compactBounds[3] -le 0) {
             throw 'Packaged Flutter window has invalid compact bounds.'
@@ -960,6 +1012,7 @@ function Invoke-PackagedApplicationAcceptance {
             imageDimensions = @($image.width, $image.height)
             imagePointerContext = $true
             compactBounds = @($compactBounds)
+            firstVisibleBounds = @($firstVisibleBounds)
             expandedBounds = @($expandedBounds)
             processCount = $processes.Count
             shortcutsRegistered = $true
@@ -1031,6 +1084,9 @@ if (-not (Test-Path -LiteralPath $capture -PathType Leaf)) {
 $selectedText = Invoke-CaptureSelectedTextProbe -Executable $capture
 Write-Host "selected-text: ok ($($selectedText.marker))"
 
+$windowOwnership = Invoke-CaptureWindowOwnershipProbe -Executable $capture
+Write-Host 'window-ownership: ok (same-process sibling rejected)'
+
 $cancelled = Invoke-CaptureRequest -Executable $capture -Method 'selectImage' -Interact {
     param($process)
     $window = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi image selection'
@@ -1047,6 +1103,7 @@ if ($NonVisualOnly) {
     Write-AcceptanceResult -Result @{
         captureHelper = $capture
         selectedText = $true
+        windowOwnership = $true
         cancellation = $true
         regionPixels = 'not-requested'
     }
@@ -1106,6 +1163,7 @@ $applicationResult = Invoke-PackagedApplicationAcceptance `
 Write-AcceptanceResult -Result @{
     captureHelper = $capture
     selectedText = $true
+    windowOwnership = $true
     cancellation = $true
     selectedBounds = @($selected.bounds.x, $selected.bounds.y, $selected.bounds.width, $selected.bounds.height)
     pngDimensions = @($width, $height)

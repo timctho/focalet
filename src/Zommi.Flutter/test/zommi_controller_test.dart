@@ -358,6 +358,105 @@ void main() {
     await controller.close();
   });
 
+  test('Hermes model catalog survives an empty reconnect response', () async {
+    const hermes = RuntimeTarget(
+      id: 'runtime-hermes',
+      runtimeId: 'hermes',
+      adapterId: 'hermes-gateway',
+      displayName: 'Hermes',
+      protocolName: 'Hermes Gateway',
+      executablePath: '/usr/bin/hermes',
+      executionHost: {
+        'id': 'native:linux',
+        'kind': 'native',
+        'displayName': 'Linux',
+      },
+      capabilityHints: RichFakeCore.capabilities,
+    );
+    final core = RichFakeCore()
+      ..historyCount = 0
+      ..activeTargetId = hermes.id
+      ..discoveredTargets.add(hermes)
+      ..modelCatalogByRuntime[hermes.id] = RichFakeCore.models;
+    final controller = ZommiController(
+      core: core,
+      desktop: FakeDesktopBridge(),
+    );
+    await controller.initialize();
+    expect(controller.activeRuntime?.id, hermes.id);
+    expect(controller.models, RichFakeCore.models);
+    expect(controller.modelSelectionSupported, isTrue);
+
+    await controller.selectRuntime('runtime-pi');
+    core.modelCatalogByRuntime[hermes.id] = const [];
+    await controller.selectRuntime(hermes.id);
+    expect(controller.activeRuntime?.id, hermes.id);
+    expect(controller.models, RichFakeCore.models);
+    expect(controller.modelSelectionSupported, isTrue);
+    await controller.close();
+  });
+
+  test('runtime round trip consolidates canonical thinking sections', () async {
+    final core = RichFakeCore()..historyCount = 0;
+    final controller = ZommiController(
+      core: core,
+      desktop: FakeDesktopBridge(),
+    );
+    await controller.initialize();
+    await controller.submit('inspect once');
+    core.emit(
+      _event(
+        1,
+        'item.update',
+        payload: const {
+          'kind': 'thinking',
+          'lifecycle': 'delta',
+          'text': 'Reading context',
+          'itemId': 'live-thinking',
+        },
+      ),
+    );
+    core.historyBySession['runtime-codex\u0000session-1'] = {
+      'thread': {
+        'id': 'session-1',
+        'turns': [
+          {
+            'id': 'canonical-turn',
+            'items': [
+              {
+                'type': 'userMessage',
+                'content': [
+                  {'type': 'text', 'text': 'inspect once'},
+                ],
+              },
+              {
+                'id': 'commentary-1',
+                'type': 'agentMessage',
+                'phase': 'commentary',
+                'text': 'Reading context',
+              },
+              {
+                'id': 'reasoning-1',
+                'type': 'reasoning',
+                'summary': ['Comparing the selected page'],
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    await controller.selectRuntime('runtime-pi');
+    await controller.selectRuntime('runtime-codex');
+    final thinking = controller.turns.last.blocks.where(
+      (block) => block.kind == TranscriptKind.thinking,
+    );
+    expect(thinking, hasLength(1));
+    expect(thinking.single.text, contains('Reading context'));
+    expect(thinking.single.text, contains('Comparing the selected page'));
+    await controller.close();
+  });
+
   test(
     'running transcript survives leaving and reopening its session',
     () async {

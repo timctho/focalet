@@ -35,7 +35,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);
-  Win32Window::Size size(900, 760);
+  // Dart applies the final monitor anchor before showing the window. Keep the
+  // hidden bootstrap surface compact so no template-sized backing frame can
+  // leak if Windows composites during setup.
+  Win32Window::Size size(56, 56);
   if (!window.Create(L"Zommi", origin, size)) {
     if (instance_mutex != nullptr) {
       ReleaseMutex(instance_mutex);

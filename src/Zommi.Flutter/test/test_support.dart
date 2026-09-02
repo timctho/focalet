@@ -26,6 +26,7 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
   Future<void>? startTurnGate;
   final Map<String, String> activeSessionsByRuntime = {};
   final Map<String, Map<String, Object?>> historyBySession = {};
+  final Map<String, List<Map<String, Object?>>> modelCatalogByRuntime = {};
   final List<Map<String, Object?>> configuredOverrides = [
     {
       'id': 'override-existing',
@@ -226,7 +227,9 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
     sessionId: activeSessionId,
     protocolVersion: 1,
     runtimeVersion: '9.8.7',
-    models: activeTargetId == 'runtime-claude' ? const [] : models,
+    models:
+        modelCatalogByRuntime[activeTargetId] ??
+        (activeTargetId == 'runtime-claude' ? const [] : models),
     sessions: _sessions(),
     capabilities: activeTargetId == 'runtime-claude'
         ? const ['turn.stream.v1']
@@ -390,6 +393,7 @@ final class FakeDesktopBridge implements DesktopBridge {
   ContextAttachment? nextImage;
   String? copiedText;
   String? copiedImage;
+  Uri? openedUrl;
   String? nextRuntimeExecutable;
   bool closed = false;
   Future<DesktopReadiness>? initializeGate;
@@ -471,6 +475,11 @@ final class FakeDesktopBridge implements DesktopBridge {
   @override
   Future<void> copyImage(String dataUrl) async {
     copiedImage = dataUrl;
+  }
+
+  @override
+  Future<void> openExternalUrl(Uri uri) async {
+    openedUrl = uri;
   }
 
   @override

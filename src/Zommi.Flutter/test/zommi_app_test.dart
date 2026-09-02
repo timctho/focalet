@@ -55,8 +55,10 @@ void main() {
       1,
     );
     expect(start.orbOpacity, 1);
+    expect(start.orbScale, 1);
     expect(start.panelOpacity, 0);
     expect(end.orbOpacity, 0);
+    expect(end.orbScale, 1);
     expect(end.panelOpacity, 1);
     for (final progress in <double>[0.1, 0.25, 0.5, 0.75, 0.9]) {
       final forward = surfaceTransitionVisuals(
@@ -74,6 +76,15 @@ void main() {
       expect(forward.panelOpacity, closeTo(reverse.panelOpacity, 0.000001));
       expect(forward.panelScale, closeTo(reverse.panelScale, 0.000001));
     }
+  });
+
+  test('replacement orb instances share one animation phase', () {
+    final instant = DateTime.fromMicrosecondsSinceEpoch(3_850_000);
+    expect(synchronizedOrbPhase(instant), closeTo(0.75, 0.000001));
+    expect(
+      synchronizedOrbPhase(instant.add(const Duration(milliseconds: 1400))),
+      closeTo(0.75, 0.000001),
+    );
   });
 
   testWidgets('quiet orb expands into the anchored composer on hover', (
@@ -99,6 +110,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Point, ask, keep moving.'), findsOneWidget);
+    expect(find.byType(ZommiOrb), findsNothing);
     expect(find.byKey(const ValueKey('zommi-composer')), findsOneWidget);
     expect(
       tester.getSize(find.byKey(const ValueKey('zommi-surface'))),

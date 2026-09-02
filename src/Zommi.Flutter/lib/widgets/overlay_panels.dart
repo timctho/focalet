@@ -235,7 +235,20 @@ class RuntimePanel extends StatelessWidget {
                         ),
                       ),
                     const Divider(height: 1),
-                    RuntimeOverrideEditor(controller: controller),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 10, 4, 2),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          key: const ValueKey('open-runtime-setup'),
+                          onPressed: controller.runtimeOverridesSupported
+                              ? () => controller.toggleRuntimeSetupPanel(true)
+                              : null,
+                          icon: const Icon(Icons.tune_rounded, size: 16),
+                          label: const Text('Advanced agent runtime setup'),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -294,16 +307,16 @@ class _RuntimeTargetTile extends StatelessWidget {
   }
 }
 
-class RuntimeOverrideEditor extends StatefulWidget {
-  const RuntimeOverrideEditor({required this.controller, super.key});
+class RuntimeSetupPanel extends StatefulWidget {
+  const RuntimeSetupPanel({required this.controller, super.key});
 
   final ZommiController controller;
 
   @override
-  State<RuntimeOverrideEditor> createState() => _RuntimeOverrideEditorState();
+  State<RuntimeSetupPanel> createState() => _RuntimeSetupPanelState();
 }
 
-class _RuntimeOverrideEditorState extends State<RuntimeOverrideEditor> {
+class _RuntimeSetupPanelState extends State<RuntimeSetupPanel> {
   String _adapterId = '';
   String _hostId = '';
   String? _executablePath;
@@ -328,15 +341,6 @@ class _RuntimeOverrideEditorState extends State<RuntimeOverrideEditor> {
 
   @override
   Widget build(BuildContext context) {
-    if (!widget.controller.runtimeOverridesSupported) {
-      return const Padding(
-        padding: EdgeInsets.fromLTRB(16, 10, 16, 14),
-        child: Text(
-          'Runtime overrides are unavailable in this core version.',
-          style: TextStyle(fontSize: 11, color: Color(0xff737887)),
-        ),
-      );
-    }
     final adapters = widget.controller.configurableRuntimeAdapters;
     final selectedAdapter = _adapter;
     final adapterId = selectedAdapter?['adapterId']?.toString() ?? '';
@@ -344,169 +348,314 @@ class _RuntimeOverrideEditorState extends State<RuntimeOverrideEditor> {
     final selectedHost = hosts.any((host) => host['id'] == _hostId)
         ? _hostId
         : (hosts.isEmpty ? '' : hosts.first['id']?.toString() ?? '');
-    return ExpansionTile(
-      key: const ValueKey('runtime-advanced'),
-      dense: true,
-      leading: const Icon(Icons.tune_rounded, size: 16),
-      title: const Text(
-        'Advanced runtime setup',
-        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+    return Material(
+      key: const ValueKey('runtime-setup-panel'),
+      color: const Color(0xfff8f9fd),
+      elevation: 10,
+      shadowColor: const Color(0x330d172a),
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(22),
+        side: const BorderSide(color: Color(0xffe0e3ec)),
       ),
-      subtitle: const Text(
-        'Add a supported local CLI that discovery missed',
-        style: TextStyle(fontSize: 10),
-      ),
-      childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
-      children: [
-        DropdownButtonFormField<String>(
-          key: const ValueKey('runtime-override-adapter'),
-          initialValue: adapterId.isEmpty ? null : adapterId,
-          isDense: true,
-          isExpanded: true,
-          style: const TextStyle(fontSize: 11),
-          decoration: const InputDecoration(labelText: 'Agent', isDense: true),
-          items: [
-            for (final adapter in adapters)
-              DropdownMenuItem(
-                value: adapter['adapterId']?.toString(),
-                child: Text(
-                  '${adapter['displayName']} · ${adapter['protocolName']}',
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 11),
-                ),
-              ),
-          ],
-          onChanged: (value) => setState(() {
-            _adapterId = value ?? '';
-            _hostId = '';
-            _executablePath = null;
-          }),
-        ),
-        DropdownButtonFormField<String>(
-          key: const ValueKey('runtime-override-host'),
-          initialValue: selectedHost.isEmpty ? null : selectedHost,
-          isDense: true,
-          isExpanded: true,
-          style: const TextStyle(fontSize: 11),
-          decoration: const InputDecoration(labelText: 'Run on', isDense: true),
-          items: [
-            for (final host in hosts)
-              DropdownMenuItem(
-                value: host['id']?.toString(),
-                child: Text(
-                  host['displayName']?.toString() ?? 'Local',
-                  style: const TextStyle(fontSize: 11),
-                ),
-              ),
-          ],
-          onChanged: (value) => setState(() {
-            _hostId = value ?? '';
-            _executablePath = null;
-          }),
-        ),
-        const SizedBox(height: 8),
-        Container(
-          key: const ValueKey('runtime-override-path'),
-          width: double.infinity,
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: const Color(0xfff1f2f7),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Row(
-            children: [
-              const Icon(Icons.terminal_rounded, size: 17),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  _executablePath ?? 'Choose the installed CLI executable',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    color: _executablePath == null
-                        ? const Color(0xff777c89)
-                        : const Color(0xff333744),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton(
-                key: const ValueKey('select-runtime-executable'),
-                onPressed: selectedHost.isEmpty
-                    ? null
-                    : () async {
-                        final path = await widget.controller
-                            .chooseRuntimeExecutable(
-                              executionHostId: selectedHost,
-                            );
-                        if (mounted && path != null) {
-                          setState(() => _executablePath = path);
-                        }
-                      },
-                child: const Text('Choose…'),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 8),
-        Align(
-          alignment: Alignment.centerRight,
-          child: FilledButton.tonal(
-            key: const ValueKey('save-runtime-override'),
-            onPressed:
-                widget.controller.runtimeOverrideBusy ||
-                    adapterId.isEmpty ||
-                    _executablePath == null ||
-                    selectedHost.isEmpty
-                ? null
-                : () async {
-                    await widget.controller.saveRuntimeOverride(
-                      adapterId: adapterId,
-                      locator: _executablePath!,
-                      executionHostId: selectedHost,
-                    );
-                    if (mounted) setState(() => _executablePath = null);
-                  },
-            child: const Text('Add runtime'),
-          ),
-        ),
-        for (final override in widget.controller.runtimeOverrides)
-          ListTile(
-            key: ValueKey('runtime-override-${override['id']}'),
-            dense: true,
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.terminal_rounded, size: 17),
-            title: Text(
-              runtimeAdapterDisplayName(
-                widget.controller,
-                override['adapterId']?.toString() ?? '',
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
-            ),
-            subtitle: Text(
-              override['executablePath']?.toString() ?? '',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 10),
-            ),
-            trailing: IconButton(
-              tooltip: 'Remove runtime',
-              onPressed: widget.controller.runtimeOverrideBusy
-                  ? null
-                  : () => unawaited(
-                      widget.controller.removeRuntimeOverride(
-                        override['id']?.toString() ?? '',
-                      ),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        width: 520,
+        height: 500,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 14, 8, 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.tune_rounded, size: 18),
+                  const SizedBox(width: 9),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Advanced agent runtime',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        Text(
+                          'Add a supported CLI that automatic discovery missed',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Color(0xff737887),
+                          ),
+                        ),
+                      ],
                     ),
-              icon: const Icon(Icons.delete_outline_rounded, size: 17),
+                  ),
+                  IconButton(
+                    key: const ValueKey('close-runtime-setup'),
+                    tooltip: 'Close advanced runtime setup',
+                    onPressed: () =>
+                        widget.controller.toggleRuntimeSetupPanel(false),
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                  ),
+                ],
+              ),
             ),
-          ),
-      ],
+            const Divider(height: 1),
+            Expanded(
+              child: !widget.controller.runtimeOverridesSupported
+                  ? const Center(
+                      child: Text(
+                        'Runtime setup is unavailable in this core version.',
+                      ),
+                    )
+                  : ListView(
+                      key: const ValueKey('runtime-setup-options'),
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                      children: [
+                        const _RuntimeSetupSectionLabel('Agent'),
+                        RadioGroup<String>(
+                          groupValue: adapterId,
+                          onChanged: (value) => setState(() {
+                            _adapterId = value ?? '';
+                            _hostId = '';
+                            _executablePath = null;
+                          }),
+                          child: Column(
+                            key: const ValueKey('runtime-setup-adapter-list'),
+                            children: [
+                              for (final adapter in adapters)
+                                _RuntimeSetupOption(
+                                  key: ValueKey(
+                                    'runtime-setup-adapter-${adapter['adapterId']}',
+                                  ),
+                                  value: adapter['adapterId']?.toString() ?? '',
+                                  title:
+                                      adapter['displayName']?.toString() ?? '',
+                                  subtitle:
+                                      adapter['protocolName']?.toString() ?? '',
+                                  selected:
+                                      adapter['adapterId']?.toString() ==
+                                      adapterId,
+                                ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        const _RuntimeSetupSectionLabel('Run on'),
+                        RadioGroup<String>(
+                          groupValue: selectedHost,
+                          onChanged: (value) => setState(() {
+                            _hostId = value ?? '';
+                            _executablePath = null;
+                          }),
+                          child: Column(
+                            key: const ValueKey('runtime-setup-host-list'),
+                            children: [
+                              for (final host in hosts)
+                                _RuntimeSetupOption(
+                                  key: ValueKey(
+                                    'runtime-setup-host-${host['id']}',
+                                  ),
+                                  value: host['id']?.toString() ?? '',
+                                  title:
+                                      host['displayName']?.toString() ??
+                                      'Local',
+                                  subtitle: host['kind']?.toString() ?? '',
+                                  selected: host['id'] == selectedHost,
+                                ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        const _RuntimeSetupSectionLabel('CLI executable'),
+                        Container(
+                          key: const ValueKey('runtime-override-path'),
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xfff1f2f7),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.terminal_rounded, size: 17),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  _executablePath ??
+                                      'Choose the installed CLI executable',
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    color: _executablePath == null
+                                        ? const Color(0xff777c89)
+                                        : const Color(0xff333744),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              OutlinedButton(
+                                key: const ValueKey(
+                                  'select-runtime-executable',
+                                ),
+                                onPressed: selectedHost.isEmpty
+                                    ? null
+                                    : () async {
+                                        final path = await widget.controller
+                                            .chooseRuntimeExecutable(
+                                              executionHostId: selectedHost,
+                                            );
+                                        if (mounted && path != null) {
+                                          setState(
+                                            () => _executablePath = path,
+                                          );
+                                        }
+                                      },
+                                child: const Text('Choose…'),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: FilledButton.tonal(
+                            key: const ValueKey('save-runtime-override'),
+                            onPressed:
+                                widget.controller.runtimeOverrideBusy ||
+                                    adapterId.isEmpty ||
+                                    _executablePath == null ||
+                                    selectedHost.isEmpty
+                                ? null
+                                : () async {
+                                    await widget.controller.saveRuntimeOverride(
+                                      adapterId: adapterId,
+                                      locator: _executablePath!,
+                                      executionHostId: selectedHost,
+                                    );
+                                    if (mounted) {
+                                      setState(() => _executablePath = null);
+                                    }
+                                  },
+                            child: const Text('Add runtime'),
+                          ),
+                        ),
+                        if (widget.controller.runtimeOverrides.isNotEmpty) ...[
+                          const SizedBox(height: 14),
+                          const Divider(height: 1),
+                          const SizedBox(height: 10),
+                          const _RuntimeSetupSectionLabel(
+                            'Configured runtimes',
+                          ),
+                          for (final override
+                              in widget.controller.runtimeOverrides)
+                            ListTile(
+                              key: ValueKey(
+                                'runtime-override-${override['id']}',
+                              ),
+                              dense: true,
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(
+                                Icons.terminal_rounded,
+                                size: 17,
+                              ),
+                              title: Text(
+                                runtimeAdapterDisplayName(
+                                  widget.controller,
+                                  override['adapterId']?.toString() ?? '',
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              subtitle: Text(
+                                override['executablePath']?.toString() ?? '',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 10),
+                              ),
+                              trailing: IconButton(
+                                tooltip: 'Remove runtime',
+                                onPressed: widget.controller.runtimeOverrideBusy
+                                    ? null
+                                    : () => unawaited(
+                                        widget.controller.removeRuntimeOverride(
+                                          override['id']?.toString() ?? '',
+                                        ),
+                                      ),
+                                icon: const Icon(
+                                  Icons.delete_outline_rounded,
+                                  size: 17,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ],
+                    ),
+            ),
+          ],
+        ),
+      ),
     );
   }
+}
+
+class _RuntimeSetupSectionLabel extends StatelessWidget {
+  const _RuntimeSetupSectionLabel(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+    child: Text(
+      label,
+      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+    ),
+  );
+}
+
+class _RuntimeSetupOption extends StatelessWidget {
+  const _RuntimeSetupOption({
+    required this.value,
+    required this.title,
+    required this.subtitle,
+    required this.selected,
+    super.key,
+  });
+
+  final String value;
+  final String title;
+  final String subtitle;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) => RadioListTile<String>(
+    value: value,
+    dense: true,
+    visualDensity: const VisualDensity(vertical: -3),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+    selected: selected,
+    selectedTileColor: const Color(0xffebe9f7),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    title: Text(
+      title,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(fontSize: 11.5),
+    ),
+    subtitle: Text(
+      subtitle,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(fontSize: 10),
+    ),
+  );
 }
 
 String runtimeAdapterDisplayName(

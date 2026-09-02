@@ -78,15 +78,29 @@ void main() {
     final windowsFlutterWindow = File(
       '${root.path}/windows/runner/flutter_window.cpp',
     ).readAsStringSync();
+    final desktopBridge = File('${root.path}/lib/desktop/desktop_bridge.dart')
+        .readAsStringSync();
     expect(
       windowsMain,
       allOf(
         contains('CreateMutexW(nullptr, TRUE, kZommiInstanceMutexName)'),
         contains('ERROR_ALREADY_EXISTS'),
         contains('PostMessageW(HWND_BROADCAST, ZommiShowWindowMessage()'),
+        contains('Win32Window::Size size(56, 56)'),
       ),
     );
     expect(windowsInstance, contains('Zommi.Desktop.SingleInstance'));
+    expect(
+      desktopBridge,
+      allOf(
+        contains('await windowManager.waitUntilReadyToShow'),
+        isNot(contains('unawaited(\n      windowManager.waitUntilReadyToShow')),
+      ),
+    );
+    expect(
+      windowsFlutterWindow,
+      isNot(contains('SetNextFrameCallback([&]() { this->Show(); }')),
+    );
     expect(
       windowsFlutterWindow,
       allOf(
@@ -120,6 +134,7 @@ void main() {
       allOf(
         contains('hotkey_manager_windows'),
         contains('screen_capturer_windows'),
+        contains('url_launcher_windows'),
         contains('window_manager'),
       ),
     );
@@ -129,6 +144,7 @@ void main() {
       allOf(
         contains('hotkey_manager_linux'),
         contains('screen_capturer_linux'),
+        contains('url_launcher_linux'),
         contains('window_manager'),
       ),
     );
@@ -138,7 +154,22 @@ void main() {
       allOf(
         contains('HotkeyManagerMacosPlugin'),
         contains('ScreenCapturerMacosPlugin'),
+        contains('UrlLauncherPlugin'),
         contains('WindowManagerPlugin'),
+      ),
+    );
+    final captureSource = File(
+      '${root.parent.path}/Zommi.Windows/ForegroundContextCapture.cs',
+    ).readAsStringSync();
+    expect(
+      captureSource,
+      allOf(
+        contains('Require actual raw-tree ancestry to the exact HWND root'),
+        isNot(
+          contains(
+            'if (elementProcessId != 0 && elementProcessId == rootProcessId)',
+          ),
+        ),
       ),
     );
   });

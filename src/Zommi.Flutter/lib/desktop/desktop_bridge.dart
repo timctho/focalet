@@ -10,6 +10,7 @@ import 'package:screen_capturer/screen_capturer.dart';
 import 'package:screen_retriever/screen_retriever.dart';
 import 'package:super_clipboard/super_clipboard.dart';
 import 'package:tray_manager/tray_manager.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
@@ -127,6 +128,8 @@ abstract interface class DesktopBridge {
 
   Future<void> copyImage(String dataUrl);
 
+  Future<void> openExternalUrl(Uri uri);
+
   Future<void> close();
 }
 
@@ -180,6 +183,9 @@ final class NoopDesktopBridge implements DesktopBridge {
   Future<void> copyImage(String dataUrl) async {}
 
   @override
+  Future<void> openExternalUrl(Uri uri) async {}
+
+  @override
   Future<void> close() async {}
 }
 
@@ -214,27 +220,24 @@ final class FlutterDesktopBridge
       titleBarStyle: TitleBarStyle.hidden,
       windowButtonVisibility: false,
     );
-    unawaited(
-      windowManager.waitUntilReadyToShow(options, () async {
-        await windowManager.setAsFrameless();
-        if (supportsNativeWindowShadow(Platform.operatingSystem)) {
-          await windowManager.setHasShadow(false);
-        }
-        // Zommi owns its surface sizes. Changing the native resize style on
-        // every orb morph forces a Win32 frame recalculation and produces a
-        // visible one-frame wobble even though the window is frameless.
-        await windowManager.setResizable(false);
-        await configureNativeSurfaceWindow();
-        // WindowOptions applies 56px before the Win32 caption is removed, so
-        // Windows may clamp the initial width to SM_CXMINTRACK. Reapply the
-        // compact size with the popup style active while preserving the
-        // requested top-left anchor.
-        await windowManager.setSize(compactWindowSize, animate: false);
-        await windowManager.setAlwaysOnTop(true);
-        await windowManager.setSkipTaskbar(true);
-        await windowManager.show();
-      }),
-    );
+    await windowManager.waitUntilReadyToShow(options, () async {
+      await windowManager.setAsFrameless();
+      if (supportsNativeWindowShadow(Platform.operatingSystem)) {
+        await windowManager.setHasShadow(false);
+      }
+      // Zommi owns its surface sizes. Changing the native resize style on
+      // every orb morph forces a Win32 frame recalculation and produces a
+      // visible one-frame wobble even though the window is frameless.
+      await windowManager.setResizable(false);
+      await configureNativeSurfaceWindow();
+      // WindowOptions applies 56px before the Win32 caption is removed, so
+      // Windows may clamp the initial width to SM_CXMINTRACK. Reapply the
+      // compact size with the popup style active while preserving the
+      // requested top-left anchor.
+      await windowManager.setSize(compactWindowSize, animate: false);
+      await windowManager.setAlwaysOnTop(true);
+      await windowManager.setSkipTaskbar(true);
+    });
     return FlutterDesktopBridge();
   }
 
@@ -277,6 +280,10 @@ final class FlutterDesktopBridge
     await windowManager.setPreventClose(true);
     await windowManager.setAlwaysOnTop(true);
     await setSurface(expanded: false);
+    // The native runner stays hidden until the frameless compact bounds are
+    // final. Showing its initial template-sized window produces a visible box
+    // before the orb's first frame.
+    await windowManager.show();
     try {
       await _captureProvider.initialize();
     } on Object catch (error) {
@@ -656,6 +663,13 @@ final class FlutterDesktopBridge
     final item = DataWriterItem(suggestedName: 'Zommi image.png')
       ..add(Formats.png(bytes));
     await clipboard.write([item]);
+  }
+
+  @override
+  Future<void> openExternalUrl(Uri uri) async {
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      throw StateError('The default browser could not open $uri.');
+    }
   }
 
   Future<void> _configureTray() async {

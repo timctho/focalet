@@ -21,6 +21,11 @@ const double expandedPanelHeight = 620;
 const double bottomAnchorInset = windowBottomInset;
 const Duration hoverCollapseDelay = Duration(milliseconds: 500);
 const Duration previewHideDelay = Duration(milliseconds: 260);
+const Duration orbMotionDuration = Duration(milliseconds: 1400);
+
+double synchronizedOrbPhase(DateTime now) =>
+    (now.microsecondsSinceEpoch % orbMotionDuration.inMicroseconds) /
+    orbMotionDuration.inMicroseconds;
 
 class ZommiApp extends StatelessWidget {
   const ZommiApp({
@@ -109,6 +114,7 @@ class _ZommiShellState extends State<ZommiShell> {
   late final ZommiController _controller;
   final Object _sessionTapGroup = Object();
   final Object _runtimeTapGroup = Object();
+  final Object _runtimeSetupTapGroup = Object();
   final Object _modelTapGroup = Object();
   Timer? _collapseTimer;
   Timer? _previewTimer;
@@ -238,6 +244,7 @@ class _ZommiShellState extends State<ZommiShell> {
       if (_controller.previewArtifact != null) {
         _controller.closeArtifact();
       } else if (_controller.runtimePanelOpen ||
+          _controller.runtimeSetupPanelOpen ||
           _controller.modelPanelOpen ||
           _controller.sessionPanelOpen) {
         _controller.closeTransientPanels();
@@ -389,6 +396,22 @@ class _ZommiShellState extends State<ZommiShell> {
                           child: TapRegion(
                             groupId: _modelTapGroup,
                             child: ModelPanel(controller: _controller),
+                          ),
+                        ),
+                      if (_controller.runtimeSetupPanelOpen)
+                        Positioned.fill(
+                          child: ColoredBox(
+                            color: const Color(0x260d172a),
+                            child: Center(
+                              child: TapRegion(
+                                groupId: _runtimeSetupTapGroup,
+                                onTapOutside: (_) =>
+                                    _controller.dismissRuntimeSetupPanel(),
+                                child: RuntimeSetupPanel(
+                                  controller: _controller,
+                                ),
+                              ),
+                            ),
                           ),
                         ),
                       if (_controller.previewAttachment case final attachment?)
@@ -814,7 +837,7 @@ class _SummaryButton extends StatelessWidget {
           foregroundColor: const Color(0xff4c5160),
           visualDensity: VisualDensity.compact,
           padding: const EdgeInsets.symmetric(horizontal: 8),
-          textStyle: const TextStyle(fontSize: 11),
+          textStyle: const TextStyle(fontSize: topBarAndChatFontSize),
         ),
         icon: AnimatedSwitcher(
           duration: const Duration(milliseconds: 160),
@@ -924,7 +947,7 @@ SurfaceTransitionVisuals surfaceTransitionVisuals(
   final panelness = 1 - compactness;
   return SurfaceTransitionVisuals(
     orbOpacity: _smoothStep(compactness),
-    orbScale: 1 + panelness * 0.1,
+    orbScale: 1,
     panelOpacity: _smoothStep(panelness),
     panelScale: 0.965 + panelness * 0.035,
   );
@@ -1111,7 +1134,7 @@ class _ZommiOrbState extends State<ZommiOrb>
     with SingleTickerProviderStateMixin {
   late final AnimationController _motion = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 1400),
+    duration: orbMotionDuration,
   );
 
   @override
@@ -1129,7 +1152,14 @@ class _ZommiOrbState extends State<ZommiOrb>
   void _syncMotion() {
     if ((widget.working || widget.loading) &&
         !MediaQuery.disableAnimationsOf(context)) {
-      if (!_motion.isAnimating) _motion.repeat();
+      if (!_motion.isAnimating) {
+        // Compact, transition, and loading orbs are separate widgets. Starting
+        // each controller at zero makes the icon visibly flash when one widget
+        // replaces another, so all instances join the same wall-clock phase.
+        _motion
+          ..value = synchronizedOrbPhase(DateTime.now())
+          ..repeat();
+      }
     } else {
       _motion
         ..stop()
