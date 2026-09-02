@@ -87,6 +87,24 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertEqual(result["captureHost"], "zommi-x11-capture")
         self.assertEqual(result["files"], 5 + len(verify_release.LINUX_RUNTIME_LIBRARIES))
 
+    def test_windows_manifest_requires_persistent_wsl_transport(self) -> None:
+        manifest_path = self.root / "release-manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["platform"] = "windows"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        self._write_checksums()
+        with self.assertRaisesRegex(
+            verify_release.ReleaseValidationError,
+            "persistent WSL relay",
+        ):
+            verify_release.verify_package(self.root, smoke_processes=False)
+
+        manifest["components"]["wslTransport"] = "persistent-authenticated-relay"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        self._write_checksums()
+        result = verify_release.verify_package(self.root, smoke_processes=False)
+        self.assertEqual(result["platform"], "windows")
+
     def test_missing_linux_runtime_library_is_rejected(self) -> None:
         (self.root / verify_release.LINUX_RUNTIME_LIBRARIES[0]).unlink()
         self._write_checksums()

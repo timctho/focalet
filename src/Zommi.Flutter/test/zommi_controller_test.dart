@@ -9,6 +9,42 @@ import 'package:zommi_flutter/state/zommi_models.dart';
 import 'test_support.dart';
 
 void main() {
+  test(
+    'runtime capability failures are not mislabeled as core failures',
+    () async {
+      final core = RichFakeCore()
+        ..historyCount = 0
+        ..connectErrorCode = 'capability-unavailable'
+        ..connectErrorMessage =
+            'Native Windows terminal compatibility requires a ConPTY backend.';
+      final controller = ZommiController(
+        core: core,
+        desktop: FakeDesktopBridge(),
+      );
+
+      await controller.initialize();
+
+      expect(controller.status, startsWith('Agent runtime unavailable ·'));
+      expect(controller.status, isNot(contains('Rust core unavailable')));
+      await controller.close();
+    },
+  );
+
+  test('manual runtime refresh bypasses the WSL discovery backoff', () async {
+    final core = RichFakeCore()..historyCount = 0;
+    final controller = ZommiController(
+      core: core,
+      desktop: FakeDesktopBridge(),
+    );
+    await controller.initialize();
+    expect(core.lastDiscoveryForce, isFalse);
+
+    await controller.refreshRuntimes();
+
+    expect(core.lastDiscoveryForce, isTrue);
+    await controller.close();
+  });
+
   test('portal authorization does not block Rust runtime discovery', () async {
     final core = RichFakeCore()..historyCount = 0;
     final desktopReady = Completer<DesktopReadiness>();

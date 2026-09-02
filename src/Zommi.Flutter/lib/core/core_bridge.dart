@@ -11,6 +11,7 @@ abstract interface class CoreBridge {
 
   Future<RuntimeDiscovery> discoverRuntimeTargets({
     String? lastSelectedTargetId,
+    bool force = false,
   });
 
   Future<RuntimeConnection> connectRuntime({
@@ -328,9 +329,11 @@ final class ProcessCoreBridge
   @override
   Future<RuntimeDiscovery> discoverRuntimeTargets({
     String? lastSelectedTargetId,
+    bool force = false,
   }) async {
     final result = await _request('runtime.discover', <String, Object?>{
       'lastSelectedTargetId': ?lastSelectedTargetId,
+      'force': force,
     });
     final targets = (result['targets'] as List<Object?>? ?? const [])
         .map(_map)

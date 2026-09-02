@@ -4,7 +4,7 @@ use std::{
     io::{self, Read},
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use serde::{Deserialize, Serialize};
@@ -13,6 +13,7 @@ use sha2::{Digest, Sha256};
 use wait_timeout::ChildExt;
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(4);
+const DISCOVERY_CACHE_SCHEMA_VERSION: u32 = 1;
 
 const CODEX_CAPABILITY_HINTS: &[&str] = &[
     "session.list.v1",
@@ -208,6 +209,25 @@ pub struct RuntimeOverrideStore {
     path: PathBuf,
 }
 
+#[derive(Debug, Clone)]
+pub struct RuntimeDiscoveryCacheStore {
+    path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub struct RuntimeDiscoveryOutcome {
+    pub targets: Vec<RuntimeTarget>,
+    pub wsl_probe_succeeded: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RuntimeDiscoveryCacheFile {
+    schema_version: u32,
+    detected_at_ms: u64,
+    targets: Vec<RuntimeTarget>,
+}
+
 impl RuntimeOverrideStore {
     pub fn platform_default() -> Self {
         if let Some(path) = env::var_os("ZOMMI_RUNTIME_OVERRIDES_PATH") {
@@ -261,6 +281,112 @@ impl RuntimeOverrideStore {
     }
 }
 
+impl RuntimeDiscoveryCacheStore {
+    pub fn platform_default() -> Self {
+        if let Some(path) = env::var_os("ZOMMI_RUNTIME_DISCOVERY_CACHE_PATH") {
+            return Self { path: path.into() };
+        }
+        let path = if cfg!(target_os = "windows") {
+            env::var_os("LOCALAPPDATA")
+                .map(PathBuf::from)
+                .unwrap_or_else(env::temp_dir)
+                .join("Zommi")
+                .join("runtime-targets.json")
+        } else if cfg!(target_os = "macos") {
+            env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(env::temp_dir)
+                .join("Library")
+                .join("Application Support")
+                .join("Zommi")
+                .join("runtime-targets.json")
+        } else {
+            env::var_os("XDG_CACHE_HOME")
+                .map(PathBuf::from)
+                .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))
+                .unwrap_or_else(env::temp_dir)
+                .join("zommi")
+                .join("runtime-targets.json")
+        };
+        Self { path }
+    }
+
+    pub fn at(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    pub fn load(&self) -> io::Result<Vec<RuntimeTarget>> {
+        let bytes = match fs::read(&self.path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error),
+        };
+        let cache: RuntimeDiscoveryCacheFile = serde_json::from_slice(&bytes)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        if cache.schema_version != DISCOVERY_CACHE_SCHEMA_VERSION {
+            return Ok(Vec::new());
+        }
+        Ok(cache
+            .targets
+            .into_iter()
+            .filter(valid_cached_wsl_target)
+            .map(|mut target| {
+                target.source = Some("last-known-good".into());
+                target.status = "detected".into();
+                target
+            })
+            .collect())
+    }
+
+    pub fn save(&self, targets: &[RuntimeTarget]) -> io::Result<()> {
+        let targets = targets
+            .iter()
+            .filter(|target| valid_cached_wsl_target(target))
+            .cloned()
+            .collect::<Vec<_>>();
+        if let Some(parent) = self.path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let detected_at_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+            .try_into()
+            .unwrap_or(u64::MAX);
+        let bytes = serde_json::to_vec_pretty(&RuntimeDiscoveryCacheFile {
+            schema_version: DISCOVERY_CACHE_SCHEMA_VERSION,
+            detected_at_ms,
+            targets,
+        })
+        .map_err(io::Error::other)?;
+        let temporary = self
+            .path
+            .with_extension(format!("{}.tmp", uuid::Uuid::new_v4().simple()));
+        fs::write(&temporary, bytes)?;
+        #[cfg(target_os = "windows")]
+        if self.path.exists() {
+            fs::remove_file(&self.path)?;
+        }
+        fs::rename(temporary, &self.path)
+    }
+}
+
+fn valid_cached_wsl_target(target: &RuntimeTarget) -> bool {
+    target.execution_host.kind == "wsl"
+        && target.execution_host.platform == "linux"
+        && target
+            .execution_host
+            .name
+            .as_deref()
+            .is_some_and(valid_profile_id)
+        && target.executable_path.starts_with('/')
+        && !target.executable_path.contains('\0')
+        && target.endpoint.is_none()
+        && RUNTIME_CATALOG
+            .iter()
+            .any(|entry| entry.adapter_id == target.adapter_id)
+}
+
 pub fn discover_runtime_targets() -> Vec<RuntimeTarget> {
     discover_runtime_targets_with(&env::vars().collect(), env::consts::OS)
 }
@@ -275,6 +401,52 @@ pub fn discover_runtime_targets_with_overrides(
             .filter_map(|configured| target_from_override(configured, env::consts::OS).ok()),
     );
     deduplicate_targets(targets)
+}
+
+pub fn discover_runtime_targets_resilient_with_overrides(
+    overrides: &[ConfiguredRuntimeOverride],
+    cache: &RuntimeDiscoveryCacheStore,
+    probe_wsl: bool,
+) -> RuntimeDiscoveryOutcome {
+    discover_runtime_targets_resilient_with(
+        &env::vars().collect(),
+        env::consts::OS,
+        overrides,
+        cache,
+        probe_wsl,
+    )
+}
+
+fn discover_runtime_targets_resilient_with(
+    environment: &HashMap<String, String>,
+    platform: &str,
+    overrides: &[ConfiguredRuntimeOverride],
+    cache: &RuntimeDiscoveryCacheStore,
+    probe_wsl: bool,
+) -> RuntimeDiscoveryOutcome {
+    let (mut targets, wsl_probe_succeeded) =
+        discover_runtime_targets_with_status(environment, platform, probe_wsl);
+    if platform == "windows" {
+        if wsl_probe_succeeded {
+            let wsl_targets = targets
+                .iter()
+                .filter(|target| target.execution_host.kind == "wsl")
+                .cloned()
+                .collect::<Vec<_>>();
+            let _ = cache.save(&wsl_targets);
+        } else if let Ok(cached) = cache.load() {
+            targets.extend(cached);
+        }
+    }
+    targets.extend(
+        overrides
+            .iter()
+            .filter_map(|configured| target_from_override(configured, platform).ok()),
+    );
+    RuntimeDiscoveryOutcome {
+        targets: deduplicate_targets(targets),
+        wsl_probe_succeeded,
+    }
 }
 
 pub fn target_from_override(
@@ -321,6 +493,11 @@ pub fn target_from_override(
                     "Native runtime override requires an absolute path on this platform.".into(),
                 );
             }
+            if !runtime_supported_on_host(entry, &configured.execution_host) {
+                return Err(
+                    "Native Windows terminal compatibility requires a ConPTY backend.".into(),
+                );
+            }
         }
         "wsl" => {
             if platform != "windows"
@@ -355,12 +532,18 @@ pub fn runtime_discovery_settings(
     let mut seen_adapters = HashSet::new();
     for entry in RUNTIME_CATALOG {
         if seen_adapters.insert(entry.adapter_id) {
+            let host_kinds =
+                if cfg!(target_os = "windows") && entry.adapter_id == "pty-compatibility" {
+                    vec!["wsl"]
+                } else {
+                    vec!["native", "wsl"]
+                };
             adapters.push(json!({
                 "adapterId": entry.adapter_id,
                 "displayName": entry.display_name,
                 "protocolName": entry.protocol_name,
                 "acceptsEndpoint": false,
-                "hostKinds": ["native", "wsl"]
+                "hostKinds": host_kinds
             }));
         }
     }
@@ -399,6 +582,14 @@ pub fn discover_runtime_targets_with(
     environment: &HashMap<String, String>,
     platform: &str,
 ) -> Vec<RuntimeTarget> {
+    discover_runtime_targets_with_status(environment, platform, true).0
+}
+
+fn discover_runtime_targets_with_status(
+    environment: &HashMap<String, String>,
+    platform: &str,
+    probe_wsl: bool,
+) -> (Vec<RuntimeTarget>, bool) {
     let mut targets = Vec::new();
     let native_host = ExecutionHost {
         id: format!("native:{platform}"),
@@ -414,6 +605,9 @@ pub fn discover_runtime_targets_with(
     };
 
     for entry in RUNTIME_CATALOG {
+        if !runtime_supported_on_host(entry, &native_host) {
+            continue;
+        }
         let override_name = format!("ZOMMI_{}_COMMAND", entry.executable.to_ascii_uppercase());
         if let Some(configured) = environment
             .get(&override_name)
@@ -451,10 +645,17 @@ pub fn discover_runtime_targets_with(
         targets.push(openclaw_gateway_target(endpoint, platform, profile_id));
     }
 
-    if platform == "windows" {
-        targets.extend(discover_wsl_targets(environment));
+    let mut wsl_probe_succeeded = platform != "windows";
+    if platform == "windows" && probe_wsl {
+        let outcome = discover_wsl_targets(environment);
+        targets.extend(outcome.targets);
+        wsl_probe_succeeded = outcome.succeeded;
     }
-    deduplicate_targets(targets)
+    (deduplicate_targets(targets), wsl_probe_succeeded)
+}
+
+fn runtime_supported_on_host(entry: &CatalogEntry, host: &ExecutionHost) -> bool {
+    !(entry.adapter_id == "pty-compatibility" && host.platform == "windows")
 }
 
 pub fn select_default_target<'a>(
@@ -504,7 +705,11 @@ pub fn command_for_target(target: &RuntimeTarget) -> RuntimeCommand {
         if let Some(home) = &target.runtime_home {
             args.extend(["--cd".into(), home.clone()]);
         }
-        args.extend(["-e".into(), "env".into(), "ZOMMI_RUNTIME_CHILD=1".into()]);
+        args.extend([
+            "-e".into(),
+            "/usr/bin/env".into(),
+            "ZOMMI_RUNTIME_CHILD=1".into(),
+        ]);
         if target.adapter_id == "codex-app-server" {
             args.push("CODEX_INTERNAL_ORIGINATOR_OVERRIDE=codex_exec".into());
         }
@@ -549,11 +754,22 @@ pub fn command_for_target(target: &RuntimeTarget) -> RuntimeCommand {
     }
 }
 
-fn discover_wsl_targets(environment: &HashMap<String, String>) -> Vec<RuntimeTarget> {
-    let quiet = run_command("wsl.exe", &["--list", "--quiet"], None);
-    let verbose = run_command("wsl.exe", &["--list", "--verbose"], None);
+struct WslDiscoveryOutcome {
+    targets: Vec<RuntimeTarget>,
+    succeeded: bool,
+}
+
+fn discover_wsl_targets(environment: &HashMap<String, String>) -> WslDiscoveryOutcome {
+    let (quiet, verbose) = std::thread::scope(|scope| {
+        let quiet = scope.spawn(|| run_command("wsl.exe", &["--list", "--quiet"], None));
+        let verbose = scope.spawn(|| run_command("wsl.exe", &["--list", "--verbose"], None));
+        (quiet.join().ok().flatten(), verbose.join().ok().flatten())
+    });
     let (Some(quiet), Some(verbose)) = (quiet, verbose) else {
-        return Vec::new();
+        return WslDiscoveryOutcome {
+            targets: Vec::new(),
+            succeeded: false,
+        };
     };
     let quiet = normalize_command_output(&quiet);
     let verbose = normalize_command_output(&verbose);
@@ -571,7 +787,7 @@ fn discover_wsl_targets(environment: &HashMap<String, String>) -> Vec<RuntimeTar
         .filter(|line| !line.is_empty())
         .map(str::to_owned)
         .collect::<Vec<_>>();
-    std::thread::scope(|scope| {
+    let probes = std::thread::scope(|scope| {
         distributions
             .iter()
             .map(|distribution| {
@@ -580,17 +796,21 @@ fn discover_wsl_targets(environment: &HashMap<String, String>) -> Vec<RuntimeTar
             })
             .collect::<Vec<_>>()
             .into_iter()
-            .filter_map(|probe| probe.join().ok())
-            .flatten()
-            .collect()
-    })
+            .map(|probe| probe.join().ok().flatten())
+            .collect::<Vec<_>>()
+    });
+    let succeeded = probes.iter().all(Option::is_some);
+    WslDiscoveryOutcome {
+        targets: probes.into_iter().flatten().flatten().collect(),
+        succeeded,
+    }
 }
 
 fn detect_wsl_runtimes(
     distribution: &str,
     default_name: Option<&str>,
     environment: &HashMap<String, String>,
-) -> Vec<RuntimeTarget> {
+) -> Option<Vec<RuntimeTarget>> {
     let executable_names = RUNTIME_CATALOG
         .iter()
         .map(|entry| format!("'{}'", entry.executable))
@@ -611,9 +831,7 @@ fn detect_wsl_runtimes(
         &["-d", distribution, "-e", "sh", "-lc", &script],
         Some(environment),
     );
-    let Some(output) = output else {
-        return Vec::new();
-    };
+    let output = output?;
     let output = normalize_command_output(&output);
     let home = output
         .lines()
@@ -626,19 +844,21 @@ fn detect_wsl_runtimes(
         is_default: default_name.is_some_and(|name| name.eq_ignore_ascii_case(distribution)),
         name: Some(distribution.into()),
     };
-    output
-        .lines()
-        .filter_map(|line| line.strip_prefix("__ZOMMI_RUNTIME_PATH__"))
-        .filter_map(|line| line.split_once('\t'))
-        .filter(|(_, path)| path.starts_with('/'))
-        .flat_map(|(name, path)| {
-            RUNTIME_CATALOG
-                .iter()
-                .filter(|entry| entry.executable == name)
-                .map(|entry| target_for(&host, path, entry, home, None))
-                .collect::<Vec<_>>()
-        })
-        .collect()
+    Some(
+        output
+            .lines()
+            .filter_map(|line| line.strip_prefix("__ZOMMI_RUNTIME_PATH__"))
+            .filter_map(|line| line.split_once('\t'))
+            .filter(|(_, path)| path.starts_with('/'))
+            .flat_map(|(name, path)| {
+                RUNTIME_CATALOG
+                    .iter()
+                    .filter(|entry| entry.executable == name)
+                    .map(|entry| target_for(&host, path, entry, home, None))
+                    .collect::<Vec<_>>()
+            })
+            .collect(),
+    )
 }
 
 fn run_command(
@@ -868,9 +1088,10 @@ mod tests {
     use std::{collections::HashMap, fs};
 
     use super::{
-        ConfiguredRuntimeOverride, ExecutionHost, RuntimeOverrideStore, RuntimeTarget,
-        command_for_target, discover_runtime_targets_with, runtime_discovery_settings,
-        select_default_target, target_from_override,
+        ConfiguredRuntimeOverride, ExecutionHost, RuntimeDiscoveryCacheStore, RuntimeOverrideStore,
+        RuntimeTarget, command_for_target, discover_runtime_targets_resilient_with,
+        discover_runtime_targets_with, runtime_discovery_settings, select_default_target,
+        target_from_override,
     };
 
     #[test]
@@ -959,7 +1180,7 @@ mod tests {
                 "--cd",
                 "/home/u",
                 "-e",
-                "env",
+                "/usr/bin/env",
                 "ZOMMI_RUNTIME_CHILD=1",
                 "CODEX_INTERNAL_ORIGINATOR_OVERRIDE=codex_exec",
                 "/home/u/bin/codex",
@@ -1092,5 +1313,102 @@ mod tests {
             profile_id: None,
         };
         assert!(target_from_override(&native, "linux").is_err());
+    }
+
+    #[test]
+    fn last_known_good_wsl_target_survives_a_failed_probe() {
+        let root = std::env::temp_dir().join(format!(
+            "zommi-runtime-cache-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        let store = RuntimeDiscoveryCacheStore::at(root.join("runtime-targets.json"));
+        let cached = RuntimeTarget {
+            id: "cached-codex".into(),
+            runtime_id: "codex".into(),
+            adapter_id: "codex-app-server".into(),
+            display_name: "Codex".into(),
+            protocol_name: "Codex app-server".into(),
+            executable_path: "/home/u/bin/codex".into(),
+            execution_host: ExecutionHost {
+                id: "wsl:ubuntu".into(),
+                kind: "wsl".into(),
+                platform: "linux".into(),
+                display_name: "WSL · Ubuntu".into(),
+                is_default: true,
+                name: Some("Ubuntu".into()),
+            },
+            status: "detected".into(),
+            priority: 10,
+            capability_hints: Vec::new(),
+            runtime_home: Some("/home/u".into()),
+            source: None,
+            endpoint: None,
+            profile_id: None,
+        };
+        store
+            .save(std::slice::from_ref(&cached))
+            .expect("save cache");
+
+        let outcome = discover_runtime_targets_resilient_with(
+            &HashMap::from([("PATH".into(), String::new())]),
+            "windows",
+            &[],
+            &store,
+            false,
+        );
+
+        assert!(!outcome.wsl_probe_succeeded);
+        assert_eq!(outcome.targets.len(), 1);
+        assert_eq!(outcome.targets[0].id, cached.id);
+        assert_eq!(
+            outcome.targets[0].source.as_deref(),
+            Some("last-known-good")
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn native_windows_terminal_targets_are_never_discovered_or_configured() {
+        let root = std::env::temp_dir().join(format!(
+            "zommi-native-pty-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).expect("create native fixture");
+        fs::write(root.join("claude.exe"), "fixture").expect("write native fixture");
+        let environment = HashMap::from([
+            ("PATH".into(), root.to_string_lossy().into_owned()),
+            ("PATHEXT".into(), ".EXE".into()),
+        ]);
+        assert!(
+            discover_runtime_targets_resilient_with(
+                &environment,
+                "windows",
+                &[],
+                &RuntimeDiscoveryCacheStore::at(root.join("cache.json")),
+                false,
+            )
+            .targets
+            .iter()
+            .all(|target| target.adapter_id != "pty-compatibility")
+        );
+        let configured = ConfiguredRuntimeOverride {
+            id: "native-claude".into(),
+            adapter_id: "pty-compatibility".into(),
+            execution_host: ExecutionHost {
+                id: "native:windows".into(),
+                kind: "native".into(),
+                platform: "windows".into(),
+                display_name: "Windows".into(),
+                is_default: true,
+                name: None,
+            },
+            executable_path: Some(root.join("claude.exe").to_string_lossy().into_owned()),
+            endpoint: None,
+            profile_id: None,
+        };
+        assert!(target_from_override(&configured, "windows").is_err());
+        let _ = fs::remove_dir_all(root);
     }
 }

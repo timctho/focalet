@@ -21,6 +21,8 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
   int historyCount = 45;
   bool closed = false;
   String? connectErrorCode;
+  String connectErrorMessage = 'Authentication required';
+  bool? lastDiscoveryForce;
   Future<void>? initializeGate;
   Future<void>? connectGate;
   Future<void>? startTurnGate;
@@ -138,11 +140,15 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
   @override
   Future<RuntimeDiscovery> discoverRuntimeTargets({
     String? lastSelectedTargetId,
-  }) async => RuntimeDiscovery(
-    targets: discoveredTargets,
-    selectedTargetId: lastSelectedTargetId ?? activeTargetId,
-    settings: _settings(),
-  );
+    bool force = false,
+  }) async {
+    lastDiscoveryForce = force;
+    return RuntimeDiscovery(
+      targets: discoveredTargets,
+      selectedTargetId: lastSelectedTargetId ?? activeTargetId,
+      settings: _settings(),
+    );
+  }
 
   Map<String, Object?> _settings() => {
     'adapters': const [
@@ -211,7 +217,7 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
   }) async {
     if (connectGate case final gate?) await gate;
     if (connectErrorCode case final code?) {
-      throw CoreProtocolException(code, 'Authentication required');
+      throw CoreProtocolException(code, connectErrorMessage);
     }
     activeTargetId = runtimeTargetId;
     activeSessionId =

@@ -74,6 +74,8 @@ jobs:
 
       - name: Test release package contracts
         run: |
+          node --check scripts/zommi-wsl-relay.js
+          node --test tests/wsl_relay.test.mjs
           python3 -m py_compile scripts/assemble_release.py scripts/verify_release.py tests/test_release_package.py
           python3 tests/test_release_package.py -v
           python3 tests/test_linux_startup_smoke.py -v

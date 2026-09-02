@@ -427,6 +427,7 @@ final class FakeCoreBridge implements CoreBridge {
   @override
   Future<RuntimeDiscovery> discoverRuntimeTargets({
     String? lastSelectedTargetId,
+    bool force = false,
   }) async => const RuntimeDiscovery(
     targets: [
       RuntimeTarget(

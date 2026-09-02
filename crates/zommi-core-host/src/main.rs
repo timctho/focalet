@@ -1,4 +1,9 @@
-use std::{collections::HashMap, env, io, path::PathBuf};
+use std::{
+    collections::HashMap,
+    env, io,
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -8,17 +13,20 @@ use tokio::{
 };
 use uuid::Uuid;
 use zommi_core::{
-    ConfiguredRuntimeOverride, RuntimeOverrideStore, SessionBinding, SessionBindingStore,
-    build_context_handoff,
+    ConfiguredRuntimeOverride, RuntimeDiscoveryCacheStore, RuntimeOverrideStore, SessionBinding,
+    SessionBindingStore, build_context_handoff,
     codex_adapter::{CodexError, CoreEvent, EventSender},
-    command_for_target, discover_runtime_targets_with_overrides, operation_fingerprint,
+    command_for_target, discover_runtime_targets_resilient_with_overrides, operation_fingerprint,
     runtime_adapter::{AdapterTurnRequest, RuntimeAdapter},
     runtime_discovery_settings, select_default_target, target_from_override,
     validate_broker_request, validate_turn_input,
 };
 
+mod wsl_relay;
+
 const CORE_PROTOCOL_VERSION: u64 = 1;
 const MAX_REQUEST_BYTES: usize = 64 * 1024 * 1024;
+const WSL_PROBE_BACKOFF: Duration = Duration::from_secs(45);
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -67,6 +75,8 @@ struct HostState {
     adapters: HashMap<String, RuntimeAdapter>,
     binding_store: SessionBindingStore,
     override_store: RuntimeOverrideStore,
+    discovery_cache: RuntimeDiscoveryCacheStore,
+    wsl_probe_retry_at: Option<Instant>,
     overrides: Vec<ConfiguredRuntimeOverride>,
     operations: HashMap<String, OperationRecord>,
     event_tx: EventSender,
@@ -85,6 +95,8 @@ impl HostState {
             adapters: HashMap::new(),
             binding_store: SessionBindingStore::platform_default(),
             override_store: RuntimeOverrideStore::platform_default(),
+            discovery_cache: RuntimeDiscoveryCacheStore::platform_default(),
+            wsl_probe_retry_at: None,
             overrides: Vec::new(),
             operations: HashMap::new(),
             event_tx,
@@ -178,7 +190,10 @@ impl HostState {
                 Ok(json!({"text": build_context_handoff(message, snapshots, image_count)}))
             }
             "runtime.discover" => {
-                self.refresh_runtime_targets().await?;
+                self.refresh_runtime_targets(
+                    payload.get("force").and_then(Value::as_bool) == Some(true),
+                )
+                .await?;
                 Ok(self.discovery_value(payload))
             }
             "runtime.addOverride" => {
@@ -209,7 +224,7 @@ impl HostState {
                 self.override_store
                     .save(&self.overrides)
                     .map_err(|error| HostError::new("persistence-failed", error.to_string()))?;
-                self.refresh_runtime_targets().await?;
+                self.refresh_runtime_targets(true).await?;
                 Ok(self.discovery_value(payload))
             }
             "runtime.removeOverride" => {
@@ -225,7 +240,7 @@ impl HostState {
                 self.override_store
                     .save(&self.overrides)
                     .map_err(|error| HostError::new("persistence-failed", error.to_string()))?;
-                self.refresh_runtime_targets().await?;
+                self.refresh_runtime_targets(true).await?;
                 Ok(self.discovery_value(payload))
             }
             "runtime.connect" => self.connect_runtime(payload).await,
@@ -416,17 +431,40 @@ impl HostState {
         }
     }
 
-    async fn refresh_runtime_targets(&mut self) -> Result<(), HostError> {
+    async fn refresh_runtime_targets(&mut self, force: bool) -> Result<(), HostError> {
         self.overrides = self
             .override_store
             .load()
             .map_err(|error| HostError::new("persistence-failed", error.to_string()))?;
         let overrides = self.overrides.clone();
-        self.targets = tokio::task::spawn_blocking(move || {
-            discover_runtime_targets_with_overrides(&overrides)
+        let cache = self.discovery_cache.clone();
+        let now = Instant::now();
+        let retry_allowed = force
+            || self
+                .wsl_probe_retry_at
+                .is_none_or(|retry_at| now >= retry_at);
+        let (outcome, probed_wsl) = tokio::task::spawn_blocking(move || {
+            let relay_ready = cfg!(target_os = "windows")
+                && !force
+                && cache
+                    .load()
+                    .is_ok_and(|targets| wsl_relay::cached_default_relay_available(&targets));
+            let probe_wsl = retry_allowed && !relay_ready;
+            (
+                discover_runtime_targets_resilient_with_overrides(&overrides, &cache, probe_wsl),
+                probe_wsl,
+            )
         })
         .await
         .map_err(|error| HostError::new("discovery-failed", error.to_string()))?;
+        if probed_wsl {
+            self.wsl_probe_retry_at = if outcome.wsl_probe_succeeded {
+                None
+            } else {
+                Some(Instant::now() + WSL_PROBE_BACKOFF)
+            };
+        }
+        self.targets = outcome.targets;
         Ok(())
     }
 
@@ -450,7 +488,7 @@ impl HostState {
 
     async fn connect_runtime(&mut self, payload: &Value) -> Result<Value, HostError> {
         if self.targets.is_empty() {
-            self.refresh_runtime_targets().await?;
+            self.refresh_runtime_targets(false).await?;
         }
         let binding = self.binding_store.load();
         let requested_target_id = payload
@@ -558,6 +596,10 @@ impl HostState {
                 })?;
             runtime_command.args = parsed;
         }
+        if cfg!(target_os = "windows") && target.execution_host.kind == "wsl" {
+            runtime_command = wsl_relay::wrap_wsl_command(&target, runtime_command)
+                .map_err(|error| HostError::new("runtime-unavailable", error.to_string()))?;
+        }
         let adapter = RuntimeAdapter::connect(
             target,
             runtime_command,
@@ -659,6 +701,20 @@ impl From<serde_json::Error> for HostError {
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
+    let arguments = env::args().skip(1).collect::<Vec<_>>();
+    if arguments
+        .first()
+        .is_some_and(|argument| argument == "--wsl-proxy")
+    {
+        let exit_code = match wsl_relay::run_proxy(&arguments[1..]) {
+            Ok(code) => code,
+            Err(error) => {
+                eprintln!("Persistent WSL relay failed: {error}");
+                70
+            }
+        };
+        std::process::exit(exit_code);
+    }
     let (output_tx, mut output_rx) = mpsc::unbounded_channel::<Value>();
     let writer = tokio::spawn(async move {
         let mut stdout = BufWriter::new(tokio::io::stdout());

@@ -195,7 +195,19 @@ final class ZommiController extends ChangeNotifier {
         if (!_applyConnectionError(targetId, error)) rethrow;
       }
     } on Object catch (error) {
-      _setStatus('Rust core unavailable · $error', warning: true);
+      if (error is CoreProtocolException &&
+          !{
+            'core-exited',
+            'core-timeout',
+            'unsupported-version',
+          }.contains(error.code)) {
+        _setStatus(
+          'Agent runtime unavailable · ${error.message}',
+          warning: true,
+        );
+      } else {
+        _setStatus('Rust core unavailable · $error', warning: true);
+      }
     } finally {
       await desktopInitialization;
       starting = false;
@@ -221,6 +233,7 @@ final class ZommiController extends ChangeNotifier {
     try {
       final discovery = await core.discoverRuntimeTargets(
         lastSelectedTargetId: activeRuntime?.id,
+        force: true,
       );
       _replaceDiscovery(discovery);
       final selected = _visibleSelectedTargetId(discovery.selectedTargetId);
