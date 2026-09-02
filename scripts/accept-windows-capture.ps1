@@ -525,20 +525,29 @@ function Get-DesktopCaptureDiagnostics {
 
 function Assert-DesktopCaptureSurface {
     Add-Type -AssemblyName System.Drawing
-    $bitmap = [Drawing.Bitmap]::new(1, 1)
-    $graphics = [Drawing.Graphics]::FromImage($bitmap)
-    try {
-        $graphics.CopyFromScreen(0, 0, 0, 0, [Drawing.Size]::new(1, 1))
+    $lastError = $null
+    foreach ($attempt in 1..20) {
+        $bitmap = [Drawing.Bitmap]::new(1, 1)
+        $graphics = [Drawing.Graphics]::FromImage($bitmap)
+        try {
+            $graphics.CopyFromScreen(0, 0, 0, 0, [Drawing.Size]::new(1, 1))
+            if ($attempt -gt 1) {
+                Write-Host "desktop-surface: recovered on attempt $attempt"
+            }
+            return
+        }
+        catch {
+            $lastError = $_.Exception.GetBaseException().Message
+        }
+        finally {
+            $graphics.Dispose()
+            $bitmap.Dispose()
+        }
+        Start-Sleep -Milliseconds 250
     }
-    catch {
-        $diagnostics = Get-DesktopCaptureDiagnostics
-        $copyError = $_.Exception.GetBaseException().Message
-        throw "The runner process cannot access a Windows desktop capture surface. This is a runner session/display attachment failure; it does not prove Windows was locked. $diagnostics; copyError=$copyError"
-    }
-    finally {
-        $graphics.Dispose()
-        $bitmap.Dispose()
-    }
+
+    $diagnostics = Get-DesktopCaptureDiagnostics
+    throw "The runner process cannot access a Windows desktop capture surface after 20 attempts. This is a runner session/display attachment failure; it does not prove Windows was locked. $diagnostics; copyError=$lastError"
 }
 
 function Assert-ProbeRegionSize {

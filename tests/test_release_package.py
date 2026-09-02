@@ -162,6 +162,9 @@ class ReleasePackageTests(unittest.TestCase):
             "clientName=$clientName",
             "userInteractive=$([Environment]::UserInteractive)",
             "virtualScreen=$virtualScreen",
+            "foreach ($attempt in 1..20)",
+            "desktop-surface: recovered on attempt $attempt",
+            "Start-Sleep -Milliseconds 250",
             "it does not prove Windows was locked",
         ):
             self.assertIn(contract, script)
