@@ -10,6 +10,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
+Import-Module (Join-Path $PSScriptRoot 'windows-deployment-helpers.psm1') -Force
 $architecture = if ($Runtime -eq 'win-arm64') { 'arm64' } else { 'x64' }
 $packageName = "zommi-windows-$architecture"
 $sourceDirectory = Join-Path $repositoryRoot "artifacts/$packageName"
@@ -161,23 +162,25 @@ try {
     foreach ($process in $targetProcesses) {
         Stop-Process -Id $process.ProcessId -Force
     }
-    Start-Sleep -Milliseconds 500
+    foreach ($process in $targetProcesses) {
+        Wait-Process -Id $process.ProcessId -Timeout 10 -ErrorAction SilentlyContinue
+    }
     if (@(Get-DownloadsZommiProcesses).Count -ne 0) {
         throw 'A Zommi process inside Downloads remained running.'
     }
 
     if (Test-Path -LiteralPath $targetDirectory) {
-        Move-Item -LiteralPath $targetDirectory -Destination $backupDirectory
+        Move-PathWithRetry -Source $targetDirectory -Destination $backupDirectory
         $hadDirectoryBackup = $true
     }
-    Move-Item -LiteralPath $pendingDirectory -Destination $targetDirectory
+    Move-PathWithRetry -Source $pendingDirectory -Destination $targetDirectory
     $directoryReplaced = $true
 
     if (Test-Path -LiteralPath $targetArchive) {
-        Move-Item -LiteralPath $targetArchive -Destination $backupArchive
+        Move-PathWithRetry -Source $targetArchive -Destination $backupArchive
         $hadArchiveBackup = $true
     }
-    Move-Item -LiteralPath $pendingArchive -Destination $targetArchive
+    Move-PathWithRetry -Source $pendingArchive -Destination $targetArchive
     $archiveReplaced = $true
 
     $deployedFileCount = Assert-DirectoryMatches $sourceDirectory $targetDirectory
@@ -268,10 +271,10 @@ catch {
         Remove-Item -LiteralPath $targetArchive -Force -ErrorAction SilentlyContinue
     }
     if ($hadDirectoryBackup -and (Test-Path -LiteralPath $backupDirectory)) {
-        Move-Item -LiteralPath $backupDirectory -Destination $targetDirectory
+        Move-PathWithRetry -Source $backupDirectory -Destination $targetDirectory
     }
     if ($hadArchiveBackup -and (Test-Path -LiteralPath $backupArchive)) {
-        Move-Item -LiteralPath $backupArchive -Destination $targetArchive
+        Move-PathWithRetry -Source $backupArchive -Destination $targetArchive
     }
     if ($stoppedProcessCount -gt 0 -and
         (Test-Path -LiteralPath (Join-Path $targetDirectory 'Zommi.exe') -PathType Leaf)) {

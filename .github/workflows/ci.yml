@@ -170,6 +170,10 @@ jobs:
         shell: pwsh
         run: python -c "import sys; assert sys.version_info >= (3, 10), sys.version; print(sys.version)"
 
+      - name: Test Windows deployment lock retry
+        shell: pwsh
+        run: ./scripts/test-windows-deployment-helpers.ps1
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@1.93.0
 
