@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:ui';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
@@ -58,6 +58,25 @@ void main() {
       expect(calls, isNot(contains('resize')));
     },
   );
+
+  testWidgets('Windows pointer containment uses the native root window', (
+    tester,
+  ) async {
+    const channel = MethodChannel('zommi/window_animation');
+    final methods = <String>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          methods.add(call.method);
+          return true;
+        });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null),
+    );
+
+    expect(await isPointerWithinNativeSurface(platformIsWindows: true), isTrue);
+    expect(methods, ['isPointerWithinWindow']);
+  });
 
   test('surface bounds preserve one bottom-center anchor across morphs', () {
     const workArea = Rect.fromLTWH(100, 50, 1200, 800);

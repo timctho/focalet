@@ -580,6 +580,8 @@ final class FlutterDesktopBridge
 
   @override
   Future<bool> isPointerWithinSurface() async {
+    final nativeResult = await isPointerWithinNativeSurface();
+    if (nativeResult != null) return nativeResult;
     try {
       final pointer = await screenRetriever.getCursorScreenPoint();
       final bounds = await windowManager.getBounds();
@@ -851,6 +853,19 @@ Future<bool?> setNativeSurfaceBoundsWithoutCopy({
         'toHeight': bounds.height,
         'scaleFactor': scaleFactor,
       },
+    );
+  } on MissingPluginException {
+    return null;
+  } on PlatformException {
+    return null;
+  }
+}
+
+Future<bool?> isPointerWithinNativeSurface({bool? platformIsWindows}) async {
+  if (!(platformIsWindows ?? Platform.isWindows)) return null;
+  try {
+    return await _windowAnimationChannel.invokeMethod<bool>(
+      'isPointerWithinWindow',
     );
   } on MissingPluginException {
     return null;

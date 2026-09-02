@@ -137,6 +137,19 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
 void FlutterWindow::HandleWindowAnimationMethodCall(
     const flutter::MethodCall<flutter::EncodableValue> &call,
     std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+  if (call.method_name() == "isPointerWithinWindow") {
+    POINT cursor{};
+    if (!GetCursorPos(&cursor)) {
+      result->Error("cursor_unavailable",
+                    "Could not read the current pointer position.");
+      return;
+    }
+    const HWND hit_window = WindowFromPoint(cursor);
+    const HWND root_window =
+        hit_window == nullptr ? nullptr : GetAncestor(hit_window, GA_ROOT);
+    result->Success(flutter::EncodableValue(root_window == GetHandle()));
+    return;
+  }
   if (call.method_name() == "configureSurfaceWindow") {
     CancelWindowAnimation();
     const auto window = GetHandle();
