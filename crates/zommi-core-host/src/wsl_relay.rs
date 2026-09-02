@@ -17,7 +17,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
 use wait_timeout::ChildExt;
-use zommi_core::{RuntimeCommand, RuntimeTarget};
+use zommi_core::{
+    RuntimeCommand, RuntimeTarget, runtime_targets_from_wsl_probe, wsl_runtime_probe_script,
+};
 
 const TRANSPORT_VERSION: u32 = 3;
 const ENDPOINT_SCHEMA_VERSION: u32 = 1;
@@ -119,6 +121,80 @@ pub fn cached_default_relay_available(targets: &[RuntimeTarget]) -> bool {
                     endpoint_matches(&endpoint, distribution) && relay_is_alive(&endpoint)
                 })
         })
+}
+
+/// Refreshes every runtime in the cached WSL hosts through the authenticated
+/// spool transport. A healthy relay means we do not need to start another
+/// `wsl.exe` process merely to rediscover Pi, Hermes, OpenClaw, or Claude.
+pub fn discover_targets_via_cached_relays(
+    cached_targets: &[RuntimeTarget],
+) -> io::Result<Vec<RuntimeTarget>> {
+    let mut hosts = Vec::<(String, bool, String)>::new();
+    for target in cached_targets {
+        if target.execution_host.kind != "wsl" {
+            continue;
+        }
+        let Some(distribution) = target.execution_host.name.as_deref() else {
+            continue;
+        };
+        if !valid_distribution(distribution)
+            || hosts
+                .iter()
+                .any(|(existing, _, _)| existing.eq_ignore_ascii_case(distribution))
+        {
+            continue;
+        }
+        let endpoint = endpoint_path(distribution).and_then(|path| load_endpoint(&path));
+        if endpoint.is_ok_and(|endpoint| {
+            endpoint_matches(&endpoint, distribution) && relay_is_alive(&endpoint)
+        }) {
+            hosts.push((
+                distribution.to_owned(),
+                target.execution_host.is_default,
+                target.runtime_home.clone().unwrap_or_else(|| "/".into()),
+            ));
+        }
+    }
+    if hosts.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "No healthy cached WSL relay is available for discovery.",
+        ));
+    }
+
+    let mut discovered = Vec::new();
+    for (distribution, is_default, cwd) in hosts {
+        let endpoint_path = endpoint_path(&distribution)?;
+        let endpoint = load_endpoint(&endpoint_path)?;
+        let invocation = ProxyInvocation {
+            distribution: distribution.clone(),
+            cwd,
+            command: "/bin/sh".into(),
+            args: vec!["-lc".into(), wsl_runtime_probe_script()],
+        };
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let status = proxy_runtime_spool_to(
+            endpoint,
+            &endpoint_path,
+            invocation,
+            false,
+            &mut stdout,
+            &mut stderr,
+        )?;
+        if status != 0 {
+            return Err(io::Error::other(format!(
+                "WSL relay discovery failed in {distribution}: {}",
+                bounded_text(&stderr)
+            )));
+        }
+        discovered.extend(runtime_targets_from_wsl_probe(
+            &distribution,
+            is_default,
+            &stdout,
+        ));
+    }
+    Ok(discovered)
 }
 
 struct ProxyInvocation {
@@ -502,6 +578,26 @@ fn proxy_runtime_spool(
     endpoint_path: &Path,
     invocation: ProxyInvocation,
 ) -> io::Result<i32> {
+    let mut stdout = io::stdout().lock();
+    let mut stderr = io::stderr().lock();
+    proxy_runtime_spool_to(
+        endpoint,
+        endpoint_path,
+        invocation,
+        true,
+        &mut stdout,
+        &mut stderr,
+    )
+}
+
+fn proxy_runtime_spool_to(
+    endpoint: RelayEndpoint,
+    endpoint_path: &Path,
+    invocation: ProxyInvocation,
+    interactive_stdin: bool,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> io::Result<i32> {
     let relay_root = endpoint_path
         .parent()
         .and_then(Path::parent)
@@ -545,36 +641,40 @@ fn proxy_runtime_spool(
             thread::sleep(Duration::from_millis(500));
         }
     });
-    let input_running = Arc::clone(&running);
-    thread::spawn(move || {
-        let mut input = io::stdin().lock();
-        let mut chunk = [0_u8; 64 * 1024];
-        while input_running.load(Ordering::Relaxed) {
-            let bytes = match input.read(&mut chunk) {
-                Ok(0) => break,
-                Ok(bytes) => bytes,
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(_) => break,
-            };
-            let appended =
-                OpenOptions::new()
-                    .append(true)
-                    .open(&input_path)
-                    .and_then(|mut output| {
-                        output.write_all(&chunk[..bytes])?;
-                        output.flush()
-                    });
-            if appended.is_err() {
-                break;
+    if interactive_stdin {
+        let input_running = Arc::clone(&running);
+        thread::spawn(move || {
+            let mut input = io::stdin().lock();
+            let mut chunk = [0_u8; 64 * 1024];
+            while input_running.load(Ordering::Relaxed) {
+                let bytes = match input.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(bytes) => bytes,
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(_) => break,
+                };
+                let appended =
+                    OpenOptions::new()
+                        .append(true)
+                        .open(&input_path)
+                        .and_then(|mut output| {
+                            output.write_all(&chunk[..bytes])?;
+                            output.flush()
+                        });
+                if appended.is_err() {
+                    break;
+                }
             }
-        }
-        if input_running.load(Ordering::Relaxed) {
-            let committed_length = fs::metadata(&input_path).map(|metadata| metadata.len());
-            if let Ok(committed_length) = committed_length {
-                let _ = fs::write(input_closed_path, committed_length.to_string());
+            if input_running.load(Ordering::Relaxed) {
+                let committed_length = fs::metadata(&input_path).map(|metadata| metadata.len());
+                if let Ok(committed_length) = committed_length {
+                    let _ = fs::write(input_closed_path, committed_length.to_string());
+                }
             }
-        }
-    });
+        });
+    } else {
+        fs::write(input_closed_path, "0")?;
+    }
 
     let mut output = OpenOptions::new().read(true).open(&output_path)?;
     let claim_path = session_directory.join("request.claimed.json");
@@ -583,8 +683,6 @@ fn proxy_runtime_spool(
     let mut relay_seen = Instant::now();
     let mut relay_check = Instant::now();
     let mut buffered = Vec::new();
-    let mut stdout = io::stdout().lock();
-    let mut stderr = io::stderr().lock();
     let result = 'output: loop {
         let mut chunk = [0_u8; 64 * 1024];
         let bytes = output.read(&mut chunk)?;

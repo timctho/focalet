@@ -52,11 +52,11 @@ final class ZommiController extends ChangeNotifier {
   bool runtimeOverrideBusy = false;
   bool sessionBusy = false;
   bool submitting = false;
-  bool expanded = false;
+  bool expanded = true;
   bool largePanel = false;
   bool surfaceTransitioning = false;
   bool surfaceTransitionAnimating = false;
-  bool transitionTargetExpanded = false;
+  bool transitionTargetExpanded = true;
   bool transitionTargetLarge = false;
   bool sessionPanelOpen = false;
   bool runtimePanelOpen = false;
@@ -94,8 +94,6 @@ final class ZommiController extends ChangeNotifier {
       _interruptingSessions.contains(_activeSessionKey);
 
   bool get anyTurnActive => _activeTurns.isNotEmpty;
-
-  bool get orbWorking => anyTurnActive || runtimeBusy;
 
   List<RuntimeTarget> get visibleRuntimeTargets =>
       runtimeTargets.where(_isVisibleRuntimeTarget).toList(growable: false);
@@ -1277,6 +1275,8 @@ final class ZommiController extends ChangeNotifier {
     );
     block.lifecycle = lifecycle;
     block.status = event.payload['status']?.toString() ?? block.status;
+    final preview = event.payload['preview']?.toString() ?? '';
+    if (preview.isNotEmpty) block.preview = preview;
     for (final artifactValue in mapList(event.payload['artifacts'])) {
       final artifact = ArtifactPreview.fromJson(artifactValue);
       if (!block.artifacts.any(

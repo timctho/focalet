@@ -22,7 +22,8 @@ pub use runtime_discovery::{
     ConfiguredRuntimeOverride, ExecutionHost, RuntimeCommand, RuntimeDiscoveryCacheStore,
     RuntimeDiscoveryOutcome, RuntimeOverrideStore, RuntimeTarget, command_for_target,
     discover_runtime_targets, discover_runtime_targets_resilient_with_overrides,
-    discover_runtime_targets_with_overrides, runtime_discovery_settings, select_default_target,
-    target_from_override,
+    discover_runtime_targets_with_overrides, runtime_discovery_settings,
+    runtime_targets_from_wsl_probe, select_default_target, target_from_override,
+    wsl_runtime_probe_script,
 };
 pub use session_binding::{SessionBinding, SessionBindingStore};

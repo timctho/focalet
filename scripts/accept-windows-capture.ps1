@@ -46,6 +46,15 @@ public static class ZommiWindowsAcceptanceNative
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetWindow(IntPtr window, uint command);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsIconic(IntPtr window);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr window, int command);
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool GetWindowRect(IntPtr window, out NativeRect bounds);
 
@@ -254,6 +263,32 @@ public static class ZommiWindowsAcceptanceNative
         const int extendedStyle = -20;
         const int topMost = 0x00000008;
         return (GetWindowLong(window, extendedStyle) & topMost) != 0;
+    }
+
+    public static bool TaskbarEligible(IntPtr window)
+    {
+        const int extendedStyle = -20;
+        const int toolWindow = 0x00000080;
+        const int appWindow = 0x00040000;
+        const uint owner = 4;
+        var style = GetWindowLong(window, extendedStyle);
+        return (style & toolWindow) == 0 &&
+            (((style & appWindow) != 0) || GetWindow(window, owner) == IntPtr.Zero);
+    }
+
+    public static bool Minimized(IntPtr window)
+    {
+        return IsIconic(window);
+    }
+
+    public static void Minimize(IntPtr window)
+    {
+        ShowWindow(window, 6);
+    }
+
+    public static void Restore(IntPtr window)
+    {
+        ShowWindow(window, 9);
     }
 
     public static bool Foreground(IntPtr window)
@@ -970,9 +1005,9 @@ function Invoke-PackagedApplicationAcceptance {
         $window = Wait-ForVisibleProcessWindow -ProcessId $application.Id
         $firstVisibleBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
         if ($firstVisibleBounds.Count -ne 4 -or
-            $firstVisibleBounds[2] -ne $firstVisibleBounds[3] -or
-            $firstVisibleBounds[2] -gt 100) {
-            throw "Packaged application exposed a template-sized first window: $($firstVisibleBounds -join ',')."
+            $firstVisibleBounds[2] -lt 640 -or
+            $firstVisibleBounds[3] -lt 500) {
+            throw "Packaged application did not start as a complete taskbar chat window: $($firstVisibleBounds -join ',')."
         }
 
         $readyResult = Wait-ForAcceptanceEvent -Path $acceptanceLog -Name 'desktop.ready'
@@ -982,100 +1017,57 @@ function Invoke-PackagedApplicationAcceptance {
             throw "Packaged shortcuts were not both registered: $($ready | ConvertTo-Json -Compress)"
         }
 
-        $compactBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
-        if ($compactBounds.Count -ne 4 -or $compactBounds[2] -le 0 -or $compactBounds[3] -le 0) {
-            throw 'Packaged Flutter window has invalid compact bounds.'
-        }
-        if ($compactBounds[2] -ne $compactBounds[3]) {
-            throw "Packaged compact surface retained a native frame: $($compactBounds -join ',')."
-        }
+        $taskbarBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
         if (-not [ZommiWindowsAcceptanceNative]::Visible($window) -or
-            -not [ZommiWindowsAcceptanceNative]::TopMost($window)) {
-            throw 'Packaged Flutter window is not visible and topmost.'
+            -not [ZommiWindowsAcceptanceNative]::TaskbarEligible($window)) {
+            throw 'Packaged Flutter window is not visible and taskbar eligible.'
+        }
+        if ([ZommiWindowsAcceptanceNative]::TopMost($window)) {
+            throw 'Packaged taskbar window unexpectedly remained always-on-top.'
         }
 
-        $compactPhysicalBounds = [ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
-        if ($compactPhysicalBounds.Count -ne 4) {
-            throw 'Could not read the packaged orb physical bounds.'
+        $physicalBounds = [ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
+        if ($physicalBounds.Count -ne 4) {
+            throw 'Could not read the packaged taskbar window physical bounds.'
         }
-        $compactCenterX = [int](
-            $compactPhysicalBounds[0] + $compactPhysicalBounds[2] / 2.0
-        )
-        $compactCenterY = [int](
-            $compactPhysicalBounds[1] + $compactPhysicalBounds[3] / 2.0
-        )
-        if (-not [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(
-            $compactCenterX,
-            $compactCenterY
-        )) {
-            throw 'Could not hover the packaged compact orb.'
+        $centerX = [int]($physicalBounds[0] + $physicalBounds[2] / 2.0)
+        $centerY = [int]($physicalBounds[1] + $physicalBounds[3] / 2.0)
+        if (-not [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos($centerX, $centerY)) {
+            throw 'Could not hover the packaged taskbar window.'
         }
-        $hoverDeadline = [DateTime]::UtcNow.AddSeconds(5)
-        do {
-            $hoverExpandedBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
-            if ($hoverExpandedBounds.Count -eq 4 -and
-                $hoverExpandedBounds[2] -gt $compactBounds[2] -and
-                $hoverExpandedBounds[3] -gt $compactBounds[3]) {
-                break
-            }
-            Start-Sleep -Milliseconds 50
-        } while ([DateTime]::UtcNow -lt $hoverDeadline)
-        if ($hoverExpandedBounds[2] -le $compactBounds[2] -or
-            $hoverExpandedBounds[3] -le $compactBounds[3]) {
-            throw 'Hovering the packaged orb did not expand the Flutter surface.'
-        }
-        Start-Sleep -Milliseconds 100
-        if (-not [ZommiWindowsAcceptanceNative]::IsOwnedWindowAtPoint(
-            $window,
-            $compactCenterX,
-            $compactCenterY
-        )) {
-            $ownership = [ZommiWindowsAcceptanceNative]::DescribeWindowAtPoint(
-                $compactCenterX,
-                $compactCenterY
-            )
-            throw "The expanded packaged surface lost the stationary pointer: expected=$($window.ToInt64()); $ownership."
-        }
-        if (-not [ZommiWindowsAcceptanceNative]::PostMouseLeaveAtPoint(
-            $compactCenterX,
-            $compactCenterY
-        )) {
-            throw 'Could not inject the native resize mouse-leave probe.'
-        }
-
         Start-Sleep -Milliseconds 750
-        $stationaryHoverBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
-        if ($stationaryHoverBounds.Count -ne 4 -or
-            $stationaryHoverBounds[2] -ne $hoverExpandedBounds[2] -or
-            $stationaryHoverBounds[3] -ne $hoverExpandedBounds[3]) {
-            throw "Packaged hover expansion collapsed under a stationary pointer: expanded=$($hoverExpandedBounds -join ',') stationary=$($stationaryHoverBounds -join ',')."
+        $hoverBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
+        if (($hoverBounds -join ',') -ne ($taskbarBounds -join ',')) {
+            throw "Taskbar window resized on hover: before=$($taskbarBounds -join ',') after=$($hoverBounds -join ',')."
+        }
+        if (-not [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(300, 300)) {
+            throw 'Could not move the pointer away from the packaged taskbar window.'
+        }
+        Start-Sleep -Milliseconds 750
+        $leaveBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
+        if (($leaveBounds -join ',') -ne ($taskbarBounds -join ',')) {
+            throw "Taskbar window resized after pointer exit: before=$($taskbarBounds -join ',') after=$($leaveBounds -join ',')."
         }
 
-        # Re-enter by one pixel so Flutter and Win32 re-arm mouse-leave
-        # tracking after the injected message before testing a genuine exit.
-        if (-not [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(
-            $compactCenterX + 1,
-            $compactCenterY
-        )) {
-            throw 'Could not re-arm the packaged surface hover state.'
-        }
-        Start-Sleep -Milliseconds 100
-        if (-not [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(300, 300)) {
-            throw 'Could not move the pointer away from the packaged surface.'
-        }
-        $hoverCollapseDeadline = [DateTime]::UtcNow.AddSeconds(5)
-        do {
-            $hoverCollapsedBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
-            if ($hoverCollapsedBounds.Count -eq 4 -and
-                $hoverCollapsedBounds[2] -eq $compactBounds[2] -and
-                $hoverCollapsedBounds[3] -eq $compactBounds[3]) {
-                break
-            }
+        [ZommiWindowsAcceptanceNative]::Minimize($window)
+        $minimizeDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        while (-not [ZommiWindowsAcceptanceNative]::Minimized($window) -and
+               [DateTime]::UtcNow -lt $minimizeDeadline) {
             Start-Sleep -Milliseconds 50
-        } while ([DateTime]::UtcNow -lt $hoverCollapseDeadline)
-        if ($hoverCollapsedBounds[2] -ne $compactBounds[2] -or
-            $hoverCollapsedBounds[3] -ne $compactBounds[3]) {
-            throw "Packaged hover surface did not collapse after the pointer left: $($hoverCollapsedBounds -join ',')."
+        }
+        if (-not [ZommiWindowsAcceptanceNative]::Minimized($window)) {
+            throw 'Packaged taskbar window did not minimize.'
+        }
+        [ZommiWindowsAcceptanceNative]::Restore($window)
+        $restoreDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        while (([ZommiWindowsAcceptanceNative]::Minimized($window) -or
+                -not [ZommiWindowsAcceptanceNative]::Visible($window)) -and
+               [DateTime]::UtcNow -lt $restoreDeadline) {
+            Start-Sleep -Milliseconds 50
+        }
+        if ([ZommiWindowsAcceptanceNative]::Minimized($window) -or
+            -not [ZommiWindowsAcceptanceNative]::Visible($window)) {
+            throw 'Packaged taskbar window did not restore.'
         }
 
         if (-not [ZommiWindowsAcceptanceNative]::SetCursorPos(300, 300)) {
@@ -1091,28 +1083,9 @@ function Invoke-PackagedApplicationAcceptance {
         if ($context.attached -ne $true) {
             throw "Packaged context shortcut did not attach context: $($context | ConvertTo-Json -Compress)"
         }
-
-        $expandedDeadline = [DateTime]::UtcNow.AddSeconds(5)
-        do {
-            $expandedBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
-            if ($expandedBounds.Count -eq 4 -and
-                $expandedBounds[2] -gt $compactBounds[2] -and
-                $expandedBounds[3] -gt $compactBounds[3]) {
-                break
-            }
-            Start-Sleep -Milliseconds 50
-        } while ([DateTime]::UtcNow -lt $expandedDeadline)
-        if ($expandedBounds[2] -le $compactBounds[2] -or
-            $expandedBounds[3] -le $compactBounds[3]) {
-            throw 'Packaged context shortcut did not expand the Flutter surface.'
-        }
-        $compactCenterX = $compactBounds[0] + $compactBounds[2] / 2.0
-        $expandedCenterX = $expandedBounds[0] + $expandedBounds[2] / 2.0
-        $compactBottom = $compactBounds[1] + $compactBounds[3]
-        $expandedBottom = $expandedBounds[1] + $expandedBounds[3]
-        if ([Math]::Abs($compactCenterX - $expandedCenterX) -gt 1 -or
-            [Math]::Abs($compactBottom - $expandedBottom) -gt 1) {
-            throw "Packaged surface endpoints do not preserve one anchor: compact=$($compactBounds -join ','), expanded=$($expandedBounds -join ',')."
+        $shortcutBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
+        if (($shortcutBounds[2..3] -join ',') -ne ($taskbarBounds[2..3] -join ',')) {
+            throw "Context shortcut resized the taskbar chat window: before=$($taskbarBounds -join ',') after=$($shortcutBounds -join ',')."
         }
 
         [ZommiWindowsAcceptanceNative]::SendAltA($true)
@@ -1206,16 +1179,17 @@ function Invoke-PackagedApplicationAcceptance {
             imageCancelled = $true
             imageDimensions = @($image.width, $image.height)
             imagePointerContext = $true
-            compactBounds = @($compactBounds)
-            compactPhysicalBounds = @($compactPhysicalBounds)
+            taskbarBounds = @($taskbarBounds)
+            physicalBounds = @($physicalBounds)
             firstVisibleBounds = @($firstVisibleBounds)
-            hoverExpandedBounds = @($hoverExpandedBounds)
-            stationaryHoverBounds = @($stationaryHoverBounds)
-            hoverCollapsedBounds = @($hoverCollapsedBounds)
-            expandedBounds = @($expandedBounds)
+            hoverBounds = @($hoverBounds)
+            leaveBounds = @($leaveBounds)
+            shortcutBounds = @($shortcutBounds)
+            minimizedAndRestored = $true
             processCount = $processes.Count
             shortcutsRegistered = $true
-            topMost = $true
+            taskbarEligible = $true
+            topMost = $false
         }
     }
     finally {

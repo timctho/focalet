@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     env, io,
     path::PathBuf,
     time::{Duration, Instant},
@@ -444,16 +444,34 @@ impl HostState {
                 .wsl_probe_retry_at
                 .is_none_or(|retry_at| now >= retry_at);
         let (outcome, probed_wsl) = tokio::task::spawn_blocking(move || {
-            let relay_ready = cfg!(target_os = "windows")
-                && !force
-                && cache
-                    .load()
-                    .is_ok_and(|targets| wsl_relay::cached_default_relay_available(&targets));
-            let probe_wsl = retry_allowed && !relay_ready;
-            (
-                discover_runtime_targets_resilient_with_overrides(&overrides, &cache, probe_wsl),
-                probe_wsl,
-            )
+            let cached = cache.load().unwrap_or_default();
+            let relay_ready =
+                cfg!(target_os = "windows") && wsl_relay::cached_default_relay_available(&cached);
+            if retry_allowed && relay_ready {
+                let mut outcome =
+                    discover_runtime_targets_resilient_with_overrides(&overrides, &cache, false);
+                if let Ok(discovered) = wsl_relay::discover_targets_via_cached_relays(&cached) {
+                    // Replace only automatic/cached WSL entries. User-configured
+                    // targets remain available even if their executable is not
+                    // currently on the login shell PATH.
+                    outcome.targets.retain(|target| {
+                        target.execution_host.kind != "wsl"
+                            || target.source.as_deref() == Some("configured-ui")
+                    });
+                    outcome.targets.extend(discovered.iter().cloned());
+                    let mut seen = HashSet::new();
+                    outcome
+                        .targets
+                        .retain(|target| seen.insert(target.id.clone()));
+                    outcome.wsl_probe_succeeded = true;
+                    let _ = cache.save(&discovered);
+                }
+                return (outcome, true);
+            }
+            let probe_wsl = retry_allowed;
+            let outcome =
+                discover_runtime_targets_resilient_with_overrides(&overrides, &cache, probe_wsl);
+            (outcome, probe_wsl)
         })
         .await
         .map_err(|error| HostError::new("discovery-failed", error.to_string()))?;

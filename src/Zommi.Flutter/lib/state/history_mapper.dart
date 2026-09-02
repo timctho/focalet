@@ -100,10 +100,11 @@ TranscriptBlock? _historyBlock(Map<String, Object?> item, String? cwd) {
       return _toolBlock(
         id,
         'Command',
-        [item['command'], item['aggregatedOutput']],
+        [item['aggregatedOutput']],
         lifecycle,
         status,
         artifacts,
+        preview: item['command']?.toString() ?? '',
       );
     case 'fileChange':
       final changes = mapList(item['changes'])
@@ -188,8 +189,9 @@ TranscriptBlock _toolBlock(
   List<Object?> values,
   TranscriptLifecycle lifecycle,
   String? status,
-  List<ArtifactPreview> artifacts,
-) => TranscriptBlock(
+  List<ArtifactPreview> artifacts, {
+  String preview = '',
+}) => TranscriptBlock(
   id: id,
   kind: TranscriptKind.tool,
   title: title,
@@ -199,6 +201,7 @@ TranscriptBlock _toolBlock(
       .join('\n'),
   lifecycle: lifecycle,
   status: status,
+  preview: preview,
   expanded: false,
   artifacts: artifacts,
 );

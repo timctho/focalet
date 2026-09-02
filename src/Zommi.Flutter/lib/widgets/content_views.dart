@@ -34,13 +34,9 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
 
   @override
   Widget build(BuildContext context) {
-    final base = DefaultTextStyle.of(context).style.copyWith(
-      color: const Color(0xff272b38),
-      fontSize: widget.compact ? userMessageFontSize : assistantMessageFontSize,
-      height: 1.38,
-      fontFamily: codexUiFontFamily,
-      fontFamilyFallback: codexUiFontFallback,
-    );
+    final base = DefaultTextStyle.of(context).style
+        .merge(topBarAndChatTextStyle)
+        .copyWith(color: const Color(0xff272b38), height: 1.38);
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
@@ -58,7 +54,10 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
                 onTapLink: (_, href, _) {
                   if (href != null) unawaited(widget.onOpenLink(href));
                 },
-                builders: {'pre': _CodeBlockBuilder(onCopy: widget.onCopy)},
+                builders: {
+                  'pre': _CodeBlockBuilder(onCopy: widget.onCopy),
+                  'a': _TooltipLinkBuilder(onOpen: widget.onOpenLink),
+                },
                 styleSheet: MarkdownStyleSheet(
                   p: base,
                   h1: base.copyWith(
@@ -135,6 +134,44 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
   }
 }
 
+final class _TooltipLinkBuilder extends MarkdownElementBuilder {
+  _TooltipLinkBuilder({required this.onOpen});
+
+  final Future<void> Function(String value) onOpen;
+
+  @override
+  Widget visitElementAfterWithContext(
+    BuildContext context,
+    md.Element element,
+    TextStyle? preferredStyle,
+    TextStyle? parentStyle,
+  ) {
+    final destination = element.attributes['href'] ?? '';
+    return Tooltip(
+      key: ValueKey('markdown-link-$destination'),
+      message: destination,
+      waitDuration: const Duration(milliseconds: 350),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: destination.isEmpty
+              ? null
+              : () => unawaited(onOpen(destination)),
+          child: Text(
+            element.textContent,
+            style: (preferredStyle ?? parentStyle ?? topBarAndChatTextStyle)
+                .copyWith(
+                  color: const Color(0xff5d54a4),
+                  decoration: TextDecoration.underline,
+                ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 final class _CodeBlockBuilder extends MarkdownElementBuilder {
   _CodeBlockBuilder({required this.onCopy});
 
@@ -183,7 +220,7 @@ class _CopyableCodeBlockState extends State<_CopyableCodeBlock> {
                 style: const TextStyle(
                   color: Color(0xff272b38),
                   fontFamily: 'monospace',
-                  fontSize: 11.5,
+                  fontSize: chatCodeFontSize,
                   height: 1.35,
                 ),
               ),

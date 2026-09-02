@@ -1269,6 +1269,12 @@ fn parse_stream_update(
         status,
         false,
     );
+    if item_type == "commandExecution" {
+        let command = value_string(item.get("command"));
+        if !command.is_empty() {
+            value["preview"] = Value::String(command);
+        }
+    }
     if !artifacts.is_empty() {
         value["artifacts"] = Value::Array(artifacts);
     }
@@ -1534,5 +1540,17 @@ mod tests {
             .expect("tool output")["kind"],
             "toolOutput"
         );
+        let command = parse_stream_update(
+            "item/completed",
+            &json!({"item": {
+                "id": "c", "type": "commandExecution", "status": "completed",
+                "command": "cargo test --workspace", "aggregatedOutput": "ok"
+            }}),
+            &kinds,
+            None,
+        )
+        .expect("completed command");
+        assert_eq!(command["preview"], "cargo test --workspace");
+        assert_eq!(command["text"], "ok");
     }
 }

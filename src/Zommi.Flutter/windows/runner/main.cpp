@@ -35,10 +35,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);
-  // Dart applies the final monitor anchor before showing the window. Keep the
-  // hidden bootstrap surface compact so no template-sized backing frame can
-  // leak if Windows composites during setup.
-  Win32Window::Size size(56, 56);
+  // The taskbar-first UI starts as the complete chat surface; there is no
+  // compact orb bootstrap frame to morph away from.
+  Win32Window::Size size(720, 620);
   if (!window.Create(L"Zommi", origin, size)) {
     if (instance_mutex != nullptr) {
       ReleaseMutex(instance_mutex);

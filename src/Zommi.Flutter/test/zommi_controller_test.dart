@@ -245,9 +245,10 @@ void main() {
 
     expect(observations.first.$1, 1);
     expect(observations.first.$2, isNot(contains('showPanel')));
+    expect(desktop.calls, contains('showPanel'));
     expect(
-      desktop.calls,
-      containsAllInOrder(['surface:true:false', 'showPanel']),
+      desktop.calls.where((call) => call == 'surface:false:false'),
+      isEmpty,
     );
     expect(controller.attachments.single.token, '[example.com]');
     expect(desktop.surfaceAnimations, everyElement(isFalse));
@@ -255,42 +256,33 @@ void main() {
   });
 
   test(
-    'full chat stays unmounted until each surface transition completes',
+    'taskbar chat stays expanded while large-window resize completes',
     () async {
       final core = RichFakeCore()..historyCount = 0;
       final desktop = FakeDesktopBridge();
       final controller = ZommiController(core: core, desktop: desktop);
       await controller.initialize();
 
-      final expandGate = Completer<void>();
-      desktop.surfaceGate = expandGate.future;
-      final expansion = controller.setExpanded(true, focus: true);
+      expect(controller.expanded, isTrue);
+      await controller.setExpanded(true, focus: true);
+      expect(controller.focusComposerEpoch, 1);
+      expect(desktop.calls, contains('showPanel'));
+
+      final resizeGate = Completer<void>();
+      desktop.surfaceGate = resizeGate.future;
+      final resize = controller.toggleLargePanel();
       await Future<void>.delayed(Duration.zero);
       expect(controller.surfaceTransitioning, isTrue);
       expect(controller.surfaceTransitionAnimating, isTrue);
       expect(controller.transitionTargetExpanded, isTrue);
-      expect(controller.expanded, isFalse);
-      expect(controller.focusComposerEpoch, 0);
-
-      expandGate.complete();
-      await expansion;
-      expect(controller.surfaceTransitioning, isFalse);
-      expect(controller.expanded, isTrue);
-      expect(controller.focusComposerEpoch, 1);
-
-      final collapseGate = Completer<void>();
-      desktop.surfaceGate = collapseGate.future;
-      final collapse = controller.setExpanded(false);
-      await Future<void>.delayed(Duration.zero);
-      expect(controller.surfaceTransitioning, isTrue);
-      expect(controller.surfaceTransitionAnimating, isTrue);
-      expect(controller.transitionTargetExpanded, isFalse);
+      expect(controller.transitionTargetLarge, isTrue);
       expect(controller.expanded, isTrue);
 
-      collapseGate.complete();
-      await collapse;
+      resizeGate.complete();
+      await resize;
       expect(controller.surfaceTransitioning, isFalse);
-      expect(controller.expanded, isFalse);
+      expect(controller.expanded, isTrue);
+      expect(controller.largePanel, isTrue);
       await controller.close();
     },
   );
@@ -570,30 +562,27 @@ void main() {
     await controller.close();
   });
 
-  test(
-    'runtime switching keeps the global orb activity signal alive',
-    () async {
-      final core = RichFakeCore()..historyCount = 0;
-      final controller = ZommiController(
-        core: core,
-        desktop: FakeDesktopBridge(),
-      );
-      await controller.initialize();
-      final gate = Completer<void>();
-      core.connectGate = gate.future;
+  test('runtime switching keeps the global activity signal alive', () async {
+    final core = RichFakeCore()..historyCount = 0;
+    final controller = ZommiController(
+      core: core,
+      desktop: FakeDesktopBridge(),
+    );
+    await controller.initialize();
+    final gate = Completer<void>();
+    core.connectGate = gate.future;
 
-      final switching = controller.selectRuntime('runtime-pi');
-      await Future<void>.delayed(Duration.zero);
-      expect(controller.runtimeBusy, isTrue);
-      expect(controller.orbWorking, isTrue);
+    final switching = controller.selectRuntime('runtime-pi');
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.runtimeBusy, isTrue);
+    expect(controller.anyTurnActive || controller.runtimeBusy, isTrue);
 
-      gate.complete();
-      await switching;
-      expect(controller.runtimeBusy, isFalse);
-      expect(controller.orbWorking, isFalse);
-      await controller.close();
-    },
-  );
+    gate.complete();
+    await switching;
+    expect(controller.runtimeBusy, isFalse);
+    expect(controller.anyTurnActive || controller.runtimeBusy, isFalse);
+    await controller.close();
+  });
 
   test('undetected runtime targets are excluded from the main list', () async {
     final core = RichFakeCore()..historyCount = 0;

@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+
 const String codexUiFontFamily = 'packages/fossui/Geist';
 const List<String> codexUiFontFallback = [
   'Geist',
@@ -6,8 +8,15 @@ const List<String> codexUiFontFallback = [
   'Arial',
 ];
 
-const double topBarAndChatFontSize = 11;
+const double topBarAndChatFontSize = 12;
 const double userMessageFontSize = topBarAndChatFontSize;
 const double assistantMessageFontSize = topBarAndChatFontSize;
-const double chatCodeFontSize = 11;
-const double compactChatCodeFontSize = 11;
+const double chatCodeFontSize = topBarAndChatFontSize;
+const double compactChatCodeFontSize = topBarAndChatFontSize;
+
+const TextStyle topBarAndChatTextStyle = TextStyle(
+  fontFamily: codexUiFontFamily,
+  fontFamilyFallback: codexUiFontFallback,
+  fontSize: topBarAndChatFontSize,
+  height: 1.35,
+);

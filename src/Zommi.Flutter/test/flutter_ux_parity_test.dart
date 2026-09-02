@@ -20,218 +20,77 @@ const _onePixelPng =
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
 void main() {
-  testWidgets('startup orb has visible motion until runtime is ready', (
-    tester,
-  ) async {
-    await tester.binding.setSurfaceSize(const Size(240, 180));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    final startup = Completer<void>();
-    final core = RichFakeCore()
-      ..historyCount = 0
-      ..initializeGate = startup.future;
-    await tester.pumpWidget(ZommiApp(core: core, desktop: FakeDesktopBridge()));
-    await tester.pump();
-
-    expect(tester.widget<ZommiOrb>(find.byType(ZommiOrb)).loading, isTrue);
-    final canvas = find.byKey(const ValueKey('zommi-orb-canvas'));
-    final firstPainter = tester.widget<CustomPaint>(canvas).painter;
-    await tester.pump(const Duration(milliseconds: 180));
-    final secondPainter = tester.widget<CustomPaint>(canvas).painter;
-    expect(secondPainter, isNot(same(firstPainter)));
-    expect(secondPainter!.shouldRepaint(firstPainter!), isTrue);
-
-    startup.complete();
-    await tester.pumpAndSettle();
-    expect(tester.widget<ZommiOrb>(find.byType(ZommiOrb)).loading, isFalse);
-  });
-
-  testWidgets('native resize renders only the lightweight morph surface', (
-    tester,
-  ) async {
-    final core = RichFakeCore()..historyCount = 0;
-    final desktop = FakeDesktopBridge();
-    await _pumpApp(tester, core: core, desktop: desktop);
-    final resizeGate = Completer<void>();
-    desktop.surfaceGate = resizeGate.future;
-
-    await tester.tap(find.byKey(const ValueKey('zommi-orb')));
-    await tester.pump();
-    expect(find.byKey(const ValueKey('surface-transition')), findsOneWidget);
-    expect(
-      tester.getSize(find.byKey(const ValueKey('surface-transition'))),
-      normalWindowSize,
-    );
-    expect(
-      find.byKey(const ValueKey('surface-transition-orb')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const ValueKey('surface-transition-panel')),
-      findsNothing,
-    );
-    expect(find.byType(ZommiOrb), findsOneWidget);
-    expect(find.byKey(const ValueKey('zommi-transcript')), findsNothing);
-    expect(find.byKey(const ValueKey('zommi-composer')), findsNothing);
-    expect(
-      tester.getSize(find.byKey(const ValueKey('zommi-surface'))),
-      const Size(expandedPanelWidth, expandedPanelHeight),
-    );
-
-    resizeGate.complete();
-    await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('surface-transition')), findsNothing);
-    expect(find.byKey(const ValueKey('zommi-composer')), findsOneWidget);
-    expect(desktop.surfaceAnimations, everyElement(isFalse));
-  });
-
   testWidgets(
-    'orb remains on the bottom-centre anchor while native growth is pending',
-    (tester) async {
-      await tester.binding.setSurfaceSize(compactWindowSize);
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      final core = RichFakeCore()..historyCount = 0;
-      final desktop = FakeDesktopBridge();
-      await tester.pumpWidget(ZommiApp(core: core, desktop: desktop));
-      await tester.pumpAndSettle();
-      final resizeGate = Completer<void>();
-      desktop.surfaceGate = resizeGate.future;
-
-      await tester.tap(find.byKey(const ValueKey('zommi-orb')));
-      await tester.pump();
-
-      final viewport = tester.getRect(find.byType(Scaffold));
-      final orb = tester.getRect(
-        find.byKey(const ValueKey('surface-transition-orb')),
-      );
-      expect(orb.size, compactWindowSize);
-      expect(orb.center.dx, closeTo(viewport.center.dx, 0.01));
-      expect(orb.bottom, closeTo(viewport.bottom, 0.01));
-
-      resizeGate.complete();
-      await tester.pumpAndSettle();
-    },
-  );
-
-  testWidgets(
-    'collapsed morph remains anchored while native shrink is pending',
+    'startup uses a full taskbar window with a clear progress indicator',
     (tester) async {
       await tester.binding.setSurfaceSize(normalWindowSize);
       addTearDown(() => tester.binding.setSurfaceSize(null));
-      final core = RichFakeCore()..historyCount = 0;
-      final desktop = FakeDesktopBridge();
-      await tester.pumpWidget(ZommiApp(core: core, desktop: desktop));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('zommi-orb')));
-      await tester.pumpAndSettle();
-
-      final shrinkGate = Completer<void>();
-      desktop.surfaceGate = shrinkGate.future;
-      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-      addTearDown(mouse.removePointer);
-      await mouse.addPointer(location: normalWindowSize.center(Offset.zero));
-      await mouse.moveTo(const Offset(-10, -10));
-      await tester.pump(hoverCollapseDelay);
-      await tester.pump(surfaceTransitionDuration);
-      await tester.binding.setSurfaceSize(compactWindowSize);
+      final startup = Completer<void>();
+      final core = RichFakeCore()
+        ..historyCount = 0
+        ..initializeGate = startup.future;
+      await tester.pumpWidget(
+        ZommiApp(core: core, desktop: FakeDesktopBridge()),
+      );
       await tester.pump();
 
-      final viewport = tester.getRect(find.byType(Scaffold));
-      final orb = tester.getRect(
-        find.byKey(const ValueKey('surface-transition-orb')),
-      );
-      expect(orb.size, compactWindowSize);
-      expect(orb.center.dx, closeTo(viewport.center.dx, 0.01));
-      expect(orb.bottom, closeTo(viewport.bottom, 0.01));
-
-      shrinkGate.complete();
-      await tester.pumpAndSettle();
-    },
-  );
-
-  testWidgets(
-    'synthetic resize exit cannot collapse under a stationary pointer',
-    (tester) async {
-      final core = RichFakeCore()..historyCount = 0;
-      final desktop = FakeDesktopBridge()..pointerWithinSurface = true;
-      await _pumpApp(tester, core: core, desktop: desktop);
-
-      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-      addTearDown(mouse.removePointer);
-      await mouse.addPointer(location: Offset.zero);
-      await mouse.moveTo(
-        tester.getCenter(find.byKey(const ValueKey('zommi-surface'))),
-      );
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('zommi-composer')), findsOneWidget);
-
-      // This exit models the event Win32 sends when the frameless window is
-      // resized around a pointer that did not physically leave the surface.
-      await mouse.moveTo(const Offset(-10, -10));
-      await tester.pump(hoverCollapseDelay);
-      await tester.pumpAndSettle();
-
-      expect(desktop.calls, contains('isPointerWithinSurface'));
+      expect(find.byKey(const ValueKey('zommi-orb')), findsNothing);
+      expect(find.byKey(const ValueKey('loading-indicator')), findsOneWidget);
       expect(find.byKey(const ValueKey('zommi-composer')), findsOneWidget);
       expect(
         tester.getSize(find.byKey(const ValueKey('zommi-surface'))),
         normalWindowSize,
       );
+
+      startup.complete();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('loading-indicator')), findsNothing);
     },
   );
 
-  testWidgets(
-    'forward and reverse bloom layers are symmetric without a growing box',
-    (tester) async {
-      final core = RichFakeCore()..historyCount = 0;
-      await _pumpApp(tester, core: core, desktop: FakeDesktopBridge());
+  testWidgets('hovering away never collapses the taskbar chat into an orb', (
+    tester,
+  ) async {
+    final desktop = FakeDesktopBridge();
+    await _pumpApp(
+      tester,
+      core: RichFakeCore()..historyCount = 0,
+      desktop: desktop,
+    );
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(mouse.removePointer);
+    await mouse.addPointer(location: normalWindowSize.center(Offset.zero));
+    await mouse.moveTo(const Offset(-10, -10));
+    await tester.pump(const Duration(seconds: 1));
 
-      await tester.tap(find.byKey(const ValueKey('zommi-orb')));
-      await tester.pump();
-      final forward = <_SurfaceLayerFrame>[];
-      for (var quarter = 1; quarter <= 3; quarter++) {
-        await tester.pump(surfaceTransitionDuration * 0.25);
-        forward.add(_surfaceLayerFrame(tester));
-      }
-      await tester.pump(surfaceTransitionDuration * 0.25);
-      await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('zommi-orb')), findsNothing);
+    expect(find.byKey(const ValueKey('zommi-composer')), findsOneWidget);
+    expect(
+      desktop.calls.where((call) => call == 'surface:false:false'),
+      isEmpty,
+    );
+  });
 
-      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-      addTearDown(mouse.removePointer);
-      await mouse.addPointer(location: Offset.zero);
-      await mouse.moveTo(
-        tester.getCenter(find.byKey(const ValueKey('zommi-surface'))),
-      );
-      await tester.pump();
-      await mouse.moveTo(const Offset(5, 5));
-      await tester.pump(hoverCollapseDelay);
-      final reverse = <_SurfaceLayerFrame>[];
-      for (var quarter = 1; quarter <= 3; quarter++) {
-        await tester.pump(surfaceTransitionDuration * 0.25);
-        reverse.add(_surfaceLayerFrame(tester));
-      }
+  testWidgets('native resizing keeps the same transcript element mounted', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(normalWindowSize);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final core = RichFakeCore()..historyCount = 24;
+    await tester.pumpWidget(ZommiApp(core: core, desktop: FakeDesktopBridge()));
+    await tester.pumpAndSettle();
+    final transcript = tester.element(find.byType(TranscriptPane));
 
-      for (var index = 0; index < forward.length; index++) {
-        final matchingReverse = reverse[reverse.length - index - 1];
-        final frame = forward[index];
-        expect(frame.transitionSize, normalWindowSize);
-        expect(matchingReverse.transitionSize, frame.transitionSize);
-        expect(matchingReverse.orbOpacity, closeTo(frame.orbOpacity, 0.000001));
-        expect(matchingReverse.orbScale, closeTo(frame.orbScale, 0.000001));
-        expect(
-          matchingReverse.panelOpacity,
-          closeTo(frame.panelOpacity, 0.000001),
-        );
-        expect(matchingReverse.panelScale, closeTo(frame.panelScale, 0.000001));
-      }
-      expect(forward.first.orbOpacity, greaterThan(0.95));
-      expect(forward.first.panelOpacity, lessThan(0.05));
-      expect(forward.last.orbOpacity, lessThan(0.05));
-      expect(forward.last.panelOpacity, greaterThan(0.95));
+    await tester.binding.setSurfaceSize(largeWindowSize);
+    await tester.pump();
 
-      await tester.pump(surfaceTransitionDuration * 0.25);
-      await tester.pumpAndSettle();
-    },
-  );
+    expect(
+      identical(tester.element(find.byType(TranscriptPane)), transcript),
+      isTrue,
+    );
+    expect(find.byKey(const ValueKey('surface-transition')), findsNothing);
+    expect(find.byKey(const ValueKey('zommi-orb')), findsNothing);
+  });
 
   testWidgets('single-line and fenced markdown copy controls never overlap', (
     tester,
@@ -302,9 +161,10 @@ void main() {
         find.byKey(const ValueKey('inline-attachment-capture-1')),
         findsOneWidget,
       );
+      expect(desktop.calls, contains('showPanel'));
       expect(
-        desktop.calls,
-        containsAllInOrder(['surface:true:false', 'showPanel']),
+        desktop.calls.where((call) => call == 'surface:false:false'),
+        isEmpty,
       );
       expect(
         tester
@@ -522,8 +382,11 @@ void main() {
       final sessionPanelSize = tester.getSize(
         find.byKey(const ValueKey('session-sidebar')),
       );
-      expect(sessionPanelSize.width, expandedPanelWidth / 2);
-      expect(sessionPanelSize.height, expandedPanelHeight - 72);
+      final surfaceSize = tester.getSize(
+        find.byKey(const ValueKey('zommi-surface')),
+      );
+      expect(sessionPanelSize.width, surfaceSize.width / 2);
+      expect(sessionPanelSize.height, surfaceSize.height - 72);
       await tester.tap(find.byKey(const ValueKey('session-session-2')));
       await tester.pumpAndSettle();
       expect(core.activeSessionId, 'session-2');
@@ -613,14 +476,16 @@ void main() {
     await _pumpApp(tester, core: core, desktop: desktop);
     await _expand(tester);
     desktop.calls.clear();
+    final transcript = tester.element(find.byType(TranscriptPane));
 
     await tester.tap(find.byKey(const ValueKey('expand-zommi')));
     await tester.pumpAndSettle();
-    expect(
-      tester.getSize(find.byKey(const ValueKey('zommi-surface'))),
-      largeWindowSize,
-    );
     expect(desktop.calls, contains('surface:true:true'));
+    expect(
+      identical(tester.element(find.byType(TranscriptPane)), transcript),
+      isTrue,
+    );
+    expect(find.byKey(const ValueKey('surface-transition')), findsNothing);
 
     desktop.emit(const DesktopInvocation(kind: DesktopInvocationKind.open));
     await tester.pumpAndSettle();
@@ -634,8 +499,8 @@ void main() {
     );
     expect(desktop.calls, isNot(contains('surface:true:false')));
     expect(
-      tester.getSize(find.byKey(const ValueKey('zommi-surface'))),
-      largeWindowSize,
+      identical(tester.element(find.byType(TranscriptPane)), transcript),
+      isTrue,
     );
   });
 
@@ -704,19 +569,33 @@ void main() {
       expect(assistantMessageBoxWidth, 620 * 0.8);
       expect(userBox.constraints?.maxWidth, userMessageBoxWidth);
       expect(assistantBox.constraints?.maxWidth, assistantMessageBoxWidth);
-      final assistantMarkdown = tester.widget<MarkdownBody>(
-        find.descendant(
-          of: find.byKey(const ValueKey('assistant-answer')),
-          matching: find.byType(MarkdownBody),
-        ),
-      );
-      assistantMarkdown.onTapLink!(
-        'Open site',
-        'https://example.com/item?q=1',
-        '',
-      );
+      const linkUrl = 'https://example.com/item?q=1';
+      final link = find.byKey(const ValueKey('markdown-link-$linkUrl'));
+      expect(link, findsOneWidget);
+      expect(find.byTooltip(linkUrl), findsOneWidget);
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      addTearDown(mouse.removePointer);
+      await mouse.addPointer(location: Offset.zero);
+      await mouse.moveTo(tester.getCenter(link));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text(linkUrl), findsOneWidget);
+      await tester.tap(link);
       await tester.pump();
-      expect(desktop.openedUrl, Uri.parse('https://example.com/item?q=1'));
+      expect(desktop.openedUrl, Uri.parse(linkUrl));
+      expect(
+        tester
+            .widget<TextButton>(
+              find.descendant(
+                of: find.byKey(const ValueKey('runtime-summary')),
+                matching: find.byType(TextButton),
+              ),
+            )
+            .style
+            ?.textStyle
+            ?.resolve(const <WidgetState>{})
+            ?.fontFamily,
+        codexUiFontFamily,
+      );
     },
   );
 
@@ -734,7 +613,7 @@ void main() {
     await tester.pump();
 
     expect(find.byKey(const ValueKey('panel-orb')), findsNothing);
-    expect(find.byType(ZommiOrb), findsNothing);
+    expect(find.byKey(const ValueKey('zommi-orb')), findsNothing);
     expect(find.byKey(const ValueKey('stop-turn')), findsOneWidget);
   });
 
@@ -768,6 +647,26 @@ void main() {
       hasLength(1),
     );
     expect(distinct.last, blocks.last);
+  });
+
+  test('folding activity does not look like new transcript content', () {
+    final block = TranscriptBlock(
+      id: 'command-1',
+      kind: TranscriptKind.tool,
+      title: 'Command',
+      text: 'output',
+      preview: '12345678901234567890EXTRA',
+      expanded: false,
+    );
+    final turn = ConversationTurn(
+      id: 'turn-1',
+      userText: 'run',
+      blocks: [block],
+    );
+    final before = transcriptContentRevision([turn]);
+    block.expanded = true;
+    expect(transcriptContentRevision([turn]), before);
+    expect(activityBlockTitle(block), 'Command · 12345678901234567890...');
   });
 
   testWidgets(
@@ -925,6 +824,7 @@ void main() {
             'lifecycle': 'completed',
             'title': 'Command',
             'text': 'rg selected',
+            'preview': '12345678901234567890EXTRA',
             'itemId': 'tool-1',
           },
         ),
@@ -960,47 +860,36 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 200));
 
-      expect(
-        find.byKey(const ValueKey('activity-turn-thinking')),
-        findsOneWidget,
-      );
-      expect(find.byKey(const ValueKey('activity-tool-1')), findsOneWidget);
-      final thinkingFold = find.descendant(
-        of: find.byKey(const ValueKey('activity-turn-thinking')),
-        matching: find.byKey(const ValueKey('thinking-fold')),
-      );
-      final toolFold = find.descendant(
-        of: find.byKey(const ValueKey('activity-tool-1')),
-        matching: find.byType(AnimatedCrossFade),
-      );
-      expect(
-        tester.widget<AnimatedCrossFade>(thinkingFold).crossFadeState,
-        CrossFadeState.showFirst,
-      );
-      expect(
-        tester.widget<AnimatedCrossFade>(toolFold).crossFadeState,
-        CrossFadeState.showFirst,
-      );
+      final thinkingCard = find.byKey(const ValueKey('activity-turn-thinking'));
+      expect(thinkingCard, findsOneWidget);
+      expect(find.byKey(const ValueKey('activity-tool-1')), findsNothing);
+      expect(find.byType(AnimatedCrossFade), findsNothing);
       expect(
         find.descendant(
-          of: find.byKey(const ValueKey('activity-turn-thinking')),
-          matching: find.byKey(const ValueKey('activity-tool-1')),
+          of: thinkingCard,
+          matching: find.byKey(const ValueKey('thinking-fold')),
         ),
         findsOneWidget,
       );
-      final thinkingCard = find.byKey(const ValueKey('activity-turn-thinking'));
+      expect(tester.getSize(thinkingCard).width, assistantMessageBoxWidth);
       await tester.ensureVisible(thinkingCard);
       await tester.pumpAndSettle();
       await expectLater(
         thinkingCard,
         matchesGoldenFile('goldens/thinking_tools_collapsed.png'),
       );
+
       await tester.tap(find.byKey(const ValueKey('thinking-toggle')));
       await tester.pumpAndSettle();
+
+      final toolCard = find.byKey(const ValueKey('activity-tool-1'));
+      expect(toolCard, findsOneWidget);
       expect(
-        tester.widget<AnimatedCrossFade>(thinkingFold).crossFadeState,
-        CrossFadeState.showSecond,
+        find.descendant(of: toolCard, matching: find.byType(AnimatedSize)),
+        findsOneWidget,
       );
+      expect(find.text('Command · 12345678901234567890...'), findsOneWidget);
+      expect(find.text('Reading the selected table.'), findsOneWidget);
       await expectLater(
         thinkingCard,
         matchesGoldenFile('goldens/thinking_tools_expanded.png'),
@@ -1188,39 +1077,66 @@ void main() {
     },
   );
 
-  testWidgets(
-    'compact orb stays active while any background session is running',
-    (tester) async {
-      final core = RichFakeCore()..historyCount = 0;
-      await _pumpApp(tester, core: core, desktop: FakeDesktopBridge());
+  testWidgets('background work never replaces the taskbar chat with an orb', (
+    tester,
+  ) async {
+    final core = RichFakeCore()..historyCount = 0;
+    await _pumpApp(tester, core: core, desktop: FakeDesktopBridge());
 
-      core.emit(
-        _event(
-          1,
-          'turn.started',
-          runtimeTargetId: 'runtime-pi',
-          sessionId: 'pi-background',
-          turnId: 'background-turn',
-          payload: const {'status': 'inProgress'},
-        ),
-      );
-      await tester.pump();
-      expect(tester.widget<ZommiOrb>(find.byType(ZommiOrb)).working, isTrue);
+    core.emit(
+      _event(
+        1,
+        'turn.started',
+        runtimeTargetId: 'runtime-pi',
+        sessionId: 'pi-background',
+        turnId: 'background-turn',
+        payload: const {'status': 'inProgress'},
+      ),
+    );
+    await tester.pump();
+    expect(find.byKey(const ValueKey('zommi-orb')), findsNothing);
+    expect(find.byKey(const ValueKey('zommi-composer')), findsOneWidget);
 
-      core.emit(
-        _event(
-          2,
-          'turn.completed',
-          runtimeTargetId: 'runtime-pi',
-          sessionId: 'pi-background',
-          turnId: 'background-turn',
-          payload: const {'status': 'completed'},
-        ),
-      );
-      await tester.pump();
-      expect(tester.widget<ZommiOrb>(find.byType(ZommiOrb)).working, isFalse);
-    },
-  );
+    core.emit(
+      _event(
+        2,
+        'turn.completed',
+        runtimeTargetId: 'runtime-pi',
+        sessionId: 'pi-background',
+        turnId: 'background-turn',
+        payload: const {'status': 'completed'},
+      ),
+    );
+    await tester.pump();
+    expect(find.byKey(const ValueKey('zommi-orb')), findsNothing);
+    expect(find.byKey(const ValueKey('zommi-composer')), findsOneWidget);
+  });
+
+  testWidgets('growing the window does not auto-scroll the transcript', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(normalWindowSize);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final core = RichFakeCore()..historyCount = 50;
+    await tester.pumpWidget(ZommiApp(core: core, desktop: FakeDesktopBridge()));
+    await tester.pumpAndSettle();
+    final transcript = find.byKey(const ValueKey('zommi-transcript'));
+    await tester.drag(transcript, const Offset(0, 1800));
+    await tester.pumpAndSettle();
+    final position = tester.widget<ListView>(transcript).controller!.position;
+    expect(position.maxScrollExtent - position.pixels, greaterThan(36));
+    final before = position.pixels;
+    final pane = tester.element(find.byType(TranscriptPane));
+
+    await tester.binding.setSurfaceSize(largeWindowSize);
+    await tester.pumpAndSettle();
+
+    expect(
+      identical(tester.element(find.byType(TranscriptPane)), pane),
+      isTrue,
+    );
+    expect(position.pixels, closeTo(before, 0.01));
+  });
 
   testWidgets(
     'background completion becomes unread and exact interruption is preserved',
@@ -1295,50 +1211,7 @@ Future<void> _pumpApp(
 }
 
 Future<void> _expand(WidgetTester tester) async {
-  await tester.tap(find.byKey(const ValueKey('zommi-orb')));
   await tester.pumpAndSettle();
-}
-
-_SurfaceLayerFrame _surfaceLayerFrame(
-  WidgetTester tester,
-) => _SurfaceLayerFrame(
-  transitionSize: tester.getSize(
-    find.byKey(const ValueKey('surface-transition')),
-  ),
-  orbOpacity: tester
-      .widget<Opacity>(
-        find.byKey(const ValueKey('surface-transition-orb-opacity')),
-      )
-      .opacity,
-  orbScale: tester
-      .widget<Transform>(find.byKey(const ValueKey('surface-transition-orb')))
-      .transform
-      .storage[0],
-  panelOpacity: tester
-      .widget<Opacity>(
-        find.byKey(const ValueKey('surface-transition-panel-opacity')),
-      )
-      .opacity,
-  panelScale: tester
-      .widget<Transform>(find.byKey(const ValueKey('surface-transition-panel')))
-      .transform
-      .storage[0],
-);
-
-final class _SurfaceLayerFrame {
-  const _SurfaceLayerFrame({
-    required this.transitionSize,
-    required this.orbOpacity,
-    required this.orbScale,
-    required this.panelOpacity,
-    required this.panelScale,
-  });
-
-  final Size transitionSize;
-  final double orbOpacity;
-  final double orbScale;
-  final double panelOpacity;
-  final double panelScale;
 }
 
 void _appendComposerText(WidgetTester tester, String value) {

@@ -811,12 +811,31 @@ fn detect_wsl_runtimes(
     default_name: Option<&str>,
     environment: &HashMap<String, String>,
 ) -> Option<Vec<RuntimeTarget>> {
+    let script = wsl_runtime_probe_script();
+    let output = run_command(
+        "wsl.exe",
+        &["-d", distribution, "-e", "sh", "-lc", &script],
+        Some(environment),
+    );
+    output.map(|output| {
+        runtime_targets_from_wsl_probe(
+            distribution,
+            default_name.is_some_and(|name| name.eq_ignore_ascii_case(distribution)),
+            &output,
+        )
+    })
+}
+
+/// Produces the shell command used by both the direct WSL probe and the
+/// persistent authenticated relay. Keeping one probe format prevents the
+/// relay fallback from silently discovering a different runtime catalog.
+pub fn wsl_runtime_probe_script() -> String {
     let executable_names = RUNTIME_CATALOG
         .iter()
         .map(|entry| format!("'{}'", entry.executable))
         .collect::<Vec<_>>()
         .join(" ");
-    let script = format!(
+    format!(
         "{}{}{}{}{}{}{}",
         "zommi_shell=$(getent passwd $(id -un) 2>/dev/null | cut -d: -f7); ",
         "[ -x \"$zommi_shell\" ] || zommi_shell=\"${SHELL:-/bin/sh}\"; ",
@@ -825,13 +844,17 @@ fn detect_wsl_runtimes(
         "for zommi_command in ",
         executable_names,
         "; do zommi_path=$(command -v -- \"$zommi_command\" 2>/dev/null || true); case \"$zommi_path\" in /*) printf \"__ZOMMI_RUNTIME_PATH__%s\\t%s\\n\" \"$zommi_command\" \"$zommi_path\" ;; esac; done'"
-    );
-    let output = run_command(
-        "wsl.exe",
-        &["-d", distribution, "-e", "sh", "-lc", &script],
-        Some(environment),
-    );
-    let output = output?;
+    )
+}
+
+/// Parses the stable probe protocol into all runtime targets exposed by one
+/// WSL distribution. This is intentionally public so the Windows host can
+/// reuse it after executing the probe through the persistent spool relay.
+pub fn runtime_targets_from_wsl_probe(
+    distribution: &str,
+    is_default: bool,
+    output: &[u8],
+) -> Vec<RuntimeTarget> {
     let output = normalize_command_output(&output);
     let home = output
         .lines()
@@ -841,24 +864,22 @@ fn detect_wsl_runtimes(
         kind: "wsl".into(),
         platform: "linux".into(),
         display_name: format!("WSL · {distribution}"),
-        is_default: default_name.is_some_and(|name| name.eq_ignore_ascii_case(distribution)),
+        is_default,
         name: Some(distribution.into()),
     };
-    Some(
-        output
-            .lines()
-            .filter_map(|line| line.strip_prefix("__ZOMMI_RUNTIME_PATH__"))
-            .filter_map(|line| line.split_once('\t'))
-            .filter(|(_, path)| path.starts_with('/'))
-            .flat_map(|(name, path)| {
-                RUNTIME_CATALOG
-                    .iter()
-                    .filter(|entry| entry.executable == name)
-                    .map(|entry| target_for(&host, path, entry, home, None))
-                    .collect::<Vec<_>>()
-            })
-            .collect(),
-    )
+    output
+        .lines()
+        .filter_map(|line| line.strip_prefix("__ZOMMI_RUNTIME_PATH__"))
+        .filter_map(|line| line.split_once('\t'))
+        .filter(|(_, path)| path.starts_with('/'))
+        .flat_map(|(name, path)| {
+            RUNTIME_CATALOG
+                .iter()
+                .filter(|entry| entry.executable == name)
+                .map(|entry| target_for(&host, path, entry, home, None))
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 fn run_command(
@@ -1090,8 +1111,8 @@ mod tests {
     use super::{
         ConfiguredRuntimeOverride, ExecutionHost, RuntimeDiscoveryCacheStore, RuntimeOverrideStore,
         RuntimeTarget, command_for_target, discover_runtime_targets_resilient_with,
-        discover_runtime_targets_with, runtime_discovery_settings, select_default_target,
-        target_from_override,
+        discover_runtime_targets_with, runtime_discovery_settings, runtime_targets_from_wsl_probe,
+        select_default_target, target_from_override, wsl_runtime_probe_script,
     };
 
     #[test]
@@ -1111,6 +1132,44 @@ mod tests {
         assert_eq!(first[0].adapter_id, "codex-app-server");
         assert_eq!(first[0].execution_host.id, "native:linux");
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn shared_wsl_probe_restores_every_detected_runtime() {
+        let script = wsl_runtime_probe_script();
+        for executable in ["codex", "pi", "hermes", "openclaw", "claude"] {
+            assert!(script.contains(&format!("'{executable}'")));
+        }
+        let targets = runtime_targets_from_wsl_probe(
+            "Ubuntu",
+            true,
+            b"__ZOMMI_RUNTIME_HOME__/home/u\n\
+              __ZOMMI_RUNTIME_PATH__codex\t/home/u/.local/bin/codex\n\
+              __ZOMMI_RUNTIME_PATH__pi\t/home/u/.local/bin/pi\n\
+              __ZOMMI_RUNTIME_PATH__hermes\t/home/u/.local/bin/hermes\n\
+              __ZOMMI_RUNTIME_PATH__openclaw\t/home/u/.local/bin/openclaw\n\
+              __ZOMMI_RUNTIME_PATH__claude\t/home/u/.local/bin/claude\n",
+        );
+        assert_eq!(targets.len(), 6, "Hermes exposes ACP and Gateway targets");
+        let adapters = targets
+            .iter()
+            .map(|target| target.adapter_id.as_str())
+            .collect::<std::collections::HashSet<_>>();
+        for adapter in [
+            "codex-app-server",
+            "pi-rpc",
+            "hermes-acp",
+            "hermes-gateway",
+            "openclaw-acp",
+            "pty-compatibility",
+        ] {
+            assert!(adapters.contains(adapter), "missing {adapter}");
+        }
+        assert!(targets.iter().all(|target| {
+            target.execution_host.is_default
+                && target.execution_host.name.as_deref() == Some("Ubuntu")
+                && target.runtime_home.as_deref() == Some("/home/u")
+        }));
     }
 
     #[test]

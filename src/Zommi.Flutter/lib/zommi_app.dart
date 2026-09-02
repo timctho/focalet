@@ -15,17 +15,11 @@ import 'package:zommi_flutter/widgets/transcript_view.dart';
 
 export 'package:zommi_flutter/theme/zommi_typography.dart';
 
-const double compactOrbSize = 56;
 const double expandedPanelWidth = 720;
 const double expandedPanelHeight = 620;
 const double bottomAnchorInset = windowBottomInset;
-const Duration hoverCollapseDelay = Duration(milliseconds: 500);
+const Duration sessionPanelHideDelay = Duration(milliseconds: 500);
 const Duration previewHideDelay = Duration(milliseconds: 260);
-const Duration orbMotionDuration = Duration(milliseconds: 1400);
-
-double synchronizedOrbPhase(DateTime now) =>
-    (now.microsecondsSinceEpoch % orbMotionDuration.inMicroseconds) /
-    orbMotionDuration.inMicroseconds;
 
 class ZommiApp extends StatelessWidget {
   const ZommiApp({
@@ -116,11 +110,9 @@ class _ZommiShellState extends State<ZommiShell> {
   final Object _runtimeTapGroup = Object();
   final Object _runtimeSetupTapGroup = Object();
   final Object _modelTapGroup = Object();
-  Timer? _collapseTimer;
   Timer? _previewTimer;
   Timer? _sessionTimer;
   int _lastFocusEpoch = 0;
-  bool _draggingWindow = false;
 
   @override
   void initState() {
@@ -154,7 +146,6 @@ class _ZommiShellState extends State<ZommiShell> {
 
   @override
   void dispose() {
-    _collapseTimer?.cancel();
     _previewTimer?.cancel();
     _sessionTimer?.cancel();
     _controller.removeListener(_onControllerChanged);
@@ -164,41 +155,8 @@ class _ZommiShellState extends State<ZommiShell> {
     super.dispose();
   }
 
-  Future<void> _expand({bool focus = true}) async {
-    _collapseTimer?.cancel();
-    await _controller.setExpanded(true, focus: focus);
-    if (focus && mounted) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _composerFocus.requestFocus();
-      });
-    }
-  }
-
-  void _scheduleCollapse() {
-    _collapseTimer?.cancel();
-    _collapseTimer = Timer(hoverCollapseDelay, () async {
-      if (!mounted || _draggingWindow) return;
-      // Resizing a frameless native window can emit a synthetic mouse exit
-      // even though the stationary pointer is still over the enlarged
-      // surface. Trust the current screen-space pointer position before
-      // collapsing so a hover expansion cannot close itself after 500 ms.
-      if (await widget.desktop.isPointerWithinSurface()) return;
-      if (!mounted || _draggingWindow) return;
-      _composerFocus.unfocus();
-      _controller.closeTransientPanels();
-      _controller.hideAttachmentPreview();
-      unawaited(_controller.setExpanded(false));
-    });
-  }
-
   Future<void> _startWindowDrag() async {
-    _collapseTimer?.cancel();
-    _draggingWindow = true;
-    try {
-      await _controller.startDragging();
-    } finally {
-      _draggingWindow = false;
-    }
+    await _controller.startDragging();
   }
 
   void _schedulePreviewClose() {
@@ -219,7 +177,7 @@ class _ZommiShellState extends State<ZommiShell> {
   void _scheduleSessionsClose() {
     _sessionTimer?.cancel();
     _sessionTimer = Timer(
-      hoverCollapseDelay,
+      sessionPanelHideDelay,
       () => _controller.toggleSessionPanel(false),
     );
   }
@@ -270,82 +228,19 @@ class _ZommiShellState extends State<ZommiShell> {
 
   @override
   Widget build(BuildContext context) {
-    final fromSize = zommiSurfaceSize(
-      expanded: _controller.expanded,
-      large: _controller.largePanel,
-    );
-    final toSize = zommiSurfaceSize(
-      expanded: _controller.transitionTargetExpanded,
-      large: _controller.transitionTargetLarge,
-    );
-    final renderExpanded =
-        _controller.expanded ||
-        (_controller.surfaceTransitioning &&
-            _controller.transitionTargetExpanded);
-    final renderLarge =
-        _controller.largePanel ||
-        (_controller.surfaceTransitioning && _controller.transitionTargetLarge);
-    final width = renderExpanded
-        ? (renderLarge ? largeWindowSize.width : expandedPanelWidth)
-        : compactOrbSize;
-    final height = renderExpanded
-        ? (renderLarge ? largeWindowSize.height : expandedPanelHeight)
-        : compactOrbSize;
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Focus(
         onKeyEvent: _handleKey,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Align(
-              // The native window grows upward from one bottom-centre anchor.
-              // Keep the Flutter surface on that same anchor even during the
-              // one frame where Win32 and Flutter have different sizes. If
-              // this is centred, the compact morph is clipped out before the
-              // enlarged backing surface arrives and appears to jump.
-              alignment: _controller.surfaceTransitioning
-                  ? Alignment.bottomCenter
-                  : Alignment.center,
-              child: MouseRegion(
-                onEnter: (_) => unawaited(_expand()),
-                onExit: (_) => _scheduleCollapse(),
-                child: SizedBox(
-                  key: const ValueKey('zommi-surface'),
-                  width: width,
-                  height: height,
-                  child: ClipRect(
-                    child: _controller.surfaceTransitioning
-                        ? _SurfaceTransitionView(
-                            fromSize: fromSize,
-                            toSize: toSize,
-                            animate: _controller.surfaceTransitionAnimating,
-                            working: _controller.orbWorking,
-                            loading: _controller.starting,
-                            panelSize: Size(width, height),
-                            panel: RepaintBoundary(
-                              child: _buildPanel(width, height),
-                            ),
-                          )
-                        : _controller.expanded
-                        ? OverflowBox(
-                            alignment: Alignment.center,
-                            minWidth: width,
-                            maxWidth: width,
-                            minHeight: height,
-                            maxHeight: height,
-                            child: _buildPanel(width, height),
-                          )
-                        : _CompactOrbButton(
-                            working: _controller.orbWorking,
-                            loading: _controller.starting,
-                            onPressed: () => unawaited(_expand()),
-                          ),
-                  ),
-                ),
-              ),
-            ),
-          ],
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final width = constraints.maxWidth;
+            final height = constraints.maxHeight;
+            return SizedBox.expand(
+              key: const ValueKey('zommi-surface'),
+              child: RepaintBoundary(child: _buildPanel(width, height)),
+            );
+          },
         ),
       ),
     );
@@ -514,8 +409,8 @@ class _ZommiShellState extends State<ZommiShell> {
           children: [
             _HeaderButton(
               key: const ValueKey('hide-zommi'),
-              label: 'Hide Zommi',
-              icon: Icons.close_rounded,
+              label: 'Minimize Zommi',
+              icon: Icons.remove_rounded,
               onPressed: () => unawaited(_controller.hideWindow()),
             ),
             TapRegion(
@@ -631,7 +526,7 @@ class _ZommiShellState extends State<ZommiShell> {
                   keyboardType: TextInputType.multiline,
                   textInputAction: TextInputAction.newline,
                   textAlignVertical: TextAlignVertical.center,
-                  style: const TextStyle(fontSize: 12, height: 1.3),
+                  style: topBarAndChatTextStyle,
                   decoration: const InputDecoration(
                     hintText: 'Ask your agent',
                     border: InputBorder.none,
@@ -792,10 +687,10 @@ class _LoadingPill extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const ZommiOrb(
-              key: ValueKey('loading-orb'),
-              loading: true,
-              size: 28,
+            const SizedBox.square(
+              key: ValueKey('loading-indicator'),
+              dimension: 20,
+              child: CircularProgressIndicator(strokeWidth: 2.4),
             ),
             const SizedBox(width: 7),
             Text(
@@ -803,9 +698,8 @@ class _LoadingPill extends StatelessWidget {
               key: const ValueKey('loading-status'),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style: topBarAndChatTextStyle.copyWith(
                 color: Color(0xff514a70),
-                fontSize: 12,
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -843,7 +737,7 @@ class _SummaryButton extends StatelessWidget {
           foregroundColor: const Color(0xff4c5160),
           visualDensity: VisualDensity.compact,
           padding: const EdgeInsets.symmetric(horizontal: 8),
-          textStyle: const TextStyle(fontSize: topBarAndChatFontSize),
+          textStyle: topBarAndChatTextStyle,
         ),
         icon: AnimatedSwitcher(
           duration: const Duration(milliseconds: 160),
@@ -872,474 +766,4 @@ class _SummaryButton extends StatelessWidget {
       ),
     );
   }
-}
-
-class _CompactOrbButton extends StatelessWidget {
-  const _CompactOrbButton({
-    required this.working,
-    required this.loading,
-    required this.onPressed,
-  });
-
-  final bool working;
-  final bool loading;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      label: 'ZommiOrb',
-      hint: loading
-          ? 'Zommi is starting'
-          : working
-          ? 'Open Zommi chat, agent working'
-          : 'Open Zommi chat',
-      button: true,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          key: const ValueKey('zommi-orb'),
-          customBorder: const CircleBorder(),
-          onTap: onPressed,
-          child: ZommiOrb(working: working, loading: loading),
-        ),
-      ),
-    );
-  }
-}
-
-Size zommiSurfaceSize({required bool expanded, required bool large}) =>
-    expanded ? (large ? largeWindowSize : normalWindowSize) : compactWindowSize;
-
-Size surfaceTransitionSize(Size from, Size to, double progress) =>
-    Size.lerp(from, to, symmetricSurfaceEase(progress))!;
-
-double surfaceTransitionCompactness(Size from, Size to, double progress) {
-  final eased = symmetricSurfaceEase(progress);
-  final fromCompact = from == compactWindowSize ? 1.0 : 0.0;
-  final toCompact = to == compactWindowSize ? 1.0 : 0.0;
-  return fromCompact + (toCompact - fromCompact) * eased;
-}
-
-@immutable
-class SurfaceTransitionVisuals {
-  const SurfaceTransitionVisuals({
-    required this.orbOpacity,
-    required this.orbScale,
-    required this.panelOpacity,
-    required this.panelScale,
-  });
-
-  final double orbOpacity;
-  final double orbScale;
-  final double panelOpacity;
-  final double panelScale;
-}
-
-SurfaceTransitionVisuals surfaceTransitionVisuals(
-  Size from,
-  Size to,
-  double progress,
-) {
-  if (from != compactWindowSize && to != compactWindowSize) {
-    return const SurfaceTransitionVisuals(
-      orbOpacity: 0,
-      orbScale: 1,
-      panelOpacity: 1,
-      panelScale: 1,
-    );
-  }
-  final compactness = surfaceTransitionCompactness(from, to, progress);
-  final panelness = 1 - compactness;
-  return SurfaceTransitionVisuals(
-    orbOpacity: _smoothStep(compactness),
-    orbScale: 1,
-    panelOpacity: _smoothStep(panelness),
-    panelScale: 0.965 + panelness * 0.035,
-  );
-}
-
-double _smoothStep(double value) {
-  final t = value.clamp(0.0, 1.0);
-  return t * t * (3 - 2 * t);
-}
-
-class _SurfaceTransitionView extends StatefulWidget {
-  const _SurfaceTransitionView({
-    required this.fromSize,
-    required this.toSize,
-    required this.animate,
-    required this.working,
-    required this.loading,
-    required this.panelSize,
-    required this.panel,
-  });
-
-  final Size fromSize;
-  final Size toSize;
-  final bool animate;
-  final bool working;
-  final bool loading;
-  final Size panelSize;
-  final Widget panel;
-
-  @override
-  State<_SurfaceTransitionView> createState() => _SurfaceTransitionViewState();
-}
-
-class _SurfaceTransitionViewState extends State<_SurfaceTransitionView>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _motion = AnimationController(
-    vsync: this,
-    duration: surfaceTransitionDuration,
-  );
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.animate) _motion.forward();
-  }
-
-  @override
-  void didUpdateWidget(covariant _SurfaceTransitionView oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.animate &&
-        (!oldWidget.animate ||
-            oldWidget.fromSize != widget.fromSize ||
-            oldWidget.toSize != widget.toSize)) {
-      _motion.forward(from: 0);
-    }
-  }
-
-  @override
-  void dispose() {
-    _motion.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return RepaintBoundary(
-      child: Align(
-        alignment: Alignment.bottomCenter,
-        child: AnimatedBuilder(
-          animation: _motion,
-          builder: (context, child) {
-            final progress = _motion.value;
-            final compactTransition =
-                widget.fromSize == compactWindowSize ||
-                widget.toSize == compactWindowSize;
-            if (compactTransition) {
-              final visuals = surfaceTransitionVisuals(
-                widget.fromSize,
-                widget.toSize,
-                progress,
-              );
-              return OverflowBox(
-                alignment: Alignment.bottomCenter,
-                minWidth: widget.panelSize.width,
-                maxWidth: widget.panelSize.width,
-                minHeight: widget.panelSize.height,
-                maxHeight: widget.panelSize.height,
-                child: SizedBox.fromSize(
-                  key: const ValueKey('surface-transition'),
-                  size: widget.panelSize,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      if (visuals.panelOpacity > 0)
-                        IgnorePointer(
-                          child: Opacity(
-                            key: const ValueKey(
-                              'surface-transition-panel-opacity',
-                            ),
-                            opacity: visuals.panelOpacity,
-                            child: Transform.scale(
-                              key: const ValueKey('surface-transition-panel'),
-                              alignment: Alignment.bottomCenter,
-                              scale: visuals.panelScale,
-                              child: widget.panel,
-                            ),
-                          ),
-                        ),
-                      if (visuals.orbOpacity > 0)
-                        Align(
-                          alignment: Alignment.bottomCenter,
-                          child: Opacity(
-                            key: const ValueKey(
-                              'surface-transition-orb-opacity',
-                            ),
-                            opacity: visuals.orbOpacity,
-                            child: Transform.scale(
-                              key: const ValueKey('surface-transition-orb'),
-                              scale: visuals.orbScale,
-                              child: SizedBox.square(
-                                dimension: compactOrbSize,
-                                child: ZommiOrb(
-                                  working: widget.working,
-                                  loading: widget.loading,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              );
-            }
-            final size = surfaceTransitionSize(
-              widget.fromSize,
-              widget.toSize,
-              progress,
-            );
-            return SizedBox.fromSize(
-              key: const ValueKey('surface-transition'),
-              size: size,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(34),
-                child: IgnorePointer(
-                  child: OverflowBox(
-                    alignment: Alignment.bottomCenter,
-                    minWidth: widget.panelSize.width,
-                    maxWidth: widget.panelSize.width,
-                    minHeight: widget.panelSize.height,
-                    maxHeight: widget.panelSize.height,
-                    child: SizedBox.fromSize(
-                      size: widget.panelSize,
-                      child: widget.panel,
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
-}
-
-class ZommiOrb extends StatefulWidget {
-  const ZommiOrb({
-    this.working = false,
-    this.loading = false,
-    this.size = compactOrbSize,
-    super.key,
-  });
-
-  final bool working;
-  final bool loading;
-  final double size;
-
-  @override
-  State<ZommiOrb> createState() => _ZommiOrbState();
-}
-
-class _ZommiOrbState extends State<ZommiOrb>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _motion = AnimationController(
-    vsync: this,
-    duration: orbMotionDuration,
-  );
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _syncMotion();
-  }
-
-  @override
-  void didUpdateWidget(covariant ZommiOrb oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _syncMotion();
-  }
-
-  void _syncMotion() {
-    if ((widget.working || widget.loading) &&
-        !MediaQuery.disableAnimationsOf(context)) {
-      if (!_motion.isAnimating) {
-        // Compact, transition, and loading orbs are separate widgets. Starting
-        // each controller at zero makes the icon visibly flash when one widget
-        // replaces another, so all instances join the same wall-clock phase.
-        _motion
-          ..value = synchronizedOrbPhase(DateTime.now())
-          ..repeat();
-      }
-    } else {
-      _motion
-        ..stop()
-        ..value = widget.working || widget.loading ? 0.35 : 0;
-    }
-  }
-
-  @override
-  void dispose() {
-    _motion.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return RepaintBoundary(
-      child: AnimatedBuilder(
-        animation: _motion,
-        builder: (context, child) => CustomPaint(
-          key: const ValueKey('zommi-orb-canvas'),
-          size: Size.square(widget.size),
-          painter: _NebulaOrbPainter(
-            phase: _motion.value,
-            working: widget.working,
-            loading: widget.loading,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _NebulaOrbPainter extends CustomPainter {
-  const _NebulaOrbPainter({
-    required this.phase,
-    required this.working,
-    required this.loading,
-  });
-
-  final double phase;
-  final bool working;
-  final bool loading;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = size.center(Offset.zero);
-    final radius = size.shortestSide * 0.39;
-    if (working || loading) {
-      final breath = 0.5 + 0.5 * math.sin(phase * math.pi * 2);
-      final orbitRadius = radius + size.shortestSide * 0.07;
-      final orbitBounds = Rect.fromCircle(center: center, radius: orbitRadius);
-      canvas.drawCircle(
-        center,
-        orbitRadius,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.1
-          ..color = const Color(0x357f79c5),
-      );
-      canvas.drawArc(
-        orbitBounds,
-        phase * math.pi * 2 - math.pi / 2,
-        math.pi * 0.72,
-        false,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2.4
-          ..strokeCap = StrokeCap.round
-          ..color = Color.lerp(
-            const Color(0xff7f79c5),
-            const Color(0xff69d8d1),
-            breath,
-          )!,
-      );
-      if (loading) {
-        canvas.drawArc(
-          orbitBounds.inflate(size.shortestSide * 0.045),
-          -phase * math.pi * 2 + math.pi / 3,
-          math.pi * 0.48,
-          false,
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1.7
-            ..strokeCap = StrokeCap.round
-            ..color = Color.lerp(
-              const Color(0xffe28bd4),
-              const Color(0xff8fddda),
-              1 - breath,
-            )!,
-        );
-        canvas.drawCircle(
-          center,
-          radius + size.shortestSide * (0.11 + breath * 0.025),
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1
-            ..color = const Color(0x287f79c5),
-        );
-      }
-      final angle = phase * math.pi * 2 + math.pi * 0.22;
-      canvas.drawCircle(
-        center.translate(
-          math.cos(angle) * orbitRadius,
-          math.sin(angle) * orbitRadius,
-        ),
-        math.max(1.6, size.shortestSide * 0.045),
-        Paint()..color = const Color(0xfff8f7ff),
-      );
-    }
-    canvas.drawCircle(
-      center,
-      radius,
-      Paint()
-        ..shader = const RadialGradient(
-          center: Alignment(-0.28, -0.32),
-          radius: 0.95,
-          colors: [
-            Color(0xfff7f6ff),
-            Color(0xffb6c8ec),
-            Color(0xff777dc0),
-            Color(0xff61557f),
-          ],
-          stops: [0, 0.32, 0.68, 1],
-        ).createShader(Rect.fromCircle(center: center, radius: radius)),
-    );
-    final drift = working || loading
-        ? math.sin(phase * math.pi * 2) * radius * 0.28
-        : 0;
-    canvas.save();
-    canvas.clipPath(
-      Path()..addOval(Rect.fromCircle(center: center, radius: radius)),
-    );
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: center.translate(-radius * 0.16 + drift, -radius * 0.08),
-        width: radius * 1.45,
-        height: radius * 0.72,
-      ),
-      Paint()
-        ..color = const Color(0x7569e1dc)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
-    );
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: center.translate(radius * 0.28 - drift * 0.5, radius * 0.25),
-        width: radius * 1.2,
-        height: radius * 0.82,
-      ),
-      Paint()
-        ..color = const Color(0x5cdd7bd0)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 7),
-    );
-    canvas.restore();
-    if (working || loading) {
-      final pulse = 0.5 + 0.5 * math.cos(phase * math.pi * 2);
-      canvas.drawCircle(
-        center.translate(radius * 0.15, -radius * 0.18),
-        radius * (0.12 + pulse * 0.08),
-        Paint()..color = const Color(0xb8ffffff),
-      );
-    }
-    canvas.drawCircle(
-      center,
-      radius,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.1
-        ..color = const Color(0xd9ffffff),
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _NebulaOrbPainter oldDelegate) =>
-      oldDelegate.phase != phase ||
-      oldDelegate.working != working ||
-      oldDelegate.loading != loading;
 }

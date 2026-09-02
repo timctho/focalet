@@ -57,6 +57,8 @@ void main() {
       expect(turns.single.blocks[0].text, 'Inspecting the selected table');
       expect(turns.single.blocks[0].expanded, isFalse);
       expect(turns.single.blocks[1].title, 'Command');
+      expect(turns.single.blocks[1].preview, 'rg table');
+      expect(turns.single.blocks[1].text, 'match');
       expect(turns.single.blocks[1].expanded, isFalse);
       expect(turns.single.blocks[2].artifacts.single.path, 'report.html');
       expect(turns.single.blocks[2].artifacts.single.cwd, '/workspace');

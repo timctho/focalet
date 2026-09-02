@@ -49,7 +49,8 @@ void main() {
     for (final contract in [
       'HotKeyModifier.alt',
       'CaptureMode.region',
-      'setAlwaysOnTop(true)',
+      'skipTaskbar: false',
+      'windowManager.minimize()',
       'Capture completes before Flutter is shown or focused',
       "'--capture-host'",
       'Zommi.Capture.exe',
@@ -86,7 +87,7 @@ void main() {
         contains('CreateMutexW(nullptr, TRUE, kZommiInstanceMutexName)'),
         contains('ERROR_ALREADY_EXISTS'),
         contains('PostMessageW(HWND_BROADCAST, ZommiShowWindowMessage()'),
-        contains('Win32Window::Size size(56, 56)'),
+        contains('Win32Window::Size size(720, 620)'),
       ),
     );
     expect(windowsInstance, contains('Zommi.Desktop.SingleInstance'));
@@ -286,7 +287,7 @@ void main() {
       File(
         '${repository.path}/src/Zommi.Flutter/linux/runner/my_application.cc',
       ).readAsStringSync(),
-      contains('gtk_window_set_default_size(window, 56, 56)'),
+      contains('gtk_window_set_default_size(window, 720, 620)'),
     );
     final hotkeyPlugin = File(
       '${repository.path}/third_party/hotkey_manager_linux/linux/'

@@ -122,6 +122,7 @@ final class TranscriptBlock {
     this.text = '',
     this.lifecycle = TranscriptLifecycle.delta,
     this.status,
+    this.preview = '',
     this.expanded = true,
     List<ArtifactPreview> artifacts = const [],
   }) : artifacts = List<ArtifactPreview>.of(artifacts);
@@ -132,6 +133,7 @@ final class TranscriptBlock {
   String text;
   TranscriptLifecycle lifecycle;
   String? status;
+  String preview;
   bool expanded;
   final List<ArtifactPreview> artifacts;
 

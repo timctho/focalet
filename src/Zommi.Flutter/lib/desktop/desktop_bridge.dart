@@ -216,12 +216,12 @@ final class FlutterDesktopBridge
   static Future<FlutterDesktopBridge> bootstrap() async {
     await windowManager.ensureInitialized();
     const options = WindowOptions(
-      size: compactWindowSize,
-      minimumSize: compactWindowSize,
+      size: normalWindowSize,
+      minimumSize: Size(640, 500),
       backgroundColor: Color(0x00000000),
-      alwaysOnTop: true,
-      skipTaskbar: true,
-      title: 'Zommi — floating agent chat',
+      alwaysOnTop: false,
+      skipTaskbar: false,
+      title: 'Zommi',
       titleBarStyle: TitleBarStyle.hidden,
       windowButtonVisibility: false,
     );
@@ -230,18 +230,11 @@ final class FlutterDesktopBridge
       if (supportsNativeWindowShadow(Platform.operatingSystem)) {
         await windowManager.setHasShadow(false);
       }
-      // Zommi owns its surface sizes. Changing the native resize style on
-      // every orb morph forces a Win32 frame recalculation and produces a
-      // visible one-frame wobble even though the window is frameless.
       await windowManager.setResizable(false);
       await configureNativeSurfaceWindow();
-      // WindowOptions applies 56px before the Win32 caption is removed, so
-      // Windows may clamp the initial width to SM_CXMINTRACK. Reapply the
-      // compact size with the popup style active while preserving the
-      // requested top-left anchor.
-      await windowManager.setSize(compactWindowSize, animate: false);
-      await windowManager.setAlwaysOnTop(true);
-      await windowManager.setSkipTaskbar(true);
+      await windowManager.setSize(normalWindowSize, animate: false);
+      await windowManager.setAlwaysOnTop(false);
+      await windowManager.setSkipTaskbar(false);
     });
     return FlutterDesktopBridge();
   }
@@ -282,12 +275,9 @@ final class FlutterDesktopBridge
     }
     _initialized = true;
     windowManager.addListener(this);
-    await windowManager.setPreventClose(true);
-    await windowManager.setAlwaysOnTop(true);
-    await setSurface(expanded: false);
-    // The native runner stays hidden until the frameless compact bounds are
-    // final. Showing its initial template-sized window produces a visible box
-    // before the orb's first frame.
+    await windowManager.setPreventClose(false);
+    await windowManager.setAlwaysOnTop(false);
+    await setSurface(expanded: true, animate: false);
     await windowManager.show();
     try {
       await _captureProvider.initialize();
@@ -553,20 +543,23 @@ final class FlutterDesktopBridge
     await windowManager.setMinimumSize(
       expanded ? const Size(640, 500) : compactWindowSize,
     );
-    await windowManager.setAlwaysOnTop(true);
+    await windowManager.setAlwaysOnTop(false);
   }
 
   @override
   Future<void> showPanel() async {
     await presentPanelWithoutResizing(
-      show: windowManager.show,
+      show: () async {
+        if (await windowManager.isMinimized()) await windowManager.restore();
+        await windowManager.show();
+      },
       focus: windowManager.focus,
-      keepOnTop: () => windowManager.setAlwaysOnTop(true),
+      keepOnTop: () => windowManager.setAlwaysOnTop(false),
     );
   }
 
   @override
-  Future<void> hide() => windowManager.hide();
+  Future<void> hide() => windowManager.minimize();
 
   @override
   Future<void> toggleMaximized() async {
@@ -704,11 +697,11 @@ final class FlutterDesktopBridge
       await file.writeAsBytes(bytes.buffer.asUint8List(), flush: true);
       _trayIconPath = file.path;
       await trayManager.setIcon(file.path, isTemplate: Platform.isMacOS);
-      await trayManager.setToolTip('Zommi floating agent chat');
+      await trayManager.setToolTip('Zommi agent chat');
       await trayManager.setContextMenu(
         Menu(
           items: [
-            MenuItem(key: 'open', label: 'Open floating chat'),
+            MenuItem(key: 'open', label: 'Open Zommi'),
             MenuItem(key: 'capture', label: 'Capture context (Alt+A)'),
             MenuItem(
               key: 'image',
@@ -755,14 +748,10 @@ final class FlutterDesktopBridge
   }
 
   @override
-  void onWindowClose() {
-    unawaited(windowManager.hide());
-  }
+  void onWindowClose() {}
 
   @override
-  void onWindowFocus() {
-    unawaited(windowManager.setAlwaysOnTop(true));
-  }
+  void onWindowFocus() {}
 
   @override
   Future<void> close() async {

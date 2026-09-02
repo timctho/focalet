@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:zommi_flutter/state/history_mapper.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
+import 'package:zommi_flutter/theme/zommi_typography.dart';
 import 'package:zommi_flutter/widgets/content_views.dart';
 import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
 
@@ -333,7 +334,7 @@ int transcriptContentRevision(Iterable<ConversationTurn> turns) =>
               block.kind,
               block.text,
               block.lifecycle,
-              block.expanded,
+              block.preview,
               ...block.artifacts.map((artifact) => artifact.identity),
             ],
           ),
@@ -359,6 +360,45 @@ List<TranscriptBlock> distinctTranscriptBlocks(
   return result;
 }
 
+String activityBlockTitle(TranscriptBlock block) {
+  if (block.title.toLowerCase() != 'command') return block.title;
+  final command = block.preview.replaceAll(RegExp(r'\s+'), ' ').trim();
+  if (command.isEmpty) return block.title;
+  final codePoints = command.runes.toList(growable: false);
+  final abbreviated = codePoints.length <= 20
+      ? command
+      : '${String.fromCharCodes(codePoints.take(20))}...';
+  return 'Command · $abbreviated';
+}
+
+class _ExpandableActivityBody extends StatelessWidget {
+  const _ExpandableActivityBody({
+    required this.expanded,
+    required this.duration,
+    required this.child,
+    super.key,
+  });
+
+  final bool expanded;
+  final Duration duration;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => ClipRect(
+    child: AnimatedSize(
+      duration: duration,
+      curve: Curves.easeOutCubic,
+      alignment: Alignment.topCenter,
+      child: expanded
+          ? child
+          : const SizedBox(
+              key: ValueKey('collapsed-activity'),
+              width: double.infinity,
+            ),
+    ),
+  );
+}
+
 class ThinkingActivityGroup extends StatelessWidget {
   const ThinkingActivityGroup({
     required this.block,
@@ -377,103 +417,113 @@ class ThinkingActivityGroup extends StatelessWidget {
     return Semantics(
       container: true,
       label: 'Thinking ${completed ? 'completed' : 'in progress'}',
-      child: Container(
-        key: ValueKey('activity-${block.id}'),
-        decoration: BoxDecoration(
-          color: const Color(0x80ffffff),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: const Color(0xffe2e5ed)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            InkWell(
-              key: const ValueKey('thinking-toggle'),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints.tightFor(
+            width: assistantMessageBoxWidth,
+          ),
+          child: Container(
+            key: ValueKey('activity-${block.id}'),
+            decoration: BoxDecoration(
+              color: const Color(0x80ffffff),
               borderRadius: BorderRadius.circular(14),
-              onTap: () => controller.setBlockExpanded(block, !block.expanded),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 9,
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.auto_awesome_rounded,
-                      size: 15,
-                      color: Color(0xff746b99),
-                    ),
-                    const SizedBox(width: 8),
-                    const Expanded(
-                      child: Text(
-                        'Thinking',
-                        style: TextStyle(
-                          color: Color(0xff4b5060),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    if (tools.isNotEmpty)
-                      Text(
-                        '${tools.length} tool${tools.length == 1 ? '' : 's'}',
-                        key: const ValueKey('thinking-tool-count'),
-                        style: const TextStyle(
-                          color: Color(0xff747988),
-                          fontSize: 10,
-                        ),
-                      ),
-                    if (tools.isNotEmpty) const SizedBox(width: 8),
-                    if (!completed)
-                      const SizedBox.square(
-                        dimension: 13,
-                        child: CircularProgressIndicator(strokeWidth: 1.5),
-                      )
-                    else
-                      const Icon(
-                        Icons.check_circle_outline_rounded,
-                        size: 15,
-                        color: Color(0xff659071),
-                      ),
-                    const SizedBox(width: 5),
-                    Icon(
-                      block.expanded
-                          ? Icons.expand_less_rounded
-                          : Icons.expand_more_rounded,
-                      size: 17,
-                    ),
-                  ],
-                ),
-              ),
+              border: Border.all(color: const Color(0xffe2e5ed)),
             ),
-            AnimatedCrossFade(
-              key: const ValueKey('thinking-fold'),
-              firstChild: const SizedBox(width: double.infinity),
-              secondChild: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (block.text.isNotEmpty)
-                      CopyableMarkdown(
-                        text: block.text,
-                        compact: true,
-                        onCopy: controller.copyText,
-                        onOpenLink: controller.openExternalLink,
-                      ),
-                    for (final artifact in block.artifacts)
-                      ArtifactCard(artifact: artifact, controller: controller),
-                    for (final tool in tools)
-                      _ToolActivitySubItem(block: tool, controller: controller),
-                  ],
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                InkWell(
+                  key: const ValueKey('thinking-toggle'),
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: () =>
+                      controller.setBlockExpanded(block, !block.expanded),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 9,
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.auto_awesome_rounded,
+                          size: 15,
+                          color: Color(0xff746b99),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Thinking',
+                            style: topBarAndChatTextStyle.copyWith(
+                              color: Color(0xff4b5060),
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        if (tools.isNotEmpty)
+                          Text(
+                            '${tools.length} tool${tools.length == 1 ? '' : 's'}',
+                            key: const ValueKey('thinking-tool-count'),
+                            style: topBarAndChatTextStyle.copyWith(
+                              color: Color(0xff747988),
+                            ),
+                          ),
+                        if (tools.isNotEmpty) const SizedBox(width: 8),
+                        if (!completed)
+                          const SizedBox.square(
+                            dimension: 13,
+                            child: CircularProgressIndicator(strokeWidth: 1.5),
+                          )
+                        else
+                          const Icon(
+                            Icons.check_circle_outline_rounded,
+                            size: 15,
+                            color: Color(0xff659071),
+                          ),
+                        const SizedBox(width: 5),
+                        Icon(
+                          block.expanded
+                              ? Icons.expand_less_rounded
+                              : Icons.expand_more_rounded,
+                          size: 17,
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-              ),
-              crossFadeState: block.expanded
-                  ? CrossFadeState.showSecond
-                  : CrossFadeState.showFirst,
-              duration: const Duration(milliseconds: 150),
+                _ExpandableActivityBody(
+                  key: const ValueKey('thinking-fold'),
+                  expanded: block.expanded,
+                  duration: const Duration(milliseconds: 150),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (block.text.isNotEmpty)
+                          CopyableMarkdown(
+                            text: block.text,
+                            compact: true,
+                            onCopy: controller.copyText,
+                            onOpenLink: controller.openExternalLink,
+                          ),
+                        for (final artifact in block.artifacts)
+                          ArtifactCard(
+                            artifact: artifact,
+                            controller: controller,
+                          ),
+                        for (final tool in tools)
+                          _ToolActivitySubItem(
+                            block: tool,
+                            controller: controller,
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -514,11 +564,10 @@ class _ToolActivitySubItem extends StatelessWidget {
                   const SizedBox(width: 7),
                   Expanded(
                     child: Text(
-                      block.title,
+                      activityBlockTitle(block),
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
+                      style: topBarAndChatTextStyle.copyWith(
                         color: Color(0xff4b5060),
-                        fontSize: 10.5,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -545,9 +594,10 @@ class _ToolActivitySubItem extends StatelessWidget {
               ),
             ),
           ),
-          AnimatedCrossFade(
-            firstChild: const SizedBox(width: double.infinity),
-            secondChild: Padding(
+          _ExpandableActivityBody(
+            expanded: block.expanded,
+            duration: const Duration(milliseconds: 130),
+            child: Padding(
               padding: const EdgeInsets.fromLTRB(9, 0, 9, 9),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -564,10 +614,6 @@ class _ToolActivitySubItem extends StatelessWidget {
                 ],
               ),
             ),
-            crossFadeState: block.expanded
-                ? CrossFadeState.showSecond
-                : CrossFadeState.showFirst,
-            duration: const Duration(milliseconds: 130),
           ),
         ],
       ),
@@ -596,7 +642,9 @@ class AssistantBlockView extends StatelessWidget {
         alignment: Alignment.centerLeft,
         child: Container(
           key: ValueKey('assistant-${block.id}'),
-          constraints: const BoxConstraints(maxWidth: assistantMessageBoxWidth),
+          constraints: const BoxConstraints.tightFor(
+            width: assistantMessageBoxWidth,
+          ),
           padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
           decoration: BoxDecoration(
             color: const Color(0xb3ffffff),
@@ -643,99 +691,102 @@ class ActivityBlockView extends StatelessWidget {
     return Semantics(
       container: true,
       label: '${block.title} ${completed ? 'completed' : 'in progress'}',
-      child: Container(
-        key: ValueKey('activity-${block.id}'),
-        decoration: BoxDecoration(
-          color: block.kind == TranscriptKind.error
-              ? const Color(0xffffedf0)
-              : const Color(0x80ffffff),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: block.kind == TranscriptKind.error
-                ? const Color(0xffe9b6bf)
-                : const Color(0xffe2e5ed),
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            InkWell(
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: assistantMessageBoxWidth),
+          child: Container(
+            key: ValueKey('activity-${block.id}'),
+            decoration: BoxDecoration(
+              color: block.kind == TranscriptKind.error
+                  ? const Color(0xffffedf0)
+                  : const Color(0x80ffffff),
               borderRadius: BorderRadius.circular(14),
-              onTap: () => controller.setBlockExpanded(block, !block.expanded),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 9,
-                ),
-                child: Row(
-                  children: [
-                    Icon(icon, size: 15, color: const Color(0xff746b99)),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        block.title,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Color(0xff4b5060),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    if (!completed)
-                      const SizedBox.square(
-                        dimension: 13,
-                        child: CircularProgressIndicator(strokeWidth: 1.5),
-                      )
-                    else
-                      const Icon(
-                        Icons.check_circle_outline_rounded,
-                        size: 15,
-                        color: Color(0xff659071),
-                      ),
-                    const SizedBox(width: 5),
-                    Icon(
-                      block.expanded
-                          ? Icons.expand_less_rounded
-                          : Icons.expand_more_rounded,
-                      size: 17,
-                    ),
-                  ],
-                ),
+              border: Border.all(
+                color: block.kind == TranscriptKind.error
+                    ? const Color(0xffe9b6bf)
+                    : const Color(0xffe2e5ed),
               ),
             ),
-            AnimatedCrossFade(
-              firstChild: const SizedBox(width: double.infinity),
-              secondChild: ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 220),
-                child: SingleChildScrollView(
-                  key: ValueKey('activity-scroll-${block.id}'),
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (block.text.isNotEmpty)
-                        CopyableMarkdown(
-                          text: block.text,
-                          compact: true,
-                          onCopy: controller.copyText,
-                          onOpenLink: controller.openExternalLink,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: () =>
+                      controller.setBlockExpanded(block, !block.expanded),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 9,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(icon, size: 15, color: const Color(0xff746b99)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            block.title,
+                            overflow: TextOverflow.ellipsis,
+                            style: topBarAndChatTextStyle.copyWith(
+                              color: Color(0xff4b5060),
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
                         ),
-                      for (final artifact in block.artifacts)
-                        ArtifactCard(
-                          artifact: artifact,
-                          controller: controller,
+                        if (!completed)
+                          const SizedBox.square(
+                            dimension: 13,
+                            child: CircularProgressIndicator(strokeWidth: 1.5),
+                          )
+                        else
+                          const Icon(
+                            Icons.check_circle_outline_rounded,
+                            size: 15,
+                            color: Color(0xff659071),
+                          ),
+                        const SizedBox(width: 5),
+                        Icon(
+                          block.expanded
+                              ? Icons.expand_less_rounded
+                              : Icons.expand_more_rounded,
+                          size: 17,
                         ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
-              ),
-              crossFadeState: block.expanded
-                  ? CrossFadeState.showSecond
-                  : CrossFadeState.showFirst,
-              duration: const Duration(milliseconds: 150),
+                _ExpandableActivityBody(
+                  expanded: block.expanded,
+                  duration: const Duration(milliseconds: 150),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 220),
+                    child: SingleChildScrollView(
+                      key: ValueKey('activity-scroll-${block.id}'),
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (block.text.isNotEmpty)
+                            CopyableMarkdown(
+                              text: block.text,
+                              compact: true,
+                              onCopy: controller.copyText,
+                              onOpenLink: controller.openExternalLink,
+                            ),
+                          for (final artifact in block.artifacts)
+                            ArtifactCard(
+                              artifact: artifact,
+                              controller: controller,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
