@@ -1165,10 +1165,19 @@ function Invoke-PackagedApplicationAcceptance {
             $_.ExecutablePath -in $packageExecutables
         })
         $coreProcesses = @($processes | Where-Object { $_.ExecutablePath -eq $core })
+        $applicationCoreProcesses = @($coreProcesses | Where-Object {
+            $_.ParentProcessId -eq $application.Id -and
+            $_.CommandLine -notmatch '(?:^|\s)--wsl-proxy(?:\s|$)'
+        })
+        $proxyCoreProcesses = @($coreProcesses | Where-Object {
+            $_.CommandLine -match '(?:^|\s)--wsl-proxy(?:\s|$)'
+        })
         $captureProcesses = @($processes | Where-Object {
             $_.ExecutablePath -eq $CaptureExecutable
         })
-        if ($coreProcesses.Count -ne 1 -or $captureProcesses.Count -ne 2) {
+        if ($applicationCoreProcesses.Count -ne 1 -or
+            $proxyCoreProcesses.Count -lt 1 -or
+            $captureProcesses.Count -ne 2) {
             throw "Unexpected packaged process topology: $($processes | Select-Object Name,ProcessId,ExecutablePath | ConvertTo-Json -Compress)"
         }
 

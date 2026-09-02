@@ -446,7 +446,7 @@ def run_case(
     shortcut_shift: bool,
     selection_action: str | None,
     expected_event: str,
-    expect_expanded: bool,
+    expect_focused: bool,
 ) -> dict[str, object]:
     trace = temporary / f"{name}.jsonl"
     runtime_log = temporary / f"{name}.log"
@@ -469,17 +469,17 @@ def run_case(
             raise RuntimeError(f"Global shortcut registration was not ready: {ready}")
         zommi = wait_until("the Zommi X11 window", x11.find_zommi_window)
 
-        def compact_window() -> XWindowAttributes | None:
+        def taskbar_window() -> XWindowAttributes | None:
             attributes = x11.attributes(zommi)
             if (
                 attributes.map_state == IS_VIEWABLE
-                and attributes.width <= 320
-                and attributes.height <= 320
+                and attributes.width >= 640
+                and attributes.height >= 500
             ):
                 return attributes
             return None
 
-        initial = wait_until("the compact Zommi surface", compact_window)
+        initial = wait_until("the taskbar Zommi surface", taskbar_window)
         x11.focus(fixture)
         if x11.focused_window() != fixture:
             raise RuntimeError("The external context fixture did not receive X11 focus.")
@@ -498,8 +498,8 @@ def run_case(
                 raise RuntimeError(f"Unknown selector action: {selection_action}")
         result = wait_until(expected_event, lambda: event(trace, expected_event))
 
-        if expect_expanded:
-            def expanded_and_focused() -> bool:
+        if expect_focused:
+            def taskbar_window_focused() -> bool:
                 attributes = x11.attributes(zommi)
                 focus = x11.focused_window()
                 return (
@@ -509,16 +509,16 @@ def run_case(
                     and x11.is_descendant(focus, zommi)
                 )
 
-            wait_until("the expanded focused Zommi surface", expanded_and_focused)
+            wait_until("the focused taskbar Zommi surface", taskbar_window_focused)
         else:
             time.sleep(0.5)
-            after = compact_window()
+            after = taskbar_window()
             if (
                 after is None
                 or after.width != initial.width
                 or after.height != initial.height
             ):
-                raise RuntimeError("Cancelled image selection expanded or hid the compact surface.")
+                raise RuntimeError("Cancelled image selection resized or hid the taskbar surface.")
 
         if process.poll() is not None:
             raise RuntimeError(f"Zommi exited during {name} with code {process.returncode}.")
@@ -562,7 +562,7 @@ def run_acceptance(package: Path) -> int:
                 shortcut_shift=False,
                 selection_action=None,
                 expected_event="shortcut.context",
-                expect_expanded=True,
+                expect_focused=True,
             )
             if context.get("windowTitle") != fixture_title or not context.get("attached"):
                 raise RuntimeError(f"Alt+A did not preserve the focused context title: {context}")
@@ -576,7 +576,7 @@ def run_acceptance(package: Path) -> int:
                 shortcut_shift=True,
                 selection_action="cancel",
                 expected_event="shortcut.image.cancelled",
-                expect_expanded=False,
+                expect_focused=False,
             )
 
             image = run_case(
@@ -588,7 +588,7 @@ def run_acceptance(package: Path) -> int:
                 shortcut_shift=True,
                 selection_action="drag",
                 expected_event="shortcut.image",
-                expect_expanded=True,
+                expect_focused=True,
             )
             expected_image = {
                 "attached": True,
@@ -606,7 +606,7 @@ def run_acceptance(package: Path) -> int:
                     {
                         "x11ContextShortcut": True,
                         "contextTitle": context["windowTitle"],
-                        "imageCancelPreservedCompact": bool(cancelled),
+                        "imageCancelPreservedTaskbar": bool(cancelled),
                         "imageShortcut": True,
                         "imageDimensions": [image["width"], image["height"]],
                         "pointerContextPaired": image["hasPointerContext"],
