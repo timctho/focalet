@@ -171,21 +171,23 @@ class ReleasePackageTests(unittest.TestCase):
         ):
             self.assertIn(contract, script)
 
-    def test_windows_hover_acceptance_rejects_synthetic_resize_exit(self) -> None:
+    def test_windows_acceptance_requires_stable_taskbar_lifecycle(self) -> None:
         script = (SCRIPTS / "accept-windows-capture.ps1").read_text(encoding="utf-8")
         for contract in (
-            "IsOwnedWindowAtPoint",
-            "GetAncestor(hit, root) == window",
+            "TaskbarEligible",
+            "const int toolWindow = 0x00000080",
+            "const int appWindow = 0x00040000",
+            "GetWindow(window, owner)",
             "PhysicalBounds",
             "SetThreadDpiAwarenessContext(new IntPtr(-4))",
             "SetPhysicalCursorPos",
-            "WindowFromPhysicalPoint",
-            "PostMouseLeaveAtPoint",
-            "PostMessage(hit, mouseLeave",
             "Start-Sleep -Milliseconds 750",
-            "Packaged hover expansion collapsed under a stationary pointer",
-            "Could not re-arm the packaged surface hover state",
-            "Packaged hover surface did not collapse after the pointer left",
+            "Packaged application did not start as a complete taskbar chat window",
+            "Taskbar window resized on hover",
+            "Taskbar window resized after pointer exit",
+            "Packaged taskbar window did not minimize",
+            "Packaged taskbar window did not restore",
+            "Packaged taskbar window unexpectedly remained always-on-top",
         ):
             self.assertIn(contract, script)
 
