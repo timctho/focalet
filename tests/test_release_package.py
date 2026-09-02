@@ -153,6 +153,19 @@ class ReleasePackageTests(unittest.TestCase):
         ):
             self.assertIn(contract, script)
 
+    def test_windows_hover_acceptance_rejects_synthetic_resize_exit(self) -> None:
+        script = (SCRIPTS / "accept-windows-capture.ps1").read_text(encoding="utf-8")
+        for contract in (
+            "IsOwnedWindowAtPoint",
+            "GetAncestor(hit, root) == window",
+            "PostMouseLeaveAtPoint",
+            "PostMessage(hit, mouseLeave",
+            "Start-Sleep -Milliseconds 750",
+            "Packaged hover expansion collapsed under a stationary pointer",
+            "Packaged hover surface did not collapse after the pointer left",
+        ):
+            self.assertIn(contract, script)
+
     def test_windows_desktop_preflight_reports_runner_session_without_blame(self) -> None:
         script = (SCRIPTS / "accept-windows-capture.ps1").read_text(encoding="utf-8")
         for contract in (

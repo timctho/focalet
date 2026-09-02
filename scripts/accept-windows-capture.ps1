@@ -70,6 +70,9 @@ public static class ZommiWindowsAcceptanceNative
     [DllImport("user32.dll")]
     private static extern IntPtr WindowFromPoint(NativePoint point);
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr window, uint flags);
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowPos(
         IntPtr window,
@@ -248,6 +251,21 @@ public static class ZommiWindowsAcceptanceNative
     public static bool IsWindowAtPoint(IntPtr window, int x, int y)
     {
         return WindowFromPoint(new NativePoint { X = x, Y = y }) == window;
+    }
+
+    public static bool IsOwnedWindowAtPoint(IntPtr window, int x, int y)
+    {
+        const uint root = 2;
+        var hit = WindowFromPoint(new NativePoint { X = x, Y = y });
+        return hit != IntPtr.Zero && GetAncestor(hit, root) == window;
+    }
+
+    public static bool PostMouseLeaveAtPoint(int x, int y)
+    {
+        const uint mouseLeave = 0x02A3;
+        var hit = WindowFromPoint(new NativePoint { X = x, Y = y });
+        return hit != IntPtr.Zero &&
+            PostMessage(hit, mouseLeave, IntPtr.Zero, IntPtr.Zero);
     }
 
     public static void CloseCompetingWindow(IntPtr window)
@@ -883,6 +901,77 @@ function Invoke-PackagedApplicationAcceptance {
             throw 'Packaged Flutter window is not visible and topmost.'
         }
 
+        $compactCenterX = [int]($compactBounds[0] + $compactBounds[2] / 2.0)
+        $compactCenterY = [int]($compactBounds[1] + $compactBounds[3] / 2.0)
+        if (-not [ZommiWindowsAcceptanceNative]::SetCursorPos(
+            $compactCenterX,
+            $compactCenterY
+        )) {
+            throw 'Could not hover the packaged compact orb.'
+        }
+        Start-Sleep -Milliseconds 100
+        if (-not [ZommiWindowsAcceptanceNative]::IsOwnedWindowAtPoint(
+            $window,
+            $compactCenterX,
+            $compactCenterY
+        )) {
+            throw 'The packaged orb did not own the hovered screen point.'
+        }
+
+        $hoverDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        do {
+            $hoverExpandedBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
+            if ($hoverExpandedBounds.Count -eq 4 -and
+                $hoverExpandedBounds[2] -gt $compactBounds[2] -and
+                $hoverExpandedBounds[3] -gt $compactBounds[3]) {
+                break
+            }
+            Start-Sleep -Milliseconds 50
+        } while ([DateTime]::UtcNow -lt $hoverDeadline)
+        if ($hoverExpandedBounds[2] -le $compactBounds[2] -or
+            $hoverExpandedBounds[3] -le $compactBounds[3]) {
+            throw 'Hovering the packaged orb did not expand the Flutter surface.'
+        }
+        if (-not [ZommiWindowsAcceptanceNative]::IsOwnedWindowAtPoint(
+            $window,
+            $compactCenterX,
+            $compactCenterY
+        )) {
+            throw 'The expanded packaged surface lost the stationary pointer.'
+        }
+        if (-not [ZommiWindowsAcceptanceNative]::PostMouseLeaveAtPoint(
+            $compactCenterX,
+            $compactCenterY
+        )) {
+            throw 'Could not inject the native resize mouse-leave probe.'
+        }
+
+        Start-Sleep -Milliseconds 750
+        $stationaryHoverBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
+        if ($stationaryHoverBounds.Count -ne 4 -or
+            $stationaryHoverBounds[2] -ne $hoverExpandedBounds[2] -or
+            $stationaryHoverBounds[3] -ne $hoverExpandedBounds[3]) {
+            throw "Packaged hover expansion collapsed under a stationary pointer: expanded=$($hoverExpandedBounds -join ',') stationary=$($stationaryHoverBounds -join ',')."
+        }
+
+        if (-not [ZommiWindowsAcceptanceNative]::SetCursorPos(300, 300)) {
+            throw 'Could not move the pointer away from the packaged surface.'
+        }
+        $hoverCollapseDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        do {
+            $hoverCollapsedBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
+            if ($hoverCollapsedBounds.Count -eq 4 -and
+                $hoverCollapsedBounds[2] -eq $compactBounds[2] -and
+                $hoverCollapsedBounds[3] -eq $compactBounds[3]) {
+                break
+            }
+            Start-Sleep -Milliseconds 50
+        } while ([DateTime]::UtcNow -lt $hoverCollapseDeadline)
+        if ($hoverCollapsedBounds[2] -ne $compactBounds[2] -or
+            $hoverCollapsedBounds[3] -ne $compactBounds[3]) {
+            throw "Packaged hover surface did not collapse after the pointer left: $($hoverCollapsedBounds -join ',')."
+        }
+
         if (-not [ZommiWindowsAcceptanceNative]::SetCursorPos(300, 300)) {
             throw 'Could not place the pointer for packaged context capture.'
         }
@@ -1013,6 +1102,9 @@ function Invoke-PackagedApplicationAcceptance {
             imagePointerContext = $true
             compactBounds = @($compactBounds)
             firstVisibleBounds = @($firstVisibleBounds)
+            hoverExpandedBounds = @($hoverExpandedBounds)
+            stationaryHoverBounds = @($stationaryHoverBounds)
+            hoverCollapsedBounds = @($hoverCollapsedBounds)
             expandedBounds = @($expandedBounds)
             processCount = $processes.Count
             shortcutsRegistered = $true
