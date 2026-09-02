@@ -91,4 +91,113 @@ function Get-DescendantProcessIds {
     )
 }
 
-Export-ModuleMember -Function Move-PathWithRetry, Get-DescendantProcessIds
+function Get-ZommiRuntimeRootProcessIds {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object[]] $Processes
+    )
+
+    return @(
+        $Processes |
+            Where-Object {
+                $_.Name -ieq 'wsl.exe' -and
+                -not [string]::IsNullOrWhiteSpace($_.CommandLine) -and
+                ($_.CommandLine.Contains('ZOMMI_RUNTIME_CHILD=1') -or
+                    # Compatibility with Hermes processes launched before the
+                    # general Zommi runtime marker was introduced.
+                    $_.CommandLine.Contains('HERMES_DASHBOARD_SESSION_TOKEN='))
+            } |
+            ForEach-Object { [uint32] $_.ProcessId }
+    )
+}
+
+function Redirect-ExplorerWindowsFromPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Source,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Destination
+    )
+
+    $normalizedSource = [IO.Path]::GetFullPath($Source)
+    $shell = New-Object -ComObject Shell.Application
+    $redirected = [Collections.Generic.List[long]]::new()
+    foreach ($window in @($shell.Windows())) {
+        try {
+            $path = [IO.Path]::GetFullPath($window.Document.Folder.Self.Path)
+            if ([string]::Equals(
+                $path,
+                $normalizedSource,
+                [StringComparison]::OrdinalIgnoreCase
+            )) {
+                $redirected.Add([long] $window.HWND)
+                $null = $window.Navigate2($Destination)
+            }
+        }
+        catch {
+            # Shell windows such as Control Panel do not expose Folder.Self.
+        }
+    }
+
+    if ($redirected.Count -eq 0) {
+        return @()
+    }
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $remaining = @(
+            $shell.Windows() | Where-Object {
+                try {
+                    [string]::Equals(
+                        [IO.Path]::GetFullPath($_.Document.Folder.Self.Path),
+                        $normalizedSource,
+                        [StringComparison]::OrdinalIgnoreCase
+                    )
+                }
+                catch {
+                    $false
+                }
+            }
+        )
+        if ($remaining.Count -eq 0) {
+            return @($redirected)
+        }
+        Start-Sleep -Milliseconds 200
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    throw "Explorer did not release the deployment directory: $Source"
+}
+
+function Restore-ExplorerWindowsToPath {
+    param(
+        [long[]] $WindowHandles = @(),
+
+        [Parameter(Mandatory = $true)]
+        [string] $Destination
+    )
+
+    if ($WindowHandles.Count -eq 0) {
+        return
+    }
+    $shell = New-Object -ComObject Shell.Application
+    foreach ($windowHandle in $WindowHandles) {
+        foreach ($window in @($shell.Windows())) {
+            try {
+                if ([long] $window.HWND -eq $windowHandle) {
+                    $null = $window.Navigate2($Destination)
+                    break
+                }
+            }
+            catch {
+                # The original Explorer window may have closed during deploy.
+            }
+        }
+    }
+}
+
+Export-ModuleMember -Function `
+    Move-PathWithRetry, `
+    Get-DescendantProcessIds, `
+    Get-ZommiRuntimeRootProcessIds, `
+    Redirect-ExplorerWindowsFromPath, `
+    Restore-ExplorerWindowsToPath

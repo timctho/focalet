@@ -504,12 +504,9 @@ pub fn command_for_target(target: &RuntimeTarget) -> RuntimeCommand {
         if let Some(home) = &target.runtime_home {
             args.extend(["--cd".into(), home.clone()]);
         }
-        args.push("-e".into());
+        args.extend(["-e".into(), "env".into(), "ZOMMI_RUNTIME_CHILD=1".into()]);
         if target.adapter_id == "codex-app-server" {
-            args.extend([
-                "env".into(),
-                "CODEX_INTERNAL_ORIGINATOR_OVERRIDE=codex_exec".into(),
-            ]);
+            args.push("CODEX_INTERNAL_ORIGINATOR_OVERRIDE=codex_exec".into());
         }
         args.push(target.executable_path.clone());
         args.extend(launch_args.iter().map(|value| (*value).into()));
@@ -963,6 +960,7 @@ mod tests {
                 "/home/u",
                 "-e",
                 "env",
+                "ZOMMI_RUNTIME_CHILD=1",
                 "CODEX_INTERNAL_ORIGINATOR_OVERRIDE=codex_exec",
                 "/home/u/bin/codex",
                 "app-server"

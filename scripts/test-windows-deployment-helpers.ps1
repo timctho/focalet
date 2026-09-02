@@ -19,6 +19,34 @@ $tree = @(
 if (($tree | Sort-Object) -join ',' -ne '100,101,102,103,104') {
     throw "The process tree included the wrong processes: $($tree -join ',')."
 }
+
+$runtimeRoots = @(
+    Get-ZommiRuntimeRootProcessIds -Processes @(
+        [pscustomobject]@{
+            ProcessId = 301
+            Name = 'wsl.exe'
+            CommandLine = 'wsl.exe -e env ZOMMI_RUNTIME_CHILD=1 codex app-server'
+        }
+        [pscustomobject]@{
+            ProcessId = 302
+            Name = 'wsl.exe'
+            CommandLine = 'wsl.exe -e env HERMES_DASHBOARD_SESSION_TOKEN=fixture hermes serve'
+        }
+        [pscustomobject]@{
+            ProcessId = 303
+            Name = 'wsl.exe'
+            CommandLine = 'wsl.exe -e bash'
+        }
+        [pscustomobject]@{
+            ProcessId = 304
+            Name = 'pwsh.exe'
+            CommandLine = 'ZOMMI_RUNTIME_CHILD=1'
+        }
+    )
+)
+if (($runtimeRoots | Sort-Object) -join ',' -ne '301,302') {
+    throw "The runtime marker matched the wrong processes: $($runtimeRoots -join ',')."
+}
 foreach ($edge in @(@(104, 103), @(103, 101), @(101, 100), @(102, 100))) {
     if ([Array]::IndexOf($tree, [uint32] $edge[0]) -ge
         [Array]::IndexOf($tree, [uint32] $edge[1])) {
@@ -83,6 +111,7 @@ try {
 
     [ordered]@{
         processTree = $true
+        runtimeMarker = $true
         lockRetry = $true
         elapsedMilliseconds = $clock.ElapsedMilliseconds
     } | ConvertTo-Json

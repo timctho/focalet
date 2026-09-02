@@ -1758,13 +1758,16 @@ fn hermes_gateway_arguments(
                 "Invalid WSL Hermes Gateway launch vector.",
             )
         })?;
-    arguments.splice(
-        separator + 1..separator + 1,
-        [
-            "env".to_owned(),
-            format!("HERMES_DASHBOARD_SESSION_TOKEN={session_token}"),
-        ],
-    );
+    let command_index = separator + 1;
+    let token = format!("HERMES_DASHBOARD_SESSION_TOKEN={session_token}");
+    if arguments
+        .get(command_index)
+        .is_some_and(|value| value == "env")
+    {
+        arguments.insert(command_index + 1, token);
+    } else {
+        arguments.splice(command_index..command_index, ["env".to_owned(), token]);
+    }
     Ok(arguments)
 }
 
@@ -1809,5 +1812,32 @@ mod tests {
         let error = hermes_gateway_arguments(&["-d".into(), "Ubuntu".into()], true, "token")
             .expect_err("missing WSL exec separator must fail");
         assert_eq!(error.code, "invalid-configuration");
+    }
+
+    #[test]
+    fn wsl_launch_preserves_the_zommi_runtime_marker() {
+        let base = [
+            "-d",
+            "Ubuntu",
+            "-e",
+            "env",
+            "ZOMMI_RUNTIME_CHILD=1",
+            "/home/u/bin/hermes",
+            "serve",
+        ]
+        .map(str::to_owned);
+        assert_eq!(
+            hermes_gateway_arguments(&base, true, "fixture-token").expect("WSL launch"),
+            [
+                "-d",
+                "Ubuntu",
+                "-e",
+                "env",
+                "HERMES_DASHBOARD_SESSION_TOKEN=fixture-token",
+                "ZOMMI_RUNTIME_CHILD=1",
+                "/home/u/bin/hermes",
+                "serve",
+            ]
+        );
     }
 }

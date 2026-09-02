@@ -28,6 +28,7 @@ $archiveReplaced = $false
 $hadDirectoryBackup = $false
 $hadArchiveBackup = $false
 $stoppedProcessCount = 0
+$redirectedExplorerWindowHandles = @()
 
 function Get-DirectoryHashes {
     param([string] $Root)
@@ -155,6 +156,11 @@ try {
     }
 
     $targetExecutable = Join-Path $targetDirectory 'Zommi.exe'
+    $redirectedExplorerWindowHandles = @(
+        Redirect-ExplorerWindowsFromPath `
+            -Source $targetDirectory `
+            -Destination $downloadsRoot
+    )
     # Stop every Zommi package launched from Downloads, including older package
     # folder names, so a stale UI or helper cannot survive the replacement.
     # Include the complete descendant tree: the Rust core can own conhost, WSL,
@@ -162,14 +168,21 @@ try {
     # whose inherited working-directory handles still lock the package folder.
     $targetProcesses = @(Get-DownloadsZommiProcesses)
     $processSnapshot = @(Get-CimInstance Win32_Process)
-    $targetProcessIds = if ($targetProcesses.Count -eq 0) {
+    $runtimeRootProcessIds = @(
+        Get-ZommiRuntimeRootProcessIds -Processes $processSnapshot
+    )
+    $rootProcessIds = @(
+        @($targetProcesses.ProcessId) + $runtimeRootProcessIds |
+            Select-Object -Unique
+    )
+    $targetProcessIds = if ($rootProcessIds.Count -eq 0) {
         @()
     }
     else {
         @(
             Get-DescendantProcessIds `
                 -Processes $processSnapshot `
-                -RootProcessIds @($targetProcesses.ProcessId)
+                -RootProcessIds $rootProcessIds
         )
     }
     $stoppedProcessCount = $targetProcessIds.Count
@@ -277,6 +290,7 @@ try {
         executableSha256 = (Get-FileHash -LiteralPath (Join-Path $targetDirectory 'Zommi.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
         archiveSha256 = $targetArchiveHash.ToLowerInvariant()
         stoppedProcesses = $stoppedProcessCount
+        redirectedExplorerWindows = $redirectedExplorerWindowHandles.Count
         startedProcessId = $startedProcessId
         flutterProcessCount = $flutterProcessCount
         singleInstanceVerified = $singleInstanceVerified
@@ -309,4 +323,9 @@ catch {
 finally {
     Remove-Item -LiteralPath $pendingDirectory -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $pendingArchive -Force -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $targetDirectory -PathType Container) {
+        Restore-ExplorerWindowsToPath `
+            -WindowHandles $redirectedExplorerWindowHandles `
+            -Destination $targetDirectory
+    }
 }
