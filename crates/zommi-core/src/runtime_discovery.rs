@@ -855,7 +855,7 @@ pub fn runtime_targets_from_wsl_probe(
     is_default: bool,
     output: &[u8],
 ) -> Vec<RuntimeTarget> {
-    let output = normalize_command_output(&output);
+    let output = normalize_command_output(output);
     let home = output
         .lines()
         .find_map(|line| line.strip_prefix("__ZOMMI_RUNTIME_HOME__"));
