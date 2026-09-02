@@ -7,6 +7,7 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:markdown/markdown.dart' as md;
 import 'package:zommi_flutter/state/zommi_models.dart';
+import 'package:zommi_flutter/theme/zommi_typography.dart';
 
 class CopyableMarkdown extends StatefulWidget {
   const CopyableMarkdown({
@@ -32,8 +33,10 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
   Widget build(BuildContext context) {
     final base = DefaultTextStyle.of(context).style.copyWith(
       color: const Color(0xff272b38),
-      fontSize: widget.compact ? 13 : 14,
+      fontSize: widget.compact ? userMessageFontSize : assistantMessageFontSize,
       height: 1.38,
+      fontFamily: codexUiFontFamily,
+      fontFamilyFallback: codexUiFontFallback,
     );
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
@@ -53,17 +56,19 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
                 styleSheet: MarkdownStyleSheet(
                   p: base,
                   h1: base.copyWith(
-                    fontSize: 18.5,
+                    fontSize: 19.5,
                     fontWeight: FontWeight.w700,
                   ),
                   h2: base.copyWith(
-                    fontSize: 16.5,
+                    fontSize: 17.5,
                     fontWeight: FontWeight.w700,
                   ),
-                  h3: base.copyWith(fontSize: 15, fontWeight: FontWeight.w700),
+                  h3: base.copyWith(fontSize: 16, fontWeight: FontWeight.w700),
                   code: base.copyWith(
                     fontFamily: 'monospace',
-                    fontSize: widget.compact ? 11.5 : 12.5,
+                    fontSize: widget.compact
+                        ? compactChatCodeFontSize
+                        : chatCodeFontSize,
                     backgroundColor: const Color(0xffeef0f6),
                   ),
                   codeblockPadding: EdgeInsets.zero,

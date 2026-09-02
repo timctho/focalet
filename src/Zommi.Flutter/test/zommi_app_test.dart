@@ -8,7 +8,7 @@ import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/zommi_app.dart';
 
 void main() {
-  test('surface morph geometry has symmetric exact endpoints', () {
+  test('surface bloom has symmetric exact endpoints and layers', () {
     expect(
       surfaceTransitionSize(
         const Size(compactOrbSize, compactOrbSize),
@@ -44,16 +44,36 @@ void main() {
         0.001,
       ),
     );
-    final midpoint = surfaceTransitionSize(
+    final start = surfaceTransitionVisuals(
       compactWindowSize,
       normalWindowSize,
-      0.5,
+      0,
     );
-    expect(
-      surfaceTransitionCornerRadius(midpoint, 0.5),
-      greaterThan(60),
-      reason: 'The intermediate morph must remain rounded, not a hard box.',
+    final end = surfaceTransitionVisuals(
+      compactWindowSize,
+      normalWindowSize,
+      1,
     );
+    expect(start.orbOpacity, 1);
+    expect(start.panelOpacity, 0);
+    expect(end.orbOpacity, 0);
+    expect(end.panelOpacity, 1);
+    for (final progress in <double>[0.1, 0.25, 0.5, 0.75, 0.9]) {
+      final forward = surfaceTransitionVisuals(
+        compactWindowSize,
+        normalWindowSize,
+        progress,
+      );
+      final reverse = surfaceTransitionVisuals(
+        normalWindowSize,
+        compactWindowSize,
+        1 - progress,
+      );
+      expect(forward.orbOpacity, closeTo(reverse.orbOpacity, 0.000001));
+      expect(forward.orbScale, closeTo(reverse.orbScale, 0.000001));
+      expect(forward.panelOpacity, closeTo(reverse.panelOpacity, 0.000001));
+      expect(forward.panelScale, closeTo(reverse.panelScale, 0.000001));
+    }
   });
 
   testWidgets('quiet orb expands into the anchored composer on hover', (

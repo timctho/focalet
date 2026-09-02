@@ -93,6 +93,8 @@ final class ZommiController extends ChangeNotifier {
 
   bool get anyTurnActive => _activeTurns.isNotEmpty;
 
+  bool get orbWorking => anyTurnActive || runtimeBusy;
+
   List<RuntimeTarget> get visibleRuntimeTargets =>
       runtimeTargets.where(_isVisibleRuntimeTarget).toList(growable: false);
 

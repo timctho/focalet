@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
+import 'package:zommi_flutter/theme/zommi_typography.dart';
 
 const String inlineAttachmentMarker = '\u{fffc}';
 
@@ -190,8 +191,13 @@ class InlineAttachmentMessage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final style = DefaultTextStyle.of(context).style
-        .copyWith(color: const Color(0xff272b38), fontSize: 13, height: 1.35);
+    final style = DefaultTextStyle.of(context).style.copyWith(
+      color: const Color(0xff272b38),
+      fontSize: userMessageFontSize,
+      height: 1.35,
+      fontFamily: codexUiFontFamily,
+      fontFamilyFallback: codexUiFontFallback,
+    );
     return SelectionArea(
       child: RichText(
         key: key,

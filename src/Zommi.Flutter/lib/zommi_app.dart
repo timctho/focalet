@@ -8,9 +8,12 @@ import 'package:zommi_flutter/desktop/artifact_loader.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
+import 'package:zommi_flutter/theme/zommi_typography.dart';
 import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
 import 'package:zommi_flutter/widgets/overlay_panels.dart';
 import 'package:zommi_flutter/widgets/transcript_view.dart';
+
+export 'package:zommi_flutter/theme/zommi_typography.dart';
 
 const double compactOrbSize = 56;
 const double expandedPanelWidth = 720;
@@ -18,8 +21,6 @@ const double expandedPanelHeight = 620;
 const double bottomAnchorInset = windowBottomInset;
 const Duration hoverCollapseDelay = Duration(milliseconds: 500);
 const Duration previewHideDelay = Duration(milliseconds: 260);
-const String codexUiFontFamily = 'Segoe UI Variable Text';
-const List<String> codexUiFontFallback = ['Segoe UI', 'Inter', 'Arial'];
 
 class ZommiApp extends StatelessWidget {
   const ZommiApp({
@@ -306,7 +307,7 @@ class _ZommiShellState extends State<ZommiShell> {
                             fromSize: fromSize,
                             toSize: toSize,
                             animate: _controller.surfaceTransitionAnimating,
-                            working: _controller.anyTurnActive,
+                            working: _controller.orbWorking,
                             loading: _controller.starting,
                             panelSize: Size(width, height),
                             panel: RepaintBoundary(
@@ -323,7 +324,7 @@ class _ZommiShellState extends State<ZommiShell> {
                             child: _buildPanel(width, height),
                           )
                         : _CompactOrbButton(
-                            working: _controller.anyTurnActive,
+                            working: _controller.orbWorking,
                             loading: _controller.starting,
                             onPressed: () => unawaited(_expand()),
                           ),
@@ -891,16 +892,47 @@ double surfaceTransitionCompactness(Size from, Size to, double progress) {
   return fromCompact + (toCompact - fromCompact) * eased;
 }
 
-double surfaceTransitionCornerRadius(Size size, double compactness) {
+@immutable
+class SurfaceTransitionVisuals {
+  const SurfaceTransitionVisuals({
+    required this.orbOpacity,
+    required this.orbScale,
+    required this.panelOpacity,
+    required this.panelScale,
+  });
+
+  final double orbOpacity;
+  final double orbScale;
+  final double panelOpacity;
+  final double panelScale;
+}
+
+SurfaceTransitionVisuals surfaceTransitionVisuals(
+  Size from,
+  Size to,
+  double progress,
+) {
+  if (from != compactWindowSize && to != compactWindowSize) {
+    return const SurfaceTransitionVisuals(
+      orbOpacity: 0,
+      orbScale: 1,
+      panelOpacity: 1,
+      panelScale: 1,
+    );
+  }
+  final compactness = surfaceTransitionCompactness(from, to, progress);
   final panelness = 1 - compactness;
-  final outer = Offset.zero & size;
-  final compactBounds = Rect.fromCenter(
-    center: outer.center,
-    width: math.min(44, size.width),
-    height: math.min(44, size.height),
+  return SurfaceTransitionVisuals(
+    orbOpacity: _smoothStep(compactness),
+    orbScale: 1 + panelness * 0.1,
+    panelOpacity: _smoothStep(panelness),
+    panelScale: 0.965 + panelness * 0.035,
   );
-  final morphBounds = Rect.lerp(compactBounds, outer, panelness)!;
-  return compactness * morphBounds.shortestSide / 2 + panelness * 34;
+}
+
+double _smoothStep(double value) {
+  final t = value.clamp(0.0, 1.0);
+  return t * t * (3 - 2 * t);
 }
 
 class _SurfaceTransitionView extends StatefulWidget {
@@ -965,53 +997,90 @@ class _SurfaceTransitionViewState extends State<_SurfaceTransitionView>
           animation: _motion,
           builder: (context, child) {
             final progress = _motion.value;
+            final compactTransition =
+                widget.fromSize == compactWindowSize ||
+                widget.toSize == compactWindowSize;
+            if (compactTransition) {
+              final visuals = surfaceTransitionVisuals(
+                widget.fromSize,
+                widget.toSize,
+                progress,
+              );
+              return OverflowBox(
+                alignment: Alignment.bottomCenter,
+                minWidth: widget.panelSize.width,
+                maxWidth: widget.panelSize.width,
+                minHeight: widget.panelSize.height,
+                maxHeight: widget.panelSize.height,
+                child: SizedBox.fromSize(
+                  key: const ValueKey('surface-transition'),
+                  size: widget.panelSize,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      if (visuals.panelOpacity > 0)
+                        IgnorePointer(
+                          child: Opacity(
+                            key: const ValueKey(
+                              'surface-transition-panel-opacity',
+                            ),
+                            opacity: visuals.panelOpacity,
+                            child: Transform.scale(
+                              key: const ValueKey('surface-transition-panel'),
+                              alignment: Alignment.bottomCenter,
+                              scale: visuals.panelScale,
+                              child: widget.panel,
+                            ),
+                          ),
+                        ),
+                      if (visuals.orbOpacity > 0)
+                        Align(
+                          alignment: Alignment.bottomCenter,
+                          child: Opacity(
+                            key: const ValueKey(
+                              'surface-transition-orb-opacity',
+                            ),
+                            opacity: visuals.orbOpacity,
+                            child: Transform.scale(
+                              key: const ValueKey('surface-transition-orb'),
+                              scale: visuals.orbScale,
+                              child: SizedBox.square(
+                                dimension: compactOrbSize,
+                                child: ZommiOrb(
+                                  working: widget.working,
+                                  loading: widget.loading,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              );
+            }
             final size = surfaceTransitionSize(
               widget.fromSize,
               widget.toSize,
               progress,
             );
-            final compactness = surfaceTransitionCompactness(
-              widget.fromSize,
-              widget.toSize,
-              progress,
-            );
-            final panelness = 1 - compactness;
-            final radius = surfaceTransitionCornerRadius(size, compactness);
-            final contentOpacity = ((panelness - 0.65) / 0.35).clamp(0.0, 1.0);
             return SizedBox.fromSize(
               key: const ValueKey('surface-transition'),
               size: size,
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(radius),
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    CustomPaint(
-                      painter: _SurfaceMorphPainter(
-                        compactness: compactness,
-                        phase: progress,
-                        working: widget.working,
-                        loading: widget.loading,
-                      ),
+                borderRadius: BorderRadius.circular(34),
+                child: IgnorePointer(
+                  child: OverflowBox(
+                    alignment: Alignment.bottomCenter,
+                    minWidth: widget.panelSize.width,
+                    maxWidth: widget.panelSize.width,
+                    minHeight: widget.panelSize.height,
+                    maxHeight: widget.panelSize.height,
+                    child: SizedBox.fromSize(
+                      size: widget.panelSize,
+                      child: widget.panel,
                     ),
-                    if (contentOpacity > 0)
-                      IgnorePointer(
-                        child: Opacity(
-                          opacity: contentOpacity,
-                          child: OverflowBox(
-                            alignment: Alignment.bottomCenter,
-                            minWidth: widget.panelSize.width,
-                            maxWidth: widget.panelSize.width,
-                            minHeight: widget.panelSize.height,
-                            maxHeight: widget.panelSize.height,
-                            child: SizedBox.fromSize(
-                              size: widget.panelSize,
-                              child: widget.panel,
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
+                  ),
                 ),
               ),
             );
@@ -1020,91 +1089,6 @@ class _SurfaceTransitionViewState extends State<_SurfaceTransitionView>
       ),
     );
   }
-}
-
-class _SurfaceMorphPainter extends CustomPainter {
-  const _SurfaceMorphPainter({
-    required this.compactness,
-    required this.phase,
-    required this.working,
-    required this.loading,
-  });
-
-  final double compactness;
-  final double phase;
-  final bool working;
-  final bool loading;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final panelness = 1 - compactness;
-    final outer = Offset.zero & size;
-    final compactRect = Rect.fromCenter(
-      center: outer.center,
-      width: math.min(44, size.width),
-      height: math.min(44, size.height),
-    );
-    final bounds = Rect.lerp(compactRect, outer, panelness)!;
-    final radius = surfaceTransitionCornerRadius(size, compactness);
-    final shape = RRect.fromRectAndRadius(bounds, Radius.circular(radius));
-    canvas.drawRRect(
-      shape,
-      Paint()
-        ..color = Color.lerp(
-          const Color(0xff716cae),
-          const Color(0xeaf9fbff),
-          panelness,
-        )!,
-    );
-    if (compactness > 0) {
-      canvas.save();
-      canvas.clipRRect(shape);
-      canvas.drawRect(
-        bounds,
-        Paint()
-          ..shader = RadialGradient(
-            center: const Alignment(-0.28, -0.32),
-            radius: 0.95,
-            colors: [
-              Color.fromRGBO(247, 246, 255, compactness),
-              Color.fromRGBO(182, 200, 236, compactness),
-              Color.fromRGBO(105, 225, 220, compactness * 0.5),
-              Color.fromRGBO(97, 85, 127, compactness),
-            ],
-            stops: const [0, 0.32, 0.68, 1],
-          ).createShader(bounds),
-      );
-      canvas.restore();
-    }
-    canvas.drawRRect(
-      shape,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.1
-        ..color = const Color(0xd9ffffff),
-    );
-    if ((working || loading) && compactness > 0.55) {
-      final pulse = 0.5 + 0.5 * math.sin(phase * math.pi * 2);
-      canvas.drawArc(
-        bounds.inflate(3 + pulse),
-        phase * math.pi * 2 - math.pi / 2,
-        math.pi * 0.72,
-        false,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 2
-          ..strokeCap = StrokeCap.round
-          ..color = Color.fromRGBO(105, 216, 209, compactness),
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _SurfaceMorphPainter oldDelegate) =>
-      oldDelegate.compactness != compactness ||
-      oldDelegate.phase != phase ||
-      oldDelegate.working != working ||
-      oldDelegate.loading != loading;
 }
 
 class ZommiOrb extends StatefulWidget {

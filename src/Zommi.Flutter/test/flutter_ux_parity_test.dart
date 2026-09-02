@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -60,9 +59,17 @@ void main() {
     expect(find.byKey(const ValueKey('surface-transition')), findsOneWidget);
     expect(
       tester.getSize(find.byKey(const ValueKey('surface-transition'))),
-      compactWindowSize,
+      normalWindowSize,
     );
-    expect(find.byType(ZommiOrb), findsNothing);
+    expect(
+      find.byKey(const ValueKey('surface-transition-orb')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('surface-transition-panel')),
+      findsNothing,
+    );
+    expect(find.byType(ZommiOrb), findsOneWidget);
     expect(find.byKey(const ValueKey('zommi-transcript')), findsNothing);
     expect(find.byKey(const ValueKey('zommi-composer')), findsNothing);
     expect(
@@ -93,12 +100,12 @@ void main() {
       await tester.pump();
 
       final viewport = tester.getRect(find.byType(Scaffold));
-      final morph = tester.getRect(
-        find.byKey(const ValueKey('surface-transition')),
+      final orb = tester.getRect(
+        find.byKey(const ValueKey('surface-transition-orb')),
       );
-      expect(morph.size, compactWindowSize);
-      expect(morph.center.dx, closeTo(viewport.center.dx, 0.01));
-      expect(morph.bottom, closeTo(viewport.bottom, 0.01));
+      expect(orb.size, compactWindowSize);
+      expect(orb.center.dx, closeTo(viewport.center.dx, 0.01));
+      expect(orb.bottom, closeTo(viewport.bottom, 0.01));
 
       resizeGate.complete();
       await tester.pumpAndSettle();
@@ -129,12 +136,12 @@ void main() {
       await tester.pump();
 
       final viewport = tester.getRect(find.byType(Scaffold));
-      final morph = tester.getRect(
-        find.byKey(const ValueKey('surface-transition')),
+      final orb = tester.getRect(
+        find.byKey(const ValueKey('surface-transition-orb')),
       );
-      expect(morph.size, compactWindowSize);
-      expect(morph.center.dx, closeTo(viewport.center.dx, 0.01));
-      expect(morph.bottom, closeTo(viewport.bottom, 0.01));
+      expect(orb.size, compactWindowSize);
+      expect(orb.center.dx, closeTo(viewport.center.dx, 0.01));
+      expect(orb.bottom, closeTo(viewport.bottom, 0.01));
 
       shrinkGate.complete();
       await tester.pumpAndSettle();
@@ -142,17 +149,17 @@ void main() {
   );
 
   testWidgets(
-    'forward and reverse morph quarter frames are pixel-symmetric and rounded',
+    'forward and reverse bloom layers are symmetric without a growing box',
     (tester) async {
       final core = RichFakeCore()..historyCount = 0;
       await _pumpApp(tester, core: core, desktop: FakeDesktopBridge());
 
       await tester.tap(find.byKey(const ValueKey('zommi-orb')));
       await tester.pump();
-      final forward = <_RasterFrame>[];
+      final forward = <_SurfaceLayerFrame>[];
       for (var quarter = 1; quarter <= 3; quarter++) {
         await tester.pump(surfaceTransitionDuration * 0.25);
-        forward.add(await _captureSurfaceTransition(tester));
+        forward.add(_surfaceLayerFrame(tester));
       }
       await tester.pump(surfaceTransitionDuration * 0.25);
       await tester.pumpAndSettle();
@@ -166,39 +173,29 @@ void main() {
       await tester.pump();
       await mouse.moveTo(const Offset(5, 5));
       await tester.pump(hoverCollapseDelay);
-      final reverse = <_RasterFrame>[];
+      final reverse = <_SurfaceLayerFrame>[];
       for (var quarter = 1; quarter <= 3; quarter++) {
         await tester.pump(surfaceTransitionDuration * 0.25);
-        reverse.add(await _captureSurfaceTransition(tester));
+        reverse.add(_surfaceLayerFrame(tester));
       }
 
       for (var index = 0; index < forward.length; index++) {
         final matchingReverse = reverse[reverse.length - index - 1];
         final frame = forward[index];
-        expect(matchingReverse.size, frame.size);
-        expect(matchingReverse.pixels, orderedEquals(frame.pixels));
-
-        final progress = (index + 1) * 0.25;
-        final frameSize = surfaceTransitionSize(
-          compactWindowSize,
-          normalWindowSize,
-          progress,
-        );
-        final outerLeft = (frame.size.width - frameSize.width) / 2;
-        final outerTop = frame.size.height - frameSize.height;
+        expect(frame.transitionSize, normalWindowSize);
+        expect(matchingReverse.transitionSize, frame.transitionSize);
+        expect(matchingReverse.orbOpacity, closeTo(frame.orbOpacity, 0.000001));
+        expect(matchingReverse.orbScale, closeTo(frame.orbScale, 0.000001));
         expect(
-          frame.alphaAt(Offset(outerLeft + 2, outerTop + 2)),
-          0,
-          reason: 'Every intermediate frame must retain rounded corners.',
+          matchingReverse.panelOpacity,
+          closeTo(frame.panelOpacity, 0.000001),
         );
-        expect(
-          frame.alphaAt(
-            Offset(frame.size.width / 2, outerTop + frameSize.height / 2),
-          ),
-          greaterThan(200),
-          reason: 'Every rounded frame must remain visibly filled.',
-        );
+        expect(matchingReverse.panelScale, closeTo(frame.panelScale, 0.000001));
       }
+      expect(forward.first.orbOpacity, greaterThan(0.95));
+      expect(forward.first.panelOpacity, lessThan(0.05));
+      expect(forward.last.orbOpacity, lessThan(0.05));
+      expect(forward.last.panelOpacity, greaterThan(0.95));
 
       await tester.pump(surfaceTransitionDuration * 0.25);
       await tester.pumpAndSettle();
@@ -606,7 +603,11 @@ void main() {
           .map((body) => body.styleSheet?.p?.fontSize)
           .whereType<double>()
           .toSet();
-      expect(bodySizes, containsAll(<double>[13, 14]));
+      expect(
+        bodySizes,
+        containsAll(<double>[userMessageFontSize, assistantMessageFontSize]),
+      );
+      expect(codexUiFontFamily, 'packages/fossui/Geist');
       expect(
         markdown.map((body) => body.styleSheet?.p?.fontFamily),
         contains(codexUiFontFamily),
@@ -1158,40 +1159,46 @@ Future<void> _expand(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
-Future<_RasterFrame> _captureSurfaceTransition(WidgetTester tester) async {
-  var renderObject = tester.renderObject<RenderObject>(
+_SurfaceLayerFrame _surfaceLayerFrame(
+  WidgetTester tester,
+) => _SurfaceLayerFrame(
+  transitionSize: tester.getSize(
     find.byKey(const ValueKey('surface-transition')),
-  );
-  while (renderObject is! RenderRepaintBoundary) {
-    final parent = renderObject.parent;
-    expect(parent, isA<RenderObject>());
-    renderObject = parent!;
-  }
-  final boundary = renderObject;
-  final image = await tester.runAsync(() => boundary.toImage(pixelRatio: 1));
-  final data = await tester.runAsync(
-    () => image!.toByteData(format: ImageByteFormat.rawRgba),
-  );
-  final pixels = Uint8List.fromList(data!.buffer.asUint8List());
-  final frame = _RasterFrame(
-    size: Size(image!.width.toDouble(), image.height.toDouble()),
-    pixels: pixels,
-  );
-  image.dispose();
-  return frame;
-}
+  ),
+  orbOpacity: tester
+      .widget<Opacity>(
+        find.byKey(const ValueKey('surface-transition-orb-opacity')),
+      )
+      .opacity,
+  orbScale: tester
+      .widget<Transform>(find.byKey(const ValueKey('surface-transition-orb')))
+      .transform
+      .storage[0],
+  panelOpacity: tester
+      .widget<Opacity>(
+        find.byKey(const ValueKey('surface-transition-panel-opacity')),
+      )
+      .opacity,
+  panelScale: tester
+      .widget<Transform>(find.byKey(const ValueKey('surface-transition-panel')))
+      .transform
+      .storage[0],
+);
 
-final class _RasterFrame {
-  const _RasterFrame({required this.size, required this.pixels});
+final class _SurfaceLayerFrame {
+  const _SurfaceLayerFrame({
+    required this.transitionSize,
+    required this.orbOpacity,
+    required this.orbScale,
+    required this.panelOpacity,
+    required this.panelScale,
+  });
 
-  final Size size;
-  final Uint8List pixels;
-
-  int alphaAt(Offset point) {
-    final x = point.dx.round().clamp(0, size.width.toInt() - 1);
-    final y = point.dy.round().clamp(0, size.height.toInt() - 1);
-    return pixels[(y * size.width.toInt() + x) * 4 + 3];
-  }
+  final Size transitionSize;
+  final double orbOpacity;
+  final double orbScale;
+  final double panelOpacity;
+  final double panelScale;
 }
 
 void _appendComposerText(WidgetTester tester, String value) {

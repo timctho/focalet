@@ -433,6 +433,31 @@ void main() {
     await controller.close();
   });
 
+  test(
+    'runtime switching keeps the global orb activity signal alive',
+    () async {
+      final core = RichFakeCore()..historyCount = 0;
+      final controller = ZommiController(
+        core: core,
+        desktop: FakeDesktopBridge(),
+      );
+      await controller.initialize();
+      final gate = Completer<void>();
+      core.connectGate = gate.future;
+
+      final switching = controller.selectRuntime('runtime-pi');
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.runtimeBusy, isTrue);
+      expect(controller.orbWorking, isTrue);
+
+      gate.complete();
+      await switching;
+      expect(controller.runtimeBusy, isFalse);
+      expect(controller.orbWorking, isFalse);
+      await controller.close();
+    },
+  );
+
   test('undetected runtime targets are excluded from the main list', () async {
     final core = RichFakeCore()..historyCount = 0;
     core.discoveredTargets.add(
