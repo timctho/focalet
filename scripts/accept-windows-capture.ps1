@@ -83,6 +83,39 @@ public static class ZommiWindowsAcceptanceNative
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool SetCursorPos(int x, int y);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr GetDC(IntPtr window);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int ReleaseDC(IntPtr window, IntPtr deviceContext);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern IntPtr CreateCompatibleDC(IntPtr deviceContext);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern bool DeleteDC(IntPtr deviceContext);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern IntPtr CreateCompatibleBitmap(IntPtr deviceContext, int width, int height);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern IntPtr SelectObject(IntPtr deviceContext, IntPtr value);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern bool DeleteObject(IntPtr value);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern bool BitBlt(
+        IntPtr destination,
+        int destinationX,
+        int destinationY,
+        int width,
+        int height,
+        IntPtr source,
+        int sourceX,
+        int sourceY,
+        uint operation);
+
     [DllImport("user32.dll")]
     private static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
 
@@ -273,6 +306,56 @@ public static class ZommiWindowsAcceptanceNative
     {
         var dpi = GetDpiForWindow(window);
         return dpi == 0 ? 96 : dpi;
+    }
+
+    public static bool TryCopyDesktopPixel(out int error)
+    {
+        const uint sourceCopy = 0x00CC0020;
+        error = 0;
+        var source = GetDC(IntPtr.Zero);
+        if (source == IntPtr.Zero)
+        {
+            error = Marshal.GetLastWin32Error();
+            return false;
+        }
+
+        var target = CreateCompatibleDC(source);
+        var bitmap = target == IntPtr.Zero
+            ? IntPtr.Zero
+            : CreateCompatibleBitmap(source, 1, 1);
+        var previous = bitmap == IntPtr.Zero
+            ? IntPtr.Zero
+            : SelectObject(target, bitmap);
+        try
+        {
+            if (target == IntPtr.Zero || bitmap == IntPtr.Zero || previous == IntPtr.Zero)
+            {
+                error = Marshal.GetLastWin32Error();
+                return false;
+            }
+            if (!BitBlt(target, 0, 0, 1, 1, source, 0, 0, sourceCopy))
+            {
+                error = Marshal.GetLastWin32Error();
+                return false;
+            }
+            return true;
+        }
+        finally
+        {
+            if (previous != IntPtr.Zero)
+            {
+                SelectObject(target, previous);
+            }
+            if (bitmap != IntPtr.Zero)
+            {
+                DeleteObject(bitmap);
+            }
+            if (target != IntPtr.Zero)
+            {
+                DeleteDC(target);
+            }
+            ReleaseDC(IntPtr.Zero, source);
+        }
     }
 
     private static IntPtr Point(int x, int y)
@@ -524,24 +607,20 @@ function Get-DesktopCaptureDiagnostics {
 }
 
 function Assert-DesktopCaptureSurface {
-    Add-Type -AssemblyName System.Drawing
     $lastError = $null
     foreach ($attempt in 1..20) {
-        $bitmap = [Drawing.Bitmap]::new(1, 1)
-        $graphics = [Drawing.Graphics]::FromImage($bitmap)
-        try {
-            $graphics.CopyFromScreen(0, 0, 0, 0, [Drawing.Size]::new(1, 1))
+        $errorCode = 0
+        if ([ZommiWindowsAcceptanceNative]::TryCopyDesktopPixel([ref] $errorCode)) {
             if ($attempt -gt 1) {
                 Write-Host "desktop-surface: recovered on attempt $attempt"
             }
             return
         }
-        catch {
-            $lastError = $_.Exception.GetBaseException().Message
-        }
-        finally {
-            $graphics.Dispose()
-            $bitmap.Dispose()
+        $lastError = if ($errorCode -eq 0) {
+            'unknown Win32 error'
+        } else {
+            $exception = [ComponentModel.Win32Exception]::new($errorCode)
+            "$($exception.Message) ($errorCode)"
         }
         Start-Sleep -Milliseconds 250
     }

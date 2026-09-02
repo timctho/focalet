@@ -163,12 +163,28 @@ class ReleasePackageTests(unittest.TestCase):
             "userInteractive=$([Environment]::UserInteractive)",
             "virtualScreen=$virtualScreen",
             "foreach ($attempt in 1..20)",
+            "TryCopyDesktopPixel",
             "desktop-surface: recovered on attempt $attempt",
             "Start-Sleep -Milliseconds 250",
             "it does not prove Windows was locked",
         ):
             self.assertIn(contract, script)
         self.assertNotIn("Keep the RDP client visible and the session unlocked", script)
+
+    def test_windows_pixel_capture_uses_the_verified_direct_gdi_path(self) -> None:
+        source = (SCRIPTS.parent / "src/Zommi.Windows/ScreenCapture.cs").read_text(
+            encoding="utf-8"
+        )
+        for contract in (
+            'DllImport("user32.dll", SetLastError = true)',
+            'DllImport("gdi32.dll", SetLastError = true)',
+            "GetDC(nint.Zero)",
+            "BitBlt(",
+            "ReleaseDC(nint.Zero, desktopDc)",
+            "SourceCopy",
+        ):
+            self.assertIn(contract, source)
+        self.assertNotIn("graphics.CopyFromScreen", source)
 
     def test_windows_selector_forces_initial_foreground_and_stays_topmost(self) -> None:
         source = (SCRIPTS.parent / "src/Zommi.Windows/RegionSelectionForm.cs").read_text(
