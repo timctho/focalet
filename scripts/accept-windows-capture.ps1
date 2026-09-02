@@ -28,6 +28,9 @@ public static class ZommiWindowsAcceptanceNative
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern int GetWindowText(IntPtr window, StringBuilder text, int maximum);
 
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int GetClassName(IntPtr window, StringBuilder text, int maximum);
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool PostMessage(IntPtr window, uint message, IntPtr word, IntPtr data);
 
@@ -301,9 +304,37 @@ public static class ZommiWindowsAcceptanceNative
 
     public static bool IsOwnedWindowAtPoint(IntPtr window, int x, int y)
     {
-        const uint root = 2;
+        const uint rootOwner = 3;
         var hit = WindowFromPoint(new NativePoint { X = x, Y = y });
-        return hit != IntPtr.Zero && GetAncestor(hit, root) == window;
+        return hit != IntPtr.Zero && GetAncestor(hit, rootOwner) == window;
+    }
+
+    public static string DescribeWindowAtPoint(int x, int y)
+    {
+        const uint root = 2;
+        const uint rootOwner = 3;
+        var hit = WindowFromPoint(new NativePoint { X = x, Y = y });
+        var rootWindow = hit == IntPtr.Zero ? IntPtr.Zero : GetAncestor(hit, root);
+        var ownerWindow = hit == IntPtr.Zero ? IntPtr.Zero : GetAncestor(hit, rootOwner);
+        uint processId = 0;
+        if (hit != IntPtr.Zero)
+        {
+            GetWindowThreadProcessId(hit, out processId);
+        }
+        var className = new StringBuilder(256);
+        if (hit != IntPtr.Zero)
+        {
+            GetClassName(hit, className, className.Capacity);
+        }
+        return string.Format(
+            "point={0},{1};hit={2};root={3};rootOwner={4};pid={5};class={6}",
+            x,
+            y,
+            hit.ToInt64(),
+            rootWindow.ToInt64(),
+            ownerWindow.ToInt64(),
+            processId,
+            className.ToString());
     }
 
     public static bool PostMouseLeaveAtPoint(int x, int y)
@@ -983,7 +1014,11 @@ function Invoke-PackagedApplicationAcceptance {
             $compactCenterX,
             $compactCenterY
         )) {
-            throw 'The expanded packaged surface lost the stationary pointer.'
+            $ownership = [ZommiWindowsAcceptanceNative]::DescribeWindowAtPoint(
+                $compactCenterX,
+                $compactCenterY
+            )
+            throw "The expanded packaged surface lost the stationary pointer: expected=$($window.ToInt64()); $ownership."
         }
         if (-not [ZommiWindowsAcceptanceNative]::PostMouseLeaveAtPoint(
             $compactCenterX,

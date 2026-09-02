@@ -157,7 +157,7 @@ class ReleasePackageTests(unittest.TestCase):
         script = (SCRIPTS / "accept-windows-capture.ps1").read_text(encoding="utf-8")
         for contract in (
             "IsOwnedWindowAtPoint",
-            "GetAncestor(hit, root) == window",
+            "GetAncestor(hit, rootOwner) == window",
             "PhysicalBounds",
             "SetThreadDpiAwarenessContext(new IntPtr(-4))",
             "SetPhysicalCursorPos",
