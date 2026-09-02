@@ -1,9 +1,14 @@
 use std::{
     env, fs,
+    fs::OpenOptions,
     io::{self, BufRead, BufReader, Read, Write},
     net::{IpAddr, Shutdown, TcpStream},
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -14,7 +19,7 @@ use uuid::Uuid;
 use wait_timeout::ChildExt;
 use zommi_core::{RuntimeCommand, RuntimeTarget};
 
-const TRANSPORT_VERSION: u32 = 2;
+const TRANSPORT_VERSION: u32 = 3;
 const ENDPOINT_SCHEMA_VERSION: u32 = 1;
 const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 const CHANNEL_STDOUT: u8 = 1;
@@ -33,6 +38,7 @@ struct RelayEndpoint {
     port: u16,
     token: String,
     pid: u32,
+    heartbeat_ms: u64,
 }
 
 pub fn wrap_wsl_command(
@@ -94,7 +100,11 @@ pub fn run_proxy(arguments: &[String]) -> io::Result<i32> {
     let invocation = ProxyInvocation::parse(arguments)?;
     let endpoint_path = endpoint_path(&invocation.distribution)?;
     let endpoint = ensure_relay(&invocation.distribution, &endpoint_path)?;
-    proxy_runtime(endpoint, invocation)
+    if env::var("ZOMMI_WSL_RELAY_TRANSPORT").as_deref() == Ok("tcp") {
+        proxy_runtime(endpoint, invocation)
+    } else {
+        proxy_runtime_spool(endpoint, &endpoint_path, invocation)
+    }
 }
 
 pub fn cached_default_relay_available(targets: &[RuntimeTarget]) -> bool {
@@ -106,7 +116,7 @@ pub fn cached_default_relay_available(targets: &[RuntimeTarget]) -> bool {
             endpoint_path(distribution)
                 .and_then(|path| load_endpoint(&path))
                 .is_ok_and(|endpoint| {
-                    endpoint_matches(&endpoint, distribution) && ping(&endpoint).is_ok()
+                    endpoint_matches(&endpoint, distribution) && relay_is_alive(&endpoint)
                 })
         })
 }
@@ -215,7 +225,7 @@ fn hex_name(value: &str) -> String {
 fn ensure_relay(distribution: &str, endpoint_path: &Path) -> io::Result<RelayEndpoint> {
     if let Ok(endpoint) = load_endpoint(endpoint_path)
         && endpoint_matches(&endpoint, distribution)
-        && ping(&endpoint).is_ok()
+        && relay_is_alive(&endpoint)
     {
         return Ok(endpoint);
     }
@@ -236,8 +246,14 @@ fn ensure_relay(distribution: &str, endpoint_path: &Path) -> io::Result<RelayEnd
                     "WSL relay endpoint identity does not match.",
                 ));
             }
-            ping(&endpoint)?;
-            Ok(endpoint)
+            if relay_is_alive(&endpoint) {
+                Ok(endpoint)
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "WSL relay heartbeat is stale.",
+                ))
+            }
         }) {
             Ok(endpoint) => return Ok(endpoint),
             Err(error) => last_error = Some(error),
@@ -271,28 +287,17 @@ fn endpoint_matches(endpoint: &RelayEndpoint, distribution: &str) -> bool {
         && endpoint.token.len() >= 32
 }
 
-fn ping(endpoint: &RelayEndpoint) -> io::Result<()> {
-    let mut stream = connect(endpoint)?;
-    write_json_line(
-        &mut stream,
-        &json!({
-            "op": "ping",
-            "token": endpoint.token,
-            "transportVersion": TRANSPORT_VERSION,
-        }),
-    )?;
-    let response = read_json_line(&mut BufReader::new(stream))?;
-    if response.get("ok").and_then(Value::as_bool) == Some(true)
-        && response.get("transportVersion").and_then(Value::as_u64)
-            == Some(u64::from(TRANSPORT_VERSION))
-    {
-        Ok(())
-    } else {
-        Err(io::Error::new(
-            io::ErrorKind::ConnectionRefused,
-            "WSL relay rejected the liveness probe.",
-        ))
-    }
+fn relay_is_alive(endpoint: &RelayEndpoint) -> bool {
+    now_ms().saturating_sub(endpoint.heartbeat_ms) <= 5_000
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
 }
 
 fn connect(endpoint: &RelayEndpoint) -> io::Result<TcpStream> {
@@ -316,8 +321,10 @@ fn start_relay(distribution: &str, endpoint_path: &Path) -> io::Result<()> {
     fs::create_dir_all(root.join("endpoints"))?;
     let relay = root.join("zommi-wsl-relay.js");
     let launcher = root.join("launch-wsl-relay.sh");
-    write_if_changed(&relay, RELAY_SOURCE.as_bytes())?;
-    write_if_changed(&launcher, LAUNCHER_SOURCE.as_bytes())?;
+    let relay_source = RELAY_SOURCE.replace("\r\n", "\n");
+    let launcher_source = LAUNCHER_SOURCE.replace("\r\n", "\n");
+    write_if_changed(&relay, relay_source.as_bytes())?;
+    write_if_changed(&launcher, launcher_source.as_bytes())?;
     match fs::remove_file(endpoint_path) {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
@@ -487,6 +494,182 @@ fn proxy_runtime(endpoint: RelayEndpoint, invocation: ProxyInvocation) -> io::Re
                 ));
             }
         }
+    }
+}
+
+fn proxy_runtime_spool(
+    endpoint: RelayEndpoint,
+    endpoint_path: &Path,
+    invocation: ProxyInvocation,
+) -> io::Result<i32> {
+    let relay_root = endpoint_path
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "WSL relay path has no root.")
+        })?;
+    let session_directory = relay_root
+        .join("spool")
+        .join(format!("session-{}", Uuid::new_v4().simple()));
+    fs::create_dir_all(&session_directory)?;
+    let running = Arc::new(AtomicBool::new(true));
+    let _session = SpoolSession {
+        directory: session_directory.clone(),
+        running: Arc::clone(&running),
+    };
+    let input_path = session_directory.join("stdin.bin");
+    let input_closed_path = session_directory.join("stdin.closed");
+    let heartbeat_path = session_directory.join("client-heartbeat");
+    let output_path = session_directory.join("output.bin");
+    fs::write(&input_path, [])?;
+    fs::write(&output_path, [])?;
+    fs::write(&heartbeat_path, now_ms().to_string())?;
+    let request = serde_json::to_vec_pretty(&json!({
+        "op": "spawn",
+        "token": endpoint.token,
+        "transportVersion": TRANSPORT_VERSION,
+        "command": invocation.command,
+        "args": invocation.args,
+        "cwd": invocation.cwd,
+    }))
+    .map_err(io::Error::other)?;
+    let request_temporary = session_directory.join("request.tmp");
+    fs::write(&request_temporary, request)?;
+    fs::rename(request_temporary, session_directory.join("request.json"))?;
+
+    let heartbeat_running = Arc::clone(&running);
+    let heartbeat_file = heartbeat_path.clone();
+    thread::spawn(move || {
+        while heartbeat_running.load(Ordering::Relaxed) {
+            let _ = fs::write(&heartbeat_file, now_ms().to_string());
+            thread::sleep(Duration::from_millis(500));
+        }
+    });
+    let input_running = Arc::clone(&running);
+    thread::spawn(move || {
+        let mut input = io::stdin().lock();
+        let mut chunk = [0_u8; 64 * 1024];
+        while input_running.load(Ordering::Relaxed) {
+            let bytes = match input.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(bytes) => bytes,
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(_) => break,
+            };
+            let appended =
+                OpenOptions::new()
+                    .append(true)
+                    .open(&input_path)
+                    .and_then(|mut output| {
+                        output.write_all(&chunk[..bytes])?;
+                        output.flush()
+                    });
+            if appended.is_err() {
+                break;
+            }
+        }
+        if input_running.load(Ordering::Relaxed) {
+            let committed_length = fs::metadata(&input_path).map(|metadata| metadata.len());
+            if let Ok(committed_length) = committed_length {
+                let _ = fs::write(input_closed_path, committed_length.to_string());
+            }
+        }
+    });
+
+    let mut output = OpenOptions::new().read(true).open(&output_path)?;
+    let claim_path = session_directory.join("request.claimed.json");
+    let claim_deadline = Instant::now() + Duration::from_secs(10);
+    let mut claimed = false;
+    let mut relay_seen = Instant::now();
+    let mut relay_check = Instant::now();
+    let mut buffered = Vec::new();
+    let mut stdout = io::stdout().lock();
+    let mut stderr = io::stderr().lock();
+    let result = 'output: loop {
+        let mut chunk = [0_u8; 64 * 1024];
+        let bytes = output.read(&mut chunk)?;
+        if bytes > 0 {
+            buffered.extend_from_slice(&chunk[..bytes]);
+        }
+        let mut consumed = 0;
+        while buffered.len().saturating_sub(consumed) >= 5 {
+            let channel = buffered[consumed];
+            let length = u32::from_be_bytes(
+                buffered[consumed + 1..consumed + 5]
+                    .try_into()
+                    .expect("frame length"),
+            ) as usize;
+            if length > MAX_FRAME_BYTES {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "WSL relay frame is too large.",
+                ));
+            }
+            if buffered.len().saturating_sub(consumed) < 5 + length {
+                break;
+            }
+            let payload_start = consumed + 5;
+            let payload_end = payload_start + length;
+            let payload = &buffered[payload_start..payload_end];
+            match channel {
+                CHANNEL_STDOUT => {
+                    stdout.write_all(payload)?;
+                    stdout.flush()?;
+                }
+                CHANNEL_STDERR => {
+                    stderr.write_all(payload)?;
+                    stderr.flush()?;
+                }
+                CHANNEL_EXIT if payload.len() == 4 => {
+                    break 'output i32::from_be_bytes(payload.try_into().expect("exit code"))
+                        .clamp(0, 255);
+                }
+                _ => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "WSL relay returned an unknown frame.",
+                    ));
+                }
+            }
+            consumed = payload_end;
+        }
+        if consumed > 0 {
+            buffered.drain(..consumed);
+        }
+        claimed = claimed || claim_path.exists();
+        if !claimed && Instant::now() >= claim_deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "WSL relay did not claim the runtime request.",
+            ));
+        }
+        if relay_check.elapsed() >= Duration::from_secs(1) {
+            relay_check = Instant::now();
+            if load_endpoint(endpoint_path).is_ok_and(|current| {
+                endpoint_matches(&current, &invocation.distribution) && relay_is_alive(&current)
+            }) {
+                relay_seen = Instant::now();
+            } else if relay_seen.elapsed() > Duration::from_secs(6) {
+                return Err(io::Error::new(
+                    io::ErrorKind::ConnectionAborted,
+                    "WSL relay stopped while the runtime was active.",
+                ));
+            }
+        }
+        thread::sleep(Duration::from_millis(5));
+    };
+    Ok(result)
+}
+
+struct SpoolSession {
+    directory: PathBuf,
+    running: Arc<AtomicBool>,
+}
+
+impl Drop for SpoolSession {
+    fn drop(&mut self) {
+        self.running.store(false, Ordering::Relaxed);
+        let _ = fs::remove_dir_all(&self.directory);
     }
 }
 

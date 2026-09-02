@@ -62,7 +62,7 @@ function runRuntime(endpoint) {
       const request = {
         op: 'spawn',
         token: TOKEN,
-        transportVersion: 2,
+        transportVersion: 3,
         command: '/bin/sh',
         args: ['-c', 'read value; printf "out:%s\\n" "$value"; printf "err:%s\\n" "$value" >&2; exit 7'],
         cwd: '/',
@@ -81,7 +81,7 @@ function runRustProxy(endpointPath) {
       '--distribution', 'test',
       '--cwd', '/',
       '--', '/bin/sh', '-c',
-      'read value; printf "proxy-out:%s\\n" "$value"; printf "proxy-err:%s\\n" "$value" >&2; exit 9',
+      'read first; printf "proxy-out:%s\\n" "$first"; read second; printf "proxy-err:%s\\n" "$second" >&2; exit 9',
     ], {
       env: { ...process.env, ZOMMI_WSL_RELAY_ENDPOINT: endpointPath },
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -96,18 +96,19 @@ function runRustProxy(endpointPath) {
       stdout: Buffer.concat(stdout).toString('utf8'),
       stderr: Buffer.concat(stderr).toString('utf8'),
     }));
-    child.stdin.end('proxy-input\n');
+    child.stdin.write('proxy-input-one\n');
+    setTimeout(() => child.stdin.end('proxy-input-two\n'), 50);
   });
 }
 
 test('persistent WSL relay authenticates and frames runtime stdio', async () => {
   const temporary = await mkdtemp(path.join(os.tmpdir(), 'zommi-wsl-relay-'));
-  const endpointPath = path.join(temporary, 'endpoint.json');
+  const endpointPath = path.join(temporary, 'endpoints', 'test.json');
   const relay = spawn(process.execPath, [
     'scripts/zommi-wsl-relay.js',
     '--endpoint', endpointPath,
     '--token', TOKEN,
-    '--version', '2',
+    '--version', '3',
     '--distribution', 'test',
   ], { stdio: ['ignore', 'ignore', 'pipe'] });
   const diagnostics = [];
@@ -115,7 +116,7 @@ test('persistent WSL relay authenticates and frames runtime stdio', async () => 
   try {
     const endpoint = await waitForEndpoint(endpointPath);
     assert.equal(endpoint.schemaVersion, 1);
-    assert.equal(endpoint.transportVersion, 2);
+    assert.equal(endpoint.transportVersion, 3);
     assert.equal(endpoint.distribution, 'test');
     assert.ok(net.isIP(endpoint.host));
     assert.equal(endpoint.token, TOKEN);
@@ -127,8 +128,8 @@ test('persistent WSL relay authenticates and frames runtime stdio', async () => 
 
     const proxy = await runRustProxy(endpointPath);
     assert.equal(proxy.code, 9);
-    assert.equal(proxy.stdout, 'proxy-out:proxy-input\n');
-    assert.equal(proxy.stderr, 'proxy-err:proxy-input\n');
+    assert.equal(proxy.stdout, 'proxy-out:proxy-input-one\n');
+    assert.equal(proxy.stderr, 'proxy-err:proxy-input-two\n');
   } finally {
     relay.kill('SIGTERM');
     await Promise.race([

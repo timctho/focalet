@@ -27,6 +27,9 @@ const endpointPath = argument('--endpoint');
 const token = argument('--token');
 const transportVersion = Number(argument('--version'));
 const distribution = argument('--distribution');
+const relayRoot = path.dirname(path.dirname(endpointPath));
+const spoolRoot = path.join(relayRoot, 'spool');
+const activeSpoolSessions = new Set();
 
 if (!Number.isSafeInteger(transportVersion) || transportVersion < 1) {
   throw new Error('Invalid transport version.');
@@ -55,6 +58,19 @@ function frame(channel, payload) {
   header[0] = channel;
   header.writeUInt32BE(bytes.length, 1);
   return Buffer.concat([header, bytes]);
+}
+
+function appendFrame(outputPath, channel, payload) {
+  fs.appendFileSync(outputPath, frame(channel, payload));
+}
+
+function tryAppendFrame(outputPath, channel, payload) {
+  try {
+    appendFrame(outputPath, channel, payload);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function killProcessGroup(child) {
@@ -150,6 +166,196 @@ function handleSpawn(socket, request, trailingInput) {
   });
 }
 
+function validSpawnRequest(request) {
+  return tokenMatches(request?.token)
+    && request?.transportVersion === transportVersion
+    && request?.op === 'spawn'
+    && typeof request.command === 'string'
+    && request.command.startsWith('/')
+    && !request.command.includes('\0')
+    && Array.isArray(request.args)
+    && request.args.every((value) => typeof value === 'string' && !value.includes('\0'))
+    && typeof request.cwd === 'string'
+    && request.cwd.startsWith('/')
+    && !request.cwd.includes('\0');
+}
+
+function failSpoolSession(sessionDirectory, message) {
+  const outputPath = path.join(sessionDirectory, 'output.bin');
+  try {
+    tryAppendFrame(outputPath, CHANNEL_STDERR, Buffer.from(`${message}\n`));
+    const payload = Buffer.allocUnsafe(4);
+    payload.writeInt32BE(70, 0);
+    tryAppendFrame(outputPath, CHANNEL_EXIT, payload);
+  } finally {
+    activeSpoolSessions.delete(sessionDirectory);
+    const cleanup = setTimeout(
+      () => fs.rmSync(sessionDirectory, { recursive: true, force: true }),
+      60_000,
+    );
+    cleanup.unref();
+  }
+}
+
+function handleSpoolSession(sessionDirectory, requestPath) {
+  const claimedPath = path.join(sessionDirectory, 'request.claimed.json');
+  try {
+    fs.renameSync(requestPath, claimedPath);
+  } catch {
+    return;
+  }
+  activeSpoolSessions.add(sessionDirectory);
+  let request;
+  try {
+    request = JSON.parse(fs.readFileSync(claimedPath, 'utf8'));
+  } catch (error) {
+    failSpoolSession(sessionDirectory, `Relay request is invalid: ${error.message}`);
+    return;
+  }
+  if (!validSpawnRequest(request)) {
+    failSpoolSession(sessionDirectory, 'Relay authentication or spawn request failed.');
+    return;
+  }
+
+  const inputPath = path.join(sessionDirectory, 'stdin.bin');
+  const inputClosedPath = path.join(sessionDirectory, 'stdin.closed');
+  const clientHeartbeatPath = path.join(sessionDirectory, 'client-heartbeat');
+  const outputPath = path.join(sessionDirectory, 'output.bin');
+  const child = spawn(request.command, request.args, {
+    cwd: request.cwd,
+    env: process.env,
+    detached: true,
+    shell: false,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let started = false;
+  let finished = false;
+  let stdoutClosed = false;
+  let stderrClosed = false;
+  let exitCode = null;
+  let inputOffset = 0;
+  let inputPaused = false;
+  let committedInputLength = null;
+  let inputTimer;
+
+  const stopInput = () => {
+    if (inputTimer) clearInterval(inputTimer);
+    inputTimer = undefined;
+  };
+
+  const maybeFinish = () => {
+    if (!started || finished || exitCode === null || !stdoutClosed || !stderrClosed) return;
+    finished = true;
+    stopInput();
+    const payload = Buffer.allocUnsafe(4);
+    payload.writeInt32BE(exitCode, 0);
+    tryAppendFrame(outputPath, CHANNEL_EXIT, payload);
+    activeSpoolSessions.delete(sessionDirectory);
+    const cleanup = setTimeout(() => fs.rmSync(sessionDirectory, { recursive: true, force: true }), 60_000);
+    cleanup.unref();
+  };
+
+  inputTimer = setInterval(() => {
+    if (!started || finished || inputPaused) return;
+    try {
+      const heartbeat = fs.statSync(clientHeartbeatPath).mtimeMs;
+      if (!Number.isFinite(heartbeat) || Date.now() - heartbeat > 5_000) {
+        stopInput();
+        killProcessGroup(child);
+        return;
+      }
+      const size = fs.statSync(inputPath).size;
+      if (committedInputLength === null && fs.existsSync(inputClosedPath)) {
+        const committed = fs.readFileSync(inputClosedPath, 'utf8').trim();
+        if (/^\d+$/.test(committed)) {
+          const parsed = Number(committed);
+          if (Number.isSafeInteger(parsed) && parsed >= 0) committedInputLength = parsed;
+        }
+      }
+      if (size > inputOffset) {
+        const length = Math.min(64 * 1024, size - inputOffset);
+        const input = Buffer.allocUnsafe(length);
+        const descriptor = fs.openSync(inputPath, 'r');
+        try { fs.readSync(descriptor, input, 0, length, inputOffset); } finally { fs.closeSync(descriptor); }
+        inputOffset += length;
+        if (child.stdin.destroyed || child.stdin.writableEnded) {
+          stopInput();
+        } else if (!child.stdin.write(input)) {
+          inputPaused = true;
+          child.stdin.once('drain', () => { inputPaused = false; });
+        }
+      }
+      if (committedInputLength !== null
+          && size >= committedInputLength
+          && inputOffset >= committedInputLength) {
+        stopInput();
+        child.stdin.end();
+      }
+    } catch (error) {
+      stopInput();
+      killProcessGroup(child);
+    }
+  }, 5);
+  inputTimer.unref();
+
+  child.stdin.on('error', (error) => {
+    stopInput();
+    if (error.code !== 'EPIPE' && error.code !== 'ERR_STREAM_DESTROYED') {
+      tryAppendFrame(outputPath, CHANNEL_STDERR, Buffer.from(`WSL runtime input failed: ${error.message}\n`));
+      killProcessGroup(child);
+    }
+  });
+
+  child.once('error', (error) => {
+    tryAppendFrame(outputPath, CHANNEL_STDERR, Buffer.from(`Could not start WSL runtime: ${error.message}\n`));
+    if (!started) {
+      started = true;
+      stdoutClosed = true;
+      stderrClosed = true;
+      exitCode = 70;
+      maybeFinish();
+    }
+  });
+  child.once('spawn', () => {
+    started = true;
+    child.stdout.on('data', (chunk) => {
+      if (!tryAppendFrame(outputPath, CHANNEL_STDOUT, chunk)) killProcessGroup(child);
+    });
+    child.stderr.on('data', (chunk) => {
+      if (!tryAppendFrame(outputPath, CHANNEL_STDERR, chunk)) killProcessGroup(child);
+    });
+    child.stdout.once('close', () => { stdoutClosed = true; maybeFinish(); });
+    child.stderr.once('close', () => { stderrClosed = true; maybeFinish(); });
+  });
+  child.once('close', (code, signal) => {
+    exitCode = Number.isInteger(code) ? code : signal ? 128 : 1;
+    maybeFinish();
+  });
+}
+
+function scanSpool() {
+  let entries;
+  try {
+    fs.mkdirSync(spoolRoot, { recursive: true });
+    entries = fs.readdirSync(spoolRoot, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const sessionDirectory = path.join(spoolRoot, entry.name);
+    if (activeSpoolSessions.has(sessionDirectory)) continue;
+    const requestPath = path.join(sessionDirectory, 'request.json');
+    if (fs.existsSync(requestPath)) {
+      try {
+        handleSpoolSession(sessionDirectory, requestPath);
+      } catch (error) {
+        failSpoolSession(sessionDirectory, `Relay could not handle request: ${error.message}`);
+      }
+    }
+  }
+}
+
 function handleClient(socket) {
   socket.setNoDelay(true);
   socket.setTimeout(10_000, () => socket.destroy());
@@ -220,9 +426,23 @@ server.listen({ host: '0.0.0.0', port: 0 }, () => {
     port: address.port,
     token,
     pid: process.pid,
+    heartbeatMs: Date.now(),
   };
-  fs.mkdirSync(path.dirname(endpointPath), { recursive: true });
-  const temporary = `${endpointPath}.${process.pid}.tmp`;
-  fs.writeFileSync(temporary, `${JSON.stringify(endpoint, null, 2)}\n`, { mode: 0o600 });
-  fs.renameSync(temporary, endpointPath);
+  const writeEndpoint = (required = false) => {
+    const temporary = `${endpointPath}.${process.pid}.tmp`;
+    try {
+      endpoint.heartbeatMs = Date.now();
+      fs.mkdirSync(path.dirname(endpointPath), { recursive: true });
+      fs.writeFileSync(temporary, `${JSON.stringify(endpoint, null, 2)}\n`, { mode: 0o600 });
+      fs.renameSync(temporary, endpointPath);
+    } catch (error) {
+      try { fs.rmSync(temporary, { force: true }); } catch { /* best effort */ }
+      if (required) throw error;
+    }
+  };
+  writeEndpoint(true);
+  const heartbeat = setInterval(writeEndpoint, 1_000);
+  heartbeat.unref();
+  const scanner = setInterval(scanSpool, 10);
+  scanner.unref();
 });

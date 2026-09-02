@@ -326,6 +326,65 @@ jobs:
             throw "The deployed WSL relay probe failed ($($probeProcess.ExitCode)): $probeError"
           }
           Write-Host "Persistent WSL relay probe succeeded for $distribution."
+          $runtimeExecutable = $cachedTarget.executablePath
+          $runtimeHome = $cachedTarget.runtimeHome
+          if ([string]::IsNullOrWhiteSpace($runtimeExecutable) -or -not $runtimeExecutable.StartsWith('/')) {
+            throw 'The deployed runtime cache has no absolute Codex executable.'
+          }
+          if ([string]::IsNullOrWhiteSpace($runtimeHome) -or -not $runtimeHome.StartsWith('/')) {
+            throw 'The deployed runtime cache has no absolute runtime home.'
+          }
+          $handshake = [Diagnostics.ProcessStartInfo]::new()
+          $handshake.FileName = $coreExecutable
+          $handshake.UseShellExecute = $false
+          $handshake.CreateNoWindow = $true
+          $handshake.RedirectStandardInput = $true
+          $handshake.RedirectStandardOutput = $true
+          $handshake.RedirectStandardError = $true
+          foreach ($argument in @(
+            '--wsl-proxy', '--distribution', $distribution,
+            '--cwd', $runtimeHome, '--', '/usr/bin/env',
+            'ZOMMI_RUNTIME_CHILD=1', $runtimeExecutable, 'app-server'
+          )) {
+            $handshake.ArgumentList.Add($argument)
+          }
+          $handshakeProcess = [Diagnostics.Process]::Start($handshake)
+          $initialize = [ordered]@{
+            id = 1
+            method = 'initialize'
+            params = [ordered]@{
+              clientInfo = [ordered]@{
+                name = 'zommi-windows-release-gate'
+                title = 'Zommi Windows Release Gate'
+                version = '0.1.0'
+              }
+            }
+          } | ConvertTo-Json -Compress -Depth 5
+          $handshakeProcess.StandardInput.WriteLine($initialize)
+          $handshakeProcess.StandardInput.Flush()
+          $responseTask = $handshakeProcess.StandardOutput.ReadLineAsync()
+          if (-not $responseTask.Wait(20000)) {
+            $handshakeProcess.Kill($true)
+            $handshakeProcess.WaitForExit()
+            $handshakeError = $handshakeProcess.StandardError.ReadToEnd()
+            throw "Codex app-server initialize timed out: $handshakeError"
+          }
+          $responseLine = $responseTask.Result
+          $handshakeProcess.StandardInput.Close()
+          if (-not $handshakeProcess.WaitForExit(5000)) {
+            $handshakeProcess.Kill($true)
+            $handshakeProcess.WaitForExit()
+          }
+          $handshakeError = $handshakeProcess.StandardError.ReadToEnd()
+          try {
+            $initializeResponse = $responseLine | ConvertFrom-Json
+          } catch {
+            throw "Codex app-server initialize returned invalid JSON: $responseLine $handshakeError"
+          }
+          if ($initializeResponse.id -ne 1 -or [string]::IsNullOrWhiteSpace($initializeResponse.result.userAgent)) {
+            throw "Codex app-server initialize was rejected: $responseLine $handshakeError"
+          }
+          Write-Host "Codex app-server initialize succeeded through the shared WSL spool."
           if ($null -eq $coreProcess) {
             throw 'The deployed Flutter process did not retain its adjacent Rust core host.'
           }
@@ -341,6 +400,7 @@ jobs:
             proxyProcessId = $proxyProcess.ProcessId
             wslDistribution = $distribution
             relayProbe = $probeOutput.Trim()
+            codexInitialize = $initializeResponse.result.userAgent
           } | ConvertTo-Json
 
   release_macos:
