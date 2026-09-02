@@ -300,6 +300,21 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($distribution)) {
             throw 'The deployed runtime cache has no default WSL distribution.'
           }
+          $defaultAdapters = @(
+            $cache.targets | Where-Object {
+              $_.executionHost.kind -eq 'wsl' -and
+              $_.executionHost.isDefault -and
+              $_.status -eq 'detected'
+            } | ForEach-Object { $_.adapterId }
+          )
+          foreach ($expectedAdapter in @(
+            'codex-app-server', 'pi-rpc', 'hermes-acp', 'hermes-gateway',
+            'openclaw-acp', 'pty-compatibility'
+          )) {
+            if ($defaultAdapters -notcontains $expectedAdapter) {
+              throw "The deployed runtime cache did not restore $expectedAdapter. Found: $($defaultAdapters -join ', ')."
+            }
+          }
           $probe = [Diagnostics.ProcessStartInfo]::new()
           $probe.FileName = $coreExecutable
           $probe.UseShellExecute = $false
@@ -399,6 +414,7 @@ jobs:
             coreProcessId = $coreProcess.ProcessId
             proxyProcessId = $proxyProcess.ProcessId
             wslDistribution = $distribution
+            runtimeAdapters = $defaultAdapters
             relayProbe = $probeOutput.Trim()
             codexInitialize = $initializeResponse.result.userAgent
           } | ConvertTo-Json
