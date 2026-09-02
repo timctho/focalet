@@ -947,15 +947,6 @@ function Invoke-PackagedApplicationAcceptance {
         )) {
             throw 'Could not hover the packaged compact orb.'
         }
-        Start-Sleep -Milliseconds 100
-        if (-not [ZommiWindowsAcceptanceNative]::IsOwnedWindowAtPoint(
-            $window,
-            $compactCenterX,
-            $compactCenterY
-        )) {
-            throw 'The packaged orb did not own the hovered screen point.'
-        }
-
         $hoverDeadline = [DateTime]::UtcNow.AddSeconds(5)
         do {
             $hoverExpandedBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
@@ -970,6 +961,7 @@ function Invoke-PackagedApplicationAcceptance {
             $hoverExpandedBounds[3] -le $compactBounds[3]) {
             throw 'Hovering the packaged orb did not expand the Flutter surface.'
         }
+        Start-Sleep -Milliseconds 100
         if (-not [ZommiWindowsAcceptanceNative]::IsOwnedWindowAtPoint(
             $window,
             $compactCenterX,
