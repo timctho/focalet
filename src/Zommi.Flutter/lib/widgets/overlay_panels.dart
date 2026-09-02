@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/widgets/content_views.dart';
@@ -31,84 +32,84 @@ class SessionSidebar extends StatelessWidget {
           color: const Color(0xf6f6f8fc),
           elevation: 14,
           borderRadius: BorderRadius.circular(18),
-          child: SizedBox(
-            width: 250,
-            height: 280,
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
-                  child: Row(
-                    children: [
-                      const Expanded(
-                        child: Text(
-                          'Chats',
-                          style: TextStyle(fontWeight: FontWeight.w700),
-                        ),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Chats',
+                        style: TextStyle(fontWeight: FontWeight.w700),
                       ),
-                      if (controller.sessionCreationSupported)
-                        IconButton(
-                          key: const ValueKey('new-session'),
-                          tooltip: 'Create new chat',
-                          onPressed: controller.sessionBusy
-                              ? null
-                              : () => unawaited(controller.createSession()),
-                          icon: const Icon(Icons.add_rounded),
-                        ),
-                    ],
-                  ),
+                    ),
+                    if (controller.sessionCreationSupported)
+                      IconButton(
+                        key: const ValueKey('new-session'),
+                        tooltip: 'Create new chat',
+                        onPressed: controller.sessionBusy
+                            ? null
+                            : () => unawaited(controller.createSession()),
+                        icon: const Icon(Icons.add_rounded),
+                      ),
+                  ],
                 ),
-                Expanded(
-                  child: controller.sessions.isEmpty
-                      ? const Center(
-                          child: Padding(
-                            padding: EdgeInsets.all(18),
-                            child: Text(
-                              'No provider-owned chats are available.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: Color(0xff737887)),
-                            ),
+              ),
+              Expanded(
+                child: controller.sessions.isEmpty
+                    ? const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(18),
+                          child: Text(
+                            'No provider-owned chats are available.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Color(0xff737887)),
                           ),
-                        )
-                      : ListView.builder(
-                          key: const ValueKey('session-list'),
-                          padding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
-                          itemCount: controller.sessions.length,
-                          itemBuilder: (context, index) {
-                            final session = controller.sessions[index];
-                            final presence = controller.presenceFor(session.id);
-                            final selected =
-                                session.id == controller.activeSessionId;
-                            return Semantics(
-                              selected: selected,
-                              label:
-                                  '${session.title}, ${presence.name} session',
-                              child: ListTile(
-                                key: ValueKey('session-${session.id}'),
-                                dense: true,
-                                selected: selected,
-                                selectedTileColor: const Color(0xffebe9f7),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                leading: _SessionStatusIcon(presence: presence),
-                                title: Text(
-                                  session.title,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                onTap: controller.sessionBusy
-                                    ? null
-                                    : () => unawaited(
-                                        controller.switchSession(session.id),
-                                      ),
-                              ),
-                            );
-                          },
                         ),
-                ),
-              ],
-            ),
+                      )
+                    : ListView.builder(
+                        key: const ValueKey('session-list'),
+                        padding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
+                        itemCount: controller.sessions.length,
+                        itemBuilder: (context, index) {
+                          final session = controller.sessions[index];
+                          final presence = controller.presenceFor(session.id);
+                          final selected =
+                              session.id == controller.activeSessionId;
+                          return Semantics(
+                            selected: selected,
+                            label: '${session.title}, ${presence.name} session',
+                            child: ListTile(
+                              key: ValueKey('session-${session.id}'),
+                              dense: true,
+                              visualDensity: const VisualDensity(vertical: -3),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
+                              selected: selected,
+                              selectedTileColor: const Color(0xffebe9f7),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              leading: _SessionStatusIcon(presence: presence),
+                              title: Text(
+                                session.title,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 11),
+                              ),
+                              onTap: controller.sessionBusy
+                                  ? null
+                                  : () => unawaited(
+                                      controller.switchSession(session.id),
+                                    ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
           ),
         ),
       ),
@@ -154,6 +155,7 @@ class RuntimePanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final targets = controller.visibleRuntimeTargets;
     return Semantics(
       container: true,
       label: 'Choose agent runtime',
@@ -164,7 +166,7 @@ class RuntimePanel extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         child: SizedBox(
           width: 420,
-          height: 450,
+          height: 410,
           child: Column(
             children: [
               Padding(
@@ -189,92 +191,104 @@ class RuntimePanel extends StatelessWidget {
                 ),
               ),
               Expanded(
-                child: controller.runtimeTargets.isEmpty
-                    ? const Center(
-                        child: Padding(
-                          padding: EdgeInsets.all(24),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                'No supported agent found',
-                                style: TextStyle(fontWeight: FontWeight.w700),
-                              ),
-                              SizedBox(height: 6),
-                              Text(
-                                'Install and sign in to Codex, Pi, Hermes, OpenClaw, or a compatible CLI, then refresh.',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(color: Color(0xff737887)),
-                              ),
-                            ],
+                child: ListView(
+                  key: const ValueKey('runtime-list'),
+                  padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+                  children: [
+                    if (targets.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'No supported agent found',
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                            SizedBox(height: 6),
+                            Text(
+                              'Install a supported CLI, refresh, or add its location below.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: Color(0xff737887)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    for (final target in targets)
+                      _RuntimeTargetTile(
+                        controller: controller,
+                        target: target,
+                      ),
+                    if (controller.activeRuntime?.status == 'sign-in-required')
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(2, 4, 2, 8),
+                        child: SizedBox(
+                          width: double.infinity,
+                          child: FilledButton.tonal(
+                            key: const ValueKey('runtime-sign-in'),
+                            onPressed: () =>
+                                unawaited(controller.openRuntimeSignIn()),
+                            child: Text(
+                              'Open ${controller.activeRuntimeName} sign-in',
+                            ),
                           ),
                         ),
-                      )
-                    : ListView.builder(
-                        key: const ValueKey('runtime-list'),
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                        itemCount: controller.runtimeTargets.length,
-                        itemBuilder: (context, index) {
-                          final target = controller.runtimeTargets[index];
-                          final selected =
-                              target.id == controller.activeRuntime?.id;
-                          final host =
-                              target.executionHost['displayName']?.toString() ??
-                              target.executionHost['name']?.toString() ??
-                              'Local';
-                          return Semantics(
-                            selected: selected,
-                            label:
-                                '${target.displayName}, ${target.protocolName}, $host, ${target.status}',
-                            child: ListTile(
-                              key: ValueKey('runtime-${target.id}'),
-                              selected: selected,
-                              selectedTileColor: const Color(0xffebe9f7),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              leading: _RuntimeStatusDot(status: target.status),
-                              title: Text(target.displayName),
-                              subtitle: Text('${target.protocolName} · $host'),
-                              trailing: Text(
-                                target.adapterId == 'pty-compatibility'
-                                    ? 'Compatible'
-                                    : _runtimeStatus(target.status),
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  color: Color(0xff747988),
-                                ),
-                              ),
-                              onTap: controller.runtimeBusy
-                                  ? null
-                                  : () => unawaited(
-                                      controller.selectRuntime(target.id),
-                                    ),
-                            ),
-                          );
-                        },
                       ),
-              ),
-              if (controller.activeRuntime?.status == 'sign-in-required')
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.tonal(
-                      key: const ValueKey('runtime-sign-in'),
-                      onPressed: () =>
-                          unawaited(controller.openRuntimeSignIn()),
-                      child: Text(
-                        'Open ${controller.activeRuntimeName} sign-in',
-                      ),
-                    ),
-                  ),
+                    const Divider(height: 1),
+                    RuntimeOverrideEditor(controller: controller),
+                  ],
                 ),
-              const Divider(height: 1),
-              RuntimeOverrideEditor(controller: controller),
+              ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _RuntimeTargetTile extends StatelessWidget {
+  const _RuntimeTargetTile({required this.controller, required this.target});
+
+  final ZommiController controller;
+  final RuntimeTarget target;
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = target.id == controller.activeRuntime?.id;
+    final host =
+        target.executionHost['displayName']?.toString() ??
+        target.executionHost['name']?.toString() ??
+        'Local';
+    return Semantics(
+      selected: selected,
+      label:
+          '${target.displayName}, ${target.protocolName}, $host, ${target.status}',
+      child: ListTile(
+        key: ValueKey('runtime-${target.id}'),
+        dense: true,
+        visualDensity: const VisualDensity(vertical: -3),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 10),
+        selected: selected,
+        selectedTileColor: const Color(0xffebe9f7),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        leading: _RuntimeStatusDot(status: target.status),
+        title: Text(target.displayName, style: const TextStyle(fontSize: 11.5)),
+        subtitle: Text(
+          '${target.protocolName} · $host',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 10),
+        ),
+        trailing: Text(
+          target.adapterId == 'pty-compatibility'
+              ? 'Compatible'
+              : _runtimeStatus(target.status),
+          style: const TextStyle(fontSize: 10, color: Color(0xff747988)),
+        ),
+        onTap: controller.runtimeBusy
+            ? null
+            : () => unawaited(controller.selectRuntime(target.id)),
       ),
     );
   }
@@ -290,18 +304,12 @@ class RuntimeOverrideEditor extends StatefulWidget {
 }
 
 class _RuntimeOverrideEditorState extends State<RuntimeOverrideEditor> {
-  final TextEditingController _locator = TextEditingController();
   String _adapterId = '';
   String _hostId = '';
-
-  @override
-  void dispose() {
-    _locator.dispose();
-    super.dispose();
-  }
+  String? _executablePath;
 
   Map<String, Object?>? get _adapter {
-    final adapters = widget.controller.runtimeOverrideAdapters;
+    final adapters = widget.controller.configurableRuntimeAdapters;
     if (adapters.isEmpty) return null;
     return adapters.firstWhere(
       (value) => value['adapterId'] == _adapterId,
@@ -329,10 +337,9 @@ class _RuntimeOverrideEditorState extends State<RuntimeOverrideEditor> {
         ),
       );
     }
-    final adapters = widget.controller.runtimeOverrideAdapters;
+    final adapters = widget.controller.configurableRuntimeAdapters;
     final selectedAdapter = _adapter;
     final adapterId = selectedAdapter?['adapterId']?.toString() ?? '';
-    final acceptsEndpoint = selectedAdapter?['acceptsEndpoint'] == true;
     final hosts = _hosts;
     final selectedHost = hosts.any((host) => host['id'] == _hostId)
         ? _hostId
@@ -341,7 +348,14 @@ class _RuntimeOverrideEditorState extends State<RuntimeOverrideEditor> {
       key: const ValueKey('runtime-advanced'),
       dense: true,
       leading: const Icon(Icons.tune_rounded, size: 16),
-      title: const Text('Advanced overrides', style: TextStyle(fontSize: 12)),
+      title: const Text(
+        'Advanced runtime setup',
+        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+      ),
+      subtitle: const Text(
+        'Add a supported local CLI that discovery missed',
+        style: TextStyle(fontSize: 10),
+      ),
       childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
       children: [
         DropdownButtonFormField<String>(
@@ -349,7 +363,8 @@ class _RuntimeOverrideEditorState extends State<RuntimeOverrideEditor> {
           initialValue: adapterId.isEmpty ? null : adapterId,
           isDense: true,
           isExpanded: true,
-          decoration: const InputDecoration(labelText: 'Agent'),
+          style: const TextStyle(fontSize: 11),
+          decoration: const InputDecoration(labelText: 'Agent', isDense: true),
           items: [
             for (final adapter in adapters)
               DropdownMenuItem(
@@ -357,42 +372,81 @@ class _RuntimeOverrideEditorState extends State<RuntimeOverrideEditor> {
                 child: Text(
                   '${adapter['displayName']} · ${adapter['protocolName']}',
                   overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11),
                 ),
               ),
           ],
           onChanged: (value) => setState(() {
             _adapterId = value ?? '';
             _hostId = '';
+            _executablePath = null;
           }),
         ),
-        if (!acceptsEndpoint)
-          DropdownButtonFormField<String>(
-            key: const ValueKey('runtime-override-host'),
-            initialValue: selectedHost.isEmpty ? null : selectedHost,
-            isDense: true,
-            isExpanded: true,
-            decoration: const InputDecoration(labelText: 'Execution host'),
-            items: [
-              for (final host in hosts)
-                DropdownMenuItem(
-                  value: host['id']?.toString(),
-                  child: Text(host['displayName']?.toString() ?? 'Local'),
+        DropdownButtonFormField<String>(
+          key: const ValueKey('runtime-override-host'),
+          initialValue: selectedHost.isEmpty ? null : selectedHost,
+          isDense: true,
+          isExpanded: true,
+          style: const TextStyle(fontSize: 11),
+          decoration: const InputDecoration(labelText: 'Run on', isDense: true),
+          items: [
+            for (final host in hosts)
+              DropdownMenuItem(
+                value: host['id']?.toString(),
+                child: Text(
+                  host['displayName']?.toString() ?? 'Local',
+                  style: const TextStyle(fontSize: 11),
                 ),
-            ],
-            onChanged: (value) => setState(() => _hostId = value ?? ''),
+              ),
+          ],
+          onChanged: (value) => setState(() {
+            _hostId = value ?? '';
+            _executablePath = null;
+          }),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          key: const ValueKey('runtime-override-path'),
+          width: double.infinity,
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: const Color(0xfff1f2f7),
+            borderRadius: BorderRadius.circular(12),
           ),
-        TextField(
-          key: const ValueKey('runtime-override-locator'),
-          controller: _locator,
-          autocorrect: false,
-          enableSuggestions: false,
-          onChanged: (_) => setState(() {}),
-          decoration: InputDecoration(
-            labelText: acceptsEndpoint ? 'Gateway endpoint' : 'Executable path',
-            hintText: acceptsEndpoint
-                ? 'ws://127.0.0.1:18789'
-                : 'Absolute native or WSL path',
-            isDense: true,
+          child: Row(
+            children: [
+              const Icon(Icons.terminal_rounded, size: 17),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _executablePath ?? 'Choose the installed CLI executable',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    color: _executablePath == null
+                        ? const Color(0xff777c89)
+                        : const Color(0xff333744),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                key: const ValueKey('select-runtime-executable'),
+                onPressed: selectedHost.isEmpty
+                    ? null
+                    : () async {
+                        final path = await widget.controller
+                            .chooseRuntimeExecutable(
+                              executionHostId: selectedHost,
+                            );
+                        if (mounted && path != null) {
+                          setState(() => _executablePath = path);
+                        }
+                      },
+                child: const Text('Choose…'),
+              ),
+            ],
           ),
         ),
         const SizedBox(height: 8),
@@ -403,18 +457,18 @@ class _RuntimeOverrideEditorState extends State<RuntimeOverrideEditor> {
             onPressed:
                 widget.controller.runtimeOverrideBusy ||
                     adapterId.isEmpty ||
-                    _locator.text.trim().isEmpty ||
-                    (!acceptsEndpoint && selectedHost.isEmpty)
+                    _executablePath == null ||
+                    selectedHost.isEmpty
                 ? null
                 : () async {
                     await widget.controller.saveRuntimeOverride(
                       adapterId: adapterId,
-                      locator: _locator.text,
+                      locator: _executablePath!,
                       executionHostId: selectedHost,
                     );
-                    if (mounted) _locator.clear();
+                    if (mounted) setState(() => _executablePath = null);
                   },
-            child: const Text('Add override'),
+            child: const Text('Add runtime'),
           ),
         ),
         for (final override in widget.controller.runtimeOverrides)
@@ -422,12 +476,24 @@ class _RuntimeOverrideEditorState extends State<RuntimeOverrideEditor> {
             key: ValueKey('runtime-override-${override['id']}'),
             dense: true,
             contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.terminal_rounded, size: 17),
             title: Text(
-              '${override['adapterId']} · ${override['endpoint'] ?? override['executablePath'] ?? ''}',
+              runtimeAdapterDisplayName(
+                widget.controller,
+                override['adapterId']?.toString() ?? '',
+              ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
             ),
-            trailing: TextButton(
+            subtitle: Text(
+              override['executablePath']?.toString() ?? '',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 10),
+            ),
+            trailing: IconButton(
+              tooltip: 'Remove runtime',
               onPressed: widget.controller.runtimeOverrideBusy
                   ? null
                   : () => unawaited(
@@ -435,13 +501,26 @@ class _RuntimeOverrideEditorState extends State<RuntimeOverrideEditor> {
                         override['id']?.toString() ?? '',
                       ),
                     ),
-              child: const Text('Remove'),
+              icon: const Icon(Icons.delete_outline_rounded, size: 17),
             ),
           ),
       ],
     );
   }
 }
+
+String runtimeAdapterDisplayName(
+  ZommiController controller,
+  String adapterId,
+) =>
+    controller.runtimeOverrideAdapters
+        .cast<Map<String, Object?>?>()
+        .firstWhere(
+          (adapter) => adapter?['adapterId'] == adapterId,
+          orElse: () => null,
+        )?['displayName']
+        ?.toString() ??
+    adapterId;
 
 class _RuntimeStatusDot extends StatelessWidget {
   const _RuntimeStatusDot({required this.status});
@@ -508,7 +587,7 @@ class _ModelPanelState extends State<ModelPanel> {
       borderRadius: BorderRadius.circular(18),
       child: SizedBox(
         width: 390,
-        height: 420,
+        height: 380,
         child: Column(
           children: [
             Padding(
@@ -518,10 +597,16 @@ class _ModelPanelState extends State<ModelPanel> {
                 controller: _search,
                 autofocus: true,
                 onChanged: (_) => setState(() {}),
+                style: const TextStyle(fontSize: 11.5),
                 decoration: const InputDecoration(
-                  prefixIcon: Icon(Icons.search_rounded),
+                  prefixIcon: Icon(Icons.search_rounded, size: 17),
+                  prefixIconConstraints: BoxConstraints(minWidth: 34),
                   hintText: 'Search models',
                   isDense: true,
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 9,
+                  ),
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -550,13 +635,24 @@ class _ModelPanelState extends State<ModelPanel> {
                           child: RadioListTile<String>(
                             key: ValueKey('model-$id'),
                             value: id,
-                            title: Text(model['displayName']?.toString() ?? id),
+                            dense: true,
+                            visualDensity: const VisualDensity(vertical: -3),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                            ),
+                            title: Text(
+                              model['displayName']?.toString() ?? id,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 11.5),
+                            ),
                             subtitle: model['description'] == null
                                 ? null
                                 : Text(
                                     model['description'].toString(),
-                                    maxLines: 2,
+                                    maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontSize: 10),
                                   ),
                             selected: selected,
                           ),
@@ -578,20 +674,45 @@ class _ModelPanelState extends State<ModelPanel> {
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                child: Wrap(
-                  spacing: 6,
-                  children: [
-                    for (final effort in widget.controller.selectedModelEfforts)
-                      ChoiceChip(
-                        key: ValueKey('effort-$effort'),
-                        label: Text(effort),
-                        selected: effort == widget.controller.selectedEffort,
-                        onSelected: (_) {
-                          widget.controller.setEffort(effort);
-                          setState(() {});
-                        },
-                      ),
-                  ],
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    key: const ValueKey('reasoning-options-row'),
+                    children: [
+                      for (
+                        var index = 0;
+                        index < widget.controller.selectedModelEfforts.length;
+                        index++
+                      ) ...[
+                        if (index > 0) const SizedBox(width: 5),
+                        ChoiceChip(
+                          key: ValueKey(
+                            'effort-${widget.controller.selectedModelEfforts[index]}',
+                          ),
+                          label: Text(
+                            widget.controller.selectedModelEfforts[index],
+                          ),
+                          labelStyle: const TextStyle(fontSize: 10),
+                          visualDensity: const VisualDensity(
+                            horizontal: -3,
+                            vertical: -3,
+                          ),
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          padding: const EdgeInsets.symmetric(horizontal: 3),
+                          selected:
+                              widget.controller.selectedModelEfforts[index] ==
+                              widget.controller.selectedEffort,
+                          onSelected: (_) {
+                            widget.controller.setEffort(
+                              widget.controller.selectedModelEfforts[index],
+                            );
+                            setState(() {});
+                          },
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -655,11 +776,18 @@ class ContextPreviewPanel extends StatelessWidget {
                   ),
                 ),
                 if (image != null)
-                  Flexible(
-                    child: Image.memory(
-                      image,
-                      fit: BoxFit.contain,
-                      semanticLabel: 'Attached visual context preview',
+                  SizedBox(
+                    key: const ValueKey('context-preview-image-frame'),
+                    width: double.infinity,
+                    height: 220,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Image.memory(
+                        image,
+                        fit: BoxFit.contain,
+                        gaplessPlayback: true,
+                        semanticLabel: 'Attached visual context preview',
+                      ),
                     ),
                   ),
                 if (attachment.previewText.isNotEmpty)
@@ -671,7 +799,7 @@ class ContextPreviewPanel extends StatelessWidget {
                         key: const ValueKey('context-preview-text'),
                         style: const TextStyle(
                           fontFamily: 'monospace',
-                          fontSize: 12,
+                          fontSize: 10.5,
                           height: 1.4,
                         ),
                       ),

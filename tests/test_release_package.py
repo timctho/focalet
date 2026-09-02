@@ -143,6 +143,63 @@ class ReleasePackageTests(unittest.TestCase):
         with self.assertRaisesRegex(verify_release.ReleaseValidationError, "Legacy Electron"):
             verify_release.verify_package(self.root, smoke_processes=False)
 
+    def test_windows_interactive_acceptance_restores_the_deployed_app(self) -> None:
+        script = (SCRIPTS / "accept-windows-capture.ps1").read_text(encoding="utf-8")
+        for contract in (
+            "Suspend-ConflictingZommiApplications",
+            "Restore-SuspendedZommiApplications",
+            "Remove-Item Env:RUNNER_TRACKING_ID",
+            "Restore-SuspendedZommiApplications -ExecutablePaths $suspendedApplications",
+        ):
+            self.assertIn(contract, script)
+
+    def test_windows_desktop_preflight_reports_runner_session_without_blame(self) -> None:
+        script = (SCRIPTS / "accept-windows-capture.ps1").read_text(encoding="utf-8")
+        for contract in (
+            "Get-DesktopCaptureDiagnostics",
+            "sessionId=$($process.SessionId)",
+            "sessionName=$sessionName",
+            "clientName=$clientName",
+            "userInteractive=$([Environment]::UserInteractive)",
+            "virtualScreen=$virtualScreen",
+            "foreach ($attempt in 1..20)",
+            "TryCopyDesktopPixel",
+            "desktop-surface: recovered on attempt $attempt",
+            "Start-Sleep -Milliseconds 250",
+            "it does not prove Windows was locked",
+        ):
+            self.assertIn(contract, script)
+        self.assertNotIn("Keep the RDP client visible and the session unlocked", script)
+
+    def test_windows_pixel_capture_uses_the_verified_direct_gdi_path(self) -> None:
+        source = (SCRIPTS.parent / "src/Zommi.Windows/ScreenCapture.cs").read_text(
+            encoding="utf-8"
+        )
+        for contract in (
+            'DllImport("user32.dll", SetLastError = true)',
+            'DllImport("gdi32.dll", SetLastError = true)',
+            "GetDC(nint.Zero)",
+            "BitBlt(",
+            "ReleaseDC(nint.Zero, desktopDc)",
+            "SourceCopy",
+        ):
+            self.assertIn(contract, source)
+        self.assertNotIn("graphics.CopyFromScreen", source)
+
+    def test_windows_selector_forces_initial_foreground_and_stays_topmost(self) -> None:
+        source = (SCRIPTS.parent / "src/Zommi.Windows/RegionSelectionForm.cs").read_text(
+            encoding="utf-8"
+        )
+        for contract in (
+            "flags |= NoActivate",
+            "ForceForeground();",
+            "AttachThreadInput(currentThread, foregroundThread, true)",
+            "BringWindowToTop(Handle)",
+            "SetForegroundWindow(Handle)",
+            "topMostGuard.Start()",
+        ):
+            self.assertIn(contract, source)
+
     def test_manifest_component_cannot_escape_package_root(self) -> None:
         manifest_path = self.root / "release-manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

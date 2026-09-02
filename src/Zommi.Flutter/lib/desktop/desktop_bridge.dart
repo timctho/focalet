@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/services.dart';
+import 'package:file_selector/file_selector.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
 import 'package:screen_capturer/screen_capturer.dart';
 import 'package:screen_retriever/screen_retriever.dart';
@@ -16,6 +18,18 @@ const Size compactWindowSize = Size(56, 56);
 const Size normalWindowSize = Size(720, 620);
 const Size largeWindowSize = Size(920, 760);
 const double windowBottomInset = 18;
+const Duration surfaceTransitionDuration = Duration(milliseconds: 280);
+const int surfaceTransitionFrameCount = 16;
+const MethodChannel _windowAnimationChannel = MethodChannel(
+  'zommi/window_animation',
+);
+
+double symmetricSurfaceEase(double progress) {
+  final value = progress.clamp(0.0, 1.0);
+  return value < 0.5
+      ? 4 * value * value * value
+      : 1 - math.pow(-2 * value + 2, 3).toDouble() / 2;
+}
 
 enum DesktopInvocationKind { open, context, image, status }
 
@@ -91,7 +105,11 @@ abstract interface class DesktopBridge {
     bool includePointerContext = false,
   });
 
-  Future<void> setSurface({required bool expanded, bool large = false});
+  Future<void> setSurface({
+    required bool expanded,
+    bool large = false,
+    bool animate = true,
+  });
 
   Future<void> showPanel();
 
@@ -102,6 +120,8 @@ abstract interface class DesktopBridge {
   Future<void> startDragging();
 
   Future<void> openRuntimeSignIn(RuntimeTarget target);
+
+  Future<String?> selectRuntimeExecutable();
 
   Future<void> copyText(String value);
 
@@ -128,7 +148,11 @@ final class NoopDesktopBridge implements DesktopBridge {
   }) async => null;
 
   @override
-  Future<void> setSurface({required bool expanded, bool large = false}) async {}
+  Future<void> setSurface({
+    required bool expanded,
+    bool large = false,
+    bool animate = true,
+  }) async {}
 
   @override
   Future<void> showPanel() async {}
@@ -144,6 +168,9 @@ final class NoopDesktopBridge implements DesktopBridge {
 
   @override
   Future<void> openRuntimeSignIn(RuntimeTarget target) async {}
+
+  @override
+  Future<String?> selectRuntimeExecutable() async => null;
 
   @override
   Future<void> copyText(String value) =>
@@ -193,6 +220,16 @@ final class FlutterDesktopBridge
         if (supportsNativeWindowShadow(Platform.operatingSystem)) {
           await windowManager.setHasShadow(false);
         }
+        // Zommi owns its surface sizes. Changing the native resize style on
+        // every orb morph forces a Win32 frame recalculation and produces a
+        // visible one-frame wobble even though the window is frameless.
+        await windowManager.setResizable(false);
+        await configureNativeSurfaceWindow();
+        // WindowOptions applies 56px before the Win32 caption is removed, so
+        // Windows may clamp the initial width to SM_CXMINTRACK. Reapply the
+        // compact size with the popup style active while preserving the
+        // requested top-left anchor.
+        await windowManager.setSize(compactWindowSize, animate: false);
         await windowManager.setAlwaysOnTop(true);
         await windowManager.setSkipTaskbar(true);
         await windowManager.show();
@@ -218,6 +255,9 @@ final class FlutterDesktopBridge
     scope: HotKeyScope.system,
   );
   bool _initialized = false;
+  bool _surfacePositionInitialized = false;
+  int _surfaceTransitionEpoch = 0;
+  Offset? _surfaceAnchor;
   bool _nativeContextRegistered = false;
   bool _nativeImageRegistered = false;
   DesktopReadiness _readiness = const DesktopReadiness();
@@ -429,7 +469,11 @@ final class FlutterDesktopBridge
   }
 
   @override
-  Future<void> setSurface({required bool expanded, bool large = false}) async {
+  Future<void> setSurface({
+    required bool expanded,
+    bool large = false,
+    bool animate = true,
+  }) async {
     final size = expanded
         ? (large ? largeWindowSize : normalWindowSize)
         : compactWindowSize;
@@ -447,26 +491,66 @@ final class FlutterDesktopBridge
     final workArea = selected.visibleSize ?? selected.size;
     final width = size.width.clamp(compactWindowSize.width, workArea.width);
     final height = size.height.clamp(compactWindowSize.height, workArea.height);
-    final bounds = Rect.fromLTWH(
-      origin.dx + (workArea.width - width) / 2,
-      origin.dy + workArea.height - height - windowBottomInset,
-      width,
-      height,
+    final workAreaBounds = origin & workArea;
+    final anchor =
+        _surfaceAnchor ??
+        (_surfacePositionInitialized
+            ? Offset(current.center.dx, current.bottom)
+            : Offset(
+                workAreaBounds.center.dx,
+                workAreaBounds.bottom - windowBottomInset,
+              ));
+    _surfaceAnchor = anchor;
+    final bounds = anchoredSurfaceBounds(
+      anchor: anchor,
+      workArea: workAreaBounds,
+      size: Size(width, height),
     );
+    final shouldAnimate = _surfacePositionInitialized;
+    _surfacePositionInitialized = true;
+    final transitionEpoch = ++_surfaceTransitionEpoch;
+    // Keeping the compact minimum during the transition prevents Win32 from
+    // jumping directly to 640x500 on the first animated frame.
+    await windowManager.setMinimumSize(compactWindowSize);
+    if (animate && shouldAnimate) {
+      final nativeResult = await animateNativeSurfaceBounds(
+        from: current,
+        to: bounds,
+        scaleFactor: selected.scaleFactor?.toDouble() ?? 1,
+      );
+      if (nativeResult == null) {
+        await animateSurfaceBounds(
+          from: current,
+          to: bounds,
+          setBounds: (value) => windowManager.setBounds(value, animate: false),
+          cancelled: () => transitionEpoch != _surfaceTransitionEpoch,
+        );
+      }
+    } else {
+      final nativeResult = shouldAnimate
+          ? await setNativeSurfaceBoundsWithoutCopy(
+              bounds: bounds,
+              scaleFactor: selected.scaleFactor?.toDouble() ?? 1,
+            )
+          : null;
+      if (nativeResult != true) {
+        await windowManager.setBounds(bounds, animate: false);
+      }
+    }
+    if (transitionEpoch != _surfaceTransitionEpoch) return;
     await windowManager.setMinimumSize(
       expanded ? const Size(640, 500) : compactWindowSize,
     );
-    await windowManager.setResizable(expanded);
-    await windowManager.setBounds(bounds, animate: true);
     await windowManager.setAlwaysOnTop(true);
   }
 
   @override
   Future<void> showPanel() async {
-    await setSurface(expanded: true);
-    await windowManager.show();
-    await windowManager.focus();
-    await windowManager.setAlwaysOnTop(true);
+    await presentPanelWithoutResizing(
+      show: windowManager.show,
+      focus: windowManager.focus,
+      keepOnTop: () => windowManager.setAlwaysOnTop(true),
+    );
   }
 
   @override
@@ -483,7 +567,11 @@ final class FlutterDesktopBridge
   }
 
   @override
-  Future<void> startDragging() => windowManager.startDragging();
+  Future<void> startDragging() async {
+    await windowManager.startDragging();
+    final bounds = await windowManager.getBounds();
+    _surfaceAnchor = Offset(bounds.center.dx, bounds.bottom);
+  }
 
   @override
   Future<void> openRuntimeSignIn(RuntimeTarget target) async {
@@ -539,6 +627,12 @@ final class FlutterDesktopBridge
       mode: ProcessStartMode.detached,
     );
     unawaited(process.exitCode);
+  }
+
+  @override
+  Future<String?> selectRuntimeExecutable() async {
+    final selected = await openFile(confirmButtonText: 'Use this CLI');
+    return selected?.path;
   }
 
   @override
@@ -605,6 +699,16 @@ final class FlutterDesktopBridge
   }
 
   @override
+  void onTrayIconRightMouseDown() {
+    unawaited(
+      showExplicitTrayContextMenu(
+        operatingSystem: Platform.operatingSystem,
+        show: () => trayManager.popUpContextMenu(),
+      ),
+    );
+  }
+
+  @override
   void onTrayMenuItemClick(MenuItem menuItem) {
     switch (menuItem.key) {
       case 'open':
@@ -653,8 +757,127 @@ final class FlutterDesktopBridge
   }
 }
 
+Future<void> presentPanelWithoutResizing({
+  required Future<void> Function() show,
+  required Future<void> Function() focus,
+  required Future<void> Function() keepOnTop,
+}) async {
+  await show();
+  await focus();
+  await keepOnTop();
+}
+
+Rect anchoredSurfaceBounds({
+  required Offset anchor,
+  required Rect workArea,
+  required Size size,
+}) {
+  final maxLeft = math.max(workArea.left, workArea.right - size.width);
+  final maxTop = math.max(workArea.top, workArea.bottom - size.height);
+  final left = (anchor.dx - size.width / 2).clamp(workArea.left, maxLeft);
+  final top = (anchor.dy - size.height).clamp(workArea.top, maxTop);
+  return Rect.fromLTWH(left, top, size.width, size.height);
+}
+
+Future<bool?> animateNativeSurfaceBounds({
+  required Rect from,
+  required Rect to,
+  required double scaleFactor,
+  Duration duration = surfaceTransitionDuration,
+}) async {
+  if (!Platform.isWindows) return null;
+  try {
+    return await _windowAnimationChannel.invokeMethod<bool>('animateBounds', {
+      'fromX': from.left,
+      'fromY': from.top,
+      'fromWidth': from.width,
+      'fromHeight': from.height,
+      'toX': to.left,
+      'toY': to.top,
+      'toWidth': to.width,
+      'toHeight': to.height,
+      'scaleFactor': scaleFactor,
+      'durationMs': duration.inMilliseconds,
+    });
+  } on MissingPluginException {
+    return null;
+  } on PlatformException {
+    return null;
+  }
+}
+
+Future<bool?> setNativeSurfaceBoundsWithoutCopy({
+  required Rect bounds,
+  required double scaleFactor,
+}) async {
+  if (!Platform.isWindows) return null;
+  try {
+    return await _windowAnimationChannel.invokeMethod<bool>(
+      'setBoundsWithoutCopy',
+      {
+        'toX': bounds.left,
+        'toY': bounds.top,
+        'toWidth': bounds.width,
+        'toHeight': bounds.height,
+        'scaleFactor': scaleFactor,
+      },
+    );
+  } on MissingPluginException {
+    return null;
+  } on PlatformException {
+    return null;
+  }
+}
+
+Future<void> configureNativeSurfaceWindow() async {
+  if (!Platform.isWindows) return;
+  try {
+    await _windowAnimationChannel.invokeMethod<void>('configureSurfaceWindow');
+  } on MissingPluginException {
+    // Non-Windows and test runners do not install the custom Win32 host.
+  } on PlatformException {
+    // The app still remains usable; packaged acceptance verifies the exact
+    // frameless endpoint so release builds cannot silently keep this fallback.
+  }
+}
+
+Future<void> animateSurfaceBounds({
+  required Rect from,
+  required Rect to,
+  required Future<void> Function(Rect value) setBounds,
+  required bool Function() cancelled,
+  Duration duration = surfaceTransitionDuration,
+  int frames = surfaceTransitionFrameCount,
+}) async {
+  if (from == to || duration == Duration.zero || frames <= 1) {
+    if (!cancelled()) await setBounds(to);
+    return;
+  }
+  final stopwatch = Stopwatch()..start();
+  for (var frame = 1; frame <= frames; frame++) {
+    if (cancelled()) return;
+    final deadline = duration * (frame / frames);
+    final remaining = deadline - stopwatch.elapsed;
+    if (remaining > Duration.zero) await Future<void>.delayed(remaining);
+    if (cancelled()) return;
+    final linear = frame / frames;
+    final eased = symmetricSurfaceEase(linear);
+    await setBounds(Rect.lerp(from, to, eased)!);
+  }
+}
+
 bool supportsNativeWindowShadow(String operatingSystem) =>
     operatingSystem == 'windows' || operatingSystem == 'macos';
+
+bool supportsExplicitTrayContextMenu(String operatingSystem) =>
+    operatingSystem == 'windows' || operatingSystem == 'linux';
+
+Future<void> showExplicitTrayContextMenu({
+  required String operatingSystem,
+  required Future<void> Function() show,
+}) async {
+  if (supportsExplicitTrayContextMenu(operatingSystem)) await show();
+}
 
 bool shouldUseWaylandPortals(Map<String, String> environment) {
   final sessionType = environment['XDG_SESSION_TYPE']?.trim().toLowerCase();

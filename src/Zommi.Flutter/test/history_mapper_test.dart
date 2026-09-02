@@ -55,7 +55,9 @@ void main() {
       expect(turns.single.blocks, hasLength(3));
       expect(turns.single.blocks[0].kind, TranscriptKind.thinking);
       expect(turns.single.blocks[0].text, 'Inspecting the selected table');
+      expect(turns.single.blocks[0].expanded, isFalse);
       expect(turns.single.blocks[1].title, 'Command');
+      expect(turns.single.blocks[1].expanded, isFalse);
       expect(turns.single.blocks[2].artifacts.single.path, 'report.html');
       expect(turns.single.blocks[2].artifacts.single.cwd, '/workspace');
     },
@@ -88,6 +90,24 @@ void main() {
         TranscriptLifecycle.delta,
       ),
       'part 1 part 2',
+    );
+    expect(
+      mergeActivityText(
+        'Hello',
+        'Hello from Codex',
+        TranscriptKind.assistant,
+        TranscriptLifecycle.delta,
+      ),
+      'Hello from Codex',
+    );
+    expect(
+      mergeActivityText(
+        'The answer is ready',
+        'ready now',
+        TranscriptKind.assistant,
+        TranscriptLifecycle.delta,
+      ),
+      'The answer is ready now',
     );
   });
 

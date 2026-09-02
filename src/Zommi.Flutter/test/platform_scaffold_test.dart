@@ -64,6 +64,57 @@ void main() {
       expect(bridge, contains(contract));
     }
     expect(
+      bridge,
+      allOf(
+        contains('void onTrayIconRightMouseDown()'),
+        contains('trayManager.popUpContextMenu()'),
+      ),
+    );
+
+    final windowsMain = File('${root.path}/windows/runner/main.cpp')
+        .readAsStringSync();
+    final windowsInstance = File('${root.path}/windows/runner/zommi_instance.h')
+        .readAsStringSync();
+    final windowsFlutterWindow = File(
+      '${root.path}/windows/runner/flutter_window.cpp',
+    ).readAsStringSync();
+    expect(
+      windowsMain,
+      allOf(
+        contains('CreateMutexW(nullptr, TRUE, kZommiInstanceMutexName)'),
+        contains('ERROR_ALREADY_EXISTS'),
+        contains('PostMessageW(HWND_BROADCAST, ZommiShowWindowMessage()'),
+      ),
+    );
+    expect(windowsInstance, contains('Zommi.Desktop.SingleInstance'));
+    expect(
+      windowsFlutterWindow,
+      allOf(
+        contains('message == ZommiShowWindowMessage()'),
+        contains('ShowWindow(hwnd, SW_RESTORE)'),
+        contains('"zommi/window_animation"'),
+        contains('kWindowAnimationFrameMs'),
+        contains('message == WM_TIMER'),
+        contains('SymmetricSurfaceEase(linear)'),
+        allOf(
+          contains('"setBoundsWithoutCopy"'),
+          contains('SetNextFrameCallback([this]()'),
+          contains('flutter_controller_->ForceRedraw()'),
+          contains('SWP_NOCOPYBITS'),
+          allOf(
+            contains('BeginSurfaceFrameTransition(current)'),
+            contains('DWMWA_CLOAK'),
+            contains('STM_SETIMAGE'),
+            contains('SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER'),
+          ),
+        ),
+      ),
+    );
+    expect(
+      File('${root.path}/windows/runner/win32_window.cpp').readAsStringSync(),
+      contains('SWP_NOACTIVATE | SWP_NOCOPYBITS | SWP_NOZORDER'),
+    );
+    expect(
       File('${root.path}/windows/flutter/generated_plugins.cmake')
           .readAsStringSync(),
       allOf(

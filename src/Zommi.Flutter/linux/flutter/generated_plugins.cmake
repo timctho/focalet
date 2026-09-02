@@ -3,6 +3,7 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  file_selector_linux
   hotkey_manager_linux
   irondash_engine_context
   screen_capturer_linux

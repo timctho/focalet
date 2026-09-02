@@ -12,6 +12,11 @@ on:
         required: false
         default: false
         type: boolean
+      windows_deploy_downloads:
+        description: Atomically deploy the verified Windows package to Downloads
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -214,6 +219,50 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
+
+      - name: Deploy verified Windows release to Downloads
+        if: github.event_name == 'workflow_dispatch' && inputs.windows_deploy_downloads
+        shell: pwsh
+        run: ./scripts/deploy-windows-downloads.ps1 -Runtime win-x64
+
+  verify_windows_deployment:
+    name: Verify deployed Windows process
+    needs: release_windows
+    if: github.event_name == 'workflow_dispatch' && inputs.windows_deploy_downloads
+    runs-on: [self-hosted, Windows, X64, zommi-release]
+    timeout-minutes: 5
+    steps:
+      - name: Verify exact deployed revision and delayed process health
+        shell: pwsh
+        run: |
+          Start-Sleep -Seconds 5
+          $targetDirectory = Join-Path $env:USERPROFILE 'Downloads/zommi-windows-x64'
+          $targetExecutable = Join-Path $targetDirectory 'Zommi.exe'
+          $manifest = Get-Content -LiteralPath (Join-Path $targetDirectory 'release-manifest.json') -Raw | ConvertFrom-Json
+          if ($manifest.gitCommit -ne '${{ github.sha }}') {
+            throw "Downloads manifest has revision $($manifest.gitCommit), expected ${{ github.sha }}."
+          }
+          $processes = @(Get-CimInstance Win32_Process | Where-Object {
+            $_.Name -eq 'Zommi.exe' -and
+            $_.ExecutablePath -and
+            [string]::Equals(
+              [IO.Path]::GetFullPath($_.ExecutablePath),
+              [IO.Path]::GetFullPath($targetExecutable),
+              [StringComparison]::OrdinalIgnoreCase)
+          })
+          if ($processes.Count -ne 1) {
+            throw "Expected one delayed exact-path Zommi process, found $($processes.Count)."
+          }
+          $process = Get-Process -Id $processes[0].ProcessId
+          if (-not $process.Responding) {
+            throw "Deployed Zommi process $($process.Id) is not responding."
+          }
+          [ordered]@{
+            gitCommit = $manifest.gitCommit
+            processId = $process.Id
+            processCount = $processes.Count
+            responding = $process.Responding
+          } | ConvertTo-Json
 
   release_macos:
     name: Native release (macOS, temporarily skipped)

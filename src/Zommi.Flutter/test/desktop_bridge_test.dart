@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
@@ -12,6 +13,21 @@ void main() {
     expect(supportsNativeWindowShadow('windows'), isTrue);
     expect(supportsNativeWindowShadow('macos'), isTrue);
   });
+
+  test(
+    'tray right-click explicitly opens the menu on supported desktops',
+    () async {
+      expect(supportsExplicitTrayContextMenu('windows'), isTrue);
+      expect(supportsExplicitTrayContextMenu('linux'), isTrue);
+      expect(supportsExplicitTrayContextMenu('macos'), isFalse);
+
+      var menuOpenCount = 0;
+      Future<void> show() async => menuOpenCount += 1;
+      await showExplicitTrayContextMenu(operatingSystem: 'windows', show: show);
+      await showExplicitTrayContextMenu(operatingSystem: 'macos', show: show);
+      expect(menuOpenCount, 1);
+    },
+  );
 
   test('cancelled image selection emits no panel-opening invocation', () {
     expect(imageSelectionInvocation(null), isNull);
@@ -27,6 +43,107 @@ void main() {
     expect(invocation?.attachment, same(attachment));
     expect(invocation?.message, 'Image context attached');
   });
+
+  test(
+    'showing a panel focuses it without applying a second surface size',
+    () async {
+      final calls = <String>[];
+      await presentPanelWithoutResizing(
+        show: () async => calls.add('show'),
+        focus: () async => calls.add('focus'),
+        keepOnTop: () async => calls.add('topmost'),
+      );
+
+      expect(calls, ['show', 'focus', 'topmost']);
+      expect(calls, isNot(contains('resize')));
+    },
+  );
+
+  test('surface bounds preserve one bottom-center anchor across morphs', () {
+    const workArea = Rect.fromLTWH(100, 50, 1200, 800);
+    final initial = anchoredSurfaceBounds(
+      anchor: Offset(workArea.center.dx, workArea.bottom - windowBottomInset),
+      workArea: workArea,
+      size: compactWindowSize,
+    );
+    expect(initial.center.dx, workArea.center.dx);
+    expect(initial.bottom, workArea.bottom - windowBottomInset);
+
+    const anchor = Offset(650, 800);
+    final expanded = anchoredSurfaceBounds(
+      anchor: anchor,
+      workArea: workArea,
+      size: normalWindowSize,
+    );
+    final collapsed = anchoredSurfaceBounds(
+      anchor: anchor,
+      workArea: workArea,
+      size: compactWindowSize,
+    );
+    expect(expanded.center.dx, anchor.dx);
+    expect(collapsed.center.dx, anchor.dx);
+    expect(expanded.bottom, anchor.dy);
+    expect(collapsed.bottom, anchor.dy);
+
+    final clamped = anchoredSurfaceBounds(
+      anchor: const Offset(138, 88),
+      workArea: workArea,
+      size: normalWindowSize,
+    );
+    expect(clamped.left, workArea.left);
+    expect(clamped.top, workArea.top);
+    expect(workArea.contains(clamped.topLeft), isTrue);
+    expect(workArea.contains(clamped.bottomRight), isTrue);
+
+    final restoredOrb = anchoredSurfaceBounds(
+      anchor: const Offset(108, 88),
+      workArea: workArea,
+      size: compactWindowSize,
+    );
+    expect(restoredOrb.left, workArea.left);
+    expect(restoredOrb.top, workArea.top);
+  });
+
+  test(
+    'surface transition frames are symmetric and preserve one anchor',
+    () async {
+      const compact = Rect.fromLTWH(332, 564, 56, 56);
+      const expanded = Rect.fromLTWH(0, 0, 720, 620);
+
+      Future<List<Rect>> sample(Rect from, Rect to) async {
+        final values = <Rect>[from];
+        await animateSurfaceBounds(
+          from: from,
+          to: to,
+          duration: const Duration(microseconds: 8),
+          frames: 8,
+          setBounds: (value) async => values.add(value),
+          cancelled: () => false,
+        );
+        return values;
+      }
+
+      final forward = await sample(compact, expanded);
+      final reverse = await sample(expanded, compact);
+      expect(forward, hasLength(9));
+      expect(reverse, hasLength(9));
+      expect(
+        symmetricSurfaceEase(0.25),
+        closeTo(1 - symmetricSurfaceEase(0.75), 0.0000001),
+      );
+      for (var index = 0; index < forward.length; index++) {
+        final matchingReverse = reverse[reverse.length - index - 1];
+        expect(forward[index].left, closeTo(matchingReverse.left, 0.001));
+        expect(forward[index].top, closeTo(matchingReverse.top, 0.001));
+        expect(forward[index].width, closeTo(matchingReverse.width, 0.001));
+        expect(forward[index].height, closeTo(matchingReverse.height, 0.001));
+        expect(forward[index].center.dx, closeTo(360, 0.001));
+        expect(forward[index].bottom, closeTo(620, 0.001));
+      }
+      expect(forward.last, expanded);
+      expect(reverse.last, compact);
+    },
+  );
 
   test(
     'Windows region selection is not queued behind slow UIA capture',

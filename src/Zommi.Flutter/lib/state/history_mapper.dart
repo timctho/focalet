@@ -64,7 +64,7 @@ TranscriptBlock? _historyBlock(Map<String, Object?> item, String? cwd) {
         text: item['text']?.toString() ?? '',
         lifecycle: lifecycle,
         status: status,
-        expanded: phase == 'commentary' && !completed,
+        expanded: false,
         artifacts: artifacts,
       );
     case 'reasoning':
@@ -78,7 +78,7 @@ TranscriptBlock? _historyBlock(Map<String, Object?> item, String? cwd) {
         ]),
         lifecycle: lifecycle,
         status: status,
-        expanded: !completed,
+        expanded: false,
         artifacts: artifacts,
       );
     case 'plan':
@@ -89,7 +89,7 @@ TranscriptBlock? _historyBlock(Map<String, Object?> item, String? cwd) {
         text: item['text']?.toString() ?? '',
         lifecycle: lifecycle,
         status: status,
-        expanded: !completed,
+        expanded: false,
         artifacts: artifacts,
       );
     case 'commandExecution':
@@ -195,7 +195,7 @@ TranscriptBlock _toolBlock(
       .join('\n'),
   lifecycle: lifecycle,
   status: status,
-  expanded: lifecycle != TranscriptLifecycle.completed,
+  expanded: false,
   artifacts: artifacts,
 );
 
@@ -328,20 +328,30 @@ String mergeActivityText(
   String current,
   String incoming,
   TranscriptKind kind,
-  TranscriptLifecycle lifecycle,
-) {
+  TranscriptLifecycle lifecycle, {
+  bool replace = false,
+}) {
+  if (replace) return incoming;
   if (incoming.isEmpty) return current;
+  if (current.isEmpty) return incoming;
+  if (incoming == current || current.endsWith(incoming)) return current;
+  if (incoming.startsWith(current)) return incoming;
   if (lifecycle == TranscriptLifecycle.completed &&
       (kind == TranscriptKind.thinking || kind == TranscriptKind.plan)) {
     if (incoming == current || current.contains(incoming)) return current;
     if (incoming.contains(current)) return incoming;
     return incoming;
   }
-  if (incoming == current) return current;
   if (lifecycle == TranscriptLifecycle.completed &&
       current.contains(incoming)) {
     return current;
   }
+  if (lifecycle == TranscriptLifecycle.completed &&
+      incoming.contains(current)) {
+    return incoming;
+  }
+  final overlap = suffixPrefixOverlap(current, incoming);
+  if (overlap > 0) return '$current${incoming.substring(overlap)}';
   final separator =
       lifecycle == TranscriptLifecycle.completed &&
           current.isNotEmpty &&
@@ -349,6 +359,16 @@ String mergeActivityText(
       ? '\n'
       : '';
   return '$current$separator$incoming';
+}
+
+int suffixPrefixOverlap(String current, String incoming) {
+  final limit = current.length < incoming.length
+      ? current.length
+      : incoming.length;
+  for (var length = limit; length > 0; length--) {
+    if (current.endsWith(incoming.substring(0, length))) return length;
+  }
+  return 0;
 }
 
 String mergeDistinctTextSections(Iterable<String> sections) {

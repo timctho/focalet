@@ -29,8 +29,11 @@ final class ZommiController extends ChangeNotifier {
   final Map<String, List<ConversationTurn>> _turnsBySession = {};
   final Map<String, String> _activeTurns = {};
   final Set<String> _unreadSessions = {};
+  final Set<String> _cancelRequestedSessions = {};
+  final Set<String> _interruptingSessions = {};
   final Set<String> _completedTurnIds = {};
   final Map<String, int> _lastSequences = {};
+  final Map<String, (String, String)> _modelSelections = {};
 
   StreamSubscription<CoreEvent>? _coreEvents;
   StreamSubscription<DesktopInvocation>? _desktopEvents;
@@ -42,12 +45,18 @@ final class ZommiController extends ChangeNotifier {
   String status = 'Connecting to Rust core…';
   bool statusWarning = false;
   bool initialized = false;
+  bool starting = true;
   bool runtimeBusy = false;
+  String? switchingRuntimeId;
   bool runtimeOverrideBusy = false;
   bool sessionBusy = false;
   bool submitting = false;
   bool expanded = false;
   bool largePanel = false;
+  bool surfaceTransitioning = false;
+  bool surfaceTransitionAnimating = false;
+  bool transitionTargetExpanded = false;
+  bool transitionTargetLarge = false;
   bool sessionPanelOpen = false;
   bool runtimePanelOpen = false;
   bool modelPanelOpen = false;
@@ -61,16 +70,33 @@ final class ZommiController extends ChangeNotifier {
   bool resolvingPrompt = false;
   bool _closed = false;
   int _localTurnSequence = 0;
+  int _surfaceTransitionEpoch = 0;
+
+  String? get _activeSessionKey {
+    final runtimeTargetId = activeRuntime?.id;
+    final sessionId = activeSessionId;
+    return runtimeTargetId == null || sessionId == null
+        ? null
+        : _sessionKey(runtimeTargetId, sessionId);
+  }
 
   List<ConversationTurn> get turns =>
-      _turnsBySession[activeSessionId] ?? const [];
+      _turnsBySession[_activeSessionKey] ?? const [];
 
-  String? get activeTurnId =>
-      activeSessionId == null ? null : _activeTurns[activeSessionId];
+  String? get activeTurnId => _activeTurns[_activeSessionKey];
 
   bool get turnActive => activeTurnId != null;
 
+  bool get activeTurnStopping =>
+      _activeSessionKey != null &&
+      _interruptingSessions.contains(_activeSessionKey);
+
   bool get anyTurnActive => _activeTurns.isNotEmpty;
+
+  bool get orbWorking => anyTurnActive || runtimeBusy;
+
+  List<RuntimeTarget> get visibleRuntimeTargets =>
+      runtimeTargets.where(_isVisibleRuntimeTarget).toList(growable: false);
 
   bool get imageInputSupported =>
       activeRuntime == null || capabilities.contains('input.image.v1');
@@ -90,6 +116,11 @@ final class ZommiController extends ChangeNotifier {
   List<Map<String, Object?>> get runtimeOverrideAdapters =>
       mapList(runtimeSettings['adapters']);
 
+  List<Map<String, Object?>> get configurableRuntimeAdapters =>
+      runtimeOverrideAdapters
+          .where((adapter) => adapter['acceptsEndpoint'] != true)
+          .toList(growable: false);
+
   List<Map<String, Object?>> get runtimeOverrideHosts =>
       mapList(runtimeSettings['hosts']);
 
@@ -98,7 +129,18 @@ final class ZommiController extends ChangeNotifier {
 
   String get activeRuntimeName => activeRuntime?.displayName ?? 'Agent';
 
+  String? get switchingRuntimeName => runtimeTargets
+      .cast<RuntimeTarget?>()
+      .firstWhere(
+        (target) => target?.id == switchingRuntimeId,
+        orElse: () => null,
+      )
+      ?.displayName;
+
   String get runtimeSummary {
+    if (switchingRuntimeId != null) {
+      return 'Switching to ${switchingRuntimeName ?? 'agent'}…';
+    }
     final runtime = activeRuntime;
     if (runtime == null) {
       return runtimeBusy ? 'Finding agents…' : 'Choose agent';
@@ -136,11 +178,8 @@ final class ZommiController extends ChangeNotifier {
       _setStatus('Finding agent runtimes…');
       final discovery = await core.discoverRuntimeTargets();
       if (_closed) return;
-      runtimeTargets
-        ..clear()
-        ..addAll(discovery.targets);
-      runtimeSettings = discovery.settings;
-      final targetId = discovery.selectedTargetId;
+      _replaceDiscovery(discovery);
+      final targetId = _visibleSelectedTargetId(discovery.selectedTargetId);
       if (targetId == null || targetId.isEmpty) {
         _setStatus(
           'No supported agent found. Capture remains available.',
@@ -157,6 +196,8 @@ final class ZommiController extends ChangeNotifier {
       _setStatus('Rust core unavailable · $error', warning: true);
     } finally {
       await desktopInitialization;
+      starting = false;
+      _notify();
     }
   }
 
@@ -179,11 +220,8 @@ final class ZommiController extends ChangeNotifier {
       final discovery = await core.discoverRuntimeTargets(
         lastSelectedTargetId: activeRuntime?.id,
       );
-      runtimeTargets
-        ..clear()
-        ..addAll(discovery.targets);
-      runtimeSettings = discovery.settings;
-      final selected = discovery.selectedTargetId;
+      _replaceDiscovery(discovery);
+      final selected = _visibleSelectedTargetId(discovery.selectedTargetId);
       if (activeRuntime == null && selected != null) {
         await _connectRuntime(selected);
       } else if (runtimeTargets.isEmpty) {
@@ -208,19 +246,21 @@ final class ZommiController extends ChangeNotifier {
       return;
     }
     runtimeBusy = true;
+    switchingRuntimeId = targetId;
     approval = null;
     question = null;
     previewArtifact = null;
-    _setStatus('Switching agent runtime…');
+    closeTransientPanels();
+    _setStatus('Switching to ${switchingRuntimeName ?? 'agent'}…');
     try {
       await _connectRuntime(targetId);
-      closeTransientPanels();
     } on Object catch (error) {
       if (!_applyConnectionError(targetId, error)) {
         _setStatus('Could not switch agent · $error', warning: true);
       }
     } finally {
       runtimeBusy = false;
+      switchingRuntimeId = null;
       _notify();
     }
   }
@@ -256,6 +296,19 @@ final class ZommiController extends ChangeNotifier {
     } on Object catch (error) {
       _setStatus('Could not open sign-in · $error', warning: true);
     }
+  }
+
+  Future<String?> chooseRuntimeExecutable({
+    required String executionHostId,
+  }) async {
+    final host = runtimeOverrideHosts.cast<Map<String, Object?>?>().firstWhere(
+      (value) => value?['id'] == executionHostId,
+      orElse: () => null,
+    );
+    if (host == null) return null;
+    final selected = await desktop.selectRuntimeExecutable();
+    if (selected == null || selected.trim().isEmpty) return null;
+    return normalizeRuntimeExecutablePath(selected, host);
   }
 
   Future<void> saveRuntimeOverride({
@@ -300,10 +353,7 @@ final class ZommiController extends ChangeNotifier {
         if (acceptsEndpoint) 'endpoint': locator.trim(),
         if (!acceptsEndpoint) 'executablePath': locator.trim(),
       });
-      runtimeTargets
-        ..clear()
-        ..addAll(discovery.targets);
-      runtimeSettings = discovery.settings;
+      _replaceDiscovery(discovery);
       _setStatus('Runtime override added');
     } on Object catch (error) {
       _setStatus('Could not add runtime override · $error', warning: true);
@@ -321,10 +371,7 @@ final class ZommiController extends ChangeNotifier {
     _notify();
     try {
       final discovery = await configuration.removeRuntimeOverride(overrideId);
-      runtimeTargets
-        ..clear()
-        ..addAll(discovery.targets);
-      runtimeSettings = discovery.settings;
+      _replaceDiscovery(discovery);
       _setStatus('Runtime override removed');
     } on Object catch (error) {
       _setStatus('Could not remove runtime override · $error', warning: true);
@@ -335,6 +382,7 @@ final class ZommiController extends ChangeNotifier {
   }
 
   Future<void> _connectRuntime(String targetId, {String? coreVersion}) async {
+    _rememberActiveModelSelection();
     final connection = await core.connectRuntime(runtimeTargetId: targetId);
     activeRuntime = runtimeTargets.cast<RuntimeTarget?>().firstWhere(
       (target) => target?.id == connection.runtimeTargetId,
@@ -352,7 +400,9 @@ final class ZommiController extends ChangeNotifier {
       ..clear()
       ..addAll(_sessionSummaries(connection.sessions));
     _ensureSession(connection.sessionId);
-    _selectInitialModel(connection);
+    if (!_restoreModelSelection(connection.runtimeTargetId)) {
+      _selectInitialModel(connection);
+    }
     if (capabilities.contains('session.list.v1')) {
       try {
         final values = await core.listSessions(
@@ -367,6 +417,7 @@ final class ZommiController extends ChangeNotifier {
       }
     }
     await _readActiveHistory();
+    _rememberActiveModelSelection();
     final version = connection.runtimeVersion ?? coreVersion;
     _setStatus('$activeRuntimeName${version == null ? '' : ' $version'} ready');
   }
@@ -393,8 +444,9 @@ final class ZommiController extends ChangeNotifier {
     final runtimeTargetId = activeRuntime?.id;
     final sessionId = activeSessionId;
     if (runtimeTargetId == null || sessionId == null) return;
+    final sessionKey = _sessionKey(runtimeTargetId, sessionId);
     if (!capabilities.contains('history.read.v1')) {
-      _turnsBySession.putIfAbsent(sessionId, () => []);
+      _turnsBySession.putIfAbsent(sessionKey, () => []);
       return;
     }
     try {
@@ -402,9 +454,15 @@ final class ZommiController extends ChangeNotifier {
         runtimeTargetId: runtimeTargetId,
         sessionId: sessionId,
       );
-      _turnsBySession[sessionId] = mapThreadHistory(response);
+      final canonical = mapThreadHistory(response);
+      final cached = _turnsBySession[sessionKey] ?? const <ConversationTurn>[];
+      _turnsBySession[sessionKey] = mergeSessionHistory(
+        canonical,
+        cached,
+        preserveCached: _activeTurns.containsKey(sessionKey),
+      );
     } on Object catch (error) {
-      _turnsBySession.putIfAbsent(sessionId, () => []);
+      _turnsBySession.putIfAbsent(sessionKey, () => []);
       _setStatus('History unavailable · $error', warning: true);
     }
     _notify();
@@ -462,7 +520,9 @@ final class ZommiController extends ChangeNotifier {
 
   Future<void> _applySessionConnection(RuntimeConnection connection) async {
     activeSessionId = connection.sessionId;
-    _unreadSessions.remove(connection.sessionId);
+    _unreadSessions.remove(
+      _sessionKey(connection.runtimeTargetId, connection.sessionId),
+    );
     capabilities = {...capabilities, ...connection.capabilities};
     if (connection.models.isNotEmpty) {
       models
@@ -475,12 +535,19 @@ final class ZommiController extends ChangeNotifier {
         ..addAll(_sessionSummaries(connection.sessions));
     }
     _ensureSession(connection.sessionId);
-    _selectInitialModel(connection);
+    if (!_selectionRemainsValid()) {
+      _selectInitialModel(connection);
+    }
+    _rememberActiveModelSelection();
     await _readActiveHistory();
     focusComposerEpoch++;
   }
 
-  Future<void> submit(String message) async {
+  Future<void> submit(
+    String message, {
+    String? inlineMessage,
+    List<String>? attachmentOrder,
+  }) async {
     final text = message.trim();
     final runtimeTargetId = activeRuntime?.id;
     final sessionId = activeSessionId;
@@ -492,20 +559,26 @@ final class ZommiController extends ChangeNotifier {
       );
       return;
     }
-    if (_activeTurns.containsKey(sessionId)) return;
-    final sendingAttachments = List<ContextAttachment>.of(attachments);
+    final sessionKey = _sessionKey(runtimeTargetId, sessionId);
+    if (_activeTurns.containsKey(sessionKey)) return;
+    final sendingAttachments = _orderedAttachments(attachmentOrder);
     attachments.clear();
     previewAttachment = null;
     final operationId =
         'flutter:${DateTime.now().microsecondsSinceEpoch}:${++_localTurnSequence}';
     final localTurn = ConversationTurn(
       id: operationId,
-      number: (_turnsBySession[sessionId]?.length ?? 0) + 1,
+      number: (_turnsBySession[sessionKey]?.length ?? 0) + 1,
       userText: text,
-      contextTokens: sendingAttachments.map((item) => item.token).toList(),
+      inlineUserText: inlineMessage,
+      contextTokens: sendingAttachments
+          .where((item) => !item.hasImage)
+          .map((item) => item.token)
+          .toList(),
+      attachments: sendingAttachments,
     );
-    _turnsBySession.putIfAbsent(sessionId, () => []).add(localTurn);
-    _activeTurns[sessionId] = operationId;
+    _turnsBySession.putIfAbsent(sessionKey, () => []).add(localTurn);
+    _activeTurns[sessionKey] = operationId;
     _updateSessionTitle(sessionId, text);
     submitting = true;
     _setStatus('Starting $activeRuntimeName turn…');
@@ -526,12 +599,30 @@ final class ZommiController extends ChangeNotifier {
         model: selectedModel.isEmpty ? null : selectedModel,
         effort: selectedEffort.isEmpty ? null : selectedEffort,
       );
-      if (!_completedTurnIds.contains(receipt.turnId)) {
-        _activeTurns[sessionId] = receipt.turnId;
-        _setStatus('$activeRuntimeName is responding…');
+      final completedIdentity = _turnIdentity(
+        receipt.runtimeTargetId,
+        receipt.turnId,
+      );
+      if (!_completedTurnIds.contains(completedIdentity)) {
+        _activeTurns[sessionKey] = receipt.turnId;
+        if (_isActiveSession(runtimeTargetId, sessionId)) {
+          _setStatus('$activeRuntimeName is responding…');
+        }
+        if (_cancelRequestedSessions.remove(sessionKey)) {
+          await _interruptExact(
+            runtimeTargetId: runtimeTargetId,
+            sessionId: sessionId,
+            turnId: receipt.turnId,
+          );
+        }
+      } else {
+        _cancelRequestedSessions.remove(sessionKey);
+        _interruptingSessions.remove(sessionKey);
       }
     } on Object catch (error) {
-      _activeTurns.remove(sessionId);
+      _activeTurns.remove(sessionKey);
+      _cancelRequestedSessions.remove(sessionKey);
+      _interruptingSessions.remove(sessionKey);
       localTurn.blocks.add(
         TranscriptBlock(
           id: '$operationId:error',
@@ -549,20 +640,67 @@ final class ZommiController extends ChangeNotifier {
     }
   }
 
+  List<ContextAttachment> _orderedAttachments(List<String>? order) {
+    if (order == null || order.isEmpty) {
+      return List<ContextAttachment>.of(attachments);
+    }
+    final byId = {
+      for (final attachment in attachments) attachment.id: attachment,
+    };
+    final result = <ContextAttachment>[];
+    for (final id in order) {
+      final attachment = byId.remove(id);
+      if (attachment != null) result.add(attachment);
+    }
+    result.addAll(
+      attachments.where((attachment) => byId.containsKey(attachment.id)),
+    );
+    return result;
+  }
+
   Future<void> interrupt() async {
     final target = activeRuntime?.id;
     final session = activeSessionId;
     final turn = activeTurnId;
     if (target == null || session == null || turn == null) return;
+    final sessionKey = _sessionKey(target, session);
+    if (_interruptingSessions.contains(sessionKey)) return;
     _setStatus('Stopping $activeRuntimeName turn…');
+    if (turn.startsWith('flutter:')) {
+      _cancelRequestedSessions.add(sessionKey);
+      _interruptingSessions.add(sessionKey);
+      _notify();
+      return;
+    }
+    await _interruptExact(
+      runtimeTargetId: target,
+      sessionId: session,
+      turnId: turn,
+    );
+  }
+
+  Future<void> _interruptExact({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String turnId,
+  }) async {
+    final sessionKey = _sessionKey(runtimeTargetId, sessionId);
+    _interruptingSessions.add(sessionKey);
+    _notify();
     try {
       await core.interruptTurn(
-        runtimeTargetId: target,
-        sessionId: session,
-        turnId: turn,
+        runtimeTargetId: runtimeTargetId,
+        sessionId: sessionId,
+        turnId: turnId,
       );
+      if (_isActiveSession(runtimeTargetId, sessionId)) {
+        _setStatus('Stop sent to $activeRuntimeName…');
+      }
     } on Object catch (error) {
+      _interruptingSessions.remove(sessionKey);
+      _cancelRequestedSessions.remove(sessionKey);
       _setStatus('Stop failed · $error', warning: true);
+      _notify();
     }
   }
 
@@ -711,11 +849,13 @@ final class ZommiController extends ChangeNotifier {
           _selectedModel()?['defaultReasoningEffort']?.toString() ??
           efforts.first;
     }
+    _rememberActiveModelSelection();
     _notify();
   }
 
   void setEffort(String value) {
     selectedEffort = value;
+    _rememberActiveModelSelection();
     _notify();
   }
 
@@ -755,25 +895,112 @@ final class ZommiController extends ChangeNotifier {
     _notify();
   }
 
-  Future<void> setExpanded(bool value, {bool focus = false}) async {
-    expanded = value;
-    if (value && focus) focusComposerEpoch++;
+  void dismissSessionPanel() {
+    if (!sessionPanelOpen) return;
+    sessionPanelOpen = false;
     _notify();
-    try {
-      await desktop.setSurface(expanded: value, large: largePanel);
-      if (value && focus) await desktop.showPanel();
-    } on Object catch (error) {
-      _setStatus('Window presentation degraded · $error', warning: true);
-    }
   }
 
-  Future<void> toggleLargePanel() async {
-    largePanel = !largePanel;
+  void dismissRuntimePanel() {
+    if (!runtimePanelOpen) return;
+    runtimePanelOpen = false;
+    _notify();
+  }
+
+  void dismissModelPanel() {
+    if (!modelPanelOpen) return;
+    modelPanelOpen = false;
+    _notify();
+  }
+
+  Future<void> setExpanded(bool value, {bool focus = false}) async {
+    if (!surfaceTransitioning && expanded == value) {
+      if (value && focus) {
+        focusComposerEpoch++;
+        _notify();
+        await desktop.showPanel();
+      }
+      return;
+    }
+    await _transitionSurface(
+      targetExpanded: value,
+      targetLarge: largePanel,
+      focus: focus,
+      errorLabel: 'Window presentation degraded',
+    );
+  }
+
+  Future<void> toggleLargePanel() => _transitionSurface(
+    targetExpanded: true,
+    targetLarge: !largePanel,
+    errorLabel: 'Window resize failed',
+  );
+
+  Future<void> _transitionSurface({
+    required bool targetExpanded,
+    required bool targetLarge,
+    required String errorLabel,
+    bool focus = false,
+  }) async {
+    final transitionEpoch = ++_surfaceTransitionEpoch;
+    final fromArea = expanded
+        ? (largePanel
+              ? largeWindowSize.width * largeWindowSize.height
+              : normalWindowSize.width * normalWindowSize.height)
+        : compactWindowSize.width * compactWindowSize.height;
+    final toArea = targetExpanded
+        ? (targetLarge
+              ? largeWindowSize.width * largeWindowSize.height
+              : normalWindowSize.width * normalWindowSize.height)
+        : compactWindowSize.width * compactWindowSize.height;
+    final growing = toArea >= fromArea;
+    surfaceTransitioning = true;
+    surfaceTransitionAnimating = false;
+    transitionTargetExpanded = targetExpanded;
+    transitionTargetLarge = targetLarge;
     _notify();
     try {
-      await desktop.setSurface(expanded: true, large: largePanel);
+      final transitionClock = Stopwatch()..start();
+      Future<void>? growingSurfaceChange;
+      if (growing) {
+        growingSurfaceChange = desktop.setSurface(
+          expanded: targetExpanded,
+          large: targetLarge,
+          animate: false,
+        );
+      }
+      surfaceTransitionAnimating = true;
+      _notify();
+      if (growingSurfaceChange != null) {
+        await growingSurfaceChange;
+      }
+      if (transitionEpoch != _surfaceTransitionEpoch) return;
+      final remaining = surfaceTransitionDuration - transitionClock.elapsed;
+      if (remaining > Duration.zero) {
+        await Future<void>.delayed(remaining);
+      }
+      if (transitionEpoch != _surfaceTransitionEpoch) return;
+      if (!growing) {
+        await desktop.setSurface(
+          expanded: targetExpanded,
+          large: targetLarge,
+          animate: false,
+        );
+      }
     } on Object catch (error) {
-      _setStatus('Window resize failed · $error', warning: true);
+      _setStatus('$errorLabel · $error', warning: true);
+    } finally {
+      if (transitionEpoch == _surfaceTransitionEpoch) {
+        expanded = targetExpanded;
+        largePanel = targetLarge;
+        surfaceTransitioning = false;
+        surfaceTransitionAnimating = false;
+        if (targetExpanded && focus) focusComposerEpoch++;
+        _notify();
+      }
+    }
+    if (transitionEpoch == _surfaceTransitionEpoch && targetExpanded && focus) {
+      await desktop.showPanel();
     }
   }
 
@@ -786,8 +1013,11 @@ final class ZommiController extends ChangeNotifier {
   Future<void> copyImage(String dataUrl) => desktop.copyImage(dataUrl);
 
   SessionPresence presenceFor(String sessionId) {
-    if (_activeTurns.containsKey(sessionId)) return SessionPresence.running;
-    if (_unreadSessions.contains(sessionId)) return SessionPresence.unread;
+    final runtimeTargetId = activeRuntime?.id;
+    if (runtimeTargetId == null) return SessionPresence.done;
+    final sessionKey = _sessionKey(runtimeTargetId, sessionId);
+    if (_activeTurns.containsKey(sessionKey)) return SessionPresence.running;
+    if (_unreadSessions.contains(sessionKey)) return SessionPresence.unread;
     if (sessionId == activeSessionId) return SessionPresence.active;
     return SessionPresence.done;
   }
@@ -811,7 +1041,7 @@ final class ZommiController extends ChangeNotifier {
   }
 
   void _handleCoreEvent(CoreEvent event) {
-    if (_closed || activeRuntime?.id != event.runtimeTargetId) return;
+    if (_closed) return;
     final sequenceKey = '${event.runtimeTargetId}:${event.sessionId ?? ''}';
     final previous = _lastSequences[sequenceKey] ?? 0;
     if (event.sequence > 0 && event.sequence <= previous) return;
@@ -834,7 +1064,8 @@ final class ZommiController extends ChangeNotifier {
             }
           }
         }
-        if (message?.isNotEmpty == true) {
+        if (message?.isNotEmpty == true &&
+            activeRuntime?.id == event.runtimeTargetId) {
           _setStatus(
             message!,
             warning: event.payload['status']?.toString() == 'degraded',
@@ -843,52 +1074,66 @@ final class ZommiController extends ChangeNotifier {
         return;
       case 'turn.started':
         if (sessionId == null) return;
+        final sessionKey = _sessionKey(event.runtimeTargetId, sessionId);
         final turnId = event.turnId;
         if (turnId != null && turnId.isNotEmpty) {
-          _activeTurns[sessionId] = turnId;
+          _activeTurns[sessionKey] = turnId;
         }
-        _setStatus('$activeRuntimeName is responding…');
+        if (_isActiveSession(event.runtimeTargetId, sessionId)) {
+          _setStatus('$activeRuntimeName is responding…');
+        }
         _notify();
         return;
       case 'item.update':
         if (sessionId == null) return;
-        _applyItemUpdate(sessionId, event);
+        _applyItemUpdate(event.runtimeTargetId, sessionId, event);
         return;
       case 'approval.requested':
         if (sessionId == null) return;
-        approval = PendingApproval.fromEvent(
-          event.runtimeTargetId,
-          sessionId,
-          event.payload,
-        );
+        if (_isActiveSession(event.runtimeTargetId, sessionId)) {
+          approval = PendingApproval.fromEvent(
+            event.runtimeTargetId,
+            sessionId,
+            event.payload,
+          );
+        }
         _notify();
         return;
       case 'question.requested':
         if (sessionId == null) return;
-        question = PendingQuestion.fromEvent(
-          event.runtimeTargetId,
-          sessionId,
-          event.payload,
-        );
+        if (_isActiveSession(event.runtimeTargetId, sessionId)) {
+          question = PendingQuestion.fromEvent(
+            event.runtimeTargetId,
+            sessionId,
+            event.payload,
+          );
+        }
         _notify();
         return;
       case 'turn.completed':
         if (sessionId == null) return;
+        final sessionKey = _sessionKey(event.runtimeTargetId, sessionId);
         final turnId = event.turnId;
         if (turnId != null) {
           if (_completedTurnIds.length >= 512) _completedTurnIds.clear();
-          _completedTurnIds.add(turnId);
+          _completedTurnIds.add(_turnIdentity(event.runtimeTargetId, turnId));
         }
-        _activeTurns.remove(sessionId);
-        if (sessionId != activeSessionId) _unreadSessions.add(sessionId);
+        _activeTurns.remove(sessionKey);
+        _interruptingSessions.remove(sessionKey);
+        _cancelRequestedSessions.remove(sessionKey);
+        if (!_isActiveSession(event.runtimeTargetId, sessionId)) {
+          _unreadSessions.add(sessionKey);
+        }
         final statusValue = event.payload['status']?.toString() ?? 'completed';
-        if (sessionId == activeSessionId) {
-          for (final block in turns.expand((turn) => turn.blocks)) {
-            if (block.isActivity) {
-              block.lifecycle = TranscriptLifecycle.completed;
-              block.expanded = false;
-            }
+        for (final block in (_turnsBySession[sessionKey] ?? const []).expand(
+          (turn) => turn.blocks,
+        )) {
+          if (block.isActivity) {
+            block.lifecycle = TranscriptLifecycle.completed;
+            block.expanded = false;
           }
+        }
+        if (_isActiveSession(event.runtimeTargetId, sessionId)) {
           _setStatus(switch (statusValue.toLowerCase()) {
             'completed' => '$activeRuntimeName reply complete',
             'interrupted' => '$activeRuntimeName turn stopped',
@@ -902,8 +1147,13 @@ final class ZommiController extends ChangeNotifier {
     }
   }
 
-  void _applyItemUpdate(String sessionId, CoreEvent event) {
-    final sessionTurns = _turnsBySession.putIfAbsent(sessionId, () => []);
+  void _applyItemUpdate(
+    String runtimeTargetId,
+    String sessionId,
+    CoreEvent event,
+  ) {
+    final sessionKey = _sessionKey(runtimeTargetId, sessionId);
+    final sessionTurns = _turnsBySession.putIfAbsent(sessionKey, () => []);
     final eventIdentity = event.clientOperationId ?? event.turnId;
     ConversationTurn? turn;
     if (eventIdentity != null) {
@@ -915,10 +1165,10 @@ final class ZommiController extends ChangeNotifier {
       }
     }
     if (turn == null &&
-        sessionId == activeSessionId &&
+        _isActiveSession(runtimeTargetId, sessionId) &&
         sessionTurns.isNotEmpty &&
         sessionTurns.last.id.startsWith('flutter:') &&
-        _activeTurns.containsKey(sessionId)) {
+        _activeTurns.containsKey(sessionKey)) {
       turn = sessionTurns.last;
     }
     if (turn == null) {
@@ -945,9 +1195,7 @@ final class ZommiController extends ChangeNotifier {
         title: event.payload['title']?.toString() ?? _kindTitle(kind),
         lifecycle: lifecycle,
         status: event.payload['status']?.toString(),
-        expanded:
-            kind != TranscriptKind.assistant &&
-            lifecycle != TranscriptLifecycle.completed,
+        expanded: kind == TranscriptKind.error,
       );
       turn.blocks.add(block);
     }
@@ -956,6 +1204,7 @@ final class ZommiController extends ChangeNotifier {
       event.payload['text']?.toString() ?? '',
       kind,
       lifecycle,
+      replace: event.payload['replace'] == true,
     );
     block.lifecycle = lifecycle;
     block.status = event.payload['status']?.toString() ?? block.status;
@@ -967,8 +1216,8 @@ final class ZommiController extends ChangeNotifier {
         block.artifacts.add(artifact);
       }
     }
-    if (sessionId != activeSessionId) {
-      _activeTurns.putIfAbsent(sessionId, () => event.turnId ?? 'running');
+    if (!_isActiveSession(runtimeTargetId, sessionId)) {
+      _activeTurns.putIfAbsent(sessionKey, () => event.turnId ?? 'running');
     }
     _notify();
   }
@@ -981,7 +1230,13 @@ final class ZommiController extends ChangeNotifier {
         SessionSummary(id: sessionId, title: 'New $activeRuntimeName chat'),
       );
     }
-    _turnsBySession.putIfAbsent(sessionId, () => []);
+    final runtimeTargetId = activeRuntime?.id;
+    if (runtimeTargetId != null) {
+      _turnsBySession.putIfAbsent(
+        _sessionKey(runtimeTargetId, sessionId),
+        () => [],
+      );
+    }
   }
 
   List<SessionSummary> _sessionSummaries(List<Map<String, Object?>> values) =>
@@ -1005,6 +1260,71 @@ final class ZommiController extends ChangeNotifier {
         (model) => _modelId(model!) == selectedModel,
         orElse: () => null,
       );
+
+  void _replaceDiscovery(RuntimeDiscovery discovery) {
+    runtimeTargets
+      ..clear()
+      ..addAll(discovery.targets.where(_isVisibleRuntimeTarget));
+    runtimeSettings = discovery.settings;
+  }
+
+  String? _visibleSelectedTargetId(String? selectedTargetId) {
+    if (selectedTargetId != null &&
+        runtimeTargets.any((target) => target.id == selectedTargetId)) {
+      return selectedTargetId;
+    }
+    return runtimeTargets.isEmpty ? null : runtimeTargets.first.id;
+  }
+
+  bool _isVisibleRuntimeTarget(RuntimeTarget target) {
+    final status = target.status.toLowerCase();
+    final detected = !{
+      'unavailable',
+      'unreachable',
+      'missing',
+      'not-detected',
+    }.contains(status);
+    final hasLocator =
+        target.executablePath.trim().isNotEmpty ||
+        target.endpoint?.trim().isNotEmpty == true;
+    return detected && hasLocator;
+  }
+
+  void _rememberActiveModelSelection() {
+    final runtimeTargetId = activeRuntime?.id;
+    if (runtimeTargetId == null) return;
+    _modelSelections[runtimeTargetId] = (selectedModel, selectedEffort);
+  }
+
+  bool _restoreModelSelection(String runtimeTargetId) {
+    final saved = _modelSelections[runtimeTargetId];
+    if (saved == null || !models.any((model) => _modelId(model) == saved.$1)) {
+      return false;
+    }
+    selectedModel = saved.$1;
+    final efforts = effortsForModel(_selectedModel());
+    selectedEffort = efforts.isEmpty || efforts.contains(saved.$2)
+        ? saved.$2
+        : (_selectedModel()?['defaultReasoningEffort']?.toString() ??
+              efforts.first);
+    return true;
+  }
+
+  bool _selectionRemainsValid() {
+    if (selectedModel.isEmpty) return models.isEmpty;
+    if (!models.any((model) => _modelId(model) == selectedModel)) return false;
+    final efforts = effortsForModel(_selectedModel());
+    return efforts.isEmpty || efforts.contains(selectedEffort);
+  }
+
+  bool _isActiveSession(String runtimeTargetId, String sessionId) =>
+      activeRuntime?.id == runtimeTargetId && activeSessionId == sessionId;
+
+  static String _sessionKey(String runtimeTargetId, String sessionId) =>
+      '$runtimeTargetId\u0000$sessionId';
+
+  static String _turnIdentity(String runtimeTargetId, String turnId) =>
+      '$runtimeTargetId\u0000$turnId';
 
   String _defaultModelId() {
     final preferred = models.cast<Map<String, Object?>?>().firstWhere(
@@ -1034,6 +1354,83 @@ final class ZommiController extends ChangeNotifier {
     await Future.wait([core.close(), desktop.close()]);
     super.dispose();
   }
+}
+
+List<ConversationTurn> mergeSessionHistory(
+  List<ConversationTurn> canonical,
+  List<ConversationTurn> cached, {
+  required bool preserveCached,
+}) {
+  if (canonical.isEmpty) return List<ConversationTurn>.of(cached);
+  if (cached.isEmpty) return List<ConversationTurn>.of(canonical);
+  final merged = List<ConversationTurn>.of(canonical);
+  for (final cachedTurn in cached) {
+    var index = merged.indexWhere((turn) => turn.id == cachedTurn.id);
+    if (index < 0 && cachedTurn.id.startsWith('flutter:')) {
+      index = merged.lastIndexWhere(
+        (turn) => turn.userText == cachedTurn.userText,
+      );
+    }
+    if (index < 0) {
+      merged.add(cachedTurn);
+    } else {
+      merged[index] = preserveCached
+          ? mergeConversationTurn(cachedTurn, merged[index])
+          : mergeConversationTurn(merged[index], cachedTurn);
+    }
+  }
+  return merged;
+}
+
+ConversationTurn mergeConversationTurn(
+  ConversationTurn primary,
+  ConversationTurn secondary,
+) {
+  final blocks = List<TranscriptBlock>.of(primary.blocks);
+  for (final candidate in secondary.blocks) {
+    final duplicate = blocks.any(
+      (block) =>
+          block.id == candidate.id ||
+          (block.kind == candidate.kind &&
+              block.text.trim().isNotEmpty &&
+              block.text.trim() == candidate.text.trim()),
+    );
+    if (!duplicate) blocks.add(candidate);
+  }
+  return ConversationTurn(
+    id: primary.id,
+    number: primary.number,
+    userText: primary.userText,
+    inlineUserText: primary.inlineUserText,
+    contextTokens: primary.contextTokens.isEmpty
+        ? secondary.contextTokens
+        : primary.contextTokens,
+    attachments: primary.attachments.isEmpty
+        ? secondary.attachments
+        : primary.attachments,
+    blocks: blocks,
+  );
+}
+
+String normalizeRuntimeExecutablePath(
+  String selectedPath,
+  Map<String, Object?> executionHost,
+) {
+  final path = selectedPath.trim();
+  if (executionHost['kind'] != 'wsl') return path;
+  final distribution = executionHost['name']?.toString().trim() ?? '';
+  if (distribution.isEmpty) return path;
+  final normalized = path.replaceAll('\\', '/');
+  final lower = normalized.toLowerCase();
+  for (final prefix in [
+    '//wsl.localhost/${distribution.toLowerCase()}/',
+    '//wsl\$/${distribution.toLowerCase()}/',
+  ]) {
+    if (lower.startsWith(prefix)) {
+      return '/${normalized.substring(prefix.length)}';
+    }
+  }
+  return path;
 }
 
 List<String> effortsForModel(Map<String, Object?>? model) =>

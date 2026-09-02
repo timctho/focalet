@@ -143,16 +143,22 @@ final class ConversationTurn {
   ConversationTurn({
     required this.id,
     required this.userText,
+    String? inlineUserText,
     this.number = 0,
     List<String> contextTokens = const [],
+    List<ContextAttachment> attachments = const [],
     List<TranscriptBlock> blocks = const [],
-  }) : contextTokens = List<String>.of(contextTokens),
+  }) : inlineUserText = inlineUserText ?? userText,
+       contextTokens = List<String>.of(contextTokens),
+       attachments = List<ContextAttachment>.of(attachments),
        blocks = List<TranscriptBlock>.of(blocks);
 
   final String id;
   final int number;
   final String userText;
+  final String inlineUserText;
   final List<String> contextTokens;
+  final List<ContextAttachment> attachments;
   final List<TranscriptBlock> blocks;
 
   TranscriptBlock? block(String id) {

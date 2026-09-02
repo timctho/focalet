@@ -8,7 +8,16 @@ internal sealed record RegionSelectionResult(Rectangle Bounds, byte[] Png);
 
 internal sealed class RegionSelectionForm : Form
 {
+    private static readonly nint TopMostWindow = new(-1);
+    private const int ExtendedStyleTopMost = 0x00000008;
+    private const int ExtendedStyleToolWindow = 0x00000080;
+    private const uint NoMove = 0x0002;
+    private const uint NoSize = 0x0001;
+    private const uint NoActivate = 0x0010;
+    private const uint ShowWindow = 0x0040;
+
     private readonly Func<Rectangle, byte[]> captureRegion;
+    private readonly System.Windows.Forms.Timer topMostGuard;
     private Point? anchor;
     private Rectangle selectedArea;
 
@@ -27,6 +36,19 @@ internal sealed class RegionSelectionForm : Form
         BackColor = Color.Black;
         Opacity = 0.28;
 
+        // Screen selection is a short-lived modal desktop operation. A
+        // different always-on-top app can otherwise enter the topmost band
+        // after this form and cover part of the selectable surface. Reassert
+        // the z-order while selection is active, just like native snipping UI.
+        topMostGuard = new System.Windows.Forms.Timer { Interval = 120 };
+        topMostGuard.Tick += (_, _) =>
+        {
+            if (Visible)
+            {
+                KeepAboveOtherWindows(activate: false);
+            }
+        };
+
         KeyDown += (_, eventArgs) =>
         {
             if (eventArgs.KeyCode == Keys.Escape)
@@ -40,6 +62,53 @@ internal sealed class RegionSelectionForm : Form
     public RegionSelectionResult? Result { get; private set; }
 
     public string? ErrorMessage { get; private set; }
+
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var parameters = base.CreateParams;
+            parameters.ExStyle |= ExtendedStyleTopMost | ExtendedStyleToolWindow;
+            return parameters;
+        }
+    }
+
+    protected override void OnShown(EventArgs eventArgs)
+    {
+        base.OnShown(eventArgs);
+        KeepAboveOtherWindows(activate: true);
+        topMostGuard.Start();
+    }
+
+    protected override void OnActivated(EventArgs eventArgs)
+    {
+        base.OnActivated(eventArgs);
+        KeepAboveOtherWindows(activate: false);
+    }
+
+    protected override void OnDeactivate(EventArgs eventArgs)
+    {
+        base.OnDeactivate(eventArgs);
+        if (Visible)
+        {
+            KeepAboveOtherWindows(activate: false);
+        }
+    }
+
+    protected override void OnFormClosed(FormClosedEventArgs eventArgs)
+    {
+        topMostGuard.Stop();
+        base.OnFormClosed(eventArgs);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            topMostGuard.Dispose();
+        }
+        base.Dispose(disposing);
+    }
 
     protected override void OnMouseDown(MouseEventArgs eventArgs)
     {
@@ -141,5 +210,84 @@ internal sealed class RegionSelectionForm : Form
         Math.Min(first.Y, second.Y),
         Math.Max(first.X, second.X),
         Math.Max(first.Y, second.Y));
+
+    private void KeepAboveOtherWindows(bool activate)
+    {
+        TopMost = true;
+        var flags = NoMove | NoSize | ShowWindow;
+        if (!activate)
+        {
+            flags |= NoActivate;
+        }
+        SetWindowPos(
+            Handle,
+            TopMostWindow,
+            0,
+            0,
+            0,
+            0,
+            flags);
+        if (activate)
+        {
+            ForceForeground();
+        }
+    }
+
+    private void ForceForeground()
+    {
+        var foreground = GetForegroundWindow();
+        var foregroundThread = foreground == nint.Zero
+            ? 0
+            : GetWindowThreadProcessId(foreground, out _);
+        var currentThread = GetCurrentThreadId();
+        var attached = foregroundThread != 0 &&
+            foregroundThread != currentThread &&
+            AttachThreadInput(currentThread, foregroundThread, true);
+        try
+        {
+            BringWindowToTop(Handle);
+            Activate();
+            SetForegroundWindow(Handle);
+            SetFocus(Handle);
+        }
+        finally
+        {
+            if (attached)
+            {
+                AttachThreadInput(currentThread, foregroundThread, false);
+            }
+        }
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(
+        nint window,
+        nint insertAfter,
+        int x,
+        int y,
+        int width,
+        int height,
+        uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(nint window);
+
+    [DllImport("user32.dll")]
+    private static extern nint GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint attach, uint attachTo, bool value);
+
+    [DllImport("user32.dll")]
+    private static extern bool BringWindowToTop(nint window);
+
+    [DllImport("user32.dll")]
+    private static extern nint SetFocus(nint window);
 
 }

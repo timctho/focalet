@@ -4,9 +4,78 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
+import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/zommi_app.dart';
 
 void main() {
+  test('surface bloom has symmetric exact endpoints and layers', () {
+    expect(
+      surfaceTransitionSize(
+        const Size(compactOrbSize, compactOrbSize),
+        const Size(expandedPanelWidth, expandedPanelHeight),
+        0,
+      ),
+      const Size(compactOrbSize, compactOrbSize),
+    );
+    expect(
+      surfaceTransitionSize(
+        const Size(compactOrbSize, compactOrbSize),
+        const Size(expandedPanelWidth, expandedPanelHeight),
+        1,
+      ),
+      const Size(expandedPanelWidth, expandedPanelHeight),
+    );
+    final forward = surfaceTransitionSize(
+      compactWindowSize,
+      normalWindowSize,
+      0.35,
+    );
+    final reverse = surfaceTransitionSize(
+      normalWindowSize,
+      compactWindowSize,
+      0.65,
+    );
+    expect(forward.width, closeTo(reverse.width, 0.001));
+    expect(forward.height, closeTo(reverse.height, 0.001));
+    expect(
+      surfaceTransitionCompactness(compactWindowSize, normalWindowSize, 0.35),
+      closeTo(
+        surfaceTransitionCompactness(normalWindowSize, compactWindowSize, 0.65),
+        0.001,
+      ),
+    );
+    final start = surfaceTransitionVisuals(
+      compactWindowSize,
+      normalWindowSize,
+      0,
+    );
+    final end = surfaceTransitionVisuals(
+      compactWindowSize,
+      normalWindowSize,
+      1,
+    );
+    expect(start.orbOpacity, 1);
+    expect(start.panelOpacity, 0);
+    expect(end.orbOpacity, 0);
+    expect(end.panelOpacity, 1);
+    for (final progress in <double>[0.1, 0.25, 0.5, 0.75, 0.9]) {
+      final forward = surfaceTransitionVisuals(
+        compactWindowSize,
+        normalWindowSize,
+        progress,
+      );
+      final reverse = surfaceTransitionVisuals(
+        normalWindowSize,
+        compactWindowSize,
+        1 - progress,
+      );
+      expect(forward.orbOpacity, closeTo(reverse.orbOpacity, 0.000001));
+      expect(forward.orbScale, closeTo(reverse.orbScale, 0.000001));
+      expect(forward.panelOpacity, closeTo(reverse.panelOpacity, 0.000001));
+      expect(forward.panelScale, closeTo(reverse.panelScale, 0.000001));
+    }
+  });
+
   testWidgets('quiet orb expands into the anchored composer on hover', (
     tester,
   ) async {
@@ -73,9 +142,46 @@ void main() {
         clientOperationId: 'client:test',
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
     expect(find.bySemanticsLabel('Exact agent session bound'), findsOneWidget);
     expect(find.text('draft while processing'), findsOneWidget);
+  });
+
+  testWidgets('stop during startup reaches the exact runtime turn', (
+    tester,
+  ) async {
+    await _setDesktopSurface(tester);
+    final pending = Completer<TurnReceipt>();
+    final core = FakeCoreBridge(turn: pending.future);
+    await tester.pumpWidget(ZommiApp(core: core));
+    await tester.pump();
+    await _expand(tester);
+    await tester.enterText(
+      find.byKey(const ValueKey('zommi-composer')),
+      'cancel immediately',
+    );
+    await tester.tap(find.byKey(const ValueKey('send-message')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('stop-turn')));
+    await tester.pump();
+    expect(core.interruptedIdentity, isNull);
+    expect(find.byIcon(Icons.hourglass_top_rounded), findsOneWidget);
+
+    pending.complete(
+      const TurnReceipt(
+        accepted: true,
+        runtimeTargetId: 'runtime-codex',
+        sessionId: 'thread-codex',
+        turnId: 'exact-runtime-turn',
+        clientOperationId: 'client:test',
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(core.interruptedIdentity, (
+      'runtime-codex',
+      'thread-codex',
+      'exact-runtime-turn',
+    ));
   });
 
   testWidgets('stream events render and stop targets the exact active turn', (

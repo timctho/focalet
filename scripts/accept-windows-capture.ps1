@@ -40,14 +40,81 @@ public static class ZommiWindowsAcceptanceNative
     [DllImport("user32.dll")]
     private static extern bool IsWindowVisible(IntPtr window);
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool GetWindowRect(IntPtr window, out NativeRect bounds);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern int GetWindowLong(IntPtr window, int index);
 
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateWindowEx(
+        int extendedStyle,
+        string className,
+        string windowName,
+        uint style,
+        int x,
+        int y,
+        int width,
+        int height,
+        IntPtr parent,
+        IntPtr menu,
+        IntPtr instance,
+        IntPtr parameter);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool DestroyWindow(IntPtr window);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr WindowFromPoint(NativePoint point);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(
+        IntPtr window,
+        IntPtr insertAfter,
+        int x,
+        int y,
+        int width,
+        int height,
+        uint flags);
+
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool SetCursorPos(int x, int y);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr GetDC(IntPtr window);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int ReleaseDC(IntPtr window, IntPtr deviceContext);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern IntPtr CreateCompatibleDC(IntPtr deviceContext);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern bool DeleteDC(IntPtr deviceContext);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern IntPtr CreateCompatibleBitmap(IntPtr deviceContext, int width, int height);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern IntPtr SelectObject(IntPtr deviceContext, IntPtr value);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern bool DeleteObject(IntPtr value);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern bool BitBlt(
+        IntPtr destination,
+        int destinationX,
+        int destinationY,
+        int width,
+        int height,
+        IntPtr source,
+        int sourceX,
+        int sourceY,
+        uint operation);
 
     [DllImport("user32.dll")]
     private static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
@@ -59,6 +126,13 @@ public static class ZommiWindowsAcceptanceNative
         public int Top;
         public int Right;
         public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
     }
 
     public static IntPtr FindWindow(int processId, string title)
@@ -130,6 +204,60 @@ public static class ZommiWindowsAcceptanceNative
         return (GetWindowLong(window, extendedStyle) & topMost) != 0;
     }
 
+    public static bool Foreground(IntPtr window)
+    {
+        return GetForegroundWindow() == window;
+    }
+
+    public static IntPtr CreateCompetingTopMost(int x, int y, int width, int height)
+    {
+        const int topMost = 0x00000008;
+        const int toolWindow = 0x00000080;
+        const int noActivate = 0x08000000;
+        const uint popup = 0x80000000;
+        const uint visible = 0x10000000;
+        const uint noActivatePosition = 0x0010;
+        const uint showWindow = 0x0040;
+        var window = CreateWindowEx(
+            topMost | toolWindow | noActivate,
+            "STATIC",
+            "Zommi acceptance competing topmost",
+            popup | visible,
+            x,
+            y,
+            width,
+            height,
+            IntPtr.Zero,
+            IntPtr.Zero,
+            IntPtr.Zero,
+            IntPtr.Zero);
+        if (window != IntPtr.Zero)
+        {
+            SetWindowPos(
+                window,
+                new IntPtr(-1),
+                x,
+                y,
+                width,
+                height,
+                noActivatePosition | showWindow);
+        }
+        return window;
+    }
+
+    public static bool IsWindowAtPoint(IntPtr window, int x, int y)
+    {
+        return WindowFromPoint(new NativePoint { X = x, Y = y }) == window;
+    }
+
+    public static void CloseCompetingWindow(IntPtr window)
+    {
+        if (window != IntPtr.Zero)
+        {
+            DestroyWindow(window);
+        }
+    }
+
     public static void SendAltA(bool shift)
     {
         const byte alt = 0x12;
@@ -178,6 +306,56 @@ public static class ZommiWindowsAcceptanceNative
     {
         var dpi = GetDpiForWindow(window);
         return dpi == 0 ? 96 : dpi;
+    }
+
+    public static bool TryCopyDesktopPixel(out int error)
+    {
+        const uint sourceCopy = 0x00CC0020;
+        error = 0;
+        var source = GetDC(IntPtr.Zero);
+        if (source == IntPtr.Zero)
+        {
+            error = Marshal.GetLastWin32Error();
+            return false;
+        }
+
+        var target = CreateCompatibleDC(source);
+        var bitmap = target == IntPtr.Zero
+            ? IntPtr.Zero
+            : CreateCompatibleBitmap(source, 1, 1);
+        var previous = bitmap == IntPtr.Zero
+            ? IntPtr.Zero
+            : SelectObject(target, bitmap);
+        try
+        {
+            if (target == IntPtr.Zero || bitmap == IntPtr.Zero || previous == IntPtr.Zero)
+            {
+                error = Marshal.GetLastWin32Error();
+                return false;
+            }
+            if (!BitBlt(target, 0, 0, 1, 1, source, 0, 0, sourceCopy))
+            {
+                error = Marshal.GetLastWin32Error();
+                return false;
+            }
+            return true;
+        }
+        finally
+        {
+            if (previous != IntPtr.Zero)
+            {
+                SelectObject(target, previous);
+            }
+            if (bitmap != IntPtr.Zero)
+            {
+                DeleteObject(bitmap);
+            }
+            if (target != IntPtr.Zero)
+            {
+                DeleteDC(target);
+            }
+            ReleaseDC(IntPtr.Zero, source);
+        }
     }
 
     private static IntPtr Point(int x, int y)
@@ -231,6 +409,9 @@ function Wait-ForPackagedSelector {
     )
 
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    $lastWindow = [IntPtr]::Zero
+    $lastTopMost = $false
+    $lastForeground = $false
     while ([DateTime]::UtcNow -lt $deadline) {
         $helpers = Get-CimInstance Win32_Process | Where-Object {
             $_.ExecutablePath -eq $CaptureExecutable
@@ -241,12 +422,17 @@ function Wait-ForPackagedSelector {
                 'Zommi image selection'
             )
             if ($window -ne [IntPtr]::Zero) {
-                return $window
+                $lastWindow = $window
+                $lastTopMost = [ZommiWindowsAcceptanceNative]::TopMost($window)
+                $lastForeground = [ZommiWindowsAcceptanceNative]::Foreground($window)
+                if ($lastTopMost -and $lastForeground) {
+                    return $window
+                }
             }
         }
         Start-Sleep -Milliseconds 50
     }
-    throw 'Timed out waiting for the packaged application region selector.'
+    throw "Timed out waiting for the packaged application region selector to activate: window=$lastWindow topMost=$lastTopMost foreground=$lastForeground."
 }
 
 function Wait-ForAcceptanceEvent {
@@ -402,20 +588,45 @@ function Invoke-CaptureSelectedTextProbe {
     }
 }
 
-function Assert-DesktopCaptureSurface {
-    Add-Type -AssemblyName System.Drawing
-    $bitmap = [Drawing.Bitmap]::new(1, 1)
-    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+function Get-DesktopCaptureDiagnostics {
+    $process = [System.Diagnostics.Process]::GetCurrentProcess()
+    $sessionName = if ([string]::IsNullOrWhiteSpace($env:SESSIONNAME)) { '<unset>' } else { $env:SESSIONNAME }
+    $clientName = if ([string]::IsNullOrWhiteSpace($env:CLIENTNAME)) { '<unset>' } else { $env:CLIENTNAME }
+    $virtualScreen = '<unavailable>'
+
     try {
-        $graphics.CopyFromScreen(0, 0, 0, 0, [Drawing.Size]::new(1, 1))
+        Add-Type -AssemblyName System.Windows.Forms
+        $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+        $virtualScreen = "$($bounds.X),$($bounds.Y) $($bounds.Width)x$($bounds.Height)"
     }
     catch {
-        throw "Windows desktop capture surface is unavailable. Keep the RDP client visible and the session unlocked, then retry. $($_.Exception.Message)"
+        $virtualScreen = "<error: $($_.Exception.GetBaseException().Message)>"
     }
-    finally {
-        $graphics.Dispose()
-        $bitmap.Dispose()
+
+    return "runnerPid=$PID; sessionId=$($process.SessionId); sessionName=$sessionName; clientName=$clientName; userInteractive=$([Environment]::UserInteractive); virtualScreen=$virtualScreen"
+}
+
+function Assert-DesktopCaptureSurface {
+    $lastError = $null
+    foreach ($attempt in 1..20) {
+        $errorCode = 0
+        if ([ZommiWindowsAcceptanceNative]::TryCopyDesktopPixel([ref] $errorCode)) {
+            if ($attempt -gt 1) {
+                Write-Host "desktop-surface: recovered on attempt $attempt"
+            }
+            return
+        }
+        $lastError = if ($errorCode -eq 0) {
+            'unknown Win32 error'
+        } else {
+            $exception = [ComponentModel.Win32Exception]::new($errorCode)
+            "$($exception.Message) ($errorCode)"
+        }
+        Start-Sleep -Milliseconds 250
     }
+
+    $diagnostics = Get-DesktopCaptureDiagnostics
+    throw "The runner process cannot access a Windows desktop capture surface after 20 attempts. This is a runner session/display attachment failure; it does not prove Windows was locked. $diagnostics; copyError=$lastError"
 }
 
 function Assert-ProbeRegionSize {
@@ -439,6 +650,109 @@ function Assert-ProbeRegionSize {
     }
 }
 
+function Suspend-ConflictingZommiApplications {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $EntryPoint
+    )
+
+    $normalizedEntryPoint = [IO.Path]::GetFullPath($EntryPoint)
+    $applications = @(Get-CimInstance Win32_Process | Where-Object {
+        $_.Name -eq 'Zommi.exe' -and
+        $_.ExecutablePath -and
+        -not [string]::Equals(
+            [IO.Path]::GetFullPath($_.ExecutablePath),
+            $normalizedEntryPoint,
+            [StringComparison]::OrdinalIgnoreCase)
+    } | Sort-Object ProcessId)
+    $applicationPaths = @($applications | ForEach-Object {
+        [IO.Path]::GetFullPath($_.ExecutablePath)
+    } | Select-Object -Unique)
+    if ($applicationPaths.Count -eq 0) {
+        return @()
+    }
+
+    $rootPrefixes = @($applicationPaths | ForEach-Object {
+        [IO.Path]::GetDirectoryName($_).TrimEnd('\') + '\'
+    } | Select-Object -Unique)
+    $relatedProcesses = @(Get-CimInstance Win32_Process | Where-Object {
+        if (-not $_.ExecutablePath) {
+            return $false
+        }
+        $processPath = [IO.Path]::GetFullPath($_.ExecutablePath)
+        foreach ($prefix in $rootPrefixes) {
+            if ($processPath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+                return $true
+            }
+        }
+        return $false
+    })
+    foreach ($process in ($relatedProcesses | Sort-Object ProcessId -Descending)) {
+        Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop
+    }
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        $remaining = @(Get-CimInstance Win32_Process | Where-Object {
+            $_.Name -eq 'Zommi.exe' -and $_.ExecutablePath -and
+            $applicationPaths -contains ([IO.Path]::GetFullPath($_.ExecutablePath))
+        })
+        if ($remaining.Count -eq 0) {
+            break
+        }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if ($remaining.Count -ne 0) {
+        throw "Could not suspend conflicting Zommi process: $($remaining.ProcessId -join ',')."
+    }
+    Start-Sleep -Milliseconds 300
+    return $applicationPaths
+}
+
+function Restore-SuspendedZommiApplications {
+    param(
+        [string[]] $ExecutablePaths
+    )
+
+    if ($ExecutablePaths.Count -eq 0) {
+        return
+    }
+    $expectedPaths = @($ExecutablePaths | Where-Object {
+        Test-Path -LiteralPath $_ -PathType Leaf
+    } | Select-Object -Unique)
+    $runnerTrackingId = $env:RUNNER_TRACKING_ID
+    try {
+        Remove-Item Env:RUNNER_TRACKING_ID -ErrorAction SilentlyContinue
+        foreach ($path in $expectedPaths) {
+            Start-Process `
+                -FilePath $path `
+                -WorkingDirectory ([IO.Path]::GetDirectoryName($path)) | Out-Null
+        }
+    }
+    finally {
+        if ($null -ne $runnerTrackingId) {
+            $env:RUNNER_TRACKING_ID = $runnerTrackingId
+        }
+    }
+    if ($expectedPaths.Count -eq 0) {
+        return
+    }
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $runningPaths = @(Get-CimInstance Win32_Process | Where-Object {
+            $_.Name -eq 'Zommi.exe' -and $_.ExecutablePath -and
+            $expectedPaths -contains ([IO.Path]::GetFullPath($_.ExecutablePath))
+        } | ForEach-Object {
+            [IO.Path]::GetFullPath($_.ExecutablePath)
+        } | Select-Object -Unique)
+        if ($runningPaths.Count -eq $expectedPaths.Count) {
+            return
+        }
+        Start-Sleep -Milliseconds 200
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw "Could not restore suspended Zommi application: $($expectedPaths -join ',')."
+}
+
 function Invoke-PackagedApplicationAcceptance {
     param(
         [Parameter(Mandatory = $true)]
@@ -457,10 +771,19 @@ function Invoke-PackagedApplicationAcceptance {
     }
     $packageExecutables = @($entrypoint, $core, $CaptureExecutable)
 
+    # The product deliberately owns one global mutex and two global hotkeys.
+    # An already deployed Zommi would redirect this probe to itself, so an
+    # explicit interactive gate temporarily suspends it and restores the exact
+    # executable after the isolated package has been cleaned up.
+    $suspendedApplications = @(
+        Suspend-ConflictingZommiApplications -EntryPoint $entrypoint
+    )
+
     $existing = @(Get-CimInstance Win32_Process | Where-Object {
         $_.ExecutablePath -in $packageExecutables
     })
     if ($existing.Count -ne 0) {
+        Restore-SuspendedZommiApplications -ExecutablePaths $suspendedApplications
         throw "Package already has running processes: $($existing.ProcessId -join ',')."
     }
 
@@ -476,8 +799,15 @@ function Invoke-PackagedApplicationAcceptance {
     $start.EnvironmentVariables['ZOMMI_ACCEPTANCE_LOG'] = $acceptanceLog
     $application = [System.Diagnostics.Process]::new()
     $application.StartInfo = $start
-    if (-not $application.Start()) {
-        throw "Could not start packaged Flutter application $entrypoint."
+    try {
+        if (-not $application.Start()) {
+            throw "Could not start packaged Flutter application $entrypoint."
+        }
+    }
+    catch {
+        $application.Dispose()
+        Restore-SuspendedZommiApplications -ExecutablePaths $suspendedApplications
+        throw
     }
 
     try {
@@ -492,6 +822,9 @@ function Invoke-PackagedApplicationAcceptance {
         $compactBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
         if ($compactBounds.Count -ne 4 -or $compactBounds[2] -le 0 -or $compactBounds[3] -le 0) {
             throw 'Packaged Flutter window has invalid compact bounds.'
+        }
+        if ($compactBounds[2] -ne $compactBounds[3]) {
+            throw "Packaged compact surface retained a native frame: $($compactBounds -join ',')."
         }
         if (-not [ZommiWindowsAcceptanceNative]::Visible($window) -or
             -not [ZommiWindowsAcceptanceNative]::TopMost($window)) {
@@ -526,9 +859,42 @@ function Invoke-PackagedApplicationAcceptance {
             $expandedBounds[3] -le $compactBounds[3]) {
             throw 'Packaged context shortcut did not expand the Flutter surface.'
         }
+        $compactCenterX = $compactBounds[0] + $compactBounds[2] / 2.0
+        $expandedCenterX = $expandedBounds[0] + $expandedBounds[2] / 2.0
+        $compactBottom = $compactBounds[1] + $compactBounds[3]
+        $expandedBottom = $expandedBounds[1] + $expandedBounds[3]
+        if ([Math]::Abs($compactCenterX - $expandedCenterX) -gt 1 -or
+            [Math]::Abs($compactBottom - $expandedBottom) -gt 1) {
+            throw "Packaged surface endpoints do not preserve one anchor: compact=$($compactBounds -join ','), expanded=$($expandedBounds -join ',')."
+        }
 
         [ZommiWindowsAcceptanceNative]::SendAltA($true)
         $selector = Wait-ForPackagedSelector -CaptureExecutable $CaptureExecutable
+        $selectorBounds = [ZommiWindowsAcceptanceNative]::Bounds($selector)
+        $probeX = $selectorBounds[0] + 40
+        $probeY = $selectorBounds[1] + 40
+        $competitor = [ZommiWindowsAcceptanceNative]::CreateCompetingTopMost(
+            $selectorBounds[0],
+            $selectorBounds[1],
+            160,
+            160
+        )
+        if ($competitor -eq [IntPtr]::Zero) {
+            throw 'Could not create the competing topmost acceptance window.'
+        }
+        try {
+            Start-Sleep -Milliseconds 400
+            if (-not [ZommiWindowsAcceptanceNative]::IsWindowAtPoint(
+                $selector,
+                $probeX,
+                $probeY
+            )) {
+                throw 'Packaged image selector was covered by another topmost window.'
+            }
+        }
+        finally {
+            [ZommiWindowsAcceptanceNative]::CloseCompetingWindow($competitor)
+        }
         if (-not [ZommiWindowsAcceptanceNative]::CancelSelection($selector)) {
             throw 'Could not cancel the packaged application region selector.'
         }
@@ -540,6 +906,10 @@ function Invoke-PackagedApplicationAcceptance {
 
         [ZommiWindowsAcceptanceNative]::SendAltA($true)
         $selector = Wait-ForPackagedSelector -CaptureExecutable $CaptureExecutable
+        if (-not [ZommiWindowsAcceptanceNative]::TopMost($selector) -or
+            -not [ZommiWindowsAcceptanceNative]::Foreground($selector)) {
+            throw 'Packaged image selector lost its topmost foreground state.'
+        }
         $dpi = [double][ZommiWindowsAcceptanceNative]::WindowDpi($selector)
         $logicalWidth = [int][Math]::Max(4, [Math]::Round(40 * 96 / $dpi))
         $logicalHeight = [int][Math]::Max(4, [Math]::Round(30 * 96 / $dpi))
@@ -597,18 +967,23 @@ function Invoke-PackagedApplicationAcceptance {
         }
     }
     finally {
-        $processes = @(Get-CimInstance Win32_Process | Where-Object {
-            $_.ExecutablePath -in $packageExecutables
-        })
-        foreach ($process in ($processes | Sort-Object ProcessId -Descending)) {
-            Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+        try {
+            $processes = @(Get-CimInstance Win32_Process | Where-Object {
+                $_.ExecutablePath -in $packageExecutables
+            })
+            foreach ($process in ($processes | Sort-Object ProcessId -Descending)) {
+                Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+            }
+            if (-not $application.HasExited) {
+                $application.WaitForExit(3000) | Out-Null
+            }
+            $application.Dispose()
+            if (Test-Path -LiteralPath $acceptanceLog) {
+                Remove-Item -LiteralPath $acceptanceLog -Force
+            }
         }
-        if (-not $application.HasExited) {
-            $application.WaitForExit(3000) | Out-Null
-        }
-        $application.Dispose()
-        if (Test-Path -LiteralPath $acceptanceLog) {
-            Remove-Item -LiteralPath $acceptanceLog -Force
+        finally {
+            Restore-SuspendedZommiApplications -ExecutablePaths $suspendedApplications
         }
     }
 }

@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,8 +7,13 @@ import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/desktop/artifact_loader.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
+import 'package:zommi_flutter/state/zommi_models.dart';
+import 'package:zommi_flutter/theme/zommi_typography.dart';
+import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
 import 'package:zommi_flutter/widgets/overlay_panels.dart';
 import 'package:zommi_flutter/widgets/transcript_view.dart';
+
+export 'package:zommi_flutter/theme/zommi_typography.dart';
 
 const double compactOrbSize = 56;
 const double expandedPanelWidth = 720;
@@ -32,17 +36,21 @@ class ZommiApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = ThemeData(
+      brightness: Brightness.light,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: const Color(0xff8178c9),
+        brightness: Brightness.light,
+      ),
+      scaffoldBackgroundColor: Colors.transparent,
+      useMaterial3: true,
+    );
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Zommi',
-      theme: ThemeData(
-        brightness: Brightness.light,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xff8178c9),
-          brightness: Brightness.light,
-        ),
-        scaffoldBackgroundColor: Colors.transparent,
-        useMaterial3: true,
+      theme: theme.copyWith(
+        textTheme: _compactTextTheme(theme.textTheme),
+        visualDensity: VisualDensity.compact,
       ),
       home: ZommiShell(
         core: core,
@@ -51,6 +59,32 @@ class ZommiApp extends StatelessWidget {
       ),
     );
   }
+}
+
+TextTheme _compactTextTheme(TextTheme base) {
+  TextStyle sized(TextStyle? style, double size) =>
+      (style ?? const TextStyle()).copyWith(
+        fontSize: size,
+        fontFamily: codexUiFontFamily,
+        fontFamilyFallback: codexUiFontFallback,
+      );
+  return base.copyWith(
+    displayLarge: sized(base.displayLarge, 46),
+    displayMedium: sized(base.displayMedium, 36),
+    displaySmall: sized(base.displaySmall, 29),
+    headlineLarge: sized(base.headlineLarge, 25),
+    headlineMedium: sized(base.headlineMedium, 21),
+    headlineSmall: sized(base.headlineSmall, 18),
+    titleLarge: sized(base.titleLarge, 17),
+    titleMedium: sized(base.titleMedium, 13),
+    titleSmall: sized(base.titleSmall, 11.5),
+    bodyLarge: sized(base.bodyLarge, 12),
+    bodyMedium: sized(base.bodyMedium, 11.5),
+    bodySmall: sized(base.bodySmall, 10),
+    labelLarge: sized(base.labelLarge, 11.5),
+    labelMedium: sized(base.labelMedium, 10.5),
+    labelSmall: sized(base.labelSmall, 9.5),
+  );
 }
 
 class ZommiShell extends StatefulWidget {
@@ -70,13 +104,17 @@ class ZommiShell extends StatefulWidget {
 }
 
 class _ZommiShellState extends State<ZommiShell> {
-  final TextEditingController _composer = TextEditingController();
+  late final InlineAttachmentTextController _composer;
   final FocusNode _composerFocus = FocusNode(debugLabel: 'Zommi composer');
   late final ZommiController _controller;
+  final Object _sessionTapGroup = Object();
+  final Object _runtimeTapGroup = Object();
+  final Object _modelTapGroup = Object();
   Timer? _collapseTimer;
   Timer? _previewTimer;
   Timer? _sessionTimer;
   int _lastFocusEpoch = 0;
+  bool _draggingWindow = false;
 
   @override
   void initState() {
@@ -85,12 +123,20 @@ class _ZommiShellState extends State<ZommiShell> {
       core: widget.core,
       desktop: widget.desktop,
       artifactLoader: widget.artifactLoader,
-    )..addListener(_onControllerChanged);
+    );
+    _composer = InlineAttachmentTextController(
+      onAttachmentRemoved: (attachment) =>
+          _controller.removeAttachment(attachment.id),
+      onAttachmentEnter: _showAttachmentPreview,
+      onAttachmentExit: (_) => _schedulePreviewClose(),
+    );
+    _controller.addListener(_onControllerChanged);
     unawaited(_controller.initialize());
   }
 
   void _onControllerChanged() {
     if (!mounted) return;
+    _composer.syncAttachments(_controller.attachments);
     if (_lastFocusEpoch != _controller.focusComposerEpoch) {
       _lastFocusEpoch = _controller.focusComposerEpoch;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -125,7 +171,7 @@ class _ZommiShellState extends State<ZommiShell> {
   void _scheduleCollapse() {
     _collapseTimer?.cancel();
     _collapseTimer = Timer(hoverCollapseDelay, () {
-      if (!mounted) return;
+      if (!mounted || _draggingWindow) return;
       _composerFocus.unfocus();
       _controller.closeTransientPanels();
       _controller.hideAttachmentPreview();
@@ -133,9 +179,24 @@ class _ZommiShellState extends State<ZommiShell> {
     });
   }
 
+  Future<void> _startWindowDrag() async {
+    _collapseTimer?.cancel();
+    _draggingWindow = true;
+    try {
+      await _controller.startDragging();
+    } finally {
+      _draggingWindow = false;
+    }
+  }
+
   void _schedulePreviewClose() {
     _previewTimer?.cancel();
     _previewTimer = Timer(previewHideDelay, _controller.hideAttachmentPreview);
+  }
+
+  void _showAttachmentPreview(ContextAttachment attachment) {
+    _previewTimer?.cancel();
+    _controller.showAttachmentPreview(attachment);
   }
 
   void _openSessions() {
@@ -152,7 +213,7 @@ class _ZommiShellState extends State<ZommiShell> {
   }
 
   void _submit() {
-    final text = _composer.text.trim();
+    final text = _composer.messageText;
     if (text.isEmpty ||
         _controller.submitting ||
         _controller.turnActive ||
@@ -160,8 +221,15 @@ class _ZommiShellState extends State<ZommiShell> {
         _controller.activeSessionId == null) {
       return;
     }
-    _composer.clear();
-    unawaited(_controller.submit(text));
+    final submission = _controller.submit(
+      text,
+      inlineMessage: _composer.inlineText,
+      attachmentOrder: _composer.inlineAttachments
+          .map((attachment) => attachment.id)
+          .toList(growable: false),
+    );
+    _composer.clearAfterSubmit();
+    unawaited(submission);
   }
 
   KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
@@ -189,13 +257,26 @@ class _ZommiShellState extends State<ZommiShell> {
 
   @override
   Widget build(BuildContext context) {
-    final width = _controller.expanded
-        ? (_controller.largePanel ? largeWindowSize.width : expandedPanelWidth)
+    final fromSize = zommiSurfaceSize(
+      expanded: _controller.expanded,
+      large: _controller.largePanel,
+    );
+    final toSize = zommiSurfaceSize(
+      expanded: _controller.transitionTargetExpanded,
+      large: _controller.transitionTargetLarge,
+    );
+    final renderExpanded =
+        _controller.expanded ||
+        (_controller.surfaceTransitioning &&
+            _controller.transitionTargetExpanded);
+    final renderLarge =
+        _controller.largePanel ||
+        (_controller.surfaceTransitioning && _controller.transitionTargetLarge);
+    final width = renderExpanded
+        ? (renderLarge ? largeWindowSize.width : expandedPanelWidth)
         : compactOrbSize;
-    final height = _controller.expanded
-        ? (_controller.largePanel
-              ? largeWindowSize.height
-              : expandedPanelHeight)
+    final height = renderExpanded
+        ? (renderLarge ? largeWindowSize.height : expandedPanelHeight)
         : compactOrbSize;
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -205,22 +286,37 @@ class _ZommiShellState extends State<ZommiShell> {
           fit: StackFit.expand,
           children: [
             Align(
-              alignment: Alignment.bottomCenter,
+              // The native window grows upward from one bottom-centre anchor.
+              // Keep the Flutter surface on that same anchor even during the
+              // one frame where Win32 and Flutter have different sizes. If
+              // this is centred, the compact morph is clipped out before the
+              // enlarged backing surface arrives and appears to jump.
+              alignment: _controller.surfaceTransitioning
+                  ? Alignment.bottomCenter
+                  : Alignment.center,
               child: MouseRegion(
                 onEnter: (_) => unawaited(_expand()),
                 onExit: (_) => _scheduleCollapse(),
-                child: AnimatedContainer(
+                child: SizedBox(
                   key: const ValueKey('zommi-surface'),
-                  duration: MediaQuery.disableAnimationsOf(context)
-                      ? Duration.zero
-                      : const Duration(milliseconds: 220),
-                  curve: Curves.easeOutCubic,
                   width: width,
                   height: height,
                   child: ClipRect(
-                    child: _controller.expanded
+                    child: _controller.surfaceTransitioning
+                        ? _SurfaceTransitionView(
+                            fromSize: fromSize,
+                            toSize: toSize,
+                            animate: _controller.surfaceTransitionAnimating,
+                            working: _controller.orbWorking,
+                            loading: _controller.starting,
+                            panelSize: Size(width, height),
+                            panel: RepaintBoundary(
+                              child: _buildPanel(width, height),
+                            ),
+                          )
+                        : _controller.expanded
                         ? OverflowBox(
-                            alignment: Alignment.bottomCenter,
+                            alignment: Alignment.center,
                             minWidth: width,
                             maxWidth: width,
                             minHeight: height,
@@ -228,7 +324,8 @@ class _ZommiShellState extends State<ZommiShell> {
                             child: _buildPanel(width, height),
                           )
                         : _CompactOrbButton(
-                            working: _controller.anyTurnActive,
+                            working: _controller.orbWorking,
+                            loading: _controller.starting,
                             onPressed: () => unawaited(_expand()),
                           ),
                   ),
@@ -244,104 +341,136 @@ class _ZommiShellState extends State<ZommiShell> {
   Widget _buildPanel(double width, double height) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(34),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: const Color(0xeaf9fbff),
-            borderRadius: BorderRadius.circular(34),
-            border: Border.all(color: const Color(0xccffffff)),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x240d172a),
-                blurRadius: 42,
-                offset: Offset(0, 18),
-              ),
-            ],
-          ),
-          child: Column(
-            children: [
-              _buildHeader(),
-              Expanded(
-                child: Stack(
-                  children: [
-                    Positioned.fill(
-                      child: TranscriptPane(
-                        key: ValueKey(
-                          'transcript-${_controller.activeSessionId}',
-                        ),
-                        controller: _controller,
-                      ),
-                    ),
-                    if (_controller.sessionPanelOpen)
-                      Positioned(
-                        left: 18,
-                        top: 2,
-                        child: SessionSidebar(
-                          controller: _controller,
-                          onPointerEnter: () => _sessionTimer?.cancel(),
-                          onPointerExit: _scheduleSessionsClose,
-                        ),
-                      ),
-                    if (_controller.runtimePanelOpen)
-                      Positioned(
-                        top: 2,
-                        left: math.max(18, (width - 420) / 2),
-                        child: RuntimePanel(controller: _controller),
-                      ),
-                    if (_controller.modelPanelOpen)
-                      Positioned(
-                        top: 2,
-                        right: 20,
-                        child: ModelPanel(controller: _controller),
-                      ),
-                    if (_controller.previewAttachment case final attachment?)
-                      Positioned(
-                        right: 22,
-                        bottom: 12,
-                        child: ContextPreviewPanel(
-                          attachment: attachment,
-                          onClose: _controller.hideAttachmentPreview,
-                          onPointerEnter: () => _previewTimer?.cancel(),
-                          onPointerExit: _schedulePreviewClose,
-                        ),
-                      ),
-                    if (_controller.approval != null)
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: const Color(0xeaf9fbff),
+          borderRadius: BorderRadius.circular(34),
+          border: Border.all(color: const Color(0xccffffff)),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x240d172a),
+              blurRadius: 42,
+              offset: Offset(0, 18),
+            ),
+          ],
+        ),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Column(
+              children: [
+                _buildHeader(),
+                Expanded(
+                  child: Stack(
+                    children: [
                       Positioned.fill(
-                        child: ColoredBox(
-                          color: const Color(0x220d172a),
-                          child: Center(
-                            child: ApprovalDialogCard(controller: _controller),
+                        child: TranscriptPane(
+                          key: ValueKey(
+                            'transcript-${_controller.activeSessionId}',
+                          ),
+                          controller: _controller,
+                          onAttachmentEnter: _showAttachmentPreview,
+                          onAttachmentExit: (_) => _schedulePreviewClose(),
+                        ),
+                      ),
+                      if (_controller.runtimePanelOpen)
+                        Positioned(
+                          top: 2,
+                          left: math.max(18, (width - 420) / 2),
+                          child: TapRegion(
+                            groupId: _runtimeTapGroup,
+                            child: RuntimePanel(controller: _controller),
                           ),
                         ),
-                      ),
-                    if (_controller.question != null)
-                      Positioned.fill(
-                        child: ColoredBox(
-                          color: const Color(0x220d172a),
-                          child: Center(
-                            child: QuestionDialogCard(
-                              key: ValueKey(_controller.question!.id),
-                              controller: _controller,
+                      if (_controller.modelPanelOpen)
+                        Positioned(
+                          top: 2,
+                          right: 20,
+                          child: TapRegion(
+                            groupId: _modelTapGroup,
+                            child: ModelPanel(controller: _controller),
+                          ),
+                        ),
+                      if (_controller.previewAttachment case final attachment?)
+                        Positioned(
+                          right: 22,
+                          bottom: 12,
+                          child: ContextPreviewPanel(
+                            attachment: attachment,
+                            onClose: _controller.hideAttachmentPreview,
+                            onPointerEnter: () => _previewTimer?.cancel(),
+                            onPointerExit: _schedulePreviewClose,
+                          ),
+                        ),
+                      if (_controller.starting || _controller.runtimeBusy)
+                        Positioned(
+                          top: 10,
+                          left: 0,
+                          right: 0,
+                          child: IgnorePointer(
+                            child: Center(
+                              child: _LoadingPill(
+                                label: _controller.starting
+                                    ? 'Waking Zommi…'
+                                    : _controller.status,
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                    if (_controller.previewArtifact != null)
-                      ArtifactViewerDialog(controller: _controller),
-                  ],
+                      if (_controller.approval != null)
+                        Positioned.fill(
+                          child: ColoredBox(
+                            color: const Color(0x220d172a),
+                            child: Center(
+                              child: ApprovalDialogCard(
+                                controller: _controller,
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (_controller.question != null)
+                        Positioned.fill(
+                          child: ColoredBox(
+                            color: const Color(0x220d172a),
+                            child: Center(
+                              child: QuestionDialogCard(
+                                key: ValueKey(_controller.question!.id),
+                                controller: _controller,
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (_controller.previewArtifact != null)
+                        ArtifactViewerDialog(controller: _controller),
+                    ],
+                  ),
+                ),
+                _buildComposer(),
+                if (_controller.activeSessionId != null)
+                  Semantics(
+                    container: true,
+                    label: 'Exact agent session bound',
+                    child: const SizedBox(width: 1, height: 1),
+                  ),
+                _buildFooter(),
+              ],
+            ),
+            if (_controller.sessionPanelOpen)
+              Positioned(
+                left: 18,
+                top: 58,
+                bottom: 14,
+                width: width / 2,
+                child: TapRegion(
+                  groupId: _sessionTapGroup,
+                  child: SessionSidebar(
+                    controller: _controller,
+                    onPointerEnter: () => _sessionTimer?.cancel(),
+                    onPointerExit: _scheduleSessionsClose,
+                  ),
                 ),
               ),
-              _buildComposer(),
-              if (_controller.activeSessionId != null)
-                Semantics(
-                  container: true,
-                  label: 'Exact agent session bound',
-                  child: const SizedBox(width: 1, height: 1),
-                ),
-              _buildFooter(),
-            ],
-          ),
+          ],
         ),
       ),
     );
@@ -360,42 +489,54 @@ class _ZommiShellState extends State<ZommiShell> {
               icon: Icons.close_rounded,
               onPressed: () => unawaited(_controller.hideWindow()),
             ),
-            MouseRegion(
-              onEnter: (_) => _openSessions(),
-              onExit: (_) => _scheduleSessionsClose(),
-              child: _HeaderButton(
-                key: const ValueKey('toggle-sessions'),
-                label: _controller.sessionPanelOpen
-                    ? 'Chat sessions — visible while hovered'
-                    : 'Chat sessions — hover to show',
-                icon: Icons.menu_rounded,
-                onPressed: _controller.sessionNavigationSupported
-                    ? _openSessions
-                    : null,
+            TapRegion(
+              groupId: _sessionTapGroup,
+              onTapOutside: (_) => _controller.dismissSessionPanel(),
+              child: MouseRegion(
+                onEnter: (_) => _openSessions(),
+                onExit: (_) => _scheduleSessionsClose(),
+                child: _HeaderButton(
+                  key: const ValueKey('toggle-sessions'),
+                  label: _controller.sessionPanelOpen
+                      ? 'Chat sessions — visible while hovered'
+                      : 'Chat sessions — hover to show',
+                  icon: Icons.menu_rounded,
+                  onPressed: _controller.sessionNavigationSupported
+                      ? _openSessions
+                      : null,
+                ),
               ),
             ),
-            const SizedBox(width: 5),
-            _SummaryButton(
-              key: const ValueKey('runtime-summary'),
-              label: _controller.runtimeSummary,
-              semanticLabel: 'Choose agent runtime',
-              warning: _controller.statusWarning,
-              onPressed: _controller.toggleRuntimePanel,
+            TapRegion(
+              groupId: _runtimeTapGroup,
+              onTapOutside: (_) => _controller.dismissRuntimePanel(),
+              child: _SummaryButton(
+                key: const ValueKey('runtime-summary'),
+                label: _controller.runtimeSummary,
+                semanticLabel: 'Choose agent runtime',
+                warning: _controller.statusWarning,
+                loading: _controller.runtimeBusy,
+                onPressed: _controller.toggleRuntimePanel,
+              ),
             ),
             if (_controller.modelSelectionSupported) ...[
               const SizedBox(width: 5),
-              _SummaryButton(
-                key: const ValueKey('model-summary'),
-                label: _controller.modelSummary,
-                semanticLabel: 'Choose model and reasoning level',
-                onPressed: _controller.toggleModelPanel,
+              TapRegion(
+                groupId: _modelTapGroup,
+                onTapOutside: (_) => _controller.dismissModelPanel(),
+                child: _SummaryButton(
+                  key: const ValueKey('model-summary'),
+                  label: _controller.modelSummary,
+                  semanticLabel: 'Choose model and reasoning level',
+                  onPressed: _controller.toggleModelPanel,
+                ),
               ),
             ],
             Expanded(
               child: GestureDetector(
                 key: const ValueKey('window-drag-region'),
                 behavior: HitTestBehavior.translucent,
-                onPanStart: (_) => unawaited(_controller.startDragging()),
+                onPanStart: (_) => unawaited(_startWindowDrag()),
                 child: const SizedBox.expand(),
               ),
             ),
@@ -419,121 +560,96 @@ class _ZommiShellState extends State<ZommiShell> {
       label: 'Message composer',
       child: Padding(
         padding: const EdgeInsets.fromLTRB(22, 6, 22, 6),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (_controller.attachments.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 7),
-                child: Wrap(
-                  key: const ValueKey('context-chips'),
-                  spacing: 6,
-                  runSpacing: 5,
-                  children: [
-                    for (final attachment in _controller.attachments)
-                      MouseRegion(
-                        onEnter: (_) {
-                          _previewTimer?.cancel();
-                          _controller.showAttachmentPreview(attachment);
-                        },
-                        onExit: (_) => _schedulePreviewClose(),
-                        child: InputChip(
-                          key: ValueKey('attachment-${attachment.id}'),
-                          label: Text(attachment.token),
-                          tooltip: 'Attached context ${attachment.token}',
-                          deleteButtonTooltipMessage:
-                              'Remove ${attachment.token}',
-                          onDeleted: () =>
-                              _controller.removeAttachment(attachment.id),
-                          avatar: attachment.hasImage
-                              ? const Icon(Icons.image_outlined, size: 15)
-                              : const Icon(Icons.adjust_rounded, size: 15),
-                        ),
-                      ),
-                  ],
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+          decoration: BoxDecoration(
+            color: const Color(0xe6ffffff),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: const Color(0xffe1e4ed)),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x160d172a),
+                blurRadius: 16,
+                offset: Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Semantics(
+                button: true,
+                label: 'Select image context',
+                child: IconButton(
+                  key: const ValueKey('select-image'),
+                  tooltip: _controller.imageInputSupported
+                      ? 'Select image context'
+                      : '${_controller.activeRuntimeName} does not accept image input',
+                  onPressed: _controller.imageInputSupported
+                      ? () => unawaited(_controller.addImageContext())
+                      : null,
+                  icon: const Icon(Icons.add_rounded),
                 ),
               ),
-            Container(
-              padding: const EdgeInsets.all(7),
-              decoration: BoxDecoration(
-                color: const Color(0xe6ffffff),
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: const Color(0xffe1e4ed)),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color(0x160d172a),
-                    blurRadius: 16,
-                    offset: Offset(0, 6),
+              Expanded(
+                child: TextField(
+                  key: const ValueKey('zommi-composer'),
+                  focusNode: _composerFocus,
+                  controller: _composer,
+                  enabled: !_controller.sessionBusy,
+                  minLines: 1,
+                  maxLines: 5,
+                  keyboardType: TextInputType.multiline,
+                  textInputAction: TextInputAction.newline,
+                  textAlignVertical: TextAlignVertical.center,
+                  style: const TextStyle(fontSize: 12, height: 1.3),
+                  decoration: const InputDecoration(
+                    hintText: 'Ask your agent',
+                    border: InputBorder.none,
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(vertical: 10),
                   ),
-                ],
+                ),
               ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Semantics(
-                    button: true,
-                    label: 'Select image context',
-                    child: IconButton(
-                      key: const ValueKey('select-image'),
-                      tooltip: _controller.imageInputSupported
-                          ? 'Select image context'
-                          : '${_controller.activeRuntimeName} does not accept image input',
-                      onPressed: _controller.imageInputSupported
-                          ? () => unawaited(_controller.addImageContext())
-                          : null,
-                      icon: const Icon(Icons.add_rounded),
+              const SizedBox(width: 5),
+              if (_controller.turnActive)
+                Semantics(
+                  label: 'Stop active turn',
+                  button: true,
+                  child: IconButton.filled(
+                    key: const ValueKey('stop-turn'),
+                    tooltip: _controller.activeTurnStopping
+                        ? 'Stopping response'
+                        : 'Stop response',
+                    onPressed: _controller.activeTurnStopping
+                        ? null
+                        : () => unawaited(_controller.interrupt()),
+                    icon: Icon(
+                      _controller.activeTurnStopping
+                          ? Icons.hourglass_top_rounded
+                          : Icons.stop_rounded,
                     ),
                   ),
-                  Expanded(
-                    child: TextField(
-                      key: const ValueKey('zommi-composer'),
-                      focusNode: _composerFocus,
-                      controller: _composer,
-                      enabled: !_controller.sessionBusy,
-                      minLines: 1,
-                      maxLines: 5,
-                      keyboardType: TextInputType.multiline,
-                      textInputAction: TextInputAction.newline,
-                      decoration: const InputDecoration(
-                        hintText: 'Ask your agent',
-                        border: InputBorder.none,
-                        isDense: true,
-                      ),
+                )
+              else
+                Semantics(
+                  label: _controller.submitting
+                      ? 'Preparing context'
+                      : 'Send message',
+                  button: true,
+                  child: IconButton.filled(
+                    key: const ValueKey('send-message'),
+                    tooltip: 'Send',
+                    onPressed: _controller.submitting ? null : _submit,
+                    icon: Icon(
+                      _controller.submitting
+                          ? Icons.more_horiz
+                          : Icons.arrow_upward_rounded,
                     ),
                   ),
-                  const SizedBox(width: 5),
-                  if (_controller.turnActive)
-                    Semantics(
-                      label: 'Stop active turn',
-                      button: true,
-                      child: IconButton.filled(
-                        key: const ValueKey('stop-turn'),
-                        tooltip: 'Stop response',
-                        onPressed: () => unawaited(_controller.interrupt()),
-                        icon: const Icon(Icons.stop_rounded),
-                      ),
-                    )
-                  else
-                    Semantics(
-                      label: _controller.submitting
-                          ? 'Preparing context'
-                          : 'Send message',
-                      button: true,
-                      child: IconButton.filled(
-                        key: const ValueKey('send-message'),
-                        tooltip: 'Send',
-                        onPressed: _controller.submitting ? null : _submit,
-                        icon: Icon(
-                          _controller.submitting
-                              ? Icons.more_horiz
-                              : Icons.arrow_upward_rounded,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ],
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -622,12 +738,62 @@ class _HeaderButton extends StatelessWidget {
   }
 }
 
+class _LoadingPill extends StatelessWidget {
+  const _LoadingPill({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xf7ffffff),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: const Color(0xffdedbea)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x1f554b7a),
+            blurRadius: 18,
+            offset: Offset(0, 7),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 6, 14, 6),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ZommiOrb(
+              key: ValueKey('loading-orb'),
+              loading: true,
+              size: 28,
+            ),
+            const SizedBox(width: 7),
+            Text(
+              label,
+              key: const ValueKey('loading-status'),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Color(0xff514a70),
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _SummaryButton extends StatelessWidget {
   const _SummaryButton({
     required this.label,
     required this.semanticLabel,
     required this.onPressed,
     this.warning = false,
+    this.loading = false,
     super.key,
   });
 
@@ -635,6 +801,7 @@ class _SummaryButton extends StatelessWidget {
   final String semanticLabel;
   final VoidCallback onPressed;
   final bool warning;
+  final bool loading;
 
   @override
   Widget build(BuildContext context) {
@@ -647,14 +814,27 @@ class _SummaryButton extends StatelessWidget {
           foregroundColor: const Color(0xff4c5160),
           visualDensity: VisualDensity.compact,
           padding: const EdgeInsets.symmetric(horizontal: 8),
+          textStyle: const TextStyle(fontSize: 11),
         ),
-        icon: Container(
-          width: 7,
-          height: 7,
-          decoration: BoxDecoration(
-            color: warning ? const Color(0xffcf805f) : const Color(0xff66a27b),
-            shape: BoxShape.circle,
-          ),
+        icon: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 160),
+          child: loading
+              ? const SizedBox.square(
+                  key: ValueKey('runtime-loading-indicator'),
+                  dimension: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Container(
+                  key: const ValueKey('runtime-status-dot'),
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    color: warning
+                        ? const Color(0xffcf805f)
+                        : const Color(0xff66a27b),
+                    shape: BoxShape.circle,
+                  ),
+                ),
         ),
         label: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 170),
@@ -666,16 +846,25 @@ class _SummaryButton extends StatelessWidget {
 }
 
 class _CompactOrbButton extends StatelessWidget {
-  const _CompactOrbButton({required this.working, required this.onPressed});
+  const _CompactOrbButton({
+    required this.working,
+    required this.loading,
+    required this.onPressed,
+  });
 
   final bool working;
+  final bool loading;
   final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
     return Semantics(
       label: 'ZommiOrb',
-      hint: working ? 'Open Zommi chat, agent working' : 'Open Zommi chat',
+      hint: loading
+          ? 'Zommi is starting'
+          : working
+          ? 'Open Zommi chat, agent working'
+          : 'Open Zommi chat',
       button: true,
       child: Material(
         color: Colors.transparent,
@@ -683,7 +872,219 @@ class _CompactOrbButton extends StatelessWidget {
           key: const ValueKey('zommi-orb'),
           customBorder: const CircleBorder(),
           onTap: onPressed,
-          child: ZommiOrb(working: working),
+          child: ZommiOrb(working: working, loading: loading),
+        ),
+      ),
+    );
+  }
+}
+
+Size zommiSurfaceSize({required bool expanded, required bool large}) =>
+    expanded ? (large ? largeWindowSize : normalWindowSize) : compactWindowSize;
+
+Size surfaceTransitionSize(Size from, Size to, double progress) =>
+    Size.lerp(from, to, symmetricSurfaceEase(progress))!;
+
+double surfaceTransitionCompactness(Size from, Size to, double progress) {
+  final eased = symmetricSurfaceEase(progress);
+  final fromCompact = from == compactWindowSize ? 1.0 : 0.0;
+  final toCompact = to == compactWindowSize ? 1.0 : 0.0;
+  return fromCompact + (toCompact - fromCompact) * eased;
+}
+
+@immutable
+class SurfaceTransitionVisuals {
+  const SurfaceTransitionVisuals({
+    required this.orbOpacity,
+    required this.orbScale,
+    required this.panelOpacity,
+    required this.panelScale,
+  });
+
+  final double orbOpacity;
+  final double orbScale;
+  final double panelOpacity;
+  final double panelScale;
+}
+
+SurfaceTransitionVisuals surfaceTransitionVisuals(
+  Size from,
+  Size to,
+  double progress,
+) {
+  if (from != compactWindowSize && to != compactWindowSize) {
+    return const SurfaceTransitionVisuals(
+      orbOpacity: 0,
+      orbScale: 1,
+      panelOpacity: 1,
+      panelScale: 1,
+    );
+  }
+  final compactness = surfaceTransitionCompactness(from, to, progress);
+  final panelness = 1 - compactness;
+  return SurfaceTransitionVisuals(
+    orbOpacity: _smoothStep(compactness),
+    orbScale: 1 + panelness * 0.1,
+    panelOpacity: _smoothStep(panelness),
+    panelScale: 0.965 + panelness * 0.035,
+  );
+}
+
+double _smoothStep(double value) {
+  final t = value.clamp(0.0, 1.0);
+  return t * t * (3 - 2 * t);
+}
+
+class _SurfaceTransitionView extends StatefulWidget {
+  const _SurfaceTransitionView({
+    required this.fromSize,
+    required this.toSize,
+    required this.animate,
+    required this.working,
+    required this.loading,
+    required this.panelSize,
+    required this.panel,
+  });
+
+  final Size fromSize;
+  final Size toSize;
+  final bool animate;
+  final bool working;
+  final bool loading;
+  final Size panelSize;
+  final Widget panel;
+
+  @override
+  State<_SurfaceTransitionView> createState() => _SurfaceTransitionViewState();
+}
+
+class _SurfaceTransitionViewState extends State<_SurfaceTransitionView>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _motion = AnimationController(
+    vsync: this,
+    duration: surfaceTransitionDuration,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.animate) _motion.forward();
+  }
+
+  @override
+  void didUpdateWidget(covariant _SurfaceTransitionView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.animate &&
+        (!oldWidget.animate ||
+            oldWidget.fromSize != widget.fromSize ||
+            oldWidget.toSize != widget.toSize)) {
+      _motion.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _motion.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RepaintBoundary(
+      child: Align(
+        alignment: Alignment.bottomCenter,
+        child: AnimatedBuilder(
+          animation: _motion,
+          builder: (context, child) {
+            final progress = _motion.value;
+            final compactTransition =
+                widget.fromSize == compactWindowSize ||
+                widget.toSize == compactWindowSize;
+            if (compactTransition) {
+              final visuals = surfaceTransitionVisuals(
+                widget.fromSize,
+                widget.toSize,
+                progress,
+              );
+              return OverflowBox(
+                alignment: Alignment.bottomCenter,
+                minWidth: widget.panelSize.width,
+                maxWidth: widget.panelSize.width,
+                minHeight: widget.panelSize.height,
+                maxHeight: widget.panelSize.height,
+                child: SizedBox.fromSize(
+                  key: const ValueKey('surface-transition'),
+                  size: widget.panelSize,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      if (visuals.panelOpacity > 0)
+                        IgnorePointer(
+                          child: Opacity(
+                            key: const ValueKey(
+                              'surface-transition-panel-opacity',
+                            ),
+                            opacity: visuals.panelOpacity,
+                            child: Transform.scale(
+                              key: const ValueKey('surface-transition-panel'),
+                              alignment: Alignment.bottomCenter,
+                              scale: visuals.panelScale,
+                              child: widget.panel,
+                            ),
+                          ),
+                        ),
+                      if (visuals.orbOpacity > 0)
+                        Align(
+                          alignment: Alignment.bottomCenter,
+                          child: Opacity(
+                            key: const ValueKey(
+                              'surface-transition-orb-opacity',
+                            ),
+                            opacity: visuals.orbOpacity,
+                            child: Transform.scale(
+                              key: const ValueKey('surface-transition-orb'),
+                              scale: visuals.orbScale,
+                              child: SizedBox.square(
+                                dimension: compactOrbSize,
+                                child: ZommiOrb(
+                                  working: widget.working,
+                                  loading: widget.loading,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              );
+            }
+            final size = surfaceTransitionSize(
+              widget.fromSize,
+              widget.toSize,
+              progress,
+            );
+            return SizedBox.fromSize(
+              key: const ValueKey('surface-transition'),
+              size: size,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(34),
+                child: IgnorePointer(
+                  child: OverflowBox(
+                    alignment: Alignment.bottomCenter,
+                    minWidth: widget.panelSize.width,
+                    maxWidth: widget.panelSize.width,
+                    minHeight: widget.panelSize.height,
+                    maxHeight: widget.panelSize.height,
+                    child: SizedBox.fromSize(
+                      size: widget.panelSize,
+                      child: widget.panel,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
@@ -691,9 +1092,15 @@ class _CompactOrbButton extends StatelessWidget {
 }
 
 class ZommiOrb extends StatefulWidget {
-  const ZommiOrb({this.working = false, this.size = compactOrbSize, super.key});
+  const ZommiOrb({
+    this.working = false,
+    this.loading = false,
+    this.size = compactOrbSize,
+    super.key,
+  });
 
   final bool working;
+  final bool loading;
   final double size;
 
   @override
@@ -704,7 +1111,7 @@ class _ZommiOrbState extends State<ZommiOrb>
     with SingleTickerProviderStateMixin {
   late final AnimationController _motion = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 2600),
+    duration: const Duration(milliseconds: 1400),
   );
 
   @override
@@ -720,12 +1127,13 @@ class _ZommiOrbState extends State<ZommiOrb>
   }
 
   void _syncMotion() {
-    if (widget.working && !MediaQuery.disableAnimationsOf(context)) {
+    if ((widget.working || widget.loading) &&
+        !MediaQuery.disableAnimationsOf(context)) {
       if (!_motion.isAnimating) _motion.repeat();
     } else {
       _motion
         ..stop()
-        ..value = widget.working ? 0.35 : 0;
+        ..value = widget.working || widget.loading ? 0.35 : 0;
     }
   }
 
@@ -746,6 +1154,7 @@ class _ZommiOrbState extends State<ZommiOrb>
           painter: _NebulaOrbPainter(
             phase: _motion.value,
             working: widget.working,
+            loading: widget.loading,
           ),
         ),
       ),
@@ -754,28 +1163,80 @@ class _ZommiOrbState extends State<ZommiOrb>
 }
 
 class _NebulaOrbPainter extends CustomPainter {
-  const _NebulaOrbPainter({required this.phase, required this.working});
+  const _NebulaOrbPainter({
+    required this.phase,
+    required this.working,
+    required this.loading,
+  });
 
   final double phase;
   final bool working;
+  final bool loading;
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = size.center(Offset.zero);
-    final radius = size.shortestSide * 0.44;
-    if (working) {
+    final radius = size.shortestSide * 0.39;
+    if (working || loading) {
       final breath = 0.5 + 0.5 * math.sin(phase * math.pi * 2);
+      final orbitRadius = radius + size.shortestSide * 0.07;
+      final orbitBounds = Rect.fromCircle(center: center, radius: orbitRadius);
       canvas.drawCircle(
         center,
-        radius + 2 + breath * 2,
+        orbitRadius,
         Paint()
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.2
+          ..strokeWidth = 1.1
+          ..color = const Color(0x357f79c5),
+      );
+      canvas.drawArc(
+        orbitBounds,
+        phase * math.pi * 2 - math.pi / 2,
+        math.pi * 0.72,
+        false,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.4
+          ..strokeCap = StrokeCap.round
           ..color = Color.lerp(
-            const Color(0x287e75bd),
-            const Color(0x647f79c5),
+            const Color(0xff7f79c5),
+            const Color(0xff69d8d1),
             breath,
           )!,
+      );
+      if (loading) {
+        canvas.drawArc(
+          orbitBounds.inflate(size.shortestSide * 0.045),
+          -phase * math.pi * 2 + math.pi / 3,
+          math.pi * 0.48,
+          false,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.7
+            ..strokeCap = StrokeCap.round
+            ..color = Color.lerp(
+              const Color(0xffe28bd4),
+              const Color(0xff8fddda),
+              1 - breath,
+            )!,
+        );
+        canvas.drawCircle(
+          center,
+          radius + size.shortestSide * (0.11 + breath * 0.025),
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1
+            ..color = const Color(0x287f79c5),
+        );
+      }
+      final angle = phase * math.pi * 2 + math.pi * 0.22;
+      canvas.drawCircle(
+        center.translate(
+          math.cos(angle) * orbitRadius,
+          math.sin(angle) * orbitRadius,
+        ),
+        math.max(1.6, size.shortestSide * 0.045),
+        Paint()..color = const Color(0xfff8f7ff),
       );
     }
     canvas.drawCircle(
@@ -794,7 +1255,9 @@ class _NebulaOrbPainter extends CustomPainter {
           stops: [0, 0.32, 0.68, 1],
         ).createShader(Rect.fromCircle(center: center, radius: radius)),
     );
-    final drift = working ? math.sin(phase * math.pi * 2) * radius * 0.16 : 0;
+    final drift = working || loading
+        ? math.sin(phase * math.pi * 2) * radius * 0.28
+        : 0;
     canvas.save();
     canvas.clipPath(
       Path()..addOval(Rect.fromCircle(center: center, radius: radius)),
@@ -820,6 +1283,14 @@ class _NebulaOrbPainter extends CustomPainter {
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 7),
     );
     canvas.restore();
+    if (working || loading) {
+      final pulse = 0.5 + 0.5 * math.cos(phase * math.pi * 2);
+      canvas.drawCircle(
+        center.translate(radius * 0.15, -radius * 0.18),
+        radius * (0.12 + pulse * 0.08),
+        Paint()..color = const Color(0xb8ffffff),
+      );
+    }
     canvas.drawCircle(
       center,
       radius,
@@ -832,5 +1303,7 @@ class _NebulaOrbPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _NebulaOrbPainter oldDelegate) =>
-      oldDelegate.phase != phase || oldDelegate.working != working;
+      oldDelegate.phase != phase ||
+      oldDelegate.working != working ||
+      oldDelegate.loading != loading;
 }
