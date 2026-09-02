@@ -73,6 +73,9 @@ public static class ZommiWindowsAcceptanceNative
     [DllImport("user32.dll")]
     private static extern IntPtr GetAncestor(IntPtr window, uint flags);
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowPos(
         IntPtr window,
@@ -193,6 +196,33 @@ public static class ZommiWindowsAcceptanceNative
             bounds.Right - bounds.Left,
             bounds.Bottom - bounds.Top,
         };
+    }
+
+    public static int[] PhysicalBounds(IntPtr window)
+    {
+        var previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
+        try
+        {
+            NativeRect bounds;
+            if (!GetWindowRect(window, out bounds))
+            {
+                return new int[0];
+            }
+            return new[]
+            {
+                bounds.Left,
+                bounds.Top,
+                bounds.Right - bounds.Left,
+                bounds.Bottom - bounds.Top,
+            };
+        }
+        finally
+        {
+            if (previous != IntPtr.Zero)
+            {
+                SetThreadDpiAwarenessContext(previous);
+            }
+        }
     }
 
     public static bool Visible(IntPtr window)
@@ -901,8 +931,16 @@ function Invoke-PackagedApplicationAcceptance {
             throw 'Packaged Flutter window is not visible and topmost.'
         }
 
-        $compactCenterX = [int]($compactBounds[0] + $compactBounds[2] / 2.0)
-        $compactCenterY = [int]($compactBounds[1] + $compactBounds[3] / 2.0)
+        $compactPhysicalBounds = [ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
+        if ($compactPhysicalBounds.Count -ne 4) {
+            throw 'Could not read the packaged orb physical bounds.'
+        }
+        $compactCenterX = [int](
+            $compactPhysicalBounds[0] + $compactPhysicalBounds[2] / 2.0
+        )
+        $compactCenterY = [int](
+            $compactPhysicalBounds[1] + $compactPhysicalBounds[3] / 2.0
+        )
         if (-not [ZommiWindowsAcceptanceNative]::SetCursorPos(
             $compactCenterX,
             $compactCenterY
@@ -1110,6 +1148,7 @@ function Invoke-PackagedApplicationAcceptance {
             imageDimensions = @($image.width, $image.height)
             imagePointerContext = $true
             compactBounds = @($compactBounds)
+            compactPhysicalBounds = @($compactPhysicalBounds)
             firstVisibleBounds = @($firstVisibleBounds)
             hoverExpandedBounds = @($hoverExpandedBounds)
             stationaryHoverBounds = @($stationaryHoverBounds)

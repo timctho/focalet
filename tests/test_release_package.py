@@ -158,6 +158,8 @@ class ReleasePackageTests(unittest.TestCase):
         for contract in (
             "IsOwnedWindowAtPoint",
             "GetAncestor(hit, root) == window",
+            "PhysicalBounds",
+            "SetThreadDpiAwarenessContext(new IntPtr(-4))",
             "PostMouseLeaveAtPoint",
             "PostMessage(hit, mouseLeave",
             "Start-Sleep -Milliseconds 750",
