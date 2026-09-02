@@ -954,6 +954,15 @@ function Invoke-PackagedApplicationAcceptance {
             throw "Packaged hover expansion collapsed under a stationary pointer: expanded=$($hoverExpandedBounds -join ',') stationary=$($stationaryHoverBounds -join ',')."
         }
 
+        # Re-enter by one pixel so Flutter and Win32 re-arm mouse-leave
+        # tracking after the injected message before testing a genuine exit.
+        if (-not [ZommiWindowsAcceptanceNative]::SetCursorPos(
+            $compactCenterX + 1,
+            $compactCenterY
+        )) {
+            throw 'Could not re-arm the packaged surface hover state.'
+        }
+        Start-Sleep -Milliseconds 100
         if (-not [ZommiWindowsAcceptanceNative]::SetCursorPos(300, 300)) {
             throw 'Could not move the pointer away from the packaged surface.'
         }

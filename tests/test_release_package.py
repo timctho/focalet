@@ -162,6 +162,7 @@ class ReleasePackageTests(unittest.TestCase):
             "PostMessage(hit, mouseLeave",
             "Start-Sleep -Milliseconds 750",
             "Packaged hover expansion collapsed under a stationary pointer",
+            "Could not re-arm the packaged surface hover state",
             "Packaged hover surface did not collapse after the pointer left",
         ):
             self.assertIn(contract, script)
