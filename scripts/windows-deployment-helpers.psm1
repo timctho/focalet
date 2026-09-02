@@ -44,4 +44,51 @@ function Move-PathWithRetry {
     } while ($true)
 }
 
-Export-ModuleMember -Function Move-PathWithRetry
+function Get-DescendantProcessIds {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object[]] $Processes,
+
+        [Parameter(Mandatory = $true)]
+        [uint32[]] $RootProcessIds
+    )
+
+    $depthById = @{}
+    foreach ($processId in $RootProcessIds) {
+        $depthById[[uint32] $processId] = 0
+    }
+
+    # Roots can include both the Flutter process and its package-local child
+    # helpers. Repeated relaxation preserves their real parent depth and also
+    # discovers descendants whose executables live outside the package, such
+    # as conhost.exe, wsl.exe, and wslhost.exe.
+    foreach ($iteration in 1..([Math]::Max(1, $Processes.Count))) {
+        $changed = $false
+        foreach ($process in $Processes) {
+            $processId = [uint32] $process.ProcessId
+            $parentId = [uint32] $process.ParentProcessId
+            if (-not $depthById.ContainsKey($parentId)) {
+                continue
+            }
+            $candidateDepth = [int] $depthById[$parentId] + 1
+            if (-not $depthById.ContainsKey($processId) -or
+                [int] $depthById[$processId] -lt $candidateDepth) {
+                $depthById[$processId] = $candidateDepth
+                $changed = $true
+            }
+        }
+        if (-not $changed) {
+            break
+        }
+    }
+
+    return @(
+        $depthById.GetEnumerator() |
+            Sort-Object -Property `
+                @{ Expression = { [int] $_.Value }; Descending = $true }, `
+                @{ Expression = { [uint32] $_.Key }; Descending = $true } |
+            ForEach-Object { [uint32] $_.Key }
+    )
+}
+
+Export-ModuleMember -Function Move-PathWithRetry, Get-DescendantProcessIds

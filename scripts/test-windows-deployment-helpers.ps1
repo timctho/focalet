@@ -2,6 +2,30 @@ $ErrorActionPreference = 'Stop'
 
 Import-Module (Join-Path $PSScriptRoot 'windows-deployment-helpers.psm1') -Force
 
+$processes = @(
+    [pscustomobject]@{ ProcessId = 50; ParentProcessId = 1; Name = 'runner' }
+    [pscustomobject]@{ ProcessId = 100; ParentProcessId = 50; Name = 'Zommi' }
+    [pscustomobject]@{ ProcessId = 101; ParentProcessId = 100; Name = 'core' }
+    [pscustomobject]@{ ProcessId = 102; ParentProcessId = 100; Name = 'capture' }
+    [pscustomobject]@{ ProcessId = 103; ParentProcessId = 101; Name = 'wsl' }
+    [pscustomobject]@{ ProcessId = 104; ParentProcessId = 103; Name = 'wslhost' }
+    [pscustomobject]@{ ProcessId = 200; ParentProcessId = 50; Name = 'unrelated' }
+)
+$tree = @(
+    Get-DescendantProcessIds `
+        -Processes $processes `
+        -RootProcessIds @(100, 101, 102)
+)
+if (($tree | Sort-Object) -join ',' -ne '100,101,102,103,104') {
+    throw "The process tree included the wrong processes: $($tree -join ',')."
+}
+foreach ($edge in @(@(104, 103), @(103, 101), @(101, 100), @(102, 100))) {
+    if ([Array]::IndexOf($tree, [uint32] $edge[0]) -ge
+        [Array]::IndexOf($tree, [uint32] $edge[1])) {
+        throw "The process tree is not child-first: $($tree -join ',')."
+    }
+}
+
 $testRoot = Join-Path $env:TEMP "zommi-deployment-test-$([Guid]::NewGuid().ToString('N'))"
 $source = Join-Path $testRoot 'source'
 $destination = Join-Path $testRoot 'destination'
@@ -58,6 +82,7 @@ try {
     }
 
     [ordered]@{
+        processTree = $true
         lockRetry = $true
         elapsedMilliseconds = $clock.ElapsedMilliseconds
     } | ConvertTo-Json

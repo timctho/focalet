@@ -157,16 +157,38 @@ try {
     $targetExecutable = Join-Path $targetDirectory 'Zommi.exe'
     # Stop every Zommi package launched from Downloads, including older package
     # folder names, so a stale UI or helper cannot survive the replacement.
+    # Include the complete descendant tree: the Rust core can own conhost, WSL,
+    # and runtime processes whose executable paths are outside Downloads but
+    # whose inherited working-directory handles still lock the package folder.
     $targetProcesses = @(Get-DownloadsZommiProcesses)
-    $stoppedProcessCount = $targetProcesses.Count
-    foreach ($process in $targetProcesses) {
-        Stop-Process -Id $process.ProcessId -Force
+    $processSnapshot = @(Get-CimInstance Win32_Process)
+    $targetProcessIds = if ($targetProcesses.Count -eq 0) {
+        @()
     }
-    foreach ($process in $targetProcesses) {
-        Wait-Process -Id $process.ProcessId -Timeout 10 -ErrorAction SilentlyContinue
+    else {
+        @(
+            Get-DescendantProcessIds `
+                -Processes $processSnapshot `
+                -RootProcessIds @($targetProcesses.ProcessId)
+        )
+    }
+    $stoppedProcessCount = $targetProcessIds.Count
+    foreach ($processId in $targetProcessIds) {
+        Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+    }
+    foreach ($processId in $targetProcessIds) {
+        Wait-Process -Id $processId -Timeout 10 -ErrorAction SilentlyContinue
     }
     if (@(Get-DownloadsZommiProcesses).Count -ne 0) {
         throw 'A Zommi process inside Downloads remained running.'
+    }
+    $remainingTreeProcesses = @(
+        Get-CimInstance Win32_Process | Where-Object {
+            $targetProcessIds -contains [uint32] $_.ProcessId
+        }
+    )
+    if ($remainingTreeProcesses.Count -ne 0) {
+        throw "A Zommi descendant remained running: $($remainingTreeProcesses.ProcessId -join ',')."
     }
 
     if (Test-Path -LiteralPath $targetDirectory) {
