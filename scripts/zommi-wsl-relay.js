@@ -5,6 +5,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const net = require('node:net');
+const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 
@@ -194,18 +195,28 @@ function handleClient(socket) {
   socket.resume();
 }
 
+function relayHost() {
+  for (const addresses of Object.values(os.networkInterfaces())) {
+    for (const address of addresses || []) {
+      if (address.family === 'IPv4' && !address.internal) return address.address;
+    }
+  }
+  return '127.0.0.1';
+}
+
+const host = relayHost();
 const server = net.createServer({ allowHalfOpen: true }, handleClient);
 server.on('error', (error) => {
   process.stderr.write(`[zommi-wsl-relay] ${error.message}\n`);
   process.exit(1);
 });
-server.listen({ host: '127.0.0.1', port: 0 }, () => {
+server.listen({ host: '0.0.0.0', port: 0 }, () => {
   const address = server.address();
   const endpoint = {
     schemaVersion: 1,
     transportVersion,
     distribution,
-    host: '127.0.0.1',
+    host,
     port: address.port,
     token,
     pid: process.pid,

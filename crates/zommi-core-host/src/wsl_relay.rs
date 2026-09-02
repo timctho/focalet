@@ -1,7 +1,7 @@
 use std::{
     env, fs,
     io::{self, BufRead, BufReader, Read, Write},
-    net::{Shutdown, TcpStream},
+    net::{IpAddr, Shutdown, TcpStream},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     thread,
@@ -14,7 +14,7 @@ use uuid::Uuid;
 use wait_timeout::ChildExt;
 use zommi_core::{RuntimeCommand, RuntimeTarget};
 
-const TRANSPORT_VERSION: u32 = 1;
+const TRANSPORT_VERSION: u32 = 2;
 const ENDPOINT_SCHEMA_VERSION: u32 = 1;
 const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 const CHANNEL_STDOUT: u8 = 1;
@@ -256,10 +256,17 @@ fn load_endpoint(path: &Path) -> io::Result<RelayEndpoint> {
 }
 
 fn endpoint_matches(endpoint: &RelayEndpoint, distribution: &str) -> bool {
+    let private_host = endpoint
+        .host
+        .parse::<IpAddr>()
+        .is_ok_and(|address| match address {
+            IpAddr::V4(address) => address.is_loopback() || address.is_private(),
+            IpAddr::V6(address) => address.is_loopback() || address.is_unique_local(),
+        });
     endpoint.schema_version == ENDPOINT_SCHEMA_VERSION
         && endpoint.transport_version == TRANSPORT_VERSION
         && endpoint.distribution.eq_ignore_ascii_case(distribution)
-        && endpoint.host == "127.0.0.1"
+        && private_host
         && endpoint.port > 0
         && endpoint.token.len() >= 32
 }

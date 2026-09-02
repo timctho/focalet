@@ -62,7 +62,7 @@ function runRuntime(endpoint) {
       const request = {
         op: 'spawn',
         token: TOKEN,
-        transportVersion: 1,
+        transportVersion: 2,
         command: '/bin/sh',
         args: ['-c', 'read value; printf "out:%s\\n" "$value"; printf "err:%s\\n" "$value" >&2; exit 7'],
         cwd: '/',
@@ -107,7 +107,7 @@ test('persistent WSL relay authenticates and frames runtime stdio', async () => 
     'scripts/zommi-wsl-relay.js',
     '--endpoint', endpointPath,
     '--token', TOKEN,
-    '--version', '1',
+    '--version', '2',
     '--distribution', 'test',
   ], { stdio: ['ignore', 'ignore', 'pipe'] });
   const diagnostics = [];
@@ -115,9 +115,9 @@ test('persistent WSL relay authenticates and frames runtime stdio', async () => 
   try {
     const endpoint = await waitForEndpoint(endpointPath);
     assert.equal(endpoint.schemaVersion, 1);
-    assert.equal(endpoint.transportVersion, 1);
+    assert.equal(endpoint.transportVersion, 2);
     assert.equal(endpoint.distribution, 'test');
-    assert.equal(endpoint.host, '127.0.0.1');
+    assert.ok(net.isIP(endpoint.host));
     assert.equal(endpoint.token, TOKEN);
 
     const result = await runRuntime(endpoint);
