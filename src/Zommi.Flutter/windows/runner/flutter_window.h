@@ -31,6 +31,10 @@ private:
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
   void AdvanceWindowAnimation();
   void CancelWindowAnimation();
+  void CancelPendingSurfaceFrame();
+  bool BeginSurfaceFrameTransition(const RECT &current_bounds);
+  void FinishSurfaceFrameTransition();
+  void DestroySurfaceTransitionOverlay();
 
   // The project to run.
   flutter::DartProject project_;
@@ -41,11 +45,16 @@ private:
       window_animation_channel_;
   std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
       window_animation_result_;
+  std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+      pending_surface_frame_result_;
   RECT animation_from_{};
   RECT animation_to_{};
   ULONGLONG animation_started_at_ = 0;
   DWORD animation_duration_ms_ = 0;
   bool window_animation_active_ = false;
+  HWND surface_transition_overlay_ = nullptr;
+  HBITMAP surface_transition_bitmap_ = nullptr;
+  bool surface_window_cloaked_ = false;
 };
 
 #endif // RUNNER_FLUTTER_WINDOW_H_

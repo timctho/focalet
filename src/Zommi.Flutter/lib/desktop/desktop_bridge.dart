@@ -527,7 +527,15 @@ final class FlutterDesktopBridge
         );
       }
     } else {
-      await windowManager.setBounds(bounds, animate: false);
+      final nativeResult = shouldAnimate
+          ? await setNativeSurfaceBoundsWithoutCopy(
+              bounds: bounds,
+              scaleFactor: selected.scaleFactor?.toDouble() ?? 1,
+            )
+          : null;
+      if (nativeResult != true) {
+        await windowManager.setBounds(bounds, animate: false);
+      }
     }
     if (transitionEpoch != _surfaceTransitionEpoch) return;
     await windowManager.setMinimumSize(
@@ -791,6 +799,29 @@ Future<bool?> animateNativeSurfaceBounds({
       'scaleFactor': scaleFactor,
       'durationMs': duration.inMilliseconds,
     });
+  } on MissingPluginException {
+    return null;
+  } on PlatformException {
+    return null;
+  }
+}
+
+Future<bool?> setNativeSurfaceBoundsWithoutCopy({
+  required Rect bounds,
+  required double scaleFactor,
+}) async {
+  if (!Platform.isWindows) return null;
+  try {
+    return await _windowAnimationChannel.invokeMethod<bool>(
+      'setBoundsWithoutCopy',
+      {
+        'toX': bounds.left,
+        'toY': bounds.top,
+        'toWidth': bounds.width,
+        'toHeight': bounds.height,
+        'scaleFactor': scaleFactor,
+      },
+    );
   } on MissingPluginException {
     return null;
   } on PlatformException {

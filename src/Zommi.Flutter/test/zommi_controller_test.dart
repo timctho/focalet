@@ -231,6 +231,7 @@ void main() {
       final expansion = controller.setExpanded(true, focus: true);
       await Future<void>.delayed(Duration.zero);
       expect(controller.surfaceTransitioning, isTrue);
+      expect(controller.surfaceTransitionAnimating, isTrue);
       expect(controller.transitionTargetExpanded, isTrue);
       expect(controller.expanded, isFalse);
       expect(controller.focusComposerEpoch, 0);
@@ -246,6 +247,7 @@ void main() {
       final collapse = controller.setExpanded(false);
       await Future<void>.delayed(Duration.zero);
       expect(controller.surfaceTransitioning, isTrue);
+      expect(controller.surfaceTransitionAnimating, isTrue);
       expect(controller.transitionTargetExpanded, isFalse);
       expect(controller.expanded, isTrue);
 

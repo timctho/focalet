@@ -960,17 +960,25 @@ final class ZommiController extends ChangeNotifier {
     transitionTargetLarge = targetLarge;
     _notify();
     try {
+      final transitionClock = Stopwatch()..start();
+      Future<void>? growingSurfaceChange;
       if (growing) {
-        await desktop.setSurface(
+        growingSurfaceChange = desktop.setSurface(
           expanded: targetExpanded,
           large: targetLarge,
           animate: false,
         );
       }
-      if (transitionEpoch != _surfaceTransitionEpoch) return;
       surfaceTransitionAnimating = true;
       _notify();
-      await Future<void>.delayed(surfaceTransitionDuration);
+      if (growingSurfaceChange != null) {
+        await growingSurfaceChange;
+      }
+      if (transitionEpoch != _surfaceTransitionEpoch) return;
+      final remaining = surfaceTransitionDuration - transitionClock.elapsed;
+      if (remaining > Duration.zero) {
+        await Future<void>.delayed(remaining);
+      }
       if (transitionEpoch != _surfaceTransitionEpoch) return;
       if (!growing) {
         await desktop.setSurface(

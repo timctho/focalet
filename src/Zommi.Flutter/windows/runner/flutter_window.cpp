@@ -1,5 +1,7 @@
 #include "flutter_window.h"
 
+#include <dwmapi.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -28,8 +30,7 @@ constexpr double SymmetricSurfaceEase(double progress) {
 static_assert(SymmetricSurfaceEase(0.0) == 0.0);
 static_assert(SymmetricSurfaceEase(0.5) == 0.5);
 static_assert(SymmetricSurfaceEase(1.0) == 1.0);
-static_assert(SymmetricSurfaceEase(0.25) ==
-              1.0 - SymmetricSurfaceEase(0.75));
+static_assert(SymmetricSurfaceEase(0.25) == 1.0 - SymmetricSurfaceEase(0.75));
 
 std::optional<double> NumberArgument(const flutter::EncodableMap &arguments,
                                      const char *name) {
@@ -95,6 +96,7 @@ bool FlutterWindow::OnCreate() {
 
 void FlutterWindow::OnDestroy() {
   CancelWindowAnimation();
+  CancelPendingSurfaceFrame();
   window_animation_channel_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
@@ -145,7 +147,8 @@ void FlutterWindow::HandleWindowAnimationMethodCall(
     SetLastError(ERROR_SUCCESS);
     const LONG_PTR style = GetWindowLongPtr(window, GWL_STYLE);
     if (style == 0 && GetLastError() != ERROR_SUCCESS) {
-      result->Error("window_unavailable", "Could not read the Zommi window style.");
+      result->Error("window_unavailable",
+                    "Could not read the Zommi window style.");
       return;
     }
     const LONG_PTR surface_style =
@@ -169,7 +172,8 @@ void FlutterWindow::HandleWindowAnimationMethodCall(
     result->Success();
     return;
   }
-  if (call.method_name() != "animateBounds") {
+  if (call.method_name() != "animateBounds" &&
+      call.method_name() != "setBoundsWithoutCopy") {
     result->NotImplemented();
     return;
   }
@@ -186,23 +190,70 @@ void FlutterWindow::HandleWindowAnimationMethodCall(
   const auto height = NumberArgument(*arguments, "toHeight");
   const auto scale = NumberArgument(*arguments, "scaleFactor");
   const auto duration = NumberArgument(*arguments, "durationMs");
-  if (!x || !y || !width || !height || !scale || !duration || *scale <= 0 ||
-      *width <= 0 || *height <= 0 || *duration < 0) {
+  const bool instant_without_copy =
+      call.method_name() == "setBoundsWithoutCopy";
+  if (!x || !y || !width || !height || !scale || *scale <= 0 || *width <= 0 ||
+      *height <= 0 || (!instant_without_copy && (!duration || *duration < 0))) {
     result->Error("invalid_arguments", "Window bounds are incomplete.");
     return;
   }
 
   CancelWindowAnimation();
+  CancelPendingSurfaceFrame();
+  RECT target{};
+  target.left = static_cast<LONG>(std::lround(*x * *scale));
+  target.top = static_cast<LONG>(std::lround(*y * *scale));
+  target.right = target.left + static_cast<LONG>(std::lround(*width * *scale));
+  target.bottom = target.top + static_cast<LONG>(std::lround(*height * *scale));
+  if (instant_without_copy) {
+    RECT current{};
+    if (!GetWindowRect(GetHandle(), &current)) {
+      result->Error("window_unavailable", "The Zommi window is unavailable.");
+      return;
+    }
+    const LONG current_width = current.right - current.left;
+    const LONG current_height = current.bottom - current.top;
+    const LONG target_width = target.right - target.left;
+    const LONG target_height = target.bottom - target.top;
+    RECT anchored_target{};
+    anchored_target.left = current.left + (current_width - target_width) / 2;
+    anchored_target.top = current.bottom - target_height;
+    anchored_target.right = anchored_target.left + target_width;
+    anchored_target.bottom = anchored_target.top + target_height;
+    if (std::abs(anchored_target.left - target.left) <= 1 &&
+        std::abs(anchored_target.top - target.top) <= 1) {
+      target = anchored_target;
+    }
+    const bool growing =
+        target_width * target_height > current_width * current_height;
+    const bool staged = growing && BeginSurfaceFrameTransition(current);
+    if (!SetWindowPos(GetHandle(), nullptr, target.left, target.top,
+                      target.right - target.left, target.bottom - target.top,
+                      SWP_NOACTIVATE | SWP_NOCOPYBITS | SWP_NOOWNERZORDER |
+                          SWP_NOZORDER)) {
+      if (staged) {
+        FinishSurfaceFrameTransition();
+      }
+      result->Error("window_resize_failed",
+                    "Could not resize the Zommi surface window.");
+      return;
+    }
+    pending_surface_frame_result_ = std::move(result);
+    flutter_controller_->engine()->SetNextFrameCallback([this]() {
+      if (pending_surface_frame_result_ != nullptr) {
+        FinishSurfaceFrameTransition();
+        auto completed = std::move(pending_surface_frame_result_);
+        completed->Success(flutter::EncodableValue(true));
+      }
+    });
+    flutter_controller_->ForceRedraw();
+    return;
+  }
   if (!GetWindowRect(GetHandle(), &animation_from_)) {
     result->Error("window_unavailable", "The Zommi window is unavailable.");
     return;
   }
-  animation_to_.left = static_cast<LONG>(std::lround(*x * *scale));
-  animation_to_.top = static_cast<LONG>(std::lround(*y * *scale));
-  animation_to_.right =
-      animation_to_.left + static_cast<LONG>(std::lround(*width * *scale));
-  animation_to_.bottom =
-      animation_to_.top + static_cast<LONG>(std::lround(*height * *scale));
+  animation_to_ = target;
   animation_duration_ms_ =
       static_cast<DWORD>(std::lround(std::max(1.0, *duration)));
   animation_started_at_ = GetTickCount64();
@@ -256,5 +307,96 @@ void FlutterWindow::CancelWindowAnimation() {
   if (window_animation_result_ != nullptr) {
     auto cancelled = std::move(window_animation_result_);
     cancelled->Success(flutter::EncodableValue(false));
+  }
+}
+
+void FlutterWindow::CancelPendingSurfaceFrame() {
+  FinishSurfaceFrameTransition();
+  if (pending_surface_frame_result_ != nullptr) {
+    auto cancelled = std::move(pending_surface_frame_result_);
+    cancelled->Success(flutter::EncodableValue(false));
+  }
+}
+
+bool FlutterWindow::BeginSurfaceFrameTransition(const RECT &current_bounds) {
+  DestroySurfaceTransitionOverlay();
+  const int width = current_bounds.right - current_bounds.left;
+  const int height = current_bounds.bottom - current_bounds.top;
+  HDC desktop = GetDC(nullptr);
+  if (desktop == nullptr) {
+    return false;
+  }
+  HDC memory = CreateCompatibleDC(desktop);
+  HBITMAP bitmap = memory == nullptr
+                       ? nullptr
+                       : CreateCompatibleBitmap(desktop, width, height);
+  HGDIOBJ previous = bitmap == nullptr ? nullptr : SelectObject(memory, bitmap);
+  const bool copied = previous != nullptr &&
+                      BitBlt(memory, 0, 0, width, height, desktop,
+                             current_bounds.left, current_bounds.top, SRCCOPY);
+  if (previous != nullptr) {
+    SelectObject(memory, previous);
+  }
+  if (memory != nullptr) {
+    DeleteDC(memory);
+  }
+  ReleaseDC(nullptr, desktop);
+  if (!copied) {
+    if (bitmap != nullptr) {
+      DeleteObject(bitmap);
+    }
+    return false;
+  }
+
+  HWND overlay = CreateWindowExW(
+      WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_TRANSPARENT,
+      L"STATIC", nullptr,
+      WS_POPUP | WS_VISIBLE | SS_BITMAP | SS_REALSIZECONTROL,
+      current_bounds.left, current_bounds.top, width, height, nullptr, nullptr,
+      GetModuleHandleW(nullptr), nullptr);
+  if (overlay == nullptr) {
+    DeleteObject(bitmap);
+    return false;
+  }
+  SendMessageW(overlay, STM_SETIMAGE, IMAGE_BITMAP,
+               reinterpret_cast<LPARAM>(bitmap));
+  if (!SetWindowPos(overlay, HWND_TOPMOST, current_bounds.left,
+                    current_bounds.top, width, height,
+                    SWP_NOACTIVATE | SWP_SHOWWINDOW)) {
+    DestroyWindow(overlay);
+    DeleteObject(bitmap);
+    return false;
+  }
+
+  BOOL cloak = TRUE;
+  if (FAILED(DwmSetWindowAttribute(GetHandle(), DWMWA_CLOAK, &cloak,
+                                   sizeof(cloak)))) {
+    DestroyWindow(overlay);
+    DeleteObject(bitmap);
+    return false;
+  }
+  surface_transition_overlay_ = overlay;
+  surface_transition_bitmap_ = bitmap;
+  surface_window_cloaked_ = true;
+  return true;
+}
+
+void FlutterWindow::FinishSurfaceFrameTransition() {
+  if (surface_window_cloaked_) {
+    BOOL cloak = FALSE;
+    DwmSetWindowAttribute(GetHandle(), DWMWA_CLOAK, &cloak, sizeof(cloak));
+    surface_window_cloaked_ = false;
+  }
+  DestroySurfaceTransitionOverlay();
+}
+
+void FlutterWindow::DestroySurfaceTransitionOverlay() {
+  if (surface_transition_overlay_ != nullptr) {
+    DestroyWindow(surface_transition_overlay_);
+    surface_transition_overlay_ = nullptr;
+  }
+  if (surface_transition_bitmap_ != nullptr) {
+    DeleteObject(surface_transition_bitmap_);
+    surface_transition_bitmap_ = nullptr;
   }
 }

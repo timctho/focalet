@@ -200,9 +200,13 @@ Win32Window::MessageHandler(HWND hwnd,
     case WM_SIZE: {
       RECT rect = GetClientArea();
       if (child_content_ != nullptr) {
-        // Size and position the child window.
-        MoveWindow(child_content_, rect.left, rect.top, rect.right - rect.left,
-                   rect.bottom - rect.top, TRUE);
+        // Discard the old Flutter backing pixels while the swap chain changes
+        // size. Copying them places the compact surface at the new client's
+        // top-left for one DWM frame before Flutter can present at the new
+        // dimensions.
+        SetWindowPos(child_content_, nullptr, rect.left, rect.top,
+                     rect.right - rect.left, rect.bottom - rect.top,
+                     SWP_NOACTIVATE | SWP_NOCOPYBITS | SWP_NOZORDER);
       }
       return 0;
     }

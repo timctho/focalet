@@ -96,8 +96,23 @@ void main() {
         contains('kWindowAnimationFrameMs'),
         contains('message == WM_TIMER'),
         contains('SymmetricSurfaceEase(linear)'),
-        contains('SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER'),
+        allOf(
+          contains('"setBoundsWithoutCopy"'),
+          contains('SetNextFrameCallback([this]()'),
+          contains('flutter_controller_->ForceRedraw()'),
+          contains('SWP_NOCOPYBITS'),
+          allOf(
+            contains('BeginSurfaceFrameTransition(current)'),
+            contains('DWMWA_CLOAK'),
+            contains('STM_SETIMAGE'),
+            contains('SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER'),
+          ),
+        ),
       ),
+    );
+    expect(
+      File('${root.path}/windows/runner/win32_window.cpp').readAsStringSync(),
+      contains('SWP_NOACTIVATE | SWP_NOCOPYBITS | SWP_NOZORDER'),
     );
     expect(
       File('${root.path}/windows/flutter/generated_plugins.cmake')
