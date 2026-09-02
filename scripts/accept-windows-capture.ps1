@@ -225,6 +225,22 @@ public static class ZommiWindowsAcceptanceNative
         }
     }
 
+    public static bool SetPhysicalCursorPos(int x, int y)
+    {
+        var previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
+        try
+        {
+            return SetCursorPos(x, y);
+        }
+        finally
+        {
+            if (previous != IntPtr.Zero)
+            {
+                SetThreadDpiAwarenessContext(previous);
+            }
+        }
+    }
+
     public static bool Visible(IntPtr window)
     {
         return IsWindowVisible(window);
@@ -941,7 +957,7 @@ function Invoke-PackagedApplicationAcceptance {
         $compactCenterY = [int](
             $compactPhysicalBounds[1] + $compactPhysicalBounds[3] / 2.0
         )
-        if (-not [ZommiWindowsAcceptanceNative]::SetCursorPos(
+        if (-not [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(
             $compactCenterX,
             $compactCenterY
         )) {
@@ -986,14 +1002,14 @@ function Invoke-PackagedApplicationAcceptance {
 
         # Re-enter by one pixel so Flutter and Win32 re-arm mouse-leave
         # tracking after the injected message before testing a genuine exit.
-        if (-not [ZommiWindowsAcceptanceNative]::SetCursorPos(
+        if (-not [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(
             $compactCenterX + 1,
             $compactCenterY
         )) {
             throw 'Could not re-arm the packaged surface hover state.'
         }
         Start-Sleep -Milliseconds 100
-        if (-not [ZommiWindowsAcceptanceNative]::SetCursorPos(300, 300)) {
+        if (-not [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(300, 300)) {
             throw 'Could not move the pointer away from the packaged surface.'
         }
         $hoverCollapseDeadline = [DateTime]::UtcNow.AddSeconds(5)

@@ -160,6 +160,7 @@ class ReleasePackageTests(unittest.TestCase):
             "GetAncestor(hit, root) == window",
             "PhysicalBounds",
             "SetThreadDpiAwarenessContext(new IntPtr(-4))",
+            "SetPhysicalCursorPos",
             "PostMouseLeaveAtPoint",
             "PostMessage(hit, mouseLeave",
             "Start-Sleep -Milliseconds 750",
