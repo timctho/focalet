@@ -1159,6 +1159,16 @@ function Invoke-PackagedApplicationAcceptance {
             throw "Context shortcut resized the taskbar chat window: before=$($taskbarBounds -join ',') after=$($shortcutBounds -join ',')."
         }
 
+        [ZommiWindowsAcceptanceNative]::Minimize($window)
+        $imageShortcutMinimizeDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        while (-not [ZommiWindowsAcceptanceNative]::Minimized($window) -and
+               [DateTime]::UtcNow -lt $imageShortcutMinimizeDeadline) {
+            Start-Sleep -Milliseconds 50
+        }
+        if (-not [ZommiWindowsAcceptanceNative]::Minimized($window)) {
+            throw 'Could not minimize Zommi before the Alt+Shift+A restore gate.'
+        }
+
         [ZommiWindowsAcceptanceNative]::SendAltA($true)
         $selector = Wait-ForPackagedSelector -CaptureExecutable $CaptureExecutable
         $selectorBounds = [ZommiWindowsAcceptanceNative]::Bounds($selector)
@@ -1195,12 +1205,16 @@ function Invoke-PackagedApplicationAcceptance {
             -After $eventCount
         $eventCount = $cancelResult.Count
         $cancelFocusDeadline = [DateTime]::UtcNow.AddSeconds(5)
-        while (-not [ZommiWindowsAcceptanceNative]::Foreground($window) -and
+        while (([ZommiWindowsAcceptanceNative]::Minimized($window) -or
+                -not [ZommiWindowsAcceptanceNative]::Visible($window) -or
+                -not [ZommiWindowsAcceptanceNative]::Foreground($window)) -and
                [DateTime]::UtcNow -lt $cancelFocusDeadline) {
             Start-Sleep -Milliseconds 50
         }
-        if (-not [ZommiWindowsAcceptanceNative]::Foreground($window)) {
-            throw 'Cancelled Alt+Shift+A did not restore and focus the packaged taskbar window.'
+        if ([ZommiWindowsAcceptanceNative]::Minimized($window) -or
+            -not [ZommiWindowsAcceptanceNative]::Visible($window) -or
+            -not [ZommiWindowsAcceptanceNative]::Foreground($window)) {
+            throw 'Cancelled Alt+Shift+A did not restore, show, and focus the minimized packaged taskbar window.'
         }
 
         [ZommiWindowsAcceptanceNative]::SendAltA($true)
@@ -1283,6 +1297,7 @@ function Invoke-PackagedApplicationAcceptance {
             leaveBounds = @($leaveBounds)
             shortcutBounds = @($shortcutBounds)
             minimizedAndRestored = $true
+            minimizedImageShortcutRestored = $true
             nativeTaskbarToggle = $true
             shortcutsRestoreFocus = $true
             processCount = $processes.Count

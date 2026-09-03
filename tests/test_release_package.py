@@ -187,6 +187,9 @@ class ReleasePackageTests(unittest.TestCase):
             "Taskbar window resized after pointer exit",
             "Packaged taskbar window did not minimize",
             "Packaged taskbar window did not restore",
+            "Could not minimize Zommi before the Alt+Shift+A restore gate",
+            "Cancelled Alt+Shift+A did not restore, show, and focus the minimized packaged taskbar window",
+            "minimizedImageShortcutRestored = $true",
             "Packaged taskbar window unexpectedly remained always-on-top",
         ):
             self.assertIn(contract, script)

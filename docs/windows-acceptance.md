@@ -36,8 +36,9 @@ Before the physical walkthrough, run the packaged helper gate:
 It verifies an exact selected-text UIA fixture, selector cancellation, a
 DPI-aware region within one physical pixel of 40 by 30, and exact agreement
 between the reported bounds and returned PNG dimensions. It then launches the
-exact packaged Flutter application and checks topmost compact/expanded window
-bounds, real operating-system shortcut registration, injected
+exact packaged Flutter application and checks stable normal/expanded taskbar
+window bounds, taskbar minimize/restore behavior, real operating-system shortcut
+registration, injected
 `Alt+A`/`Alt+Shift+A` activation, context attachment, image cancellation,
 image-plus-pointer pairing, and the adjacent Flutter/Rust/two-helper process
 topology. Run it from an interactive desktop PowerShell; a process launched
@@ -63,11 +64,9 @@ delivery; they are still not physical keyboard evidence.
 ## Window and interaction
 
 1. Start the exact extracted `Zommi.exe`.
-2. Confirm a small quiet orb appears centered just above the work-area edge and
-   stays topmost without taking over the taskbar.
-3. Hover it: the translucent panel expands from the same bottom-center anchor
-   and focuses the composer.
-4. Move outside: it remains expanded for 499 ms and collapses at 500 ms.
+2. Confirm one complete chat window appears in the taskbar and is not topmost.
+3. Click its taskbar icon to minimize it, then click again to restore it.
+4. Expand and restore the large window without moving its bottom-center anchor.
 5. Verify blank header space drags the window while controls, transcript,
    composer, session list, and scrollable activity remain interactive.
 6. With reduced motion enabled, verify working state remains visually distinct
@@ -86,9 +85,10 @@ delivery; they are still not physical keyboard evidence.
 
 ## Explicit image (`Alt+Shift+A`)
 
-1. Press `Alt+Shift+A` and confirm the selector appears without waiting for a
-   slow UIA capture.
-2. Cancel once and verify no attachment is added.
+1. Minimize Zommi, press `Alt+Shift+A`, and confirm the selector appears without
+   waiting for a slow UIA capture.
+2. Cancel once and verify no attachment is added and the chat is restored,
+   foreground, and ready for composer input.
 3. Select a region and verify one image chip, dimensions, preview, removal, and
    pointer-context pairing.
 4. Treat blank/different GPU-composited Chrome pixels as a documented fidelity

@@ -37,6 +37,7 @@ class ZommiApp extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = ThemeData(
       brightness: Brightness.light,
+      fontFamily: codexUiFontFamily,
       colorScheme: ColorScheme.fromSeed(
         seedColor: const Color(0xff8178c9),
         brightness: Brightness.light,
@@ -281,6 +282,21 @@ class _ZommiShellState extends State<ZommiShell> {
                           onAttachmentExit: (_) => _schedulePreviewClose(),
                         ),
                       ),
+                      if (_controller.sessionPanelOpen)
+                        Positioned(
+                          left: 18,
+                          top: 2,
+                          bottom: 0,
+                          width: width / 2,
+                          child: TapRegion(
+                            groupId: _sessionTapGroup,
+                            child: SessionSidebar(
+                              controller: _controller,
+                              onPointerEnter: () => _sessionTimer?.cancel(),
+                              onPointerExit: _scheduleSessionsClose,
+                            ),
+                          ),
+                        ),
                       if (_controller.runtimePanelOpen)
                         Positioned(
                           top: 2,
@@ -379,21 +395,6 @@ class _ZommiShellState extends State<ZommiShell> {
                 _buildFooter(),
               ],
             ),
-            if (_controller.sessionPanelOpen)
-              Positioned(
-                left: 18,
-                top: 58,
-                bottom: 14,
-                width: width / 2,
-                child: TapRegion(
-                  groupId: _sessionTapGroup,
-                  child: SessionSidebar(
-                    controller: _controller,
-                    onPointerEnter: () => _sessionTimer?.cancel(),
-                    onPointerExit: _scheduleSessionsClose,
-                  ),
-                ),
-              ),
           ],
         ),
       ),
@@ -485,6 +486,7 @@ class _ZommiShellState extends State<ZommiShell> {
       child: Padding(
         padding: const EdgeInsets.fromLTRB(22, 6, 22, 6),
         child: Container(
+          key: const ValueKey('message-composer-shell'),
           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
           decoration: BoxDecoration(
             color: const Color(0xe6ffffff),
@@ -501,19 +503,11 @@ class _ZommiShellState extends State<ZommiShell> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Semantics(
-                button: true,
-                label: 'Select image context',
-                child: IconButton(
-                  key: const ValueKey('select-image'),
-                  tooltip: _controller.imageInputSupported
-                      ? 'Select image context'
-                      : '${_controller.activeRuntimeName} does not accept image input',
-                  onPressed: _controller.imageInputSupported
-                      ? () => unawaited(_controller.addImageContext())
-                      : null,
-                  icon: const Icon(Icons.add_rounded),
-                ),
+              _ComposerAttachmentMenu(
+                controller: _controller,
+                onCaptureContext: () =>
+                    unawaited(_controller.addPointerContext()),
+                onSelectImage: () => unawaited(_controller.addImageContext()),
               ),
               Expanded(
                 child: TextField(
@@ -628,6 +622,96 @@ class _ZommiShellState extends State<ZommiShell> {
             shortcuts,
             key: const ValueKey('shortcut-status'),
             style: const TextStyle(color: Color(0xff7b808d), fontSize: 10),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+enum _ComposerAttachmentAction { pointerContext, image }
+
+class _ComposerAttachmentMenu extends StatelessWidget {
+  const _ComposerAttachmentMenu({
+    required this.controller,
+    required this.onCaptureContext,
+    required this.onSelectImage,
+  });
+
+  final ZommiController controller;
+  final VoidCallback onCaptureContext;
+  final VoidCallback onSelectImage;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: 'Add context or image',
+      child: PopupMenuButton<_ComposerAttachmentAction>(
+        key: const ValueKey('composer-attachment-menu'),
+        tooltip: 'Add context or image',
+        position: PopupMenuPosition.over,
+        icon: const Icon(Icons.add_rounded),
+        onSelected: (action) {
+          switch (action) {
+            case _ComposerAttachmentAction.pointerContext:
+              onCaptureContext();
+              return;
+            case _ComposerAttachmentAction.image:
+              onSelectImage();
+              return;
+          }
+        },
+        itemBuilder: (context) => [
+          const PopupMenuItem(
+            key: ValueKey('capture-pointer-context'),
+            value: _ComposerAttachmentAction.pointerContext,
+            child: _ComposerAttachmentMenuRow(
+              icon: Icons.near_me_outlined,
+              label: 'Capture context under pointer',
+              shortcut: 'Alt+A',
+            ),
+          ),
+          PopupMenuItem(
+            key: const ValueKey('select-image-context'),
+            value: _ComposerAttachmentAction.image,
+            enabled: controller.imageInputSupported,
+            child: const _ComposerAttachmentMenuRow(
+              icon: Icons.crop_free_rounded,
+              label: 'Select image',
+              shortcut: 'Alt+Shift+A',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ComposerAttachmentMenuRow extends StatelessWidget {
+  const _ComposerAttachmentMenuRow({
+    required this.icon,
+    required this.label,
+    required this.shortcut,
+  });
+
+  final IconData icon;
+  final String label;
+  final String shortcut;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 226,
+      child: Row(
+        children: [
+          Icon(icon, size: 17),
+          const SizedBox(width: 9),
+          Expanded(child: Text(label, maxLines: 1)),
+          const SizedBox(width: 12),
+          Text(
+            shortcut,
+            style: const TextStyle(color: Color(0xff777c89), fontSize: 10),
           ),
         ],
       ),

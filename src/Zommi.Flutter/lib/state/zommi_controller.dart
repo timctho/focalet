@@ -740,6 +740,31 @@ final class ZommiController extends ChangeNotifier {
     }
   }
 
+  Future<void> addPointerContext() async {
+    var attachmentAdded = false;
+    try {
+      final attachment = await desktop.captureContext(hidePanel: true);
+      if (attachment != null) {
+        addAttachment(attachment);
+        attachmentAdded = true;
+        _setStatus('Context attached');
+      } else {
+        _setStatus(
+          'No accessible context was exposed under the pointer',
+          warning: true,
+        );
+      }
+    } on Object catch (error) {
+      _setStatus('Context capture failed · $error', warning: true);
+    } finally {
+      if (!attachmentAdded) {
+        focusComposerEpoch++;
+        _notify();
+      }
+      await desktop.showPanel();
+    }
+  }
+
   void addAttachment(ContextAttachment attachment) {
     attachments.add(attachment.withToken(_attachmentToken(attachment)));
     previewAttachment = null;

@@ -102,7 +102,7 @@ abstract interface class DesktopBridge {
 
   Future<DesktopReadiness> initialize();
 
-  Future<ContextAttachment?> captureContext();
+  Future<ContextAttachment?> captureContext({bool hidePanel = false});
 
   Future<ContextAttachment?> selectImageContext({
     bool includePointerContext = false,
@@ -147,7 +147,8 @@ final class NoopDesktopBridge implements DesktopBridge {
   Future<DesktopReadiness> initialize() async => const DesktopReadiness();
 
   @override
-  Future<ContextAttachment?> captureContext() async => null;
+  Future<ContextAttachment?> captureContext({bool hidePanel = false}) async =>
+      null;
 
   @override
   Future<ContextAttachment?> selectImageContext({
@@ -427,7 +428,25 @@ final class FlutterDesktopBridge
   }
 
   @override
-  Future<ContextAttachment?> captureContext() async {
+  Future<ContextAttachment?> captureContext({bool hidePanel = false}) async {
+    if (!hidePanel) return _capturePointerContext();
+    final wasVisible = await windowManager.isVisible();
+    final wasMinimized = await windowManager.isMinimized();
+    await windowManager.hide();
+    try {
+      // Let the compositor expose the application underneath Zommi before
+      // resolving the window and accessibility element at the pointer.
+      await Future<void>.delayed(const Duration(milliseconds: 90));
+      return await _capturePointerContext();
+    } finally {
+      await _restorePanelAfterCapture(
+        wasVisible: wasVisible,
+        wasMinimized: wasMinimized,
+      );
+    }
+  }
+
+  Future<ContextAttachment?> _capturePointerContext() async {
     Offset? point;
     try {
       point = await screenRetriever.getCursorScreenPoint();
@@ -444,11 +463,23 @@ final class FlutterDesktopBridge
     );
   }
 
+  Future<void> _restorePanelAfterCapture({
+    required bool wasVisible,
+    required bool wasMinimized,
+  }) async {
+    if (!wasVisible && !wasMinimized) return;
+    if (wasMinimized || await windowManager.isMinimized()) {
+      await windowManager.restore();
+    }
+    await windowManager.show();
+  }
+
   @override
   Future<ContextAttachment?> selectImageContext({
     bool includePointerContext = false,
   }) async {
     final wasVisible = await windowManager.isVisible();
+    final wasMinimized = await windowManager.isMinimized();
     await windowManager.hide();
     try {
       final contextFuture = includePointerContext
@@ -469,7 +500,10 @@ final class FlutterDesktopBridge
         bounds: selected.bounds,
       );
     } finally {
-      if (wasVisible) await windowManager.show();
+      await _restorePanelAfterCapture(
+        wasVisible: wasVisible,
+        wasMinimized: wasMinimized,
+      );
     }
   }
 

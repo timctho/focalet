@@ -11,6 +11,24 @@ import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
 
 const double userMessageBoxWidth = 416;
 const double assistantMessageBoxWidth = 496;
+const double _baselineMessageViewportWidth = 720;
+const double _transcriptHorizontalInsets = 48;
+
+double responsiveUserMessageBoxWidth(double viewportWidth) {
+  final growth = math.max(0, viewportWidth - _baselineMessageViewportWidth);
+  return math.min(
+    math.max(0, viewportWidth - _transcriptHorizontalInsets),
+    userMessageBoxWidth + growth * 0.62,
+  );
+}
+
+double responsiveAssistantMessageBoxWidth(double viewportWidth) {
+  final growth = math.max(0, viewportWidth - _baselineMessageViewportWidth);
+  return math.min(
+    math.max(0, viewportWidth - _transcriptHorizontalInsets),
+    assistantMessageBoxWidth + growth * 0.74,
+  );
+}
 
 class TranscriptPane extends StatefulWidget {
   const TranscriptPane({
@@ -161,13 +179,17 @@ class _TranscriptPaneState extends State<TranscriptPane> {
             itemCount: visible.length,
             itemBuilder: (context, index) {
               final turn = visible[index];
-              return ConversationTurnView(
-                key: ValueKey('turn-${turn.id}'),
-                turn: turn,
-                runtimeName: widget.controller.activeRuntimeName,
-                controller: widget.controller,
-                onAttachmentEnter: widget.onAttachmentEnter,
-                onAttachmentExit: widget.onAttachmentExit,
+              return LayoutBuilder(
+                builder: (context, constraints) => ConversationTurnView(
+                  key: ValueKey('turn-${turn.id}'),
+                  turn: turn,
+                  viewportWidth:
+                      constraints.maxWidth + _transcriptHorizontalInsets,
+                  runtimeName: widget.controller.activeRuntimeName,
+                  controller: widget.controller,
+                  onAttachmentEnter: widget.onAttachmentEnter,
+                  onAttachmentExit: widget.onAttachmentExit,
+                ),
               );
             },
           ),
@@ -210,6 +232,7 @@ class _TranscriptPaneState extends State<TranscriptPane> {
 class ConversationTurnView extends StatelessWidget {
   const ConversationTurnView({
     required this.turn,
+    required this.viewportWidth,
     required this.runtimeName,
     required this.controller,
     required this.onAttachmentEnter,
@@ -218,6 +241,7 @@ class ConversationTurnView extends StatelessWidget {
   });
 
   final ConversationTurn turn;
+  final double viewportWidth;
   final String runtimeName;
   final ZommiController controller;
   final ValueChanged<ContextAttachment> onAttachmentEnter;
@@ -245,8 +269,8 @@ class ConversationTurnView extends StatelessWidget {
               alignment: Alignment.centerRight,
               child: Container(
                 key: ValueKey('user-message-${turn.id}'),
-                constraints: const BoxConstraints(
-                  maxWidth: userMessageBoxWidth,
+                constraints: BoxConstraints(
+                  maxWidth: responsiveUserMessageBoxWidth(viewportWidth),
                 ),
                 padding: const EdgeInsets.symmetric(
                   horizontal: 13,
@@ -257,6 +281,7 @@ class ConversationTurnView extends StatelessWidget {
                   borderRadius: BorderRadius.circular(18),
                 ),
                 child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     if (turn.contextTokens.isNotEmpty &&
@@ -302,6 +327,9 @@ class ConversationTurnView extends StatelessWidget {
                   child: block.kind == TranscriptKind.assistant
                       ? AssistantBlockView(
                           block: block,
+                          width: responsiveAssistantMessageBoxWidth(
+                            viewportWidth,
+                          ),
                           runtimeName: runtimeName,
                           controller: controller,
                         )
@@ -309,9 +337,18 @@ class ConversationTurnView extends StatelessWidget {
                       ? ThinkingActivityGroup(
                           block: block,
                           tools: tools,
+                          width: responsiveAssistantMessageBoxWidth(
+                            viewportWidth,
+                          ),
                           controller: controller,
                         )
-                      : ActivityBlockView(block: block, controller: controller),
+                      : ActivityBlockView(
+                          block: block,
+                          width: responsiveAssistantMessageBoxWidth(
+                            viewportWidth,
+                          ),
+                          controller: controller,
+                        ),
                 ),
           ],
         ),
@@ -403,12 +440,14 @@ class ThinkingActivityGroup extends StatelessWidget {
   const ThinkingActivityGroup({
     required this.block,
     required this.tools,
+    required this.width,
     required this.controller,
     super.key,
   });
 
   final TranscriptBlock block;
   final List<TranscriptBlock> tools;
+  final double width;
   final ZommiController controller;
 
   @override
@@ -420,9 +459,7 @@ class ThinkingActivityGroup extends StatelessWidget {
       child: Align(
         alignment: Alignment.centerLeft,
         child: ConstrainedBox(
-          constraints: const BoxConstraints.tightFor(
-            width: assistantMessageBoxWidth,
-          ),
+          constraints: BoxConstraints.tightFor(width: width),
           child: Container(
             key: ValueKey('activity-${block.id}'),
             decoration: BoxDecoration(
@@ -624,12 +661,14 @@ class _ToolActivitySubItem extends StatelessWidget {
 class AssistantBlockView extends StatelessWidget {
   const AssistantBlockView({
     required this.block,
+    required this.width,
     required this.runtimeName,
     required this.controller,
     super.key,
   });
 
   final TranscriptBlock block;
+  final double width;
   final String runtimeName;
   final ZommiController controller;
 
@@ -642,9 +681,7 @@ class AssistantBlockView extends StatelessWidget {
         alignment: Alignment.centerLeft,
         child: Container(
           key: ValueKey('assistant-${block.id}'),
-          constraints: const BoxConstraints.tightFor(
-            width: assistantMessageBoxWidth,
-          ),
+          constraints: BoxConstraints.tightFor(width: width),
           padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 5),
           decoration: BoxDecoration(
             color: const Color(0xb3ffffff),
@@ -652,6 +689,7 @@ class AssistantBlockView extends StatelessWidget {
             border: Border.all(color: const Color(0x99ffffff)),
           ),
           child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               CopyableMarkdown(
@@ -672,11 +710,13 @@ class AssistantBlockView extends StatelessWidget {
 class ActivityBlockView extends StatelessWidget {
   const ActivityBlockView({
     required this.block,
+    required this.width,
     required this.controller,
     super.key,
   });
 
   final TranscriptBlock block;
+  final double width;
   final ZommiController controller;
 
   @override
@@ -694,7 +734,7 @@ class ActivityBlockView extends StatelessWidget {
       child: Align(
         alignment: Alignment.centerLeft,
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: assistantMessageBoxWidth),
+          constraints: BoxConstraints(maxWidth: width),
           child: Container(
             key: ValueKey('activity-${block.id}'),
             decoration: BoxDecoration(

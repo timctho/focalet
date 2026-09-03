@@ -419,8 +419,8 @@ final class FakeDesktopBridge implements DesktopBridge {
   }
 
   @override
-  Future<ContextAttachment?> captureContext() async {
-    calls.add('capture');
+  Future<ContextAttachment?> captureContext({bool hidePanel = false}) async {
+    calls.add('capture:$hidePanel');
     return nextContext;
   }
 

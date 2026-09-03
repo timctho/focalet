@@ -45,47 +45,70 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
           ConstrainedBox(
             key: ValueKey('copy-layout-${widget.text.hashCode}'),
             constraints: const BoxConstraints(minHeight: 24),
-            child: Padding(
-              padding: const EdgeInsets.only(right: 28),
-              child: MarkdownBody(
-                data: widget.text,
-                selectable: true,
-                fitContent: false,
-                onTapLink: (_, href, _) {
-                  if (href != null) unawaited(widget.onOpenLink(href));
-                },
-                builders: {
-                  'pre': _CodeBlockBuilder(onCopy: widget.onCopy),
-                  'a': _TooltipLinkBuilder(onOpen: widget.onOpenLink),
-                },
-                styleSheet: MarkdownStyleSheet(
-                  p: base,
-                  h1: base.copyWith(
-                    fontSize: 19.5,
-                    fontWeight: FontWeight.w700,
-                  ),
-                  h2: base.copyWith(
-                    fontSize: 17.5,
-                    fontWeight: FontWeight.w700,
-                  ),
-                  h3: base.copyWith(fontSize: 16, fontWeight: FontWeight.w700),
-                  code: base.copyWith(
-                    fontFamily: 'monospace',
-                    fontSize: widget.compact
-                        ? compactChatCodeFontSize
-                        : chatCodeFontSize,
-                    backgroundColor: const Color(0xffeef0f6),
-                  ),
-                  codeblockPadding: EdgeInsets.zero,
-                  codeblockDecoration: const BoxDecoration(),
-                  blockquoteDecoration: const BoxDecoration(
-                    border: Border(
-                      left: BorderSide(color: Color(0xff8f83ce), width: 3),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              heightFactor: 1,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 28),
+                child: MarkdownBody(
+                  data: widget.text,
+                  selectable: true,
+                  fitContent: false,
+                  onTapLink: (_, href, _) {
+                    if (href != null) unawaited(widget.onOpenLink(href));
+                  },
+                  builders: {
+                    'pre': _CodeBlockBuilder(onCopy: widget.onCopy),
+                    'a': _TooltipLinkBuilder(onOpen: widget.onOpenLink),
+                  },
+                  styleSheet: MarkdownStyleSheet(
+                    a: base.copyWith(
+                      color: const Color(0xff5d54a4),
+                      decoration: TextDecoration.underline,
                     ),
+                    p: base,
+                    h1: base.copyWith(
+                      fontSize: 19.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    h2: base.copyWith(
+                      fontSize: 17.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    h3: base.copyWith(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    h4: base.copyWith(fontWeight: FontWeight.w700),
+                    h5: base.copyWith(fontWeight: FontWeight.w700),
+                    h6: base.copyWith(fontWeight: FontWeight.w700),
+                    em: base.copyWith(fontStyle: FontStyle.italic),
+                    strong: base.copyWith(fontWeight: FontWeight.w700),
+                    del: base.copyWith(decoration: TextDecoration.lineThrough),
+                    blockquote: base,
+                    listBullet: base,
+                    tableHead: base.copyWith(fontWeight: FontWeight.w700),
+                    tableBody: base,
+                    code: base.copyWith(
+                      fontFamily: 'monospace',
+                      fontSize: widget.compact
+                          ? compactChatCodeFontSize
+                          : chatCodeFontSize,
+                      backgroundColor: const Color(0xffeef0f6),
+                    ),
+                    codeblockPadding: EdgeInsets.zero,
+                    codeblockDecoration: const BoxDecoration(),
+                    blockquoteDecoration: const BoxDecoration(
+                      border: Border(
+                        left: BorderSide(color: Color(0xff8f83ce), width: 3),
+                      ),
+                    ),
+                    blockquotePadding: const EdgeInsets.only(left: 12),
+                    tableBorder: TableBorder.all(
+                      color: const Color(0xffd7dbe5),
+                    ),
+                    tableCellsPadding: const EdgeInsets.all(7),
                   ),
-                  blockquotePadding: const EdgeInsets.only(left: 12),
-                  tableBorder: TableBorder.all(color: const Color(0xffd7dbe5)),
-                  tableCellsPadding: const EdgeInsets.all(7),
                 ),
               ),
             ),

@@ -117,8 +117,10 @@ void main() {
     final layout = find.byKey(ValueKey('copy-layout-${singleLine.hashCode}'));
     final responseCopyRect = tester.getRect(responseCopy);
     final layoutRect = tester.getRect(layout);
+    final singleLineMarkdown = tester.getRect(find.byType(MarkdownBody));
     expect(tester.getSize(responseCopy), const Size(24, 24));
     expect(tester.getSize(layout).height, 24);
+    expect(singleLineMarkdown.center.dy, closeTo(layoutRect.center.dy, 0.01));
     expect(responseCopyRect.top, greaterThanOrEqualTo(layoutRect.top));
     expect(responseCopyRect.bottom, lessThanOrEqualTo(layoutRect.bottom));
 
@@ -175,6 +177,22 @@ void main() {
     );
     expect(tester.getSize(user).height, lessThanOrEqualTo(36));
     expect(tester.getSize(assistant).height, lessThanOrEqualTo(36));
+    expect(
+      tester
+          .getCenter(
+            find.descendant(of: user, matching: find.byType(MarkdownBody)),
+          )
+          .dy,
+      closeTo(tester.getCenter(user).dy, 0.01),
+    );
+    expect(
+      tester
+          .getCenter(
+            find.descendant(of: assistant, matching: find.byType(MarkdownBody)),
+          )
+          .dy,
+      closeTo(tester.getCenter(assistant).dy, 0.01),
+    );
   });
 
   testWidgets(
@@ -266,7 +284,7 @@ void main() {
         find.byKey(const ValueKey('zommi-composer')),
         'hey i own ',
       );
-      await tester.tap(find.byKey(const ValueKey('select-image')));
+      await _selectImageFromComposerMenu(tester);
       await tester.pumpAndSettle();
       expect(desktop.calls, contains('selectImage:false'));
       expect(
@@ -282,7 +300,7 @@ void main() {
         token: '',
         imageDataUrl: _onePixelPng,
       );
-      await tester.tap(find.byKey(const ValueKey('select-image')));
+      await _selectImageFromComposerMenu(tester);
       await tester.pumpAndSettle();
       expect(
         find.byKey(const ValueKey('inline-image-image-2')),
@@ -343,6 +361,44 @@ void main() {
       );
     },
   );
+
+  testWidgets('composer plus menu captures pointer context and offers image', (
+    tester,
+  ) async {
+    final desktop = FakeDesktopBridge()
+      ..nextContext = _browserAttachment('menu-context');
+    await _pumpApp(
+      tester,
+      core: RichFakeCore()..historyCount = 0,
+      desktop: desktop,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('composer-attachment-menu')));
+    await tester.pumpAndSettle();
+    expect(find.text('Capture context under pointer'), findsOneWidget);
+    expect(find.text('Select image'), findsOneWidget);
+    expect(find.text('Alt+A'), findsOneWidget);
+    expect(find.text('Alt+Shift+A'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('capture-pointer-context')));
+    await tester.pumpAndSettle();
+    expect(desktop.calls, containsAllInOrder(['capture:true', 'showPanel']));
+    expect(
+      desktop.calls.where((call) => call.startsWith('selectImage:')),
+      isEmpty,
+    );
+    expect(
+      find.byKey(const ValueKey('inline-attachment-menu-context')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('zommi-composer')))
+          .focusNode
+          ?.hasFocus,
+      isTrue,
+    );
+  });
 
   testWidgets(
     'runtime, model, effort, and provider-owned sessions stay exact',
@@ -424,8 +480,15 @@ void main() {
       final surfaceSize = tester.getSize(
         find.byKey(const ValueKey('zommi-surface')),
       );
+      final sessionPanelBounds = tester.getRect(
+        find.byKey(const ValueKey('session-sidebar')),
+      );
+      final composerBounds = tester.getRect(
+        find.byKey(const ValueKey('message-composer-shell')),
+      );
       expect(sessionPanelSize.width, surfaceSize.width / 2);
-      expect(sessionPanelSize.height, surfaceSize.height - 72);
+      expect(sessionPanelBounds.bottom, lessThanOrEqualTo(composerBounds.top));
+      expect(sessionPanelBounds.overlaps(composerBounds), isFalse);
       await tester.tap(find.byKey(const ValueKey('session-session-2')));
       await tester.pumpAndSettle();
       expect(core.activeSessionId, 'session-2');
@@ -591,6 +654,18 @@ void main() {
         markdown.map((body) => body.styleSheet?.p?.fontFamily),
         contains(codexUiFontFamily),
       );
+      expect(
+        Theme.of(tester.element(find.byType(ZommiShell)))
+            .textTheme
+            .bodyMedium
+            ?.fontFamily,
+        codexUiFontFamily,
+      );
+      for (final body in markdown) {
+        expect(body.styleSheet?.strong?.fontFamily, codexUiFontFamily);
+        expect(body.styleSheet?.listBullet?.fontFamily, codexUiFontFamily);
+        expect(body.styleSheet?.tableBody?.fontFamily, codexUiFontFamily);
+      }
       final userBox = tester.widget<Container>(
         find.byWidgetPredicate(
           (widget) =>
@@ -606,8 +681,14 @@ void main() {
       );
       expect(userMessageBoxWidth, 520 * 0.8);
       expect(assistantMessageBoxWidth, 620 * 0.8);
-      expect(userBox.constraints?.maxWidth, userMessageBoxWidth);
-      expect(assistantBox.constraints?.maxWidth, assistantMessageBoxWidth);
+      expect(
+        userBox.constraints?.maxWidth,
+        responsiveUserMessageBoxWidth(1000),
+      );
+      expect(
+        assistantBox.constraints?.maxWidth,
+        responsiveAssistantMessageBoxWidth(1000),
+      );
       const linkUrl = 'https://example.com/item?q=1';
       final link = find.byKey(const ValueKey('markdown-link-$linkUrl'));
       expect(link, findsOneWidget);
@@ -928,7 +1009,10 @@ void main() {
         ),
         findsOneWidget,
       );
-      expect(tester.getSize(thinkingCard).width, assistantMessageBoxWidth);
+      expect(
+        tester.getSize(thinkingCard).width,
+        responsiveAssistantMessageBoxWidth(1000),
+      );
       await tester.ensureVisible(thinkingCard);
       await tester.pumpAndSettle();
       await expectLater(
@@ -1195,6 +1279,47 @@ void main() {
     expect(position.pixels, closeTo(before, 0.01));
   });
 
+  testWidgets('message boxes widen with the enlarged window', (tester) async {
+    await tester.binding.setSurfaceSize(normalWindowSize);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final core = RichFakeCore()..historyCount = 1;
+    await tester.pumpWidget(ZommiApp(core: core, desktop: FakeDesktopBridge()));
+    await tester.pumpAndSettle();
+    final assistant = find.byKey(
+      const ValueKey('assistant-session-1-answer-1'),
+    );
+    final user = find.byKey(const ValueKey('user-message-session-1-turn-1'));
+    final normalAssistantWidth = tester.getSize(assistant).width;
+    final normalUserConstraint = tester.widget<Container>(user).constraints!;
+
+    await tester.binding.setSurfaceSize(largeWindowSize);
+    await tester.pumpAndSettle();
+
+    final largeAssistantWidth = tester.getSize(assistant).width;
+    final largeUserConstraint = tester.widget<Container>(user).constraints!;
+    expect(
+      normalAssistantWidth,
+      responsiveAssistantMessageBoxWidth(normalWindowSize.width),
+    );
+    expect(
+      largeAssistantWidth,
+      responsiveAssistantMessageBoxWidth(largeWindowSize.width),
+    );
+    expect(largeAssistantWidth, greaterThan(normalAssistantWidth));
+    expect(
+      normalUserConstraint.maxWidth,
+      responsiveUserMessageBoxWidth(normalWindowSize.width),
+    );
+    expect(
+      largeUserConstraint.maxWidth,
+      responsiveUserMessageBoxWidth(largeWindowSize.width),
+    );
+    expect(
+      largeUserConstraint.maxWidth,
+      greaterThan(normalUserConstraint.maxWidth),
+    );
+  });
+
   testWidgets(
     'background completion becomes unread and exact interruption is preserved',
     (tester) async {
@@ -1269,6 +1394,12 @@ Future<void> _pumpApp(
 
 Future<void> _expand(WidgetTester tester) async {
   await tester.pumpAndSettle();
+}
+
+Future<void> _selectImageFromComposerMenu(WidgetTester tester) async {
+  await tester.tap(find.byKey(const ValueKey('composer-attachment-menu')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(const ValueKey('select-image-context')));
 }
 
 void _appendComposerText(WidgetTester tester, String value) {
