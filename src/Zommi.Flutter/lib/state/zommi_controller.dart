@@ -15,7 +15,9 @@ final class ZommiController extends ChangeNotifier {
     required this.core,
     required this.desktop,
     ArtifactLoader? artifactLoader,
-  }) : artifactLoader = artifactLoader ?? const LocalArtifactLoader();
+    bool initialLargePanel = false,
+  }) : artifactLoader = artifactLoader ?? const LocalArtifactLoader(),
+       largePanel = initialLargePanel;
 
   final CoreBridge core;
   final DesktopBridge desktop;
@@ -59,7 +61,7 @@ final class ZommiController extends ChangeNotifier {
   bool sessionSettingsBusy = false;
   bool submitting = false;
   bool expanded = true;
-  bool largePanel = false;
+  bool largePanel;
   bool surfaceTransitioning = false;
   bool surfaceTransitionAnimating = false;
   bool transitionTargetExpanded = true;
@@ -68,6 +70,7 @@ final class ZommiController extends ChangeNotifier {
   bool runtimePanelOpen = false;
   bool runtimeSetupPanelOpen = false;
   bool modelPanelOpen = false;
+  bool appSettingsPanelOpen = false;
   bool sessionSettingsDetailOpen = false;
   bool contextShortcutRegistered = false;
   bool imageShortcutRegistered = false;
@@ -250,6 +253,9 @@ final class ZommiController extends ChangeNotifier {
   Future<void> _initializeDesktopIntegration() async {
     try {
       final readiness = await desktop.initialize();
+      if (largePanel) {
+        await desktop.setSurface(expanded: true, large: true, animate: false);
+      }
       contextShortcutRegistered = readiness.contextShortcut;
       imageShortcutRegistered = readiness.imageShortcut;
       _notify();
@@ -776,7 +782,7 @@ final class ZommiController extends ChangeNotifier {
   Future<void> addPointerContext() async {
     var attachmentAdded = false;
     try {
-      final attachment = await desktop.captureContext(hidePanel: true);
+      final attachment = await desktop.selectPointerContext();
       if (attachment != null) {
         addAttachment(attachment);
         attachmentAdded = true;
@@ -1059,6 +1065,7 @@ final class ZommiController extends ChangeNotifier {
       runtimePanelOpen = false;
       modelPanelOpen = false;
       sessionSettingsDetailOpen = false;
+      appSettingsPanelOpen = false;
     }
     _notify();
   }
@@ -1070,6 +1077,7 @@ final class ZommiController extends ChangeNotifier {
       runtimeSetupPanelOpen = false;
       modelPanelOpen = false;
       sessionSettingsDetailOpen = false;
+      appSettingsPanelOpen = false;
     }
     _notify();
   }
@@ -1081,6 +1089,7 @@ final class ZommiController extends ChangeNotifier {
       runtimePanelOpen = false;
       modelPanelOpen = false;
       sessionSettingsDetailOpen = false;
+      appSettingsPanelOpen = false;
     }
     _notify();
   }
@@ -1099,6 +1108,7 @@ final class ZommiController extends ChangeNotifier {
       sessionPanelOpen = false;
       runtimePanelOpen = false;
       runtimeSetupPanelOpen = false;
+      appSettingsPanelOpen = false;
     }
     _notify();
   }
@@ -1109,6 +1119,25 @@ final class ZommiController extends ChangeNotifier {
     runtimeSetupPanelOpen = false;
     modelPanelOpen = false;
     sessionSettingsDetailOpen = false;
+    appSettingsPanelOpen = false;
+    _notify();
+  }
+
+  void toggleAppSettingsPanel() {
+    appSettingsPanelOpen = !appSettingsPanelOpen;
+    if (appSettingsPanelOpen) {
+      sessionPanelOpen = false;
+      runtimePanelOpen = false;
+      runtimeSetupPanelOpen = false;
+      modelPanelOpen = false;
+      sessionSettingsDetailOpen = false;
+    }
+    _notify();
+  }
+
+  void dismissAppSettingsPanel() {
+    if (!appSettingsPanelOpen) return;
+    appSettingsPanelOpen = false;
     _notify();
   }
 

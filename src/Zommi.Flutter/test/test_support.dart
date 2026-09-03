@@ -479,6 +479,12 @@ final class FakeDesktopBridge implements DesktopBridge {
   }
 
   @override
+  Future<ContextAttachment?> selectPointerContext() async {
+    calls.add('selectPointerContext');
+    return nextContext;
+  }
+
+  @override
   Future<ContextAttachment?> selectImageContext({
     bool includePointerContext = false,
   }) async {

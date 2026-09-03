@@ -7,6 +7,7 @@ import 'package:zommi_flutter/desktop/artifact_loader.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
+import 'package:zommi_flutter/theme/app_preferences.dart';
 import 'package:zommi_flutter/theme/zommi_typography.dart';
 import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
 import 'package:zommi_flutter/widgets/overlay_panels.dart';
@@ -20,17 +21,34 @@ const double bottomAnchorInset = windowBottomInset;
 const Duration sessionPanelHideDelay = Duration(milliseconds: 500);
 const Duration previewHideDelay = Duration(milliseconds: 260);
 
-class ZommiApp extends StatelessWidget {
+class ZommiApp extends StatefulWidget {
   const ZommiApp({
     required this.core,
     this.desktop = const NoopDesktopBridge(),
     this.artifactLoader,
+    this.initialPreferences = const AppPreferences(),
+    this.preferencesStore = const NoopAppPreferencesStore(),
     super.key,
   });
 
   final CoreBridge core;
   final DesktopBridge desktop;
   final ArtifactLoader? artifactLoader;
+  final AppPreferences initialPreferences;
+  final AppPreferencesStore preferencesStore;
+
+  @override
+  State<ZommiApp> createState() => _ZommiAppState();
+}
+
+class _ZommiAppState extends State<ZommiApp> {
+  late AppPreferences _preferences = widget.initialPreferences;
+
+  void _updatePreferences(AppPreferences preferences) {
+    if (_preferences == preferences) return;
+    setState(() => _preferences = preferences);
+    unawaited(widget.preferencesStore.save(preferences).catchError((_) {}));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -38,7 +56,7 @@ class ZommiApp extends StatelessWidget {
       brightness: Brightness.light,
       fontFamily: codexUiFontFamily,
       colorScheme: ColorScheme.fromSeed(
-        seedColor: const Color(0xff8178c9),
+        seedColor: _preferences.themeColor.seed,
         brightness: Brightness.light,
       ),
       scaffoldBackgroundColor: Colors.transparent,
@@ -50,11 +68,19 @@ class ZommiApp extends StatelessWidget {
       theme: theme.copyWith(
         textTheme: _compactTextTheme(theme.textTheme),
         visualDensity: VisualDensity.compact,
+        extensions: [
+          ZommiVisualSettings(
+            chatFontSize: _preferences.chatFontSize,
+            themeColor: _preferences.themeColor,
+          ),
+        ],
       ),
       home: ZommiShell(
-        core: core,
-        desktop: desktop,
-        artifactLoader: artifactLoader,
+        core: widget.core,
+        desktop: widget.desktop,
+        artifactLoader: widget.artifactLoader,
+        preferences: _preferences,
+        onPreferencesChanged: _updatePreferences,
       ),
     );
   }
@@ -89,6 +115,8 @@ TextTheme _compactTextTheme(TextTheme base) {
 class ZommiShell extends StatefulWidget {
   const ZommiShell({
     required this.core,
+    required this.preferences,
+    required this.onPreferencesChanged,
     this.desktop = const NoopDesktopBridge(),
     this.artifactLoader,
     super.key,
@@ -97,6 +125,8 @@ class ZommiShell extends StatefulWidget {
   final CoreBridge core;
   final DesktopBridge desktop;
   final ArtifactLoader? artifactLoader;
+  final AppPreferences preferences;
+  final ValueChanged<AppPreferences> onPreferencesChanged;
 
   @override
   State<ZommiShell> createState() => _ZommiShellState();
@@ -110,8 +140,10 @@ class _ZommiShellState extends State<ZommiShell> {
   final Object _runtimeTapGroup = Object();
   final Object _runtimeSetupTapGroup = Object();
   final Object _modelTapGroup = Object();
+  final Object _appSettingsTapGroup = Object();
   final LayerLink _runtimePanelLink = LayerLink();
   final LayerLink _settingsPanelLink = LayerLink();
+  final LayerLink _appSettingsPanelLink = LayerLink();
   Timer? _previewTimer;
   Timer? _sessionTimer;
   int _lastFocusEpoch = 0;
@@ -123,6 +155,7 @@ class _ZommiShellState extends State<ZommiShell> {
       core: widget.core,
       desktop: widget.desktop,
       artifactLoader: widget.artifactLoader,
+      initialLargePanel: widget.preferences.largeWindow,
     );
     _composer = InlineAttachmentTextController(
       onAttachmentRemoved: (attachment) =>
@@ -212,6 +245,7 @@ class _ZommiShellState extends State<ZommiShell> {
       } else if (_controller.runtimePanelOpen ||
           _controller.runtimeSetupPanelOpen ||
           _controller.modelPanelOpen ||
+          _controller.appSettingsPanelOpen ||
           _controller.sessionPanelOpen) {
         _controller.closeTransientPanels();
       } else {
@@ -249,11 +283,18 @@ class _ZommiShellState extends State<ZommiShell> {
   }
 
   Widget _buildPanel(double width, double height) {
+    final accent = Theme.of(context).colorScheme.primary;
+    final tone = Theme.of(context).extension<ZommiVisualSettings>()?.themeColor;
     return ClipRRect(
       borderRadius: BorderRadius.circular(34),
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: const Color(0xeaf9fbff),
+          color: tone == null || tone == ZommiThemeColor.violet
+              ? const Color(0xeaf9fbff)
+              : Color.alphaBlend(
+                  accent.withValues(alpha: 0.055),
+                  const Color(0xeaf9fbff),
+                ),
           borderRadius: BorderRadius.circular(34),
           border: Border.all(color: const Color(0xccffffff)),
           boxShadow: const [
@@ -325,18 +366,14 @@ class _ZommiShellState extends State<ZommiShell> {
                             onPointerExit: _schedulePreviewClose,
                           ),
                         ),
-                      if (_controller.starting || _controller.runtimeBusy)
+                      if (_controller.starting)
                         Positioned(
                           top: 10,
                           left: 0,
                           right: 0,
                           child: IgnorePointer(
                             child: Center(
-                              child: _LoadingPill(
-                                label: _controller.starting
-                                    ? 'Waking Zommi…'
-                                    : _controller.status,
-                              ),
+                              child: _LoadingPill(label: 'Waking Zommi…'),
                             ),
                           ),
                         ),
@@ -407,6 +444,26 @@ class _ZommiShellState extends State<ZommiShell> {
                   child: TapRegion(
                     groupId: _modelTapGroup,
                     child: SessionSettingsPanel(controller: _controller),
+                  ),
+                ),
+              ),
+            if (_controller.appSettingsPanelOpen)
+              Positioned(
+                left: 0,
+                top: 0,
+                child: CompositedTransformFollower(
+                  link: _appSettingsPanelLink,
+                  showWhenUnlinked: false,
+                  targetAnchor: Alignment.bottomRight,
+                  followerAnchor: Alignment.topRight,
+                  offset: const Offset(0, 6),
+                  child: TapRegion(
+                    groupId: _appSettingsTapGroup,
+                    child: AppSettingsPanel(
+                      controller: _controller,
+                      preferences: widget.preferences,
+                      onChanged: widget.onPreferencesChanged,
+                    ),
                   ),
                 ),
               ),
@@ -483,15 +540,18 @@ class _ZommiShellState extends State<ZommiShell> {
                 ),
               ],
               const Expanded(child: SizedBox.expand()),
-              _HeaderButton(
-                key: const ValueKey('expand-zommi'),
-                label: _controller.largePanel
-                    ? 'Restore Zommi'
-                    : 'Expand Zommi',
-                icon: _controller.largePanel
-                    ? Icons.close_fullscreen_rounded
-                    : Icons.open_in_full_rounded,
-                onPressed: () => unawaited(_controller.toggleLargePanel()),
+              TapRegion(
+                groupId: _appSettingsTapGroup,
+                onTapOutside: (_) => _controller.dismissAppSettingsPanel(),
+                child: CompositedTransformTarget(
+                  link: _appSettingsPanelLink,
+                  child: _HeaderButton(
+                    key: const ValueKey('app-settings'),
+                    label: 'App settings',
+                    icon: Icons.settings_outlined,
+                    onPressed: _controller.toggleAppSettingsPanel,
+                  ),
+                ),
               ),
             ],
           ),
@@ -652,7 +712,7 @@ class _ZommiShellState extends State<ZommiShell> {
 
 enum _ComposerAttachmentAction { pointerContext, image }
 
-class _ComposerAttachmentMenu extends StatelessWidget {
+class _ComposerAttachmentMenu extends StatefulWidget {
   const _ComposerAttachmentMenu({
     required this.controller,
     required this.onCaptureContext,
@@ -664,77 +724,217 @@ class _ComposerAttachmentMenu extends StatelessWidget {
   final VoidCallback onSelectImage;
 
   @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      label: 'Add context or image',
-      child: PopupMenuButton<_ComposerAttachmentAction>(
-        key: const ValueKey('composer-attachment-menu'),
-        tooltip: 'Add context or image',
-        position: PopupMenuPosition.over,
-        icon: const Icon(Icons.add_rounded),
-        onSelected: (action) {
-          switch (action) {
-            case _ComposerAttachmentAction.pointerContext:
-              onCaptureContext();
-              return;
-            case _ComposerAttachmentAction.image:
-              onSelectImage();
-              return;
-          }
-        },
-        itemBuilder: (context) => [
-          const PopupMenuItem(
-            key: ValueKey('capture-pointer-context'),
-            value: _ComposerAttachmentAction.pointerContext,
-            child: _ComposerAttachmentMenuRow(
-              icon: Icons.near_me_outlined,
-              label: 'Capture context under pointer',
-              shortcut: 'Alt+A',
+  State<_ComposerAttachmentMenu> createState() =>
+      _ComposerAttachmentMenuState();
+}
+
+class _ComposerAttachmentMenuState extends State<_ComposerAttachmentMenu>
+    with SingleTickerProviderStateMixin {
+  final LayerLink _link = LayerLink();
+  OverlayEntry? _entry;
+  late final AnimationController _animation = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 180),
+    reverseDuration: const Duration(milliseconds: 120),
+  );
+  late final Animation<double> _opacity = CurvedAnimation(
+    parent: _animation,
+    curve: Curves.easeOutCubic,
+    reverseCurve: Curves.easeInCubic,
+  );
+  late final Animation<Offset> _slide = Tween<Offset>(
+    begin: const Offset(0, 0.12),
+    end: Offset.zero,
+  ).animate(_opacity);
+
+  void _toggle() => _entry == null ? _show() : unawaited(_hide());
+
+  void _show() {
+    if (_entry != null) return;
+    _entry = OverlayEntry(
+      builder: (context) => Stack(
+        children: [
+          Positioned.fill(
+            child: GestureDetector(
+              key: const ValueKey('composer-attachment-menu-barrier'),
+              behavior: HitTestBehavior.translucent,
+              onTap: () => unawaited(_hide()),
             ),
           ),
-          PopupMenuItem(
-            key: const ValueKey('select-image-context'),
-            value: _ComposerAttachmentAction.image,
-            enabled: controller.imageInputSupported,
-            child: const _ComposerAttachmentMenuRow(
-              icon: Icons.crop_free_rounded,
-              label: 'Select image',
-              shortcut: 'Alt+Shift+A',
+          CompositedTransformFollower(
+            link: _link,
+            showWhenUnlinked: false,
+            targetAnchor: Alignment.topLeft,
+            followerAnchor: Alignment.bottomLeft,
+            offset: const Offset(0, -12),
+            child: FadeTransition(
+              opacity: _opacity,
+              child: SlideTransition(
+                position: _slide,
+                child: _ComposerAttachmentMenuSurface(
+                  imageEnabled: widget.controller.imageInputSupported,
+                  onSelected: _select,
+                ),
+              ),
             ),
           ),
         ],
       ),
     );
+    Overlay.of(context, rootOverlay: true).insert(_entry!);
+    _animation.forward(from: 0);
+  }
+
+  Future<void> _hide() async {
+    final entry = _entry;
+    if (entry == null) return;
+    _entry = null;
+    await _animation.reverse();
+    entry.remove();
+  }
+
+  void _select(_ComposerAttachmentAction action) =>
+      unawaited(_selectAfterHide(action));
+
+  Future<void> _selectAfterHide(_ComposerAttachmentAction action) async {
+    await _hide();
+    if (!mounted) return;
+    switch (action) {
+      case _ComposerAttachmentAction.pointerContext:
+        widget.onCaptureContext();
+        return;
+      case _ComposerAttachmentAction.image:
+        widget.onSelectImage();
+        return;
+    }
+  }
+
+  @override
+  void dispose() {
+    _entry?.remove();
+    _entry = null;
+    _animation.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return CompositedTransformTarget(
+      link: _link,
+      child: Semantics(
+        button: true,
+        label: 'Add context or image',
+        child: IconButton(
+          key: const ValueKey('composer-attachment-menu'),
+          tooltip: 'Add context or image',
+          onPressed: _toggle,
+          visualDensity: VisualDensity.compact,
+          icon: const Icon(Icons.add_rounded),
+        ),
+      ),
+    );
   }
 }
 
-class _ComposerAttachmentMenuRow extends StatelessWidget {
-  const _ComposerAttachmentMenuRow({
+class _ComposerAttachmentMenuSurface extends StatelessWidget {
+  const _ComposerAttachmentMenuSurface({
+    required this.imageEnabled,
+    required this.onSelected,
+  });
+
+  final bool imageEnabled;
+  final ValueChanged<_ComposerAttachmentAction> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      key: const ValueKey('composer-attachment-menu-surface'),
+      color: const Color(0xfaf7f9fd),
+      elevation: 18,
+      borderRadius: BorderRadius.circular(18),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        width: 286,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 7),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _ComposerAttachmentMenuItem(
+                key: const ValueKey('capture-pointer-context'),
+                icon: Icons.ads_click_rounded,
+                label: 'Click to capture context',
+                shortcut: 'Alt+A',
+                onTap: () =>
+                    onSelected(_ComposerAttachmentAction.pointerContext),
+              ),
+              _ComposerAttachmentMenuItem(
+                key: const ValueKey('select-image-context'),
+                icon: Icons.crop_free_rounded,
+                label: 'Select image',
+                shortcut: 'Alt+Shift+A',
+                enabled: imageEnabled,
+                onTap: () => onSelected(_ComposerAttachmentAction.image),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ComposerAttachmentMenuItem extends StatelessWidget {
+  const _ComposerAttachmentMenuItem({
     required this.icon,
     required this.label,
     required this.shortcut,
+    required this.onTap,
+    this.enabled = true,
+    super.key,
   });
 
   final IconData icon;
   final String label;
   final String shortcut;
+  final VoidCallback onTap;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 226,
-      child: Row(
-        children: [
-          Icon(icon, size: 17),
-          const SizedBox(width: 9),
-          Expanded(child: Text(label, maxLines: 1)),
-          const SizedBox(width: 12),
-          Text(
-            shortcut,
-            style: const TextStyle(color: Color(0xff777c89), fontSize: 10),
+    final foreground = enabled
+        ? const Color(0xff3c4352)
+        : Colors.blueGrey.shade300;
+    return InkWell(
+      onTap: enabled ? onTap : null,
+      child: SizedBox(
+        height: 44,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Row(
+            children: [
+              Icon(icon, size: 17, color: foreground),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  style: TextStyle(fontSize: 11.5, color: foreground),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                shortcut,
+                style: TextStyle(
+                  color: enabled
+                      ? const Color(0xff777c89)
+                      : Colors.blueGrey.shade300,
+                  fontSize: 10,
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

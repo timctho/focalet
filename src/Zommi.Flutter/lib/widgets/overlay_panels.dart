@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
+import 'package:zommi_flutter/theme/app_preferences.dart';
 import 'package:zommi_flutter/widgets/content_views.dart';
 
 class SessionSidebar extends StatelessWidget {
@@ -761,17 +762,21 @@ class _SessionSettingsPanelState extends State<SessionSettingsPanel> {
             onSelected: _setPage,
           ),
         );
-    return SizedBox(
-      key: const ValueKey('session-settings-panel'),
-      width: detail == null ? 286 : 390,
-      height: 390,
-      child: ClipRect(
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 190),
+      curve: Curves.easeOutCubic,
+      alignment: Alignment.topLeft,
+      child: SizedBox(
+        key: const ValueKey('session-settings-panel'),
+        width: detail == null ? 286 : 390,
+        height: detail == null ? null : 390,
         child: AnimatedSwitcher(
           duration: const Duration(milliseconds: 190),
           switchInCurve: Curves.easeOutCubic,
           switchOutCurve: Curves.easeInCubic,
           layoutBuilder: (currentChild, previousChildren) => Stack(
             alignment: Alignment.topLeft,
+            clipBehavior: Clip.none,
             children: [...previousChildren, ?currentChild],
           ),
           transitionBuilder: (child, animation) => SlideTransition(
@@ -805,12 +810,13 @@ class _SettingsOverview extends StatelessWidget {
       color: const Color(0xfaf7f9fd),
       elevation: 18,
       borderRadius: BorderRadius.circular(18),
+      clipBehavior: Clip.antiAlias,
       child: SizedBox(
         width: 286,
-        height: 390,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(10, 14, 10, 10),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Padding(
@@ -861,7 +867,6 @@ class _SettingsOverview extends StatelessWidget {
                   onTap: () => onSelected(_SessionSettingsPage.profile),
                 ),
               ],
-              const Spacer(),
               if (controller.sessionSettingsBusy)
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -872,6 +877,182 @@ class _SettingsOverview extends StatelessWidget {
                   ),
                 ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class AppSettingsPanel extends StatelessWidget {
+  const AppSettingsPanel({
+    required this.controller,
+    required this.preferences,
+    required this.onChanged,
+    super.key,
+  });
+
+  final ZommiController controller;
+  final AppPreferences preferences;
+  final ValueChanged<AppPreferences> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      key: const ValueKey('app-settings-panel'),
+      color: const Color(0xfaf7f9fd),
+      elevation: 18,
+      borderRadius: BorderRadius.circular(18),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        width: 310,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'App settings',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Chat message size',
+                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 7),
+              SegmentedButton<double>(
+                key: const ValueKey('chat-font-size-control'),
+                showSelectedIcon: false,
+                segments: const [
+                  ButtonSegment(value: 11, label: Text('Small')),
+                  ButtonSegment(value: 12, label: Text('Default')),
+                  ButtonSegment(value: 13, label: Text('Large')),
+                  ButtonSegment(value: 14, label: Text('XL')),
+                ],
+                selected: {preferences.chatFontSize},
+                onSelectionChanged: (selection) => onChanged(
+                  preferences.copyWith(chatFontSize: selection.single),
+                ),
+                style: const ButtonStyle(
+                  visualDensity: VisualDensity(horizontal: -3, vertical: -3),
+                  textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 10)),
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Theme color',
+                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 7),
+              Row(
+                key: const ValueKey('theme-color-control'),
+                children: [
+                  for (final color in ZommiThemeColor.values) ...[
+                    if (color != ZommiThemeColor.values.first)
+                      const SizedBox(width: 7),
+                    Expanded(
+                      child: _ThemeColorChoice(
+                        color: color,
+                        selected: preferences.themeColor == color,
+                        onTap: () =>
+                            onChanged(preferences.copyWith(themeColor: color)),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Window size',
+                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 7),
+              SegmentedButton<bool>(
+                key: const ValueKey('window-size-control'),
+                showSelectedIcon: false,
+                segments: const [
+                  ButtonSegment(
+                    value: false,
+                    icon: Icon(Icons.crop_portrait_rounded, size: 15),
+                    label: Text('Standard'),
+                  ),
+                  ButtonSegment(
+                    value: true,
+                    icon: Icon(Icons.open_in_full_rounded, size: 15),
+                    label: Text('Wide'),
+                  ),
+                ],
+                selected: {controller.largePanel},
+                onSelectionChanged: (selection) {
+                  if (selection.single != controller.largePanel) {
+                    onChanged(
+                      preferences.copyWith(largeWindow: selection.single),
+                    );
+                    unawaited(controller.toggleLargePanel());
+                  }
+                },
+                style: const ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                  textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 10.5)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ThemeColorChoice extends StatelessWidget {
+  const _ThemeColorChoice({
+    required this.color,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final ZommiThemeColor color;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: color.label,
+      child: InkWell(
+        key: ValueKey('theme-color-${color.id}'),
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          height: 34,
+          decoration: BoxDecoration(
+            color: selected
+                ? color.seed.withValues(alpha: 0.13)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: selected ? color.seed : const Color(0xffd9dde7),
+            ),
+          ),
+          child: Center(
+            child: Container(
+              width: 15,
+              height: 15,
+              decoration: BoxDecoration(
+                color: color.seed,
+                shape: BoxShape.circle,
+              ),
+              child: selected
+                  ? const Icon(
+                      Icons.check_rounded,
+                      color: Colors.white,
+                      size: 11,
+                    )
+                  : null,
+            ),
           ),
         ),
       ),
@@ -1150,6 +1331,7 @@ class _SettingsDetailShell extends StatelessWidget {
       color: const Color(0xfaf7f9fd),
       elevation: 18,
       borderRadius: BorderRadius.circular(18),
+      clipBehavior: Clip.antiAlias,
       child: SizedBox(
         width: 390,
         height: 390,

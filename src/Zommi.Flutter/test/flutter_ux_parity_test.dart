@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
+import 'package:zommi_flutter/theme/app_preferences.dart';
 import 'package:zommi_flutter/widgets/content_views.dart';
 import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
 import 'package:zommi_flutter/widgets/transcript_view.dart';
@@ -373,16 +374,30 @@ void main() {
       desktop: desktop,
     );
 
+    final composerBounds = tester.getRect(
+      find.byKey(const ValueKey('message-composer-shell')),
+    );
     await tester.tap(find.byKey(const ValueKey('composer-attachment-menu')));
+    await tester.pump();
+    final menu = find.byKey(const ValueKey('composer-attachment-menu-surface'));
+    final startingTop = tester.getTopLeft(menu).dy;
+    await tester.pump(const Duration(milliseconds: 90));
+    final movingTop = tester.getTopLeft(menu).dy;
     await tester.pumpAndSettle();
-    expect(find.text('Capture context under pointer'), findsOneWidget);
+    final menuBounds = tester.getRect(menu);
+    expect(movingTop, lessThan(startingTop));
+    expect(menuBounds.bottom, lessThanOrEqualTo(composerBounds.top));
+    expect(find.text('Click to capture context'), findsOneWidget);
     expect(find.text('Select image'), findsOneWidget);
     expect(find.text('Alt+A'), findsOneWidget);
     expect(find.text('Alt+Shift+A'), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('capture-pointer-context')));
     await tester.pumpAndSettle();
-    expect(desktop.calls, containsAllInOrder(['capture:true', 'showPanel']));
+    expect(
+      desktop.calls,
+      containsAllInOrder(['selectPointerContext', 'showPanel']),
+    );
     expect(
       desktop.calls.where((call) => call.startsWith('selectImage:')),
       isEmpty,
@@ -436,7 +451,7 @@ void main() {
         find.byKey(const ValueKey('runtime-loading-indicator')),
         findsOneWidget,
       );
-      expect(find.byKey(const ValueKey('loading-status')), findsOneWidget);
+      expect(find.byKey(const ValueKey('loading-status')), findsNothing);
       expect(core.activeTargetId, 'runtime-codex');
       switchGate.complete();
       await tester.pumpAndSettle();
@@ -592,6 +607,20 @@ void main() {
       final settings = find.byKey(const ValueKey('session-settings-panel'));
       expect(settings, findsOneWidget);
       expect(tester.getSize(settings).width, 286);
+      expect(tester.getSize(settings).height, lessThan(390));
+      expect(
+        tester
+            .widget<Material>(
+              find
+                  .ancestor(
+                    of: find.byKey(const ValueKey('settings-workspace')),
+                    matching: find.byType(Material),
+                  )
+                  .first,
+            )
+            .clipBehavior,
+        Clip.antiAlias,
+      );
       expect(find.byKey(const ValueKey('settings-workspace')), findsOneWidget);
       expect(find.byKey(const ValueKey('settings-model')), findsOneWidget);
       expect(find.byKey(const ValueKey('settings-profile')), findsOneWidget);
@@ -754,7 +783,9 @@ void main() {
     desktop.calls.clear();
     final transcript = tester.element(find.byType(TranscriptPane));
 
-    await tester.tap(find.byKey(const ValueKey('expand-zommi')));
+    await tester.tap(find.byKey(const ValueKey('app-settings')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Wide'));
     await tester.pumpAndSettle();
     expect(desktop.calls, contains('surface:true:true'));
     expect(
@@ -777,6 +808,65 @@ void main() {
     expect(
       identical(tester.element(find.byType(TranscriptPane)), transcript),
       isTrue,
+    );
+  });
+
+  testWidgets('gear opens app appearance settings and saves live choices', (
+    tester,
+  ) async {
+    final core = RichFakeCore()..historyCount = 0;
+    final desktop = FakeDesktopBridge();
+    await _pumpApp(tester, core: core, desktop: desktop);
+
+    expect(find.byKey(const ValueKey('expand-zommi')), findsNothing);
+    final gear = find.byKey(const ValueKey('app-settings'));
+    final gearBounds = tester.getRect(gear);
+    await tester.tap(gear);
+    await tester.pumpAndSettle();
+
+    final panel = find.byKey(const ValueKey('app-settings-panel'));
+    final panelBounds = tester.getRect(panel);
+    expect(panelBounds.right, closeTo(gearBounds.right, 0.1));
+    expect(panelBounds.top, closeTo(gearBounds.bottom + 6, 0.1));
+    expect(
+      find.byKey(const ValueKey('chat-font-size-control')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('theme-color-control')), findsOneWidget);
+
+    await tester.tap(find.text('Large'));
+    await tester.pumpAndSettle();
+    expect(
+      Theme.of(tester.element(find.byType(ZommiShell)))
+          .extension<ZommiVisualSettings>()
+          ?.chatFontSize,
+      13,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('theme-color-ocean')));
+    await tester.pumpAndSettle();
+    expect(
+      Theme.of(tester.element(find.byType(ZommiShell)))
+          .extension<ZommiVisualSettings>()
+          ?.themeColor,
+      ZommiThemeColor.ocean,
+    );
+
+    await tester.tap(gear);
+    await tester.pumpAndSettle();
+    expect(panel, findsNothing);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('zommi-composer')),
+      'larger chat type',
+    );
+    await tester.tap(find.byKey(const ValueKey('send-message')));
+    await tester.pump();
+    expect(
+      tester
+          .widgetList<MarkdownBody>(find.byType(MarkdownBody))
+          .map((body) => body.styleSheet?.p?.fontSize),
+      contains(13),
     );
   });
 

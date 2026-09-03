@@ -185,6 +185,22 @@ void main() {
         ),
       ),
     );
+    final pointSelector = File(
+      '${root.parent.path}/Zommi.Windows/PointSelectionForm.cs',
+    ).readAsStringSync();
+    expect(
+      pointSelector,
+      allOf(
+        contains('Text = "Zommi context selection"'),
+        contains('Cursor = Cursors.Cross'),
+        contains('Click a window or control to attach its context'),
+        contains('Result = Cursor.Position'),
+      ),
+    );
+    final nativeHost = File(
+      '${root.parent.path}/Zommi.Windows/CaptureNativeHost.cs',
+    ).readAsStringSync();
+    expect(nativeHost, contains('case "selectContext"'));
   });
 
   test(

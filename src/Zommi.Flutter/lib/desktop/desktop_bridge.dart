@@ -104,6 +104,8 @@ abstract interface class DesktopBridge {
 
   Future<ContextAttachment?> captureContext({bool hidePanel = false});
 
+  Future<ContextAttachment?> selectPointerContext();
+
   Future<ContextAttachment?> selectImageContext({
     bool includePointerContext = false,
   });
@@ -151,6 +153,9 @@ final class NoopDesktopBridge implements DesktopBridge {
   @override
   Future<ContextAttachment?> captureContext({bool hidePanel = false}) async =>
       null;
+
+  @override
+  Future<ContextAttachment?> selectPointerContext() async => null;
 
   @override
   Future<ContextAttachment?> selectImageContext({
@@ -443,6 +448,32 @@ final class FlutterDesktopBridge
       // resolving the window and accessibility element at the pointer.
       await Future<void>.delayed(const Duration(milliseconds: 90));
       return await _capturePointerContext();
+    } finally {
+      await _restorePanelAfterCapture(
+        wasVisible: wasVisible,
+        wasMinimized: wasMinimized,
+      );
+    }
+  }
+
+  @override
+  Future<ContextAttachment?> selectPointerContext() async {
+    final wasVisible = await windowManager.isVisible();
+    final wasMinimized = await windowManager.isMinimized();
+    await windowManager.hide();
+    try {
+      // The explicit picker owns the next click and changes the system cursor,
+      // so selecting context from the composer cannot feel like an immediate,
+      // invisible capture of the old pointer position.
+      await Future<void>.delayed(const Duration(milliseconds: 90));
+      final result = await _captureProvider.selectContext();
+      if (result?.snapshot == null) return null;
+      return ContextAttachment(
+        id: _nextAttachmentId(),
+        token: '',
+        snapshot: result!.snapshot,
+        previewText: result.previewText,
+      );
     } finally {
       await _restorePanelAfterCapture(
         wasVisible: wasVisible,
@@ -1115,6 +1146,8 @@ abstract interface class CaptureProvider {
 
   Future<CaptureResult> capture({Offset? point});
 
+  Future<CaptureResult?> selectContext();
+
   Future<ImageSelection?> selectImage();
 
   Future<void> close();
@@ -1181,6 +1214,16 @@ final class WindowsCaptureProvider implements CaptureProvider {
   }
 
   @override
+  Future<CaptureResult?> selectContext() async {
+    final response = await _selectorClient.request('selectContext');
+    if (response['cancelled'] == true) return null;
+    return CaptureResult(
+      snapshot: _nullableMap(response['snapshot']),
+      previewText: response['previewText']?.toString() ?? '',
+    );
+  }
+
+  @override
   Future<ImageSelection?> selectImage() async {
     final response = await _selectorClient.request('selectImage');
     if (response['cancelled'] == true) return null;
@@ -1226,17 +1269,35 @@ final class LinuxCaptureProvider implements CaptureProvider {
     final response = await _request([
       _useWaylandPortals ? 'portal-context' : 'context',
     ], const Duration(seconds: 5));
-    return portableCaptureResult(
-      application:
-          response['application']?.toString() ??
-          (_useWaylandPortals ? 'Linux desktop' : 'X11 application'),
-      processName: response['processName']?.toString(),
-      windowTitle: response['windowTitle']?.toString() ?? '',
-      url: '',
-      limitation:
-          response['limitation']?.toString() ??
-          'X11 semantic enrichment depends on AT-SPI.',
-    );
+    return _portableResultFromLinuxResponse(response);
+  }
+
+  CaptureResult _portableResultFromLinuxResponse(
+    Map<String, Object?> response,
+  ) => portableCaptureResult(
+    application:
+        response['application']?.toString() ??
+        (_useWaylandPortals ? 'Linux desktop' : 'X11 application'),
+    processName: response['processName']?.toString(),
+    windowTitle: response['windowTitle']?.toString() ?? '',
+    url: '',
+    limitation:
+        response['limitation']?.toString() ??
+        'X11 semantic enrichment depends on AT-SPI.',
+  );
+
+  @override
+  Future<CaptureResult?> selectContext() async {
+    if (_useWaylandPortals) {
+      // Wayland does not expose an unrestricted global pointer grab. Preserve
+      // the portal's explicit foreground-context authority on that platform.
+      return capture();
+    }
+    final response = await _request([
+      'point-context',
+    ], const Duration(minutes: 5));
+    if (response['cancelled'] == true) return null;
+    return _portableResultFromLinuxResponse(response);
   }
 
   @override
@@ -1309,6 +1370,9 @@ final class PortableCaptureProvider implements CaptureProvider {
   Future<CaptureResult> capture({Offset? point}) async {
     return _captureMac();
   }
+
+  @override
+  Future<CaptureResult?> selectContext() => capture();
 
   Future<CaptureResult> _captureMac() async {
     const script = '''

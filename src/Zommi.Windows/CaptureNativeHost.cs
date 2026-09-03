@@ -102,6 +102,9 @@ internal static class CaptureNativeHost
                 };
                 return false;
             }
+            case "selectContext":
+                result = SelectContext(capture);
+                return false;
             case "selectImage":
                 result = SelectImage();
                 return false;
@@ -150,6 +153,34 @@ internal static class CaptureNativeHost
                 selected.Bounds.Width,
                 selected.Bounds.Height,
             },
+        };
+    }
+
+    private static object SelectContext(ForegroundContextCapture capture)
+    {
+        using var selector = new PointSelectionForm();
+        var dialogResult = selector.ShowDialog();
+        if (dialogResult != DialogResult.OK || selector.Result is not { } point)
+        {
+            return new { Cancelled = true };
+        }
+
+        // The transparent picker must leave the z-order before WindowFromPoint
+        // resolves the user's target rather than Zommi's own overlay.
+        Application.DoEvents();
+        Thread.Sleep(80);
+        var captured = capture.CaptureAt(DateTimeOffset.UtcNow, point.X, point.Y);
+        var previewText = captured.Snapshot is null
+            ? null
+            : ContextPreviewFormatter.Format(captured.Snapshot);
+        return new
+        {
+            Cancelled = false,
+            captured.Snapshot,
+            captured.PreservePrevious,
+            captured.ElapsedMilliseconds,
+            captured.Timings,
+            PreviewText = previewText,
         };
     }
 

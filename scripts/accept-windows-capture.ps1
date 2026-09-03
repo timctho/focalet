@@ -143,6 +143,12 @@ public static class ZommiWindowsAcceptanceNative
     [DllImport("user32.dll")]
     private static extern void mouse_event(uint flags, uint x, uint y, uint data, UIntPtr extraInfo);
 
+    [DllImport("user32.dll")]
+    private static extern bool GetCursorInfo(ref CursorInfo cursor);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr LoadCursor(IntPtr instance, IntPtr cursorName);
+
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeRect
     {
@@ -157,6 +163,15 @@ public static class ZommiWindowsAcceptanceNative
     {
         public int X;
         public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct CursorInfo
+    {
+        public int Size;
+        public int Flags;
+        public IntPtr Cursor;
+        public NativePoint ScreenPosition;
     }
 
     public static IntPtr FindWindow(int processId, string title)
@@ -257,6 +272,16 @@ public static class ZommiWindowsAcceptanceNative
                 SetThreadDpiAwarenessContext(previous);
             }
         }
+    }
+
+    public static bool CrosshairCursorActive()
+    {
+        const int showing = 0x00000001;
+        const int crosshair = 32515;
+        var info = new CursorInfo { Size = Marshal.SizeOf<CursorInfo>() };
+        return GetCursorInfo(ref info) &&
+            (info.Flags & showing) != 0 &&
+            info.Cursor == LoadCursor(IntPtr.Zero, new IntPtr(crosshair));
     }
 
     public static bool Visible(IntPtr window)
@@ -483,6 +508,22 @@ public static class ZommiWindowsAcceptanceNative
         SendMessage(window, mouseMove, new IntPtr(leftButton), Point(endX, endY));
         System.Threading.Thread.Sleep(100);
         SendMessage(window, leftUp, IntPtr.Zero, Point(endX, endY));
+        return true;
+    }
+
+    public static bool ClickSelection(IntPtr window, int x, int y)
+    {
+        var bounds = PhysicalBounds(window);
+        if (bounds.Length != 4 || !SetPhysicalCursorPos(bounds[0] + x, bounds[1] + y))
+        {
+            return false;
+        }
+        const uint leftDown = 0x0201;
+        const uint leftUp = 0x0202;
+        const int leftButton = 0x0001;
+        SendMessage(window, leftDown, new IntPtr(leftButton), Point(x, y));
+        System.Threading.Thread.Sleep(80);
+        SendMessage(window, leftUp, IntPtr.Zero, Point(x, y));
         return true;
     }
 
@@ -1399,6 +1440,34 @@ if ($NonVisualOnly) {
 
 Assert-DesktopCaptureSurface
 
+$pointContext = Invoke-CaptureRequest -Executable $capture -Method 'selectContext' -Interact {
+    param($process)
+    $window = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi context selection'
+    if (-not [ZommiWindowsAcceptanceNative]::TopMost($window) -or
+        -not [ZommiWindowsAcceptanceNative]::Foreground($window)) {
+        throw 'Context point selector was not the active topmost window.'
+    }
+    $bounds = [ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
+    if ($bounds.Count -ne 4 -or
+        -not [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(
+            $bounds[0] + 220,
+            $bounds[1] + 220
+        )) {
+        throw 'Could not position the pointer inside the context selector.'
+    }
+    Start-Sleep -Milliseconds 120
+    if (-not [ZommiWindowsAcceptanceNative]::CrosshairCursorActive()) {
+        throw 'Context point selector did not expose its crosshair cursor.'
+    }
+    if (-not [ZommiWindowsAcceptanceNative]::ClickSelection($window, 220, 220)) {
+        throw 'Could not click the context point selector.'
+    }
+}
+if ($pointContext.cancelled -eq $true -or $null -eq $pointContext.snapshot) {
+    throw 'Context point selector did not capture the clicked desktop target.'
+}
+Write-Host 'point-context: ok (crosshair and click)'
+
 $selected = Invoke-CaptureRequest -Executable $capture -Method 'selectImage' -Interact {
     param($process)
     $window = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi image selection'
@@ -1452,6 +1521,7 @@ Write-AcceptanceResult -Result @{
     selectedText = $true
     windowOwnership = $true
     cancellation = $true
+    pointContext = $true
     selectedBounds = @($selected.bounds.x, $selected.bounds.y, $selected.bounds.width, $selected.bounds.height)
     pngDimensions = @($width, $height)
     pngBytes = $png.Length

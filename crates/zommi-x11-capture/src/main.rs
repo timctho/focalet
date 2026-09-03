@@ -54,6 +54,7 @@ async fn run() -> AppResult<()> {
             }))
         }
         Some("context") if arguments.next().is_none() => capture_context(),
+        Some("point-context") if arguments.next().is_none() => select_point_context(),
         Some("portal-context") if arguments.next().is_none() => capture_portal_context(),
         Some("region") => {
             let flag = arguments.next().and_then(|value| value.into_string().ok());
@@ -75,7 +76,7 @@ async fn run() -> AppResult<()> {
         }
         Some("portal-shortcuts") if arguments.next().is_none() => portal_shortcuts().await,
         _ => Err(
-            "usage: zommi-x11-capture <probe|context|portal-context|region --output <png-path>|portal-region --output <png-path>|portal-shortcuts>"
+            "usage: zommi-x11-capture <probe|context|point-context|portal-context|region --output <png-path>|portal-region --output <png-path>|portal-shortcuts>"
                 .into(),
         ),
     }
@@ -271,11 +272,15 @@ fn window_title(connection: &RustConnection, window: Window) -> AppResult<String
 fn capture_context() -> AppResult<()> {
     let (connection, screen_number) = connect()?;
     let window = active_window(&connection, screen_number)?;
-    let title = window_title(&connection, window)?;
+    emit_json(&context_value(&connection, window)?)
+}
+
+fn context_value(connection: &RustConnection, window: Window) -> AppResult<Value> {
+    let title = window_title(connection, window)?;
     let process_id = property_u32(
-        &connection,
+        connection,
         window,
-        atom(&connection, b"_NET_WM_PID")?,
+        atom(connection, b"_NET_WM_PID")?,
         AtomEnum::CARDINAL.into(),
     )?;
     let process_name = process_id
@@ -283,13 +288,127 @@ fn capture_context() -> AppResult<()> {
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "X11 application".to_owned());
-    emit_json(&json!({
+    Ok(json!({
         "application": process_name,
         "processName": process_name,
         "windowTitle": title,
         "windowId": window,
         "processId": process_id,
         "limitation": "X11 exposes active-window metadata only; semantic enrichment depends on AT-SPI.",
+    }))
+}
+
+fn top_level_window(
+    connection: &RustConnection,
+    root: Window,
+    window: Window,
+) -> AppResult<Window> {
+    if window == 0 || window == root {
+        return active_window(
+            connection,
+            connection
+                .setup()
+                .roots
+                .iter()
+                .position(|screen| screen.root == root)
+                .unwrap_or(0),
+        );
+    }
+    let mut current = window;
+    loop {
+        let tree = connection.query_tree(current)?.reply()?;
+        if tree.parent == root || tree.parent == 0 || tree.parent == current {
+            return Ok(current);
+        }
+        current = tree.parent;
+    }
+}
+
+fn create_crosshair_cursor(connection: &RustConnection) -> AppResult<(u32, u32)> {
+    const XC_CROSSHAIR: u16 = 34;
+    let font = connection.generate_id()?;
+    connection.open_font(font, b"cursor")?;
+    let cursor = connection.generate_id()?;
+    connection.create_glyph_cursor(
+        cursor,
+        font,
+        font,
+        XC_CROSSHAIR,
+        XC_CROSSHAIR + 1,
+        u16::MAX,
+        u16::MAX,
+        u16::MAX,
+        0,
+        0,
+        0,
+    )?;
+    Ok((font, cursor))
+}
+
+fn select_point_context() -> AppResult<()> {
+    let (connection, screen_number) = connect()?;
+    let root = connection.setup().roots[screen_number].root;
+    let (font, cursor) = create_crosshair_cursor(&connection)?;
+    let pointer_status = connection
+        .grab_pointer(
+            false,
+            root,
+            EventMask::BUTTON_PRESS,
+            GrabMode::ASYNC,
+            GrabMode::ASYNC,
+            x11rb::NONE,
+            cursor,
+            CURRENT_TIME,
+        )?
+        .reply()?
+        .status;
+    if pointer_status != GrabStatus::SUCCESS {
+        connection.free_cursor(cursor)?;
+        connection.close_font(font)?;
+        connection.flush()?;
+        return Err(format!("the X11 pointer is already grabbed ({pointer_status:?})").into());
+    }
+    let keyboard_status = grab_keyboard_after_shortcut(&connection, root)?;
+    if keyboard_status != GrabStatus::SUCCESS {
+        connection.ungrab_pointer(CURRENT_TIME)?;
+        connection.free_cursor(cursor)?;
+        connection.close_font(font)?;
+        connection.flush()?;
+        return Err(format!("the X11 keyboard is already grabbed ({keyboard_status:?})").into());
+    }
+
+    connection.flush()?;
+    let mut selected = None;
+    loop {
+        match connection.wait_for_event()? {
+            Event::ButtonPress(event) if event.detail == BUTTON_LEFT => {
+                selected = Some(event.child);
+                break;
+            }
+            Event::KeyPress(event) if key_is_escape(&connection, event.detail)? => break,
+            _ => {}
+        }
+    }
+
+    connection.ungrab_keyboard(CURRENT_TIME)?;
+    connection.ungrab_pointer(CURRENT_TIME)?;
+    connection.free_cursor(cursor)?;
+    connection.close_font(font)?;
+    connection.flush()?;
+
+    let Some(window) = selected else {
+        return emit_json(&json!({"cancelled": true}));
+    };
+    let target = top_level_window(&connection, root, window)?;
+    let context = context_value(&connection, target)?;
+    emit_json(&json!({
+        "cancelled": false,
+        "application": context["application"],
+        "processName": context["processName"],
+        "windowTitle": context["windowTitle"],
+        "windowId": context["windowId"],
+        "processId": context["processId"],
+        "limitation": context["limitation"],
     }))
 }
 

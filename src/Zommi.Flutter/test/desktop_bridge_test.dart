@@ -177,18 +177,24 @@ void main() {
             : Future.value(<String, Object?>{}),
       );
       final selectorClient = _FakeNativeCaptureClient(
-        onRequest: (method) async => method == 'selectImage'
-            ? <String, Object?>{
-                'cancelled': false,
-                'dataUrl': 'data:image/png;base64,aGVsbG8=',
-                'bounds': <String, Object?>{
-                  'x': 1,
-                  'y': 2,
-                  'width': 3,
-                  'height': 4,
-                },
-              }
-            : <String, Object?>{},
+        onRequest: (method) async => switch (method) {
+          'selectContext' => <String, Object?>{
+            'cancelled': false,
+            'snapshot': <String, Object?>{'application': 'clicked-window'},
+            'previewText': 'Clicked window context',
+          },
+          'selectImage' => <String, Object?>{
+            'cancelled': false,
+            'dataUrl': 'data:image/png;base64,aGVsbG8=',
+            'bounds': <String, Object?>{
+              'x': 1,
+              'y': 2,
+              'width': 3,
+              'height': 4,
+            },
+          },
+          _ => <String, Object?>{},
+        },
       );
       final provider = WindowsCaptureProvider(
         captureClient: captureClient,
@@ -199,10 +205,16 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(captureClient.requests, ['capture']);
 
+      final selectedContext = await provider.selectContext().timeout(
+        const Duration(milliseconds: 100),
+      );
+      expect(selectorClient.requests, ['selectContext']);
+      expect(selectedContext?.snapshot?['application'], 'clicked-window');
+
       final image = await provider.selectImage().timeout(
         const Duration(milliseconds: 100),
       );
-      expect(selectorClient.requests, ['selectImage']);
+      expect(selectorClient.requests, ['selectContext', 'selectImage']);
       expect(image?.bounds?['width'], 3);
 
       captureResult.complete(<String, Object?>{'snapshot': null});
@@ -222,7 +234,8 @@ void main() {
         runCommand: (executable, arguments, timeout) async {
           expect(executable, '/opt/zommi/zommi-x11-capture');
           calls.add(arguments);
-          if (arguments.first == 'context') {
+          if (arguments.first == 'context' ||
+              arguments.first == 'point-context') {
             return ProcessResult(
               10,
               0,
@@ -254,11 +267,15 @@ void main() {
       expect(context.snapshot?['processName'], 'fixture-process');
       expect(context.snapshot?['windowTitle'], 'Fixture window');
 
+      final selectedContext = await provider.selectContext();
+      expect(selectedContext?.snapshot?['application'], 'fixture-app');
+
       final image = await provider.selectImage();
       expect(image?.dataUrl, 'data:image/png;base64,AQID');
       expect(image?.bounds?['width'], 40);
       expect(calls, [
         ['context'],
+        ['point-context'],
         ['region', '--output', isA<String>()],
       ]);
       expect(await File(calls.last.last).exists(), isFalse);

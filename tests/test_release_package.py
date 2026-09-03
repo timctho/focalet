@@ -241,6 +241,26 @@ class ReleasePackageTests(unittest.TestCase):
         ):
             self.assertIn(contract, source)
 
+    def test_windows_point_context_uses_a_crosshair_and_clicked_target(self) -> None:
+        source = (SCRIPTS.parent / "src/Zommi.Windows/PointSelectionForm.cs").read_text(
+            encoding="utf-8"
+        )
+        host = (SCRIPTS.parent / "src/Zommi.Windows/CaptureNativeHost.cs").read_text(
+            encoding="utf-8"
+        )
+        acceptance = (SCRIPTS / "accept-windows-capture.ps1").read_text(
+            encoding="utf-8"
+        )
+        for contract in (
+            "Cursor = Cursors.Cross",
+            "Result = Cursor.Position",
+            "Click a window or control to attach its context",
+        ):
+            self.assertIn(contract, source)
+        self.assertIn('case "selectContext"', host)
+        self.assertIn("CrosshairCursorActive", acceptance)
+        self.assertIn("point-context: ok (crosshair and click)", acceptance)
+
     def test_manifest_component_cannot_escape_package_root(self) -> None:
         manifest_path = self.root / "release-manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

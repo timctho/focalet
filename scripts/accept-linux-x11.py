@@ -369,6 +369,17 @@ class X11:
         )
         self.lib.XSync(self.display, False)
 
+    def click_point(self, point: tuple[int, int]) -> None:
+        self.xtest.XTestFakeMotionEvent(
+            self.display, self.screen, point[0], point[1], CURRENT_TIME
+        )
+        self.lib.XSync(self.display, False)
+        self.xtest.XTestFakeButtonEvent(self.display, 1, True, CURRENT_TIME)
+        self.lib.XSync(self.display, False)
+        time.sleep(0.05)
+        self.xtest.XTestFakeButtonEvent(self.display, 1, False, CURRENT_TIME)
+        self.lib.XSync(self.display, False)
+
 
 def wait_until(description: str, predicate, timeout: float = 20.0):
     deadline = time.monotonic() + timeout
@@ -434,6 +445,29 @@ def stop_process(process: subprocess.Popen[str]) -> None:
     except subprocess.TimeoutExpired:
         process.kill()
         process.wait(timeout=5)
+
+
+def select_point_context(capture: Path, x11: X11, fixture: int) -> dict[str, object]:
+    x11.focus(fixture)
+    process = subprocess.Popen(
+        [str(capture), "point-context"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        time.sleep(0.15)
+        x11.click_point((100, 100))
+        stdout, stderr = process.communicate(timeout=10)
+    except BaseException:
+        stop_process(process)
+        raise
+    if process.returncode != 0:
+        raise RuntimeError(f"X11 point-context selector failed: {stderr}")
+    result = json.loads(stdout.strip().splitlines()[-1])
+    if result.get("cancelled") or not result.get("windowTitle"):
+        raise RuntimeError(f"X11 point-context selector returned no target: {result}")
+    return result
 
 
 def run_case(
@@ -567,6 +601,12 @@ def run_acceptance(package: Path) -> int:
             if context.get("windowTitle") != fixture_title or not context.get("attached"):
                 raise RuntimeError(f"Alt+A did not preserve the focused context title: {context}")
 
+            pointed = select_point_context(capture, x11, fixture)
+            if pointed.get("windowTitle") != fixture_title:
+                raise RuntimeError(
+                    f"Point context did not preserve the clicked window title: {pointed}"
+                )
+
             cancelled = run_case(
                 package,
                 x11,
@@ -606,6 +646,7 @@ def run_acceptance(package: Path) -> int:
                     {
                         "x11ContextShortcut": True,
                         "contextTitle": context["windowTitle"],
+                        "pointContextTitle": pointed["windowTitle"],
                         "imageCancelRestoredFocusedTaskbar": bool(cancelled),
                         "imageShortcut": True,
                         "imageDimensions": [image["width"], image["height"]],

@@ -34,8 +34,10 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
 
   @override
   Widget build(BuildContext context) {
+    final chatFontSize = chatFontSizeOf(context);
+    final headingDelta = chatFontSize - topBarAndChatFontSize;
     final base = DefaultTextStyle.of(context).style
-        .merge(topBarAndChatTextStyle)
+        .merge(chatTextStyleOf(context))
         .copyWith(color: const Color(0xff272b38), height: 1.38);
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
@@ -68,15 +70,15 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
                     ),
                     p: base,
                     h1: base.copyWith(
-                      fontSize: 19.5,
+                      fontSize: 19.5 + headingDelta,
                       fontWeight: FontWeight.w700,
                     ),
                     h2: base.copyWith(
-                      fontSize: 17.5,
+                      fontSize: 17.5 + headingDelta,
                       fontWeight: FontWeight.w700,
                     ),
                     h3: base.copyWith(
-                      fontSize: 16,
+                      fontSize: 16 + headingDelta,
                       fontWeight: FontWeight.w700,
                     ),
                     h4: base.copyWith(fontWeight: FontWeight.w700),
@@ -91,9 +93,7 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
                     tableBody: base,
                     code: base.copyWith(
                       fontFamily: 'monospace',
-                      fontSize: widget.compact
-                          ? compactChatCodeFontSize
-                          : chatCodeFontSize,
+                      fontSize: chatFontSize,
                       backgroundColor: const Color(0xffeef0f6),
                     ),
                     codeblockPadding: EdgeInsets.zero,
@@ -183,7 +183,7 @@ final class _TooltipLinkBuilder extends MarkdownElementBuilder {
               : () => unawaited(onOpen(destination)),
           child: Text(
             element.textContent,
-            style: (preferredStyle ?? parentStyle ?? topBarAndChatTextStyle)
+            style: (preferredStyle ?? parentStyle ?? chatTextStyleOf(context))
                 .copyWith(
                   color: const Color(0xff5d54a4),
                   decoration: TextDecoration.underline,
@@ -240,10 +240,10 @@ class _CopyableCodeBlockState extends State<_CopyableCodeBlock> {
               scrollDirection: Axis.horizontal,
               child: SelectableText(
                 widget.code,
-                style: const TextStyle(
-                  color: Color(0xff272b38),
+                style: TextStyle(
+                  color: const Color(0xff272b38),
                   fontFamily: 'monospace',
-                  fontSize: chatCodeFontSize,
+                  fontSize: chatFontSizeOf(context),
                   height: 1.35,
                 ),
               ),
@@ -293,7 +293,9 @@ class SafeHtmlView extends StatelessWidget {
           margin: Margins.zero,
           padding: HtmlPaddings.zero,
           color: const Color(0xff272b38),
-          fontSize: FontSize(compact ? 12 : 13.5),
+          fontSize: FontSize(
+            compact ? chatFontSizeOf(context) : chatFontSizeOf(context) + 1.5,
+          ),
           backgroundColor: const Color(0x00000000),
         ),
         'table': Style(border: Border.all(color: const Color(0xffd7dbe5))),

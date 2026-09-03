@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:zommi_flutter/state/history_mapper.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
+import 'package:zommi_flutter/theme/app_preferences.dart';
 import 'package:zommi_flutter/theme/zommi_typography.dart';
 import 'package:zommi_flutter/widgets/content_views.dart';
 import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
@@ -277,7 +278,17 @@ class ConversationTurnView extends StatelessWidget {
                   vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: const Color(0xffe9e7f8),
+                  color:
+                      Theme.of(context)
+                              .extension<ZommiVisualSettings>()
+                              ?.themeColor ==
+                          ZommiThemeColor.violet
+                      ? const Color(0xffe9e7f8)
+                      : Color.alphaBlend(
+                          Theme.of(context).colorScheme.primary
+                              .withValues(alpha: 0.10),
+                          const Color(0xfff2f3f8),
+                        ),
                   borderRadius: BorderRadius.circular(18),
                 ),
                 child: Column(
@@ -491,7 +502,7 @@ class ThinkingActivityGroup extends StatelessWidget {
                         Expanded(
                           child: Text(
                             'Thinking',
-                            style: topBarAndChatTextStyle.copyWith(
+                            style: chatTextStyleOf(context).copyWith(
                               color: Color(0xff4b5060),
                               fontWeight: FontWeight.w700,
                             ),
@@ -501,9 +512,8 @@ class ThinkingActivityGroup extends StatelessWidget {
                           Text(
                             '${tools.length} tool${tools.length == 1 ? '' : 's'}',
                             key: const ValueKey('thinking-tool-count'),
-                            style: topBarAndChatTextStyle.copyWith(
-                              color: Color(0xff747988),
-                            ),
+                            style: chatTextStyleOf(context)
+                                .copyWith(color: Color(0xff747988)),
                           ),
                         if (tools.isNotEmpty) const SizedBox(width: 8),
                         if (!completed)
@@ -603,7 +613,7 @@ class _ToolActivitySubItem extends StatelessWidget {
                     child: Text(
                       activityBlockTitle(block),
                       overflow: TextOverflow.ellipsis,
-                      style: topBarAndChatTextStyle.copyWith(
+                      style: chatTextStyleOf(context).copyWith(
                         color: Color(0xff4b5060),
                         fontWeight: FontWeight.w600,
                       ),
@@ -768,7 +778,7 @@ class ActivityBlockView extends StatelessWidget {
                           child: Text(
                             block.title,
                             overflow: TextOverflow.ellipsis,
-                            style: topBarAndChatTextStyle.copyWith(
+                            style: chatTextStyleOf(context).copyWith(
                               color: Color(0xff4b5060),
                               fontWeight: FontWeight.w700,
                             ),
