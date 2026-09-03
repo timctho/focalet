@@ -718,6 +718,21 @@ pub const PARENT_APP_RUNTIME_ENVIRONMENT_KEYS: &[&str] = &[
     "PARENT_APP_WORKTREE_ID",
 ];
 
+/// GUI-launched Windows processes do not always inherit a PATH that Rust can
+/// use for Win32 executable lookup. Prefer the stable System32 location and
+/// retain the command-name fallback for tests and non-Windows hosts.
+pub fn windows_wsl_executable() -> String {
+    for variable in ["SystemRoot", "WINDIR"] {
+        if let Some(root) = env::var_os(variable) {
+            let candidate = PathBuf::from(root).join("System32").join("wsl.exe");
+            if candidate.is_file() {
+                return candidate.to_string_lossy().into_owned();
+            }
+        }
+    }
+    "wsl.exe".into()
+}
+
 pub fn command_for_target(target: &RuntimeTarget) -> RuntimeCommand {
     let launch_args = launch_args(target.adapter_id.as_str());
     if target.execution_host.kind == "wsl" {
@@ -741,7 +756,7 @@ pub fn command_for_target(target: &RuntimeTarget) -> RuntimeCommand {
         args.push(target.executable_path.clone());
         args.extend(launch_args.iter().map(|value| (*value).into()));
         return RuntimeCommand {
-            command: "wsl.exe".into(),
+            command: windows_wsl_executable(),
             args,
             working_directory: None,
         };
@@ -785,9 +800,10 @@ struct WslDiscoveryOutcome {
 }
 
 fn discover_wsl_targets(environment: &HashMap<String, String>) -> WslDiscoveryOutcome {
+    let wsl = windows_wsl_executable();
     let (quiet, verbose) = std::thread::scope(|scope| {
-        let quiet = scope.spawn(|| run_command("wsl.exe", &["--list", "--quiet"], None));
-        let verbose = scope.spawn(|| run_command("wsl.exe", &["--list", "--verbose"], None));
+        let quiet = scope.spawn(|| run_command(&wsl, &["--list", "--quiet"], None));
+        let verbose = scope.spawn(|| run_command(&wsl, &["--list", "--verbose"], None));
         (quiet.join().ok().flatten(), verbose.join().ok().flatten())
     });
     let (Some(quiet), Some(verbose)) = (quiet, verbose) else {
@@ -837,8 +853,9 @@ fn detect_wsl_runtimes(
     environment: &HashMap<String, String>,
 ) -> Option<Vec<RuntimeTarget>> {
     let script = wsl_runtime_probe_script();
+    let wsl = windows_wsl_executable();
     let output = run_command(
-        "wsl.exe",
+        &wsl,
         &["-d", distribution, "-e", "sh", "-lc", &script],
         Some(environment),
     );

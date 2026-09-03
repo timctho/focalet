@@ -18,7 +18,8 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 use wait_timeout::ChildExt;
 use zommi_core::{
-    RuntimeCommand, RuntimeTarget, runtime_targets_from_wsl_probe, wsl_runtime_probe_script,
+    RuntimeCommand, RuntimeTarget, runtime_discovery::windows_wsl_executable,
+    runtime_targets_from_wsl_probe, wsl_runtime_probe_script,
 };
 
 const TRANSPORT_VERSION: u32 = 4;
@@ -479,7 +480,7 @@ fn wsl_path(distribution: &str, windows_path: &Path) -> io::Result<String> {
 }
 
 fn run_wsl(arguments: &[&str], timeout: Duration) -> io::Result<std::process::Output> {
-    let mut child = Command::new("wsl.exe")
+    let mut child = Command::new(windows_wsl_executable())
         .args(arguments)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
