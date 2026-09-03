@@ -655,6 +655,55 @@ void main() {
     },
   );
 
+  testWidgets('runtime list shows Hermes ACP and Gateway once each', (
+    tester,
+  ) async {
+    const acp = RuntimeTarget(
+      id: 'runtime-hermes-acp',
+      runtimeId: 'hermes',
+      adapterId: 'hermes-acp',
+      displayName: 'Hermes',
+      protocolName: 'ACP',
+      executablePath: '/usr/bin/hermes',
+      executionHost: {
+        'id': 'native:linux',
+        'kind': 'native',
+        'displayName': 'Linux',
+      },
+    );
+    const gateway = RuntimeTarget(
+      id: 'runtime-hermes-gateway',
+      runtimeId: 'hermes',
+      adapterId: 'hermes-gateway',
+      displayName: 'Hermes',
+      protocolName: 'Gateway',
+      executablePath: '/usr/bin/hermes',
+      executionHost: {
+        'id': 'native:linux',
+        'kind': 'native',
+        'displayName': 'Linux',
+      },
+    );
+    final core = RichFakeCore()..historyCount = 0;
+    core.discoveredTargets.addAll(const [acp, gateway, acp, gateway]);
+    await _pumpApp(tester, core: core, desktop: FakeDesktopBridge());
+    await _expand(tester);
+
+    await tester.tap(find.byKey(const ValueKey('runtime-summary')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('runtime-runtime-hermes-acp')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('runtime-runtime-hermes-gateway')),
+      findsOneWidget,
+    );
+    expect(find.text('ACP · Linux'), findsOneWidget);
+    expect(find.text('Gateway · Linux'), findsOneWidget);
+  });
+
   testWidgets('Hermes model selector survives a runtime round trip', (
     tester,
   ) async {

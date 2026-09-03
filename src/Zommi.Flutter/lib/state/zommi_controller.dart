@@ -1562,15 +1562,10 @@ final class ZommiController extends ChangeNotifier {
     final orderedKeys = <String>[];
     final candidatesByKey = <String, List<RuntimeTarget>>{};
     for (final target in targets.where(_isVisibleRuntimeTarget)) {
-      final hostId = target.executionHost['id']?.toString() ?? '';
-      final key = target.runtimeId == 'hermes' ? 'hermes@$hostId' : target.id;
+      final key = target.id;
       candidatesByKey.putIfAbsent(key, () => []).add(target);
-      final existing = selectedByKey[key];
-      if (existing == null) {
+      if (!selectedByKey.containsKey(key)) {
         orderedKeys.add(key);
-        selectedByKey[key] = target;
-      } else if (_runtimeTargetPreference(target) >
-          _runtimeTargetPreference(existing)) {
         selectedByKey[key] = target;
       }
     }
@@ -1584,13 +1579,6 @@ final class ZommiController extends ChangeNotifier {
         .map((key) => selectedByKey[key]!)
         .toList(growable: false);
   }
-
-  int _runtimeTargetPreference(RuntimeTarget target) =>
-      switch (target.adapterId) {
-        'hermes-gateway' => 2,
-        'hermes-acp' => 1,
-        _ => 0,
-      };
 
   void _rememberActiveSessionSettings() {
     final runtimeTargetId = activeRuntime?.id;

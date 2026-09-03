@@ -662,7 +662,7 @@ void main() {
   });
 
   test(
-    'Hermes targets collapse to Gateway and preserve the selected runtime',
+    'Hermes ACP and Gateway stay visible while exact duplicates collapse',
     () async {
       const acp = RuntimeTarget(
         id: 'runtime-hermes-acp',
@@ -696,11 +696,19 @@ void main() {
 
       await controller.initialize();
 
-      final hermes = controller.visibleRuntimeTargets.where(
-        (target) => target.runtimeId == 'hermes',
+      final hermes = controller.visibleRuntimeTargets
+          .where((target) => target.runtimeId == 'hermes')
+          .toList();
+      expect(hermes, hasLength(2));
+      expect(
+        hermes.map((target) => target.adapterId),
+        containsAllInOrder(const ['hermes-acp', 'hermes-gateway']),
       );
-      expect(hermes, hasLength(1));
-      expect(hermes.single.adapterId, 'hermes-gateway');
+      expect(controller.activeRuntime?.id, acp.id);
+      expect(controller.profileSelectionSupported, isFalse);
+
+      await controller.selectRuntime(gateway.id);
+
       expect(controller.activeRuntime?.id, gateway.id);
       expect(controller.profileSelectionSupported, isTrue);
       await controller.close();

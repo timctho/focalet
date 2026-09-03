@@ -1943,10 +1943,19 @@ fn hermes_gateway_arguments(
     if !is_wsl {
         return Ok(arguments);
     }
-    let separator = arguments
+    let direct_separator = arguments
         .iter()
         .position(|value| value == "-e")
-        .filter(|index| index + 1 < arguments.len())
+        .filter(|index| index + 1 < arguments.len());
+    let relay_separator = arguments
+        .first()
+        .is_some_and(|value| value == "--wsl-proxy")
+        .then(|| arguments.iter().position(|value| value == "--"))
+        .flatten()
+        .filter(|index| index + 1 < arguments.len());
+    let (separator, relay_wrapped) = direct_separator
+        .map(|index| (index, false))
+        .or_else(|| relay_separator.map(|index| (index, true)))
         .ok_or_else(|| {
             gateway_error(
                 "invalid-configuration",
@@ -1957,11 +1966,29 @@ fn hermes_gateway_arguments(
     let token = format!("HERMES_DASHBOARD_SESSION_TOKEN={session_token}");
     if arguments
         .get(command_index)
-        .is_some_and(|value| value == "env")
+        .is_some_and(|value| value.rsplit('/').next() == Some("env"))
     {
-        arguments.insert(command_index + 1, token);
+        let mut assignment_index = command_index + 1;
+        while arguments
+            .get(assignment_index)
+            .is_some_and(|value| value == "-u" || value == "--unset")
+            && arguments.get(assignment_index + 1).is_some()
+        {
+            assignment_index += 2;
+        }
+        arguments.insert(assignment_index, token);
     } else {
-        arguments.splice(command_index..command_index, ["env".to_owned(), token]);
+        arguments.splice(
+            command_index..command_index,
+            [
+                if relay_wrapped {
+                    "/usr/bin/env".to_owned()
+                } else {
+                    "env".to_owned()
+                },
+                token,
+            ],
+        );
     }
     Ok(arguments)
 }
@@ -2028,6 +2055,43 @@ mod tests {
                 "Ubuntu",
                 "-e",
                 "env",
+                "HERMES_DASHBOARD_SESSION_TOKEN=fixture-token",
+                "ZOMMI_RUNTIME_CHILD=1",
+                "/home/u/bin/hermes",
+                "serve",
+            ]
+        );
+    }
+
+    #[test]
+    fn persistent_relay_launch_injects_the_dashboard_token_after_env() {
+        let base = [
+            "--wsl-proxy",
+            "--distribution",
+            "Ubuntu",
+            "--cwd",
+            "/home/u",
+            "--",
+            "/usr/bin/env",
+            "-u",
+            "PARENT_APP_SESSION_ID",
+            "ZOMMI_RUNTIME_CHILD=1",
+            "/home/u/bin/hermes",
+            "serve",
+        ]
+        .map(str::to_owned);
+        assert_eq!(
+            hermes_gateway_arguments(&base, true, "fixture-token").expect("relay launch"),
+            [
+                "--wsl-proxy",
+                "--distribution",
+                "Ubuntu",
+                "--cwd",
+                "/home/u",
+                "--",
+                "/usr/bin/env",
+                "-u",
+                "PARENT_APP_SESSION_ID",
                 "HERMES_DASHBOARD_SESSION_TOKEN=fixture-token",
                 "ZOMMI_RUNTIME_CHILD=1",
                 "/home/u/bin/hermes",
