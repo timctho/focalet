@@ -200,6 +200,12 @@ void main() {
       sessionId: connection.sessionId,
     );
     expect(reopened.sessionId, connection.sessionId);
+    final configured = await bridge.configureSession(
+      runtimeTargetId: connection.runtimeTargetId,
+      sessionId: connection.sessionId,
+      cwd: '/workspace/turn-override',
+    );
+    expect(configured.sessionMetadata['cwd'], '/workspace/turn-override');
     await expectLater(
       bridge.startTurn(
         runtimeTargetId: connection.runtimeTargetId,
@@ -229,6 +235,7 @@ void main() {
       ],
       images: const ['data:image/png;base64,aGVsbG8='],
       clientOperationId: 'client:flutter-rust-e2e',
+      cwd: '/workspace/turn-override',
     );
     expect(receipt.turnId, 'turn-rust-flutter');
     expect((await completed.future).payload['status'], 'completed');
@@ -264,6 +271,7 @@ void main() {
       ],
       images: const ['data:image/png;base64,aGVsbG8='],
       clientOperationId: 'client:flutter-rust-e2e',
+      cwd: '/workspace/turn-override',
     );
     expect(replay.turnId, receipt.turnId);
     await expectLater(
@@ -382,6 +390,7 @@ void main() {
     );
     final params = turnStart['params'] as Map;
     expect(params['summary'], 'detailed');
+    expect(params['cwd'], '/workspace/turn-override');
     expect(jsonEncode(params), contains('PRIMARY SURFACE SELECTION'));
     expect(jsonEncode(params), contains('data:image/png;base64,aGVsbG8='));
     final interrupt = requests.whereType<Map>().firstWhere(

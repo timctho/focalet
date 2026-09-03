@@ -385,26 +385,55 @@ void main() {
     await controller.close();
   });
 
-  test('model choice survives session and runtime round trips', () async {
+  test(
+    'each session keeps an independent model and reasoning choice',
+    () async {
+      final core = RichFakeCore()..historyCount = 0;
+      final controller = ZommiController(
+        core: core,
+        desktop: FakeDesktopBridge(),
+      );
+      await controller.initialize();
+      controller.setModel('fixture-mini');
+      controller.setEffort('medium');
+
+      await controller.switchSession('session-2');
+      expect(controller.selectedModel, 'fixture-pro');
+      expect(controller.selectedEffort, 'high');
+      controller.setModel('fixture-mini');
+      controller.setEffort('low');
+
+      await controller.switchSession('session-1');
+      expect(controller.selectedModel, 'fixture-mini');
+      expect(controller.selectedEffort, 'medium');
+
+      await controller.selectRuntime('runtime-pi');
+      controller.setModel('fixture-pro');
+      controller.setEffort('low');
+      await controller.selectRuntime('runtime-codex');
+      expect(controller.selectedModel, 'fixture-mini');
+      expect(controller.selectedEffort, 'medium');
+      await controller.close();
+    },
+  );
+
+  test('workspace overrides stay isolated and reach the core', () async {
     final core = RichFakeCore()..historyCount = 0;
     final controller = ZommiController(
       core: core,
       desktop: FakeDesktopBridge(),
     );
     await controller.initialize();
-    controller.setModel('fixture-mini');
-    controller.setEffort('medium');
+
+    await controller.setWorkspace('/work/alpha');
+    expect(controller.selectedWorkspace, '/work/alpha');
+    expect(core.lastCwd, '/work/alpha');
 
     await controller.switchSession('session-2');
-    expect(controller.selectedModel, 'fixture-mini');
-    expect(controller.selectedEffort, 'medium');
-
-    await controller.selectRuntime('runtime-pi');
-    controller.setModel('fixture-pro');
-    controller.setEffort('low');
-    await controller.selectRuntime('runtime-codex');
-    expect(controller.selectedModel, 'fixture-mini');
-    expect(controller.selectedEffort, 'medium');
+    expect(controller.selectedWorkspace, isEmpty);
+    await controller.setWorkspace('/work/beta');
+    await controller.switchSession('session-1');
+    expect(controller.selectedWorkspace, '/work/alpha');
     await controller.close();
   });
 

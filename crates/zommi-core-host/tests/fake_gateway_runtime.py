@@ -141,11 +141,15 @@ def serve_hermes(connection: socket.socket) -> None:
         params = request.get("params") or {}
         result: dict[str, Any] = {}
         if method == "session.list":
+            profile = str(params.get("profile") or "default")
+            listed_session_id = (
+                "hermes-coder-session" if profile == "coder" else stored_session_id
+            )
             result = {
                 "sessions": [
                     {
-                        "id": stored_session_id,
-                        "title": "Saved Hermes chat",
+                        "id": listed_session_id,
+                        "title": f"Saved Hermes {profile} chat",
                         "preview": "saved",
                         "started_at": 12,
                         "message_count": 2,
@@ -153,17 +157,24 @@ def serve_hermes(connection: socket.socket) -> None:
                 ]
             }
         elif method == "session.create":
+            profile = str(params.get("profile") or "default")
+            created_session_id = (
+                "hermes-coder-session" if profile == "coder" else stored_session_id
+            )
             result = {
                 "session_id": runtime_session_id,
-                "stored_session_id": stored_session_id,
+                "stored_session_id": created_session_id,
                 "messages": [],
                 "info": {
                     "model": "gpt-test",
                     "provider": "copilot",
                     "reasoning_effort": "medium",
+                    "cwd": params.get("cwd") or "/workspace/default",
+                    "profile_name": profile,
                 },
             }
         elif method == "session.resume":
+            profile = str(params.get("profile") or "default")
             result = {
                 "session_id": runtime_session_id,
                 "resumed": params.get("session_id"),
@@ -176,7 +187,14 @@ def serve_hermes(connection: socket.socket) -> None:
                     "model": "gpt-test",
                     "provider": "copilot",
                     "reasoning_effort": "medium",
+                    "cwd": "/workspace/default",
+                    "profile_name": profile,
                 },
+            }
+        elif method == "session.cwd.set":
+            result = {
+                "cwd": params.get("cwd"),
+                "profile_name": "default",
             }
         elif method == "model.options":
             result = {
@@ -510,7 +528,18 @@ def handle_connection(connection: socket.socket, mode: str) -> None:
     try:
         request_line, headers = read_http_request(connection)
         if mode == "hermes" and "upgrade" not in headers:
-            body = json.dumps({"ok": True, "auth_required": False, "version": "0.20.0"}).encode()
+            if request_line.startswith("GET /api/profiles/active "):
+                payload = {"active": "default", "current": "default"}
+            elif request_line.startswith("GET /api/profiles "):
+                payload = {
+                    "profiles": [
+                        {"name": "default", "is_default": True, "model": "gpt-test"},
+                        {"name": "coder", "is_default": False, "model": "gpt-test"},
+                    ]
+                }
+            else:
+                payload = {"ok": True, "auth_required": False, "version": "0.20.0"}
+            body = json.dumps(payload).encode()
             connection.sendall(
                 (
                     "HTTP/1.1 200 OK\r\n"

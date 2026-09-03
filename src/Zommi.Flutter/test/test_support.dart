@@ -13,6 +13,8 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
   String? lastMessage;
   String? lastModel;
   String? lastEffort;
+  String? lastCwd;
+  String? lastProfile;
   List<Map<String, Object?>> lastSnapshots = [];
   List<String> lastImages = [];
   (String, String, String)? interrupted;
@@ -240,10 +242,22 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
     capabilities: activeTargetId == 'runtime-claude'
         ? const ['turn.stream.v1']
         : capabilities,
-    sessionMetadata: const {
-      'activeModel': 'fixture-pro',
-      'activeEffort': 'high',
-    },
+    sessionMetadata: activeTargetId == 'runtime-hermes'
+        ? const {
+            'activeModel': 'fixture-pro',
+            'activeEffort': 'high',
+            'cwd': '/workspace/hermes',
+            'profile': 'default',
+            'profiles': [
+              {'name': 'default', 'model': 'fixture-pro'},
+              {
+                'name': 'coder',
+                'model': 'fixture-pro',
+                'description': 'Coding profile',
+              },
+            ],
+          }
+        : const {'activeModel': 'fixture-pro', 'activeEffort': 'high'},
   );
 
   List<Map<String, Object?>> _sessions() => [
@@ -262,6 +276,8 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
     required String runtimeTargetId,
     String? model,
     String? effort,
+    String? cwd,
+    String? profile,
   }) async {
     activeSessionId = 'created-session';
     activeSessionsByRuntime[runtimeTargetId] = activeSessionId;
@@ -272,9 +288,33 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
   Future<RuntimeConnection> openSession({
     required String runtimeTargetId,
     required String sessionId,
+    String? cwd,
+    String? profile,
   }) async {
     activeSessionId = sessionId;
     activeSessionsByRuntime[runtimeTargetId] = sessionId;
+    return _connection();
+  }
+
+  @override
+  Future<RuntimeConnection> configureSession({
+    required String runtimeTargetId,
+    required String sessionId,
+    String? cwd,
+    String? profile,
+    String? model,
+    String? effort,
+  }) async {
+    lastCwd = cwd;
+    lastProfile = profile;
+    lastModel = model;
+    lastEffort = effort;
+    if (activeTargetId == 'runtime-hermes' &&
+        profile != null &&
+        profile.isNotEmpty) {
+      activeSessionId = 'hermes-$profile-session';
+      activeSessionsByRuntime[runtimeTargetId] = activeSessionId;
+    }
     return _connection();
   }
 
@@ -321,11 +361,15 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
     String? clientOperationId,
     String? model,
     String? effort,
+    String? cwd,
+    String? profile,
   }) async {
     if (startTurnGate case final gate?) await gate;
     lastMessage = message;
     lastModel = model;
     lastEffort = effort;
+    lastCwd = cwd;
+    lastProfile = profile;
     lastSnapshots = snapshots;
     lastImages = images;
     return TurnReceipt(
@@ -401,6 +445,7 @@ final class FakeDesktopBridge implements DesktopBridge {
   String? copiedImage;
   Uri? openedUrl;
   String? nextRuntimeExecutable;
+  String? nextWorkspaceDirectory;
   bool closed = false;
   Future<DesktopReadiness>? initializeGate;
   Future<void>? surfaceGate;
@@ -478,6 +523,12 @@ final class FakeDesktopBridge implements DesktopBridge {
   Future<String?> selectRuntimeExecutable() async {
     calls.add('selectRuntimeExecutable');
     return nextRuntimeExecutable;
+  }
+
+  @override
+  Future<String?> selectWorkspaceDirectory() async {
+    calls.add('selectWorkspaceDirectory');
+    return nextWorkspaceDirectory;
   }
 
   @override

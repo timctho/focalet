@@ -699,10 +699,454 @@ String _runtimeStatus(String value) => switch (value.toLowerCase()) {
   _ => 'Detected',
 };
 
-class ModelPanel extends StatefulWidget {
-  const ModelPanel({required this.controller, super.key});
+enum _SessionSettingsPage { workspace, model, profile }
+
+class SessionSettingsPanel extends StatefulWidget {
+  const SessionSettingsPanel({required this.controller, super.key});
 
   final ZommiController controller;
+
+  @override
+  State<SessionSettingsPanel> createState() => _SessionSettingsPanelState();
+}
+
+class _SessionSettingsPanelState extends State<SessionSettingsPanel> {
+  _SessionSettingsPage? _page;
+
+  @override
+  Widget build(BuildContext context) {
+    final detail = switch (_page) {
+      _SessionSettingsPage.workspace => WorkspacePanel(
+        key: const ValueKey('workspace-panel'),
+        controller: widget.controller,
+        onBack: () => setState(() => _page = null),
+      ),
+      _SessionSettingsPage.model => ModelPanel(
+        key: const ValueKey('model-panel'),
+        controller: widget.controller,
+        onBack: () => setState(() => _page = null),
+      ),
+      _SessionSettingsPage.profile => ProfilePanel(
+        key: const ValueKey('profile-panel'),
+        controller: widget.controller,
+        onBack: () => setState(() => _page = null),
+      ),
+      null => null,
+    };
+    return SizedBox(
+      key: const ValueKey('session-settings-panel'),
+      width: detail == null ? 286 : 692,
+      height: 390,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _SettingsOverview(
+            controller: widget.controller,
+            selected: _page,
+            onSelected: (page) => setState(() => _page = page),
+          ),
+          if (detail != null) ...[
+            const SizedBox(width: 8),
+            Expanded(
+              child: ClipRect(
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 190),
+                  switchInCurve: Curves.easeOutCubic,
+                  transitionBuilder: (child, animation) => SlideTransition(
+                    position: Tween<Offset>(
+                      begin: const Offset(-0.10, 0),
+                      end: Offset.zero,
+                    ).animate(animation),
+                    child: FadeTransition(opacity: animation, child: child),
+                  ),
+                  child: detail,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _SettingsOverview extends StatelessWidget {
+  const _SettingsOverview({
+    required this.controller,
+    required this.selected,
+    required this.onSelected,
+  });
+
+  final ZommiController controller;
+  final _SessionSettingsPage? selected;
+  final ValueChanged<_SessionSettingsPage> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xfaf7f9fd),
+      elevation: 18,
+      borderRadius: BorderRadius.circular(18),
+      child: SizedBox(
+        width: 286,
+        height: 390,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 14, 10, 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 8),
+                child: Text(
+                  'Session settings',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Text(
+                  'Saved separately for this chat',
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    color: Colors.blueGrey.shade500,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              _SettingsRow(
+                key: const ValueKey('settings-workspace'),
+                icon: Icons.folder_outlined,
+                label: 'Workspace',
+                value: controller.workspaceSummary,
+                selected: selected == _SessionSettingsPage.workspace,
+                onTap: () => onSelected(_SessionSettingsPage.workspace),
+              ),
+              const SizedBox(height: 5),
+              _SettingsRow(
+                key: const ValueKey('settings-model'),
+                icon: Icons.auto_awesome_outlined,
+                label: 'Model / reasoning',
+                value: controller.modelSummary,
+                selected: selected == _SessionSettingsPage.model,
+                enabled: controller.modelSelectionSupported,
+                onTap: () => onSelected(_SessionSettingsPage.model),
+              ),
+              if (controller.profileSelectionSupported) ...[
+                const SizedBox(height: 5),
+                _SettingsRow(
+                  key: const ValueKey('settings-profile'),
+                  icon: Icons.person_outline_rounded,
+                  label: 'Hermes profile',
+                  value: controller.profileSummary,
+                  selected: selected == _SessionSettingsPage.profile,
+                  onTap: () => onSelected(_SessionSettingsPage.profile),
+                ),
+              ],
+              const Spacer(),
+              if (controller.sessionSettingsBusy)
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  child: LinearProgressIndicator(
+                    key: ValueKey('settings-loading'),
+                    minHeight: 3,
+                    borderRadius: BorderRadius.all(Radius.circular(99)),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsRow extends StatelessWidget {
+  const _SettingsRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.selected,
+    required this.onTap,
+    this.enabled = true,
+    super.key,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final bool selected;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: enabled ? onTap : null,
+      borderRadius: BorderRadius.circular(12),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xffe9edf8) : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 17, color: const Color(0xff4f596d)),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w700,
+                      color: enabled
+                          ? const Color(0xff3c4352)
+                          : Colors.blueGrey.shade300,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    enabled ? value : 'Not available',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      color: Colors.blueGrey.shade500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 17,
+              color: enabled
+                  ? Colors.blueGrey.shade400
+                  : Colors.blueGrey.shade200,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class WorkspacePanel extends StatefulWidget {
+  const WorkspacePanel({
+    required this.controller,
+    required this.onBack,
+    super.key,
+  });
+
+  final ZommiController controller;
+  final VoidCallback onBack;
+
+  @override
+  State<WorkspacePanel> createState() => _WorkspacePanelState();
+}
+
+class _WorkspacePanelState extends State<WorkspacePanel> {
+  late final TextEditingController _path = TextEditingController(
+    text: widget.controller.selectedWorkspace,
+  );
+  final FocusNode _focus = FocusNode();
+
+  @override
+  void dispose() {
+    _path.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_focus.hasFocus && _path.text != widget.controller.selectedWorkspace) {
+      _path.text = widget.controller.selectedWorkspace;
+    }
+    return _SettingsDetailShell(
+      title: 'Workspace',
+      onBack: widget.onBack,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Commands and file tools for this chat run from this folder.',
+              style: TextStyle(fontSize: 10.5, color: Colors.blueGrey.shade600),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              key: const ValueKey('workspace-path'),
+              controller: _path,
+              focusNode: _focus,
+              autofocus: true,
+              style: const TextStyle(fontSize: 11.5),
+              onSubmitted: widget.controller.sessionSettingsBusy
+                  ? null
+                  : (value) => unawaited(widget.controller.setWorkspace(value)),
+              decoration: const InputDecoration(
+                labelText: 'Folder path',
+                isDense: true,
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton.icon(
+                  key: const ValueKey('browse-workspace'),
+                  onPressed: widget.controller.sessionSettingsBusy
+                      ? null
+                      : () => unawaited(widget.controller.chooseWorkspace()),
+                  icon: const Icon(Icons.folder_open_outlined, size: 16),
+                  label: const Text('Browse', style: TextStyle(fontSize: 11)),
+                ),
+                const SizedBox(width: 6),
+                FilledButton(
+                  key: const ValueKey('apply-workspace'),
+                  onPressed: widget.controller.sessionSettingsBusy
+                      ? null
+                      : () => unawaited(
+                          widget.controller.setWorkspace(_path.text),
+                        ),
+                  child: const Text('Apply', style: TextStyle(fontSize: 11)),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class ProfilePanel extends StatelessWidget {
+  const ProfilePanel({
+    required this.controller,
+    required this.onBack,
+    super.key,
+  });
+
+  final ZommiController controller;
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    return _SettingsDetailShell(
+      title: 'Hermes profile',
+      onBack: onBack,
+      child: Expanded(
+        child: ListView.builder(
+          key: const ValueKey('profile-list'),
+          padding: const EdgeInsets.fromLTRB(8, 4, 8, 10),
+          itemCount: controller.profiles.length,
+          itemBuilder: (context, index) {
+            final profile = controller.profiles[index];
+            final name = profile['name']?.toString() ?? '';
+            final description = profile['description']?.toString().trim();
+            final model = profile['model']?.toString().trim();
+            final subtitle = description?.isNotEmpty == true
+                ? description!
+                : model?.isNotEmpty == true
+                ? model!
+                : 'Hermes profile';
+            return RadioGroup<String>(
+              groupValue: controller.selectedProfile,
+              onChanged: (value) {
+                if (!controller.sessionSettingsBusy && value != null) {
+                  unawaited(controller.setProfile(value));
+                }
+              },
+              child: RadioListTile<String>(
+                key: ValueKey('profile-$name'),
+                value: name,
+                dense: true,
+                visualDensity: const VisualDensity(vertical: -3),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 7),
+                title: Text(
+                  name,
+                  style: const TextStyle(fontSize: 11.5),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  subtitle,
+                  style: const TextStyle(fontSize: 10),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsDetailShell extends StatelessWidget {
+  const _SettingsDetailShell({
+    required this.title,
+    required this.onBack,
+    required this.child,
+  });
+
+  final String title;
+  final VoidCallback onBack;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xfaf7f9fd),
+      elevation: 18,
+      borderRadius: BorderRadius.circular(18),
+      child: SizedBox(
+        width: 390,
+        height: 390,
+        child: Column(
+          children: [
+            SizedBox(
+              height: 48,
+              child: Row(
+                children: [
+                  IconButton(
+                    key: const ValueKey('settings-back'),
+                    tooltip: 'Back to session settings',
+                    onPressed: onBack,
+                    icon: const Icon(Icons.arrow_back_rounded, size: 17),
+                  ),
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            child,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class ModelPanel extends StatefulWidget {
+  const ModelPanel({required this.controller, required this.onBack, super.key});
+
+  final ZommiController controller;
+  final VoidCallback onBack;
 
   @override
   State<ModelPanel> createState() => _ModelPanelState();
@@ -729,14 +1173,10 @@ class _ModelPanelState extends State<ModelPanel> {
           return name.contains(query);
         })
         .toList(growable: false);
-    return Material(
-      key: const ValueKey('model-panel'),
-      color: const Color(0xfaf7f9fd),
-      elevation: 18,
-      borderRadius: BorderRadius.circular(18),
-      child: SizedBox(
-        width: 390,
-        height: 380,
+    return _SettingsDetailShell(
+      title: 'Model / reasoning',
+      onBack: widget.onBack,
+      child: Expanded(
         child: Column(
           children: [
             Padding(

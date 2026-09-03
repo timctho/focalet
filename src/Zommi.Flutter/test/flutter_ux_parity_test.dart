@@ -445,6 +445,12 @@ void main() {
 
       await tester.tap(find.byKey(const ValueKey('model-summary')));
       await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('session-settings-panel')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const ValueKey('settings-model')));
+      await tester.pumpAndSettle();
       final reasoningRow = find.byKey(const ValueKey('reasoning-options-row'));
       expect(reasoningRow, findsOneWidget);
       expect(tester.getSize(reasoningRow).height, lessThan(34));
@@ -469,7 +475,7 @@ void main() {
       await tester.pump();
       await tester.tap(find.byKey(const ValueKey('effort-medium')));
       await tester.pump();
-      expect(find.textContaining('Fixture Mini · Medium'), findsOneWidget);
+      expect(find.textContaining('Fixture Mini · Medium'), findsWidgets);
 
       await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
       await tester.pumpAndSettle();
@@ -492,7 +498,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('session-session-2')));
       await tester.pumpAndSettle();
       expect(core.activeSessionId, 'session-2');
-      expect(find.textContaining('Fixture Mini · Medium'), findsOneWidget);
+      expect(find.textContaining('Fixture Pro · High'), findsOneWidget);
       expect(find.byKey(const ValueKey('session-sidebar')), findsNothing);
     },
   );
@@ -514,10 +520,13 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('model-summary')));
     await tester.pump();
-    expect(find.byKey(const ValueKey('model-panel')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('session-settings-panel')),
+      findsOneWidget,
+    );
     await tester.tap(composer);
     await tester.pump();
-    expect(find.byKey(const ValueKey('model-panel')), findsNothing);
+    expect(find.byKey(const ValueKey('session-settings-panel')), findsNothing);
 
     await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
     await tester.pump();
@@ -529,6 +538,70 @@ void main() {
     await tester.pump();
     expect(find.byKey(const ValueKey('session-sidebar')), findsNothing);
   });
+
+  testWidgets(
+    'session settings overview slides editors right and applies Hermes values',
+    (tester) async {
+      const hermes = RuntimeTarget(
+        id: 'runtime-hermes',
+        runtimeId: 'hermes',
+        adapterId: 'hermes-gateway',
+        displayName: 'Hermes',
+        protocolName: 'Gateway',
+        executablePath: '/usr/bin/hermes',
+        executionHost: {
+          'id': 'native:linux',
+          'kind': 'native',
+          'displayName': 'Linux',
+        },
+        capabilityHints: RichFakeCore.capabilities,
+      );
+      final core = RichFakeCore()
+        ..historyCount = 0
+        ..activeTargetId = hermes.id
+        ..discoveredTargets.add(hermes);
+      final desktop = FakeDesktopBridge()
+        ..nextWorkspaceDirectory = '/workspace/new';
+      await _pumpApp(tester, core: core, desktop: desktop);
+      await _expand(tester);
+
+      await tester.tap(find.byKey(const ValueKey('model-summary')));
+      await tester.pumpAndSettle();
+      final settings = find.byKey(const ValueKey('session-settings-panel'));
+      expect(settings, findsOneWidget);
+      expect(find.byKey(const ValueKey('settings-workspace')), findsOneWidget);
+      expect(find.byKey(const ValueKey('settings-model')), findsOneWidget);
+      expect(find.byKey(const ValueKey('settings-profile')), findsOneWidget);
+      final compactWidth = tester.getSize(settings).width;
+
+      await tester.tap(find.byKey(const ValueKey('settings-workspace')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('workspace-panel')), findsOneWidget);
+      expect(tester.getSize(settings).width, greaterThan(compactWidth));
+      expect(
+        tester.getTopLeft(find.byKey(const ValueKey('workspace-panel'))).dx,
+        greaterThan(
+          tester
+              .getTopLeft(find.byKey(const ValueKey('settings-workspace')))
+              .dx,
+        ),
+      );
+      await tester.tap(find.byKey(const ValueKey('browse-workspace')));
+      await tester.pumpAndSettle();
+      expect(core.lastCwd, '/workspace/new');
+
+      await tester.tap(find.byKey(const ValueKey('settings-back')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('settings-profile')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('profile-list')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('profile-coder')));
+      await tester.pumpAndSettle();
+      expect(core.lastProfile, 'coder');
+      expect(core.activeSessionId, 'hermes-coder-session');
+      expect(find.text('coder'), findsWidgets);
+    },
+  );
 
   testWidgets('Hermes model selector survives a runtime round trip', (
     tester,

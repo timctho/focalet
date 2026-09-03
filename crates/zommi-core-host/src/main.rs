@@ -164,6 +164,7 @@ impl HostState {
                     "session.list.v1",
                     "session.create.v1",
                     "session.resume.v1",
+                    "session.configure.v1",
                     "history.read.v1",
                     "turn.stream.v1",
                     "turn.interrupt.v1",
@@ -254,6 +255,8 @@ impl HostState {
                     .create_session(
                         payload.get("model").and_then(Value::as_str),
                         payload.get("effort").and_then(Value::as_str),
+                        payload.get("cwd").and_then(Value::as_str),
+                        payload.get("profile").and_then(Value::as_str),
                     )
                     .await?;
                 let session_id = adapter.active_session_id().await?;
@@ -268,7 +271,30 @@ impl HostState {
             "session.open" => {
                 let adapter = self.exact_adapter(payload)?;
                 let session_id = required_string(payload, "sessionId")?;
-                let connection = adapter.open_session(session_id).await?;
+                let connection = adapter
+                    .open_session(session_id, payload.get("profile").and_then(Value::as_str))
+                    .await?;
+                let active_session_id = adapter.active_session_id().await?;
+                self.save_binding(
+                    adapter.target_id(),
+                    &active_session_id,
+                    adapter.binding_metadata().await,
+                    payload,
+                )?;
+                Ok(connection)
+            }
+            "session.configure" => {
+                let adapter = self.exact_adapter(payload)?;
+                let session_id = required_string(payload, "sessionId")?;
+                let connection = adapter
+                    .configure_session(
+                        session_id,
+                        payload.get("cwd").and_then(Value::as_str),
+                        payload.get("profile").and_then(Value::as_str),
+                        payload.get("model").and_then(Value::as_str),
+                        payload.get("effort").and_then(Value::as_str),
+                    )
+                    .await?;
                 let active_session_id = adapter.active_session_id().await?;
                 self.save_binding(
                     adapter.target_id(),
@@ -333,7 +359,9 @@ impl HostState {
                     "snapshots": input.snapshots,
                     "images": input.images,
                     "model": payload.get("model"),
-                    "effort": payload.get("effort")
+                    "effort": payload.get("effort"),
+                    "cwd": payload.get("cwd"),
+                    "profile": payload.get("profile")
                 }));
                 if let Some(previous) = self.operations.get(&client_operation_id) {
                     if previous.fingerprint != fingerprint {
@@ -353,6 +381,8 @@ impl HostState {
                         client_operation_id: &client_operation_id,
                         model: payload.get("model").and_then(Value::as_str),
                         effort: payload.get("effort").and_then(Value::as_str),
+                        cwd: payload.get("cwd").and_then(Value::as_str),
+                        profile: payload.get("profile").and_then(Value::as_str),
                     })
                     .await
                     .map_err(HostError::from)
@@ -535,11 +565,13 @@ impl HostState {
             )
         })?;
 
-        let requested_cwd = payload
+        let explicit_cwd = payload
             .get("cwd")
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
+            .map(PathBuf::from);
+        let requested_cwd = explicit_cwd
+            .clone()
             .or_else(|| {
                 binding
                     .as_ref()
@@ -548,7 +580,7 @@ impl HostState {
             })
             .or_else(|| env::current_dir().ok())
             .unwrap_or_else(env::temp_dir);
-        let cwd = if target.execution_host.kind == "wsl" {
+        let cwd = if target.execution_host.kind == "wsl" && explicit_cwd.is_none() {
             target
                 .runtime_home
                 .as_deref()

@@ -280,7 +280,23 @@ final class FakeCoreBridge implements CoreBridge {
     required String runtimeTargetId,
     String? model,
     String? effort,
+    String? cwd,
+    String? profile,
   }) => connectRuntime(runtimeTargetId: runtimeTargetId);
+
+  @override
+  Future<RuntimeConnection> configureSession({
+    required String runtimeTargetId,
+    required String sessionId,
+    String? cwd,
+    String? profile,
+    String? model,
+    String? effort,
+  }) => connectRuntime(
+    runtimeTargetId: runtimeTargetId,
+    preferredSessionId: sessionId,
+    cwd: cwd,
+  );
 
   @override
   Future<RuntimeDiscovery> discoverRuntimeTargets({
@@ -326,6 +342,8 @@ final class FakeCoreBridge implements CoreBridge {
   Future<RuntimeConnection> openSession({
     required String runtimeTargetId,
     required String sessionId,
+    String? cwd,
+    String? profile,
   }) => connectRuntime(
     runtimeTargetId: runtimeTargetId,
     preferredSessionId: sessionId,
@@ -374,6 +392,8 @@ final class FakeCoreBridge implements CoreBridge {
     String? clientOperationId,
     String? model,
     String? effort,
+    String? cwd,
+    String? profile,
   }) {
     lastMessage = message;
     return _turn;

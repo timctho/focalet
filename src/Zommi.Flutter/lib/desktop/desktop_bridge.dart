@@ -128,6 +128,8 @@ abstract interface class DesktopBridge {
 
   Future<String?> selectRuntimeExecutable();
 
+  Future<String?> selectWorkspaceDirectory();
+
   Future<void> copyText(String value);
 
   Future<void> copyImage(String dataUrl);
@@ -182,6 +184,9 @@ final class NoopDesktopBridge implements DesktopBridge {
 
   @override
   Future<String?> selectRuntimeExecutable() async => null;
+
+  @override
+  Future<String?> selectWorkspaceDirectory() async => null;
 
   @override
   Future<void> copyText(String value) =>
@@ -689,6 +694,10 @@ final class FlutterDesktopBridge
     final selected = await openFile(confirmButtonText: 'Use this CLI');
     return selected?.path;
   }
+
+  @override
+  Future<String?> selectWorkspaceDirectory() =>
+      getDirectoryPath(confirmButtonText: 'Use this workspace');
 
   @override
   Future<void> copyText(String value) async {

@@ -232,6 +232,85 @@ void main() {
   );
 
   test(
+    'Hermes workspace and profile settings use native Gateway RPCs',
+    () async {
+      final fixture = _fixturePath();
+      final temporary = await Directory.systemTemp.createTemp(
+        'zommi-hermes-settings-',
+      );
+      addTearDown(() => temporary.delete(recursive: true));
+      final requestLog = File('${temporary.path}/requests.jsonl');
+      final bridge = ProcessCoreBridge(
+        executablePath: _coreHostPath(),
+        environment: <String, String>{
+          'ZOMMI_HERMES_COMMAND': await _findPython(),
+          'ZOMMI_HERMES_GATEWAY_ARGS_JSON': jsonEncode(<String>[
+            fixture.path,
+            '--mode',
+            'hermes',
+          ]),
+          'ZOMMI_CORE_STATE_PATH': '${temporary.path}/binding.json',
+          'ZOMMI_FAKE_REQUEST_LOG': requestLog.path,
+        },
+      );
+      addTearDown(bridge.close);
+
+      await bridge.initialize();
+      final target = (await bridge.discoverRuntimeTargets()).targets
+          .singleWhere((target) => target.adapterId == 'hermes-gateway');
+      final connection = await bridge.connectRuntime(
+        runtimeTargetId: target.id,
+        cwd: temporary.path,
+      );
+      expect(
+        (connection.sessionMetadata['profiles'] as List).whereType<Map>().map(
+          (profile) => profile['name'],
+        ),
+        containsAll(<String>['default', 'coder']),
+      );
+      expect(connection.sessionMetadata['profile'], 'default');
+
+      final moved = await bridge.configureSession(
+        runtimeTargetId: target.id,
+        sessionId: connection.sessionId,
+        cwd: '/workspace/changed',
+      );
+      expect(moved.sessionMetadata['cwd'], '/workspace/changed');
+
+      final switched = await bridge.configureSession(
+        runtimeTargetId: target.id,
+        sessionId: moved.sessionId,
+        cwd: '/workspace/coder',
+        profile: 'coder',
+        model: 'copilot/gpt-test',
+        effort: 'medium',
+      );
+      expect(switched.sessionId, 'hermes-coder-session');
+      expect(switched.sessionMetadata['profile'], 'coder');
+      expect(switched.sessionMetadata['cwd'], '/workspace/coder');
+
+      final requests = await _readRequests(requestLog);
+      expect(
+        requests.any(
+          (request) =>
+              request['method'] == 'session.cwd.set' &&
+              (request['params'] as Map)['cwd'] == '/workspace/changed',
+        ),
+        isTrue,
+      );
+      expect(
+        requests.any(
+          (request) =>
+              request['method'] == 'session.create' &&
+              (request['params'] as Map)['profile'] == 'coder' &&
+              (request['params'] as Map)['cwd'] == '/workspace/coder',
+        ),
+        isTrue,
+      );
+    },
+  );
+
+  test(
     'OpenClaw v4 Gateway preserves identity and terminal ordering',
     () async {
       final temporary = await Directory.systemTemp.createTemp(

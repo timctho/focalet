@@ -312,7 +312,9 @@ class _ZommiShellState extends State<ZommiShell> {
                           right: 20,
                           child: TapRegion(
                             groupId: _modelTapGroup,
-                            child: ModelPanel(controller: _controller),
+                            child: SessionSettingsPanel(
+                              controller: _controller,
+                            ),
                           ),
                         ),
                       if (_controller.runtimeSetupPanelOpen)
@@ -448,7 +450,7 @@ class _ZommiShellState extends State<ZommiShell> {
                   onPressed: _controller.toggleRuntimePanel,
                 ),
               ),
-              if (_controller.modelSelectionSupported) ...[
+              if (_controller.sessionSettingsSupported) ...[
                 const SizedBox(width: 5),
                 TapRegion(
                   groupId: _modelTapGroup,
@@ -456,7 +458,7 @@ class _ZommiShellState extends State<ZommiShell> {
                   child: _SummaryButton(
                     key: const ValueKey('model-summary'),
                     label: _controller.modelSummary,
-                    semanticLabel: 'Choose model and reasoning level',
+                    semanticLabel: 'Session settings',
                     onPressed: _controller.toggleModelPanel,
                   ),
                 ),
