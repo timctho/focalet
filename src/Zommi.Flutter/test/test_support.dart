@@ -22,6 +22,7 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
   (String, String, String, Map<String, Object?>)? questionResolution;
   int historyCount = 45;
   bool closed = false;
+  int connectCount = 0;
   String? connectErrorCode;
   String connectErrorMessage = 'Authentication required';
   bool? lastDiscoveryForce;
@@ -218,6 +219,7 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
     String? preferredSessionId,
     String? cwd,
   }) async {
+    connectCount++;
     if (connectGate case final gate?) await gate;
     if (connectErrorCode case final code?) {
       throw CoreProtocolException(code, connectErrorMessage);

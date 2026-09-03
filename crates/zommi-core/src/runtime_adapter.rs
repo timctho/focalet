@@ -131,6 +131,13 @@ impl RuntimeAdapter {
         }
     }
 
+    pub async fn is_running(&self) -> bool {
+        match self {
+            Self::Codex(adapter) => adapter.is_running().await,
+            _ => true,
+        }
+    }
+
     pub async fn active_session_id(&self) -> Result<String, CodexError> {
         match self {
             Self::Codex(adapter) => adapter.active_session_id().await,

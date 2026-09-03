@@ -616,17 +616,22 @@ impl HostState {
                     .map(str::to_owned)
             });
         if let Some(adapter) = self.adapters.get(&target.id).cloned() {
-            let connection = adapter.connection_value().await?;
-            let session_id = adapter.active_session_id().await?;
-            self.binding_store
-                .save(&SessionBinding {
-                    runtime_target_id: adapter.target_id().to_owned(),
-                    session_id,
-                    cwd: cwd.to_string_lossy().into_owned(),
-                    session_metadata: adapter.binding_metadata().await,
-                })
-                .map_err(|error| HostError::new("persistence-failed", error.to_string()))?;
-            return Ok(connection);
+            if adapter.is_running().await {
+                let connection = adapter.connection_value().await?;
+                let session_id = adapter.active_session_id().await?;
+                self.binding_store
+                    .save(&SessionBinding {
+                        runtime_target_id: adapter.target_id().to_owned(),
+                        session_id,
+                        cwd: cwd.to_string_lossy().into_owned(),
+                        session_metadata: adapter.binding_metadata().await,
+                    })
+                    .map_err(|error| HostError::new("persistence-failed", error.to_string()))?;
+                return Ok(connection);
+            }
+            if let Some(stale) = self.adapters.remove(&target.id) {
+                stale.shutdown().await;
+            }
         }
         let mut runtime_command = command_for_target(&target);
         let adapter_override = format!(

@@ -591,6 +591,7 @@ void main() {
       await tester.pumpAndSettle();
       final settings = find.byKey(const ValueKey('session-settings-panel'));
       expect(settings, findsOneWidget);
+      expect(tester.getSize(settings).width, 286);
       expect(find.byKey(const ValueKey('settings-workspace')), findsOneWidget);
       expect(find.byKey(const ValueKey('settings-model')), findsOneWidget);
       expect(find.byKey(const ValueKey('settings-profile')), findsOneWidget);
@@ -599,6 +600,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('workspace-panel')), findsOneWidget);
       expect(find.byKey(const ValueKey('settings-workspace')), findsNothing);
+      expect(tester.getSize(settings).width, 390);
 
       await tester.enterText(
         find.byKey(const ValueKey('workspace-path')),
@@ -608,6 +610,15 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining('Folder does not exist'), findsOneWidget);
       expect(core.lastCwd, '/workspace/missing');
+
+      await tester.tap(find.byKey(const ValueKey('model-summary')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('workspace-panel')), findsNothing);
+      expect(find.byKey(const ValueKey('settings-workspace')), findsOneWidget);
+      expect(settings, findsOneWidget);
+      expect(tester.getSize(settings).width, 286);
+      await tester.tap(find.byKey(const ValueKey('settings-workspace')));
+      await tester.pumpAndSettle();
 
       await tester.tap(find.byKey(const ValueKey('browse-workspace')));
       await tester.pumpAndSettle();
@@ -622,11 +633,16 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('apply-workspace')));
       await tester.pumpAndSettle();
       expect(core.lastCwd, '/workspace/new');
+      expect(find.byKey(const ValueKey('workspace-panel')), findsNothing);
+      expect(find.byKey(const ValueKey('settings-workspace')), findsOneWidget);
+      expect(settings, findsOneWidget);
+      expect(tester.getSize(settings).width, 286);
 
       await tester.tap(find.byKey(const ValueKey('model-summary')));
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('workspace-panel')), findsNothing);
-      expect(find.byKey(const ValueKey('settings-workspace')), findsOneWidget);
+      expect(settings, findsNothing);
+      await tester.tap(find.byKey(const ValueKey('model-summary')));
+      await tester.pumpAndSettle();
       expect(settings, findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('settings-profile')));
       await tester.pumpAndSettle();

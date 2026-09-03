@@ -714,6 +714,12 @@ class _SessionSettingsPanelState extends State<SessionSettingsPanel> {
   _SessionSettingsPage? _page;
   late int _overviewEpoch = widget.controller.sessionSettingsOverviewEpoch;
 
+  void _setPage(_SessionSettingsPage? page) {
+    if (_page == page) return;
+    setState(() => _page = page);
+    widget.controller.setSessionSettingsDetailOpen(page != null);
+  }
+
   @override
   void didUpdateWidget(covariant SessionSettingsPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -730,17 +736,17 @@ class _SessionSettingsPanelState extends State<SessionSettingsPanel> {
       _SessionSettingsPage.workspace => WorkspacePanel(
         key: const ValueKey('workspace-panel'),
         controller: widget.controller,
-        onBack: () => setState(() => _page = null),
+        onBack: () => _setPage(null),
       ),
       _SessionSettingsPage.model => ModelPanel(
         key: const ValueKey('model-panel'),
         controller: widget.controller,
-        onBack: () => setState(() => _page = null),
+        onBack: () => _setPage(null),
       ),
       _SessionSettingsPage.profile => ProfilePanel(
         key: const ValueKey('profile-panel'),
         controller: widget.controller,
-        onBack: () => setState(() => _page = null),
+        onBack: () => _setPage(null),
       ),
       null => null,
     };
@@ -752,12 +758,12 @@ class _SessionSettingsPanelState extends State<SessionSettingsPanel> {
           child: _SettingsOverview(
             controller: widget.controller,
             selected: _page,
-            onSelected: (page) => setState(() => _page = page),
+            onSelected: _setPage,
           ),
         );
     return SizedBox(
       key: const ValueKey('session-settings-panel'),
-      width: 390,
+      width: detail == null ? 286 : 390,
       height: 390,
       child: ClipRect(
         child: AnimatedSwitcher(
@@ -1059,6 +1065,7 @@ class _WorkspacePanelState extends State<WorkspacePanel> {
     final applied = await widget.controller.setWorkspace(_path.text);
     if (!mounted || !applied) return;
     setState(() => _dirty = false);
+    widget.onBack();
   }
 }
 

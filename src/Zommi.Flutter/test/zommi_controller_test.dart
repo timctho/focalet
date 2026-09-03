@@ -661,6 +661,78 @@ void main() {
     await controller.close();
   });
 
+  test(
+    'Hermes targets collapse to Gateway and preserve the selected runtime',
+    () async {
+      const acp = RuntimeTarget(
+        id: 'runtime-hermes-acp',
+        runtimeId: 'hermes',
+        adapterId: 'hermes-acp',
+        displayName: 'Hermes',
+        protocolName: 'ACP',
+        executablePath: '/usr/bin/hermes',
+        executionHost: {'id': 'native:linux', 'kind': 'native'},
+      );
+      const gateway = RuntimeTarget(
+        id: 'runtime-hermes',
+        runtimeId: 'hermes',
+        adapterId: 'hermes-gateway',
+        displayName: 'Hermes',
+        protocolName: 'Gateway',
+        executablePath: '/usr/bin/hermes',
+        executionHost: {'id': 'native:linux', 'kind': 'native'},
+        capabilityHints: RichFakeCore.capabilities,
+      );
+      final core = RichFakeCore()
+        ..historyCount = 0
+        ..activeTargetId = acp.id;
+      core.discoveredTargets
+        ..clear()
+        ..addAll(const [acp, gateway, acp, gateway]);
+      final controller = ZommiController(
+        core: core,
+        desktop: FakeDesktopBridge(),
+      );
+
+      await controller.initialize();
+
+      final hermes = controller.visibleRuntimeTargets.where(
+        (target) => target.runtimeId == 'hermes',
+      );
+      expect(hermes, hasLength(1));
+      expect(hermes.single.adapterId, 'hermes-gateway');
+      expect(controller.activeRuntime?.id, gateway.id);
+      expect(controller.profileSelectionSupported, isTrue);
+      await controller.close();
+    },
+  );
+
+  test('selecting an unavailable active runtime reconnects it', () async {
+    final core = RichFakeCore()..historyCount = 0;
+    final controller = ZommiController(
+      core: core,
+      desktop: FakeDesktopBridge(),
+    );
+    await controller.initialize();
+    expect(core.connectCount, 1);
+    core.emit(
+      _event(
+        1,
+        'runtime.status',
+        payload: const {
+          'status': 'unavailable',
+          'message': 'Codex app-server is not running.',
+        },
+      ),
+    );
+
+    await controller.selectRuntime('runtime-codex');
+
+    expect(core.connectCount, 2);
+    expect(controller.activeRuntime?.id, 'runtime-codex');
+    await controller.close();
+  });
+
   test('WSL file picker paths normalize to the CLI path only', () {
     expect(
       normalizeRuntimeExecutablePath(

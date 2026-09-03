@@ -404,6 +404,10 @@ impl CodexAdapter {
         &self.inner.target_id
     }
 
+    pub async fn is_running(&self) -> bool {
+        !self.inner.state.lock().await.exited
+    }
+
     pub async fn list_sessions(&self) -> Result<Vec<Value>, CodexError> {
         let result = self
             .inner

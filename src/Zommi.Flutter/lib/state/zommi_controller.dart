@@ -35,6 +35,7 @@ final class ZommiController extends ChangeNotifier {
   final Map<String, int> _lastSequences = {};
   final Map<String, SessionSettings> _sessionSettings = {};
   final Map<String, List<Map<String, Object?>>> _modelCatalogs = {};
+  final Map<String, String> _runtimeTargetAliases = {};
 
   StreamSubscription<CoreEvent>? _coreEvents;
   StreamSubscription<DesktopInvocation>? _desktopEvents;
@@ -67,6 +68,7 @@ final class ZommiController extends ChangeNotifier {
   bool runtimePanelOpen = false;
   bool runtimeSetupPanelOpen = false;
   bool modelPanelOpen = false;
+  bool sessionSettingsDetailOpen = false;
   bool contextShortcutRegistered = false;
   bool imageShortcutRegistered = false;
   int focusComposerEpoch = 0;
@@ -109,7 +111,7 @@ final class ZommiController extends ChangeNotifier {
   );
 
   List<RuntimeTarget> get visibleRuntimeTargets =>
-      runtimeTargets.where(_isVisibleRuntimeTarget).toList(growable: false);
+      _deduplicateRuntimeTargets(runtimeTargets);
 
   bool get imageInputSupported =>
       activeRuntime == null || capabilities.contains('input.image.v1');
@@ -286,7 +288,10 @@ final class ZommiController extends ChangeNotifier {
   }
 
   Future<void> selectRuntime(String targetId) async {
-    if (runtimeBusy || activeRuntime?.id == targetId) {
+    final selectingActiveRuntime = activeRuntime?.id == targetId;
+    final activeRuntimeUnavailable =
+        selectingActiveRuntime && activeRuntime?.status == 'unavailable';
+    if (runtimeBusy || (selectingActiveRuntime && !activeRuntimeUnavailable)) {
       closeTransientPanels();
       return;
     }
@@ -1053,6 +1058,7 @@ final class ZommiController extends ChangeNotifier {
     if (sessionPanelOpen) {
       runtimePanelOpen = false;
       modelPanelOpen = false;
+      sessionSettingsDetailOpen = false;
     }
     _notify();
   }
@@ -1063,6 +1069,7 @@ final class ZommiController extends ChangeNotifier {
       sessionPanelOpen = false;
       runtimeSetupPanelOpen = false;
       modelPanelOpen = false;
+      sessionSettingsDetailOpen = false;
     }
     _notify();
   }
@@ -1073,15 +1080,22 @@ final class ZommiController extends ChangeNotifier {
       sessionPanelOpen = false;
       runtimePanelOpen = false;
       modelPanelOpen = false;
+      sessionSettingsDetailOpen = false;
     }
     _notify();
   }
 
   void toggleModelPanel() {
     if (modelPanelOpen) {
-      sessionSettingsOverviewEpoch++;
+      if (sessionSettingsDetailOpen) {
+        sessionSettingsDetailOpen = false;
+        sessionSettingsOverviewEpoch++;
+      } else {
+        modelPanelOpen = false;
+      }
     } else {
       modelPanelOpen = true;
+      sessionSettingsDetailOpen = false;
       sessionPanelOpen = false;
       runtimePanelOpen = false;
       runtimeSetupPanelOpen = false;
@@ -1094,6 +1108,13 @@ final class ZommiController extends ChangeNotifier {
     runtimePanelOpen = false;
     runtimeSetupPanelOpen = false;
     modelPanelOpen = false;
+    sessionSettingsDetailOpen = false;
+    _notify();
+  }
+
+  void setSessionSettingsDetailOpen(bool value) {
+    if (sessionSettingsDetailOpen == value) return;
+    sessionSettingsDetailOpen = value;
     _notify();
   }
 
@@ -1118,6 +1139,7 @@ final class ZommiController extends ChangeNotifier {
   void dismissModelPanel() {
     if (!modelPanelOpen) return;
     modelPanelOpen = false;
+    sessionSettingsDetailOpen = false;
     _notify();
   }
 
@@ -1497,13 +1519,20 @@ final class ZommiController extends ChangeNotifier {
       );
 
   void _replaceDiscovery(RuntimeDiscovery discovery) {
+    _runtimeTargetAliases.clear();
+    final visible = _deduplicateRuntimeTargets(
+      discovery.targets,
+      aliases: _runtimeTargetAliases,
+    );
     runtimeTargets
       ..clear()
-      ..addAll(discovery.targets.where(_isVisibleRuntimeTarget));
+      ..addAll(visible);
     runtimeSettings = discovery.settings;
   }
 
   String? _visibleSelectedTargetId(String? selectedTargetId) {
+    selectedTargetId =
+        _runtimeTargetAliases[selectedTargetId] ?? selectedTargetId;
     if (selectedTargetId != null &&
         runtimeTargets.any((target) => target.id == selectedTargetId)) {
       return selectedTargetId;
@@ -1524,6 +1553,44 @@ final class ZommiController extends ChangeNotifier {
         target.endpoint?.trim().isNotEmpty == true;
     return detected && hasLocator;
   }
+
+  List<RuntimeTarget> _deduplicateRuntimeTargets(
+    Iterable<RuntimeTarget> targets, {
+    Map<String, String>? aliases,
+  }) {
+    final selectedByKey = <String, RuntimeTarget>{};
+    final orderedKeys = <String>[];
+    final candidatesByKey = <String, List<RuntimeTarget>>{};
+    for (final target in targets.where(_isVisibleRuntimeTarget)) {
+      final hostId = target.executionHost['id']?.toString() ?? '';
+      final key = target.runtimeId == 'hermes' ? 'hermes@$hostId' : target.id;
+      candidatesByKey.putIfAbsent(key, () => []).add(target);
+      final existing = selectedByKey[key];
+      if (existing == null) {
+        orderedKeys.add(key);
+        selectedByKey[key] = target;
+      } else if (_runtimeTargetPreference(target) >
+          _runtimeTargetPreference(existing)) {
+        selectedByKey[key] = target;
+      }
+    }
+    for (final entry in candidatesByKey.entries) {
+      final selected = selectedByKey[entry.key]!;
+      for (final candidate in entry.value) {
+        aliases?[candidate.id] = selected.id;
+      }
+    }
+    return orderedKeys
+        .map((key) => selectedByKey[key]!)
+        .toList(growable: false);
+  }
+
+  int _runtimeTargetPreference(RuntimeTarget target) =>
+      switch (target.adapterId) {
+        'hermes-gateway' => 2,
+        'hermes-acp' => 1,
+        _ => 0,
+      };
 
   void _rememberActiveSessionSettings() {
     final runtimeTargetId = activeRuntime?.id;
