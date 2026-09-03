@@ -64,7 +64,10 @@ function runRuntime(endpoint) {
         token: TOKEN,
         transportVersion: 3,
         command: '/bin/sh',
-        args: ['-c', 'read value; printf "out:%s\\n" "$value"; printf "err:%s\\n" "$value" >&2; exit 7'],
+        args: [
+          '-c',
+          'read value; printf "out:%s\\n" "$value"; [ -z "${PARENT_APP_LEAK_PROBE+x}" ] || printf "parent-app-env-leaked\\n"; printf "err:%s\\n" "$value" >&2; exit 7',
+        ],
         cwd: '/',
       };
       socket.end(`${JSON.stringify(request)}\nrelay-input\n`);
@@ -110,7 +113,10 @@ test('persistent WSL relay authenticates and frames runtime stdio', async () => 
     '--token', TOKEN,
     '--version', '3',
     '--distribution', 'test',
-  ], { stdio: ['ignore', 'ignore', 'pipe'] });
+  ], {
+    env: { ...process.env, PARENT_APP_LEAK_PROBE: 'must-not-reach-runtime' },
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
   const diagnostics = [];
   relay.stderr.on('data', (chunk) => diagnostics.push(chunk));
   try {
