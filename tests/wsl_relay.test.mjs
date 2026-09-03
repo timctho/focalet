@@ -7,6 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 const TOKEN = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+const TRANSPORT_VERSION = 4;
 
 async function waitForEndpoint(endpointPath) {
   const deadline = Date.now() + 5_000;
@@ -62,7 +63,7 @@ function runRuntime(endpoint) {
       const request = {
         op: 'spawn',
         token: TOKEN,
-        transportVersion: 3,
+        transportVersion: TRANSPORT_VERSION,
         command: '/bin/sh',
         args: [
           '-c',
@@ -111,7 +112,7 @@ test('persistent WSL relay authenticates and frames runtime stdio', async () => 
     'scripts/zommi-wsl-relay.js',
     '--endpoint', endpointPath,
     '--token', TOKEN,
-    '--version', '3',
+    '--version', String(TRANSPORT_VERSION),
     '--distribution', 'test',
   ], {
     env: { ...process.env, PARENT_APP_LEAK_PROBE: 'must-not-reach-runtime' },
@@ -122,7 +123,7 @@ test('persistent WSL relay authenticates and frames runtime stdio', async () => 
   try {
     const endpoint = await waitForEndpoint(endpointPath);
     assert.equal(endpoint.schemaVersion, 1);
-    assert.equal(endpoint.transportVersion, 3);
+    assert.equal(endpoint.transportVersion, TRANSPORT_VERSION);
     assert.equal(endpoint.distribution, 'test');
     assert.ok(net.isIP(endpoint.host));
     assert.equal(endpoint.token, TOKEN);
