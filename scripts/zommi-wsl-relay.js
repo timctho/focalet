@@ -31,6 +31,14 @@ const relayRoot = path.dirname(path.dirname(endpointPath));
 const spoolRoot = path.join(relayRoot, 'spool');
 const activeSpoolSessions = new Set();
 
+function runtimeEnvironment() {
+  const environment = { ...process.env };
+  for (const key of Object.keys(environment)) {
+    if (key.startsWith('PARENT_APP_')) delete environment[key];
+  }
+  return environment;
+}
+
 if (!Number.isSafeInteger(transportVersion) || transportVersion < 1) {
   throw new Error('Invalid transport version.');
 }
@@ -98,7 +106,7 @@ function handleSpawn(socket, request, trailingInput) {
 
   const child = spawn(command, args, {
     cwd,
-    env: process.env,
+    env: runtimeEnvironment(),
     detached: true,
     shell: false,
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -223,7 +231,7 @@ function handleSpoolSession(sessionDirectory, requestPath) {
   const outputPath = path.join(sessionDirectory, 'output.bin');
   const child = spawn(request.command, request.args, {
     cwd: request.cwd,
-    env: process.env,
+    env: runtimeEnvironment(),
     detached: true,
     shell: false,
     stdio: ['pipe', 'pipe', 'pipe'],

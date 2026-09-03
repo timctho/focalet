@@ -55,6 +55,9 @@ public static class ZommiWindowsAcceptanceNative
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr window, int command);
 
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr window);
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool GetWindowRect(IntPtr window, out NativeRect bounds);
 
@@ -136,6 +139,9 @@ public static class ZommiWindowsAcceptanceNative
 
     [DllImport("user32.dll")]
     private static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
+
+    [DllImport("user32.dll")]
+    private static extern void mouse_event(uint flags, uint x, uint y, uint data, UIntPtr extraInfo);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeRect
@@ -276,6 +282,15 @@ public static class ZommiWindowsAcceptanceNative
             (((style & appWindow) != 0) || GetWindow(window, owner) == IntPtr.Zero);
     }
 
+    public static bool NativeTaskbarToggleAvailable(IntPtr window)
+    {
+        const int windowStyle = -16;
+        const int minimizeBox = 0x00020000;
+        const int systemMenu = 0x00080000;
+        var style = GetWindowLong(window, windowStyle);
+        return (style & minimizeBox) != 0 && (style & systemMenu) != 0;
+    }
+
     public static bool Minimized(IntPtr window)
     {
         return IsIconic(window);
@@ -283,12 +298,17 @@ public static class ZommiWindowsAcceptanceNative
 
     public static void Minimize(IntPtr window)
     {
-        ShowWindow(window, 6);
+        const uint systemCommand = 0x0112;
+        const int minimize = 0xF020;
+        SendMessage(window, systemCommand, new IntPtr(minimize), IntPtr.Zero);
     }
 
     public static void Restore(IntPtr window)
     {
-        ShowWindow(window, 9);
+        const uint systemCommand = 0x0112;
+        const int restore = 0xF120;
+        SendMessage(window, systemCommand, new IntPtr(restore), IntPtr.Zero);
+        SetForegroundWindow(window);
     }
 
     public static bool Foreground(IntPtr window)
@@ -423,6 +443,24 @@ public static class ZommiWindowsAcceptanceNative
             keybd_event(shiftKey, 0, keyUp, UIntPtr.Zero);
         }
         keybd_event(alt, 0, keyUp, UIntPtr.Zero);
+    }
+
+    public static bool DragWindowFromTitlebar(int startX, int startY, int endX, int endY)
+    {
+        const uint leftDown = 0x0002;
+        const uint leftUp = 0x0004;
+        if (!SetPhysicalCursorPos(startX, startY))
+        {
+            return false;
+        }
+        mouse_event(leftDown, 0, 0, 0, UIntPtr.Zero);
+        System.Threading.Thread.Sleep(80);
+        SetPhysicalCursorPos(startX + Math.Sign(endX - startX) * 10, startY);
+        System.Threading.Thread.Sleep(120);
+        SetPhysicalCursorPos(endX, endY);
+        System.Threading.Thread.Sleep(120);
+        mouse_event(leftUp, 0, 0, 0, UIntPtr.Zero);
+        return true;
     }
 
     public static bool CancelSelection(IntPtr window)
@@ -1022,6 +1060,9 @@ function Invoke-PackagedApplicationAcceptance {
             -not [ZommiWindowsAcceptanceNative]::TaskbarEligible($window)) {
             throw 'Packaged Flutter window is not visible and taskbar eligible.'
         }
+        if (-not [ZommiWindowsAcceptanceNative]::NativeTaskbarToggleAvailable($window)) {
+            throw 'Packaged taskbar window has no native minimize/system-menu styles.'
+        }
         if ([ZommiWindowsAcceptanceNative]::TopMost($window)) {
             throw 'Packaged taskbar window unexpectedly remained always-on-top.'
         }
@@ -1047,6 +1088,28 @@ function Invoke-PackagedApplicationAcceptance {
         $leaveBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
         if (($leaveBounds -join ',') -ne ($taskbarBounds -join ',')) {
             throw "Taskbar window resized after pointer exit: before=$($taskbarBounds -join ',') after=$($leaveBounds -join ',')."
+        }
+
+        $dragStartX = [int]($physicalBounds[0] + $physicalBounds[2] / 2.0)
+        $dragStartY = [int]($physicalBounds[1] + 28)
+        if (-not [ZommiWindowsAcceptanceNative]::DragWindowFromTitlebar(
+            $dragStartX,
+            $dragStartY,
+            $dragStartX + 48,
+            $dragStartY
+        )) {
+            throw 'Could not drag the packaged custom titlebar.'
+        }
+        $dragDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        do {
+            Start-Sleep -Milliseconds 50
+            $draggedBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
+        } while (($draggedBounds[0] -eq $taskbarBounds[0]) -and
+                 ($draggedBounds[1] -eq $taskbarBounds[1]) -and
+                 [DateTime]::UtcNow -lt $dragDeadline)
+        if (($draggedBounds[0] -eq $taskbarBounds[0]) -and
+            ($draggedBounds[1] -eq $taskbarBounds[1])) {
+            throw "Packaged custom titlebar did not move the window: before=$($taskbarBounds -join ',') after=$($draggedBounds -join ',')."
         }
 
         [ZommiWindowsAcceptanceNative]::Minimize($window)
@@ -1082,6 +1145,14 @@ function Invoke-PackagedApplicationAcceptance {
         $eventCount = $contextResult.Count
         if ($context.attached -ne $true) {
             throw "Packaged context shortcut did not attach context: $($context | ConvertTo-Json -Compress)"
+        }
+        $contextFocusDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        while (-not [ZommiWindowsAcceptanceNative]::Foreground($window) -and
+               [DateTime]::UtcNow -lt $contextFocusDeadline) {
+            Start-Sleep -Milliseconds 50
+        }
+        if (-not [ZommiWindowsAcceptanceNative]::Foreground($window)) {
+            throw 'Alt+A did not restore and focus the packaged taskbar window.'
         }
         $shortcutBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
         if (($shortcutBounds[2..3] -join ',') -ne ($taskbarBounds[2..3] -join ',')) {
@@ -1123,6 +1194,14 @@ function Invoke-PackagedApplicationAcceptance {
             -Name 'shortcut.image.cancelled' `
             -After $eventCount
         $eventCount = $cancelResult.Count
+        $cancelFocusDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        while (-not [ZommiWindowsAcceptanceNative]::Foreground($window) -and
+               [DateTime]::UtcNow -lt $cancelFocusDeadline) {
+            Start-Sleep -Milliseconds 50
+        }
+        if (-not [ZommiWindowsAcceptanceNative]::Foreground($window)) {
+            throw 'Cancelled Alt+Shift+A did not restore and focus the packaged taskbar window.'
+        }
 
         [ZommiWindowsAcceptanceNative]::SendAltA($true)
         $selector = Wait-ForPackagedSelector -CaptureExecutable $CaptureExecutable
@@ -1155,6 +1234,14 @@ function Invoke-PackagedApplicationAcceptance {
             $image.hasImage -ne $true -or
             $image.hasPointerContext -ne $true) {
             throw "Packaged image shortcut contract failed: $($image | ConvertTo-Json -Compress)"
+        }
+        $imageFocusDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        while (-not [ZommiWindowsAcceptanceNative]::Foreground($window) -and
+               [DateTime]::UtcNow -lt $imageFocusDeadline) {
+            Start-Sleep -Milliseconds 50
+        }
+        if (-not [ZommiWindowsAcceptanceNative]::Foreground($window)) {
+            throw 'Alt+Shift+A did not restore and focus the packaged taskbar window.'
         }
 
         Start-Sleep -Milliseconds 300
@@ -1190,11 +1277,14 @@ function Invoke-PackagedApplicationAcceptance {
             imagePointerContext = $true
             taskbarBounds = @($taskbarBounds)
             physicalBounds = @($physicalBounds)
+            draggedBounds = @($draggedBounds)
             firstVisibleBounds = @($firstVisibleBounds)
             hoverBounds = @($hoverBounds)
             leaveBounds = @($leaveBounds)
             shortcutBounds = @($shortcutBounds)
             minimizedAndRestored = $true
+            nativeTaskbarToggle = $true
+            shortcutsRestoreFocus = $true
             processCount = $processes.Count
             shortcutsRegistered = $true
             taskbarEligible = $true

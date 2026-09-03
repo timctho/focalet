@@ -160,10 +160,13 @@ void FlutterWindow::HandleWindowAnimationMethodCall(
                     "Could not read the Zommi window style.");
       return;
     }
+    // Keep the native system/minimize capabilities even though the caption is
+    // custom drawn. Windows uses these styles for taskbar click toggling, and
+    // window_manager uses SC_MOVE to drag a frameless surface.
     const LONG_PTR surface_style =
-        (style & ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX |
-                   WS_MAXIMIZEBOX | WS_SYSMENU)) |
-        WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+        (style & ~(WS_CAPTION | WS_THICKFRAME | WS_MAXIMIZEBOX)) |
+        WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPCHILDREN |
+        WS_CLIPSIBLINGS;
     SetLastError(ERROR_SUCCESS);
     if (SetWindowLongPtr(window, GWL_STYLE, surface_style) == 0 &&
         GetLastError() != ERROR_SUCCESS) {

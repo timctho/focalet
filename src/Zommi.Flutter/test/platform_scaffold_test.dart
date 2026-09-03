@@ -33,6 +33,7 @@ void main() {
   test('desktop shell registers cross-platform window, shortcut, tray, and capture plugins', () {
     final root = Directory.current;
     final pubspec = File('${root.path}/pubspec.yaml').readAsStringSync();
+    expect(pubspec, isNot(contains('fossui:')));
     for (final dependency in [
       'window_manager:',
       'hotkey_manager:',
@@ -110,7 +111,10 @@ void main() {
         contains('"zommi/window_animation"'),
         contains('kWindowAnimationFrameMs'),
         contains('message == WM_TIMER'),
-        contains('SymmetricSurfaceEase(linear)'),
+        allOf(
+          contains('SymmetricSurfaceEase(linear)'),
+          contains('WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX'),
+        ),
         allOf(
           allOf(
             contains('"isPointerWithinWindow"'),

@@ -21,7 +21,7 @@ use zommi_core::{
     RuntimeCommand, RuntimeTarget, runtime_targets_from_wsl_probe, wsl_runtime_probe_script,
 };
 
-const TRANSPORT_VERSION: u32 = 3;
+const TRANSPORT_VERSION: u32 = 4;
 const ENDPOINT_SCHEMA_VERSION: u32 = 1;
 const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 const CHANNEL_STDOUT: u8 = 1;
@@ -791,7 +791,7 @@ fn read_json_line(reader: &mut BufReader<TcpStream>) -> io::Result<Value> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ProxyInvocation, hex_name, wrap_wsl_command};
+    use super::{ProxyInvocation, RELAY_SOURCE, hex_name, wrap_wsl_command};
     use zommi_core::{ExecutionHost, RuntimeCommand, RuntimeTarget};
 
     #[test]
@@ -826,6 +826,10 @@ mod tests {
                 "Ubuntu".into(),
                 "-e".into(),
                 "/usr/bin/env".into(),
+                "-u".into(),
+                "PARENT_APP_AGENT_HOOK_ENDPOINT".into(),
+                "-u".into(),
+                "PARENT_APP_PANE_KEY".into(),
                 "ZOMMI_RUNTIME_CHILD=1".into(),
                 "/home/u/bin/codex".into(),
                 "app-server".into(),
@@ -838,6 +842,19 @@ mod tests {
         assert_eq!(wrapped.args[2], "Ubuntu");
         assert_eq!(wrapped.args[4], "/home/u");
         assert_eq!(wrapped.args[6], "/usr/bin/env");
+        assert!(
+            wrapped
+                .args
+                .windows(2)
+                .any(|values| values == ["-u", "PARENT_APP_AGENT_HOOK_ENDPOINT"])
+        );
+        assert!(
+            wrapped
+                .args
+                .windows(2)
+                .any(|values| values == ["-u", "PARENT_APP_PANE_KEY"])
+        );
+        assert!(wrapped.args.contains(&"ZOMMI_RUNTIME_CHILD=1".into()));
     }
 
     #[test]
@@ -867,5 +884,11 @@ mod tests {
             .is_err()
         );
         assert_eq!(hex_name("Ubuntu"), "5562756e7475");
+    }
+
+    #[test]
+    fn embedded_relay_strips_parent_app_routing_from_every_runtime_child() {
+        assert!(RELAY_SOURCE.contains("key.startsWith('PARENT_APP_')"));
+        assert_eq!(RELAY_SOURCE.matches("env: runtimeEnvironment()").count(), 2);
     }
 }

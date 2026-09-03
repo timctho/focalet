@@ -48,8 +48,10 @@ final class DesktopInvocation {
   final bool warning;
 }
 
-DesktopInvocation? imageSelectionInvocation(ContextAttachment? attachment) {
-  if (attachment == null) return null;
+DesktopInvocation imageSelectionInvocation(ContextAttachment? attachment) {
+  if (attachment == null) {
+    return const DesktopInvocation(kind: DesktopInvocationKind.image);
+  }
   return DesktopInvocation(
     kind: DesktopInvocationKind.image,
     attachment: attachment,
@@ -374,16 +376,17 @@ final class FlutterDesktopBridge
     try {
       final attachment = await selectImageContext(includePointerContext: true);
       final invocation = imageSelectionInvocation(attachment);
-      if (invocation == null) {
+      if (attachment == null) {
         await _recordAcceptance('shortcut.image.cancelled', const {});
+        _invocations.add(invocation);
         return;
       }
       await _recordAcceptance('shortcut.image', {
         'attached': true,
-        'hasImage': attachment?.imageDataUrl?.isNotEmpty == true,
-        'hasPointerContext': attachment?.snapshot != null,
-        'width': attachment?.bounds?['width'],
-        'height': attachment?.bounds?['height'],
+        'hasImage': attachment.imageDataUrl?.isNotEmpty == true,
+        'hasPointerContext': attachment.snapshot != null,
+        'width': attachment.bounds?['width'],
+        'height': attachment.bounds?['height'],
       });
       _invocations.add(invocation);
     } on Object catch (error) {

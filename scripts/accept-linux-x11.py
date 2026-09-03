@@ -576,7 +576,7 @@ def run_acceptance(package: Path) -> int:
                 shortcut_shift=True,
                 selection_action="cancel",
                 expected_event="shortcut.image.cancelled",
-                expect_focused=False,
+                expect_focused=True,
             )
 
             image = run_case(
@@ -606,7 +606,7 @@ def run_acceptance(package: Path) -> int:
                     {
                         "x11ContextShortcut": True,
                         "contextTitle": context["windowTitle"],
-                        "imageCancelPreservedTaskbar": bool(cancelled),
+                        "imageCancelRestoredFocusedTaskbar": bool(cancelled),
                         "imageShortcut": True,
                         "imageDimensions": [image["width"], image["height"]],
                         "pointerContextPaired": image["hasPointerContext"],

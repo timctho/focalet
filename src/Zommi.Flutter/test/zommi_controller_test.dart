@@ -256,6 +256,28 @@ void main() {
   });
 
   test(
+    'cancelled image shortcut still restores and focuses the composer',
+    () async {
+      final core = RichFakeCore()..historyCount = 0;
+      final desktop = FakeDesktopBridge();
+      final controller = ZommiController(core: core, desktop: desktop);
+      await controller.initialize();
+      desktop.calls.clear();
+
+      desktop.emit(const DesktopInvocation(kind: DesktopInvocationKind.image));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.focusComposerEpoch, 1);
+      expect(desktop.calls, contains('showPanel'));
+      expect(
+        desktop.calls.where((call) => call.startsWith('surface:')),
+        isEmpty,
+      );
+      await controller.close();
+    },
+  );
+
+  test(
     'taskbar chat stays expanded while large-window resize completes',
     () async {
       final core = RichFakeCore()..historyCount = 0;

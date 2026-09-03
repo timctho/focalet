@@ -117,7 +117,8 @@ void main() {
     final layout = find.byKey(ValueKey('copy-layout-${singleLine.hashCode}'));
     final responseCopyRect = tester.getRect(responseCopy);
     final layoutRect = tester.getRect(layout);
-    expect(tester.getSize(responseCopy), const Size(30, 30));
+    expect(tester.getSize(responseCopy), const Size(24, 24));
+    expect(tester.getSize(layout).height, 24);
     expect(responseCopyRect.top, greaterThanOrEqualTo(layoutRect.top));
     expect(responseCopyRect.bottom, lessThanOrEqualTo(layoutRect.bottom));
 
@@ -136,6 +137,44 @@ void main() {
     final codeBoxDecoration = codeDecoration! as BoxDecoration;
     expect(codeBoxDecoration.color, isNull);
     expect(codeBoxDecoration.border, isNull);
+  });
+
+  testWidgets('single-line user and agent message boxes stay compact', (
+    tester,
+  ) async {
+    final core = RichFakeCore()..historyCount = 0;
+    await _pumpApp(tester, core: core, desktop: FakeDesktopBridge());
+    await tester.enterText(
+      find.byKey(const ValueKey('zommi-composer')),
+      'one line',
+    );
+    await tester.tap(find.byKey(const ValueKey('send-message')));
+    await tester.pump();
+    core.emit(
+      _event(
+        1,
+        'item.update',
+        payload: const {
+          'kind': 'assistant',
+          'lifecycle': 'delta',
+          'text': 'one line back',
+          'itemId': 'single-line-answer',
+        },
+      ),
+    );
+    await tester.pump();
+
+    final user = find.byWidgetPredicate(
+      (widget) =>
+          widget is Container &&
+          widget.key is ValueKey<String> &&
+          (widget.key! as ValueKey<String>).value.startsWith('user-message-'),
+    );
+    final assistant = find.byKey(
+      const ValueKey('assistant-single-line-answer'),
+    );
+    expect(tester.getSize(user).height, lessThanOrEqualTo(36));
+    expect(tester.getSize(assistant).height, lessThanOrEqualTo(36));
   });
 
   testWidgets(
@@ -547,7 +586,7 @@ void main() {
       expect(bodySizes, <double>{topBarAndChatFontSize});
       expect(userMessageFontSize, assistantMessageFontSize);
       expect(userMessageFontSize, topBarAndChatFontSize);
-      expect(codexUiFontFamily, 'packages/fossui/Geist');
+      expect(codexUiFontFamily, 'Segoe UI');
       expect(
         markdown.map((body) => body.styleSheet?.p?.fontFamily),
         contains(codexUiFontFamily),
@@ -755,6 +794,24 @@ void main() {
       find.byKey(const ValueKey('window-drag-region')),
       const Offset(40, -20),
     );
+    await tester.pump();
+    expect(desktop.calls, contains('startDragging'));
+  });
+
+  testWidgets('dragging across the custom titlebar starts native movement', (
+    tester,
+  ) async {
+    final core = RichFakeCore()..historyCount = 0;
+    final desktop = FakeDesktopBridge();
+    await _pumpApp(tester, core: core, desktop: desktop);
+    final titlebar = find.byKey(const ValueKey('window-drag-region'));
+    final bounds = tester.getRect(titlebar);
+    final gesture = await tester.startGesture(
+      Offset(bounds.left + 8, bounds.center.dy),
+      kind: PointerDeviceKind.mouse,
+    );
+    await gesture.moveBy(const Offset(48, 0));
+    await gesture.up();
     await tester.pump();
     expect(desktop.calls, contains('startDragging'));
   });

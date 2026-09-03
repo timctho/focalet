@@ -693,6 +693,31 @@ pub fn select_default_target<'a>(
     usable.into_iter().next()
 }
 
+/// parent application injects hook routing metadata into terminals it owns. Zommi may reuse
+/// the user's Codex home for authentication and canonical history, but a
+/// runtime child must never impersonate the parent application pane that launched it.
+pub const PARENT_APP_RUNTIME_ENVIRONMENT_KEYS: &[&str] = &[
+    "PARENT_APP_AGENT_HOOK_ENDPOINT",
+    "PARENT_APP_AGENT_HOOK_ENV",
+    "PARENT_APP_AGENT_HOOK_PORT",
+    "PARENT_APP_AGENT_HOOK_TOKEN",
+    "PARENT_APP_AGENT_HOOK_TRANSPORT",
+    "PARENT_APP_AGENT_HOOK_VERSION",
+    "PARENT_APP_AGENT_LAUNCH_TOKEN",
+    "PARENT_APP_CLI_COMMAND",
+    "PARENT_APP_CODEX_HOME",
+    "PARENT_APP_CODEX_LAUNCH_PREFLIGHT",
+    "PARENT_APP_ORCHESTRATION_COMPATIBILITY_HOST_ID",
+    "PARENT_APP_ORCHESTRATION_COMPATIBILITY_HOST_INCARNATION",
+    "PARENT_APP_ORCHESTRATION_COMPATIBILITY_HOST_KIND",
+    "PARENT_APP_PANE_KEY",
+    "PARENT_APP_SHELL_READY_ROOT",
+    "PARENT_APP_TAB_ID",
+    "PARENT_APP_TERMINAL_HANDLE",
+    "PARENT_APP_USER_DATA_PATH",
+    "PARENT_APP_WORKTREE_ID",
+];
+
 pub fn command_for_target(target: &RuntimeTarget) -> RuntimeCommand {
     let launch_args = launch_args(target.adapter_id.as_str());
     if target.execution_host.kind == "wsl" {
@@ -705,11 +730,11 @@ pub fn command_for_target(target: &RuntimeTarget) -> RuntimeCommand {
         if let Some(home) = &target.runtime_home {
             args.extend(["--cd".into(), home.clone()]);
         }
-        args.extend([
-            "-e".into(),
-            "/usr/bin/env".into(),
-            "ZOMMI_RUNTIME_CHILD=1".into(),
-        ]);
+        args.extend(["-e".into(), "/usr/bin/env".into()]);
+        for variable in PARENT_APP_RUNTIME_ENVIRONMENT_KEYS {
+            args.extend(["-u".into(), (*variable).into()]);
+        }
+        args.push("ZOMMI_RUNTIME_CHILD=1".into());
         if target.adapter_id == "codex-app-server" {
             args.push("CODEX_INTERNAL_ORIGINATOR_OVERRIDE=codex_exec".into());
         }
@@ -1109,10 +1134,11 @@ mod tests {
     use std::{collections::HashMap, fs};
 
     use super::{
-        ConfiguredRuntimeOverride, ExecutionHost, RuntimeDiscoveryCacheStore, RuntimeOverrideStore,
-        RuntimeTarget, command_for_target, discover_runtime_targets_resilient_with,
-        discover_runtime_targets_with, runtime_discovery_settings, runtime_targets_from_wsl_probe,
-        select_default_target, target_from_override, wsl_runtime_probe_script,
+        ConfiguredRuntimeOverride, ExecutionHost, PARENT_APP_RUNTIME_ENVIRONMENT_KEYS,
+        RuntimeDiscoveryCacheStore, RuntimeOverrideStore, RuntimeTarget, command_for_target,
+        discover_runtime_targets_resilient_with, discover_runtime_targets_with,
+        runtime_discovery_settings, runtime_targets_from_wsl_probe, select_default_target,
+        target_from_override, wsl_runtime_probe_script,
     };
 
     #[test]
@@ -1231,21 +1257,22 @@ mod tests {
         };
         let command = command_for_target(&target);
         assert_eq!(command.command, "wsl.exe");
-        assert_eq!(
-            command.args,
-            [
-                "-d",
-                "Ubuntu",
-                "--cd",
-                "/home/u",
-                "-e",
-                "/usr/bin/env",
-                "ZOMMI_RUNTIME_CHILD=1",
-                "CODEX_INTERNAL_ORIGINATOR_OVERRIDE=codex_exec",
-                "/home/u/bin/codex",
-                "app-server"
-            ]
-        );
+        let expected = ["-d", "Ubuntu", "--cd", "/home/u", "-e", "/usr/bin/env"]
+            .into_iter()
+            .map(str::to_owned)
+            .chain(
+                PARENT_APP_RUNTIME_ENVIRONMENT_KEYS
+                    .iter()
+                    .flat_map(|variable| ["-u".to_owned(), (*variable).to_owned()]),
+            )
+            .chain([
+                "ZOMMI_RUNTIME_CHILD=1".into(),
+                "CODEX_INTERNAL_ORIGINATOR_OVERRIDE=codex_exec".into(),
+                "/home/u/bin/codex".into(),
+                "app-server".into(),
+            ])
+            .collect::<Vec<_>>();
+        assert_eq!(command.args, expected);
     }
 
     #[test]

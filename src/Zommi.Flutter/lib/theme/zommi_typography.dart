@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 
-const String codexUiFontFamily = 'packages/fossui/Geist';
+// Codex follows the host UI font stack. Segoe UI gives the Windows build the
+// same native text rhythm instead of bundling the heavier Geist face.
+const String codexUiFontFamily = 'Segoe UI';
 const List<String> codexUiFontFallback = [
-  'Geist',
   'Segoe UI Variable Text',
-  'Segoe UI',
+  'SF Pro Text',
+  'Helvetica Neue',
+  'Ubuntu Sans',
+  'Noto Sans',
   'Arial',
 ];
 

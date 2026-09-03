@@ -401,78 +401,78 @@ class _ZommiShellState extends State<ZommiShell> {
   }
 
   Widget _buildHeader() {
-    return SizedBox(
-      height: 62,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 7),
-        child: Row(
-          children: [
-            _HeaderButton(
-              key: const ValueKey('hide-zommi'),
-              label: 'Minimize Zommi',
-              icon: Icons.remove_rounded,
-              onPressed: () => unawaited(_controller.hideWindow()),
-            ),
-            TapRegion(
-              groupId: _sessionTapGroup,
-              onTapOutside: (_) => _controller.dismissSessionPanel(),
-              child: MouseRegion(
-                onEnter: (_) => _openSessions(),
-                onExit: (_) => _scheduleSessionsClose(),
-                child: _HeaderButton(
-                  key: const ValueKey('toggle-sessions'),
-                  label: _controller.sessionPanelOpen
-                      ? 'Chat sessions — visible while hovered'
-                      : 'Chat sessions — hover to show',
-                  icon: Icons.menu_rounded,
-                  onPressed: _controller.sessionNavigationSupported
-                      ? _openSessions
-                      : null,
-                ),
+    return GestureDetector(
+      key: const ValueKey('window-drag-region'),
+      behavior: HitTestBehavior.translucent,
+      onPanStart: (_) => unawaited(_startWindowDrag()),
+      child: SizedBox(
+        height: 62,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 7),
+          child: Row(
+            children: [
+              _HeaderButton(
+                key: const ValueKey('hide-zommi'),
+                label: 'Minimize Zommi',
+                icon: Icons.remove_rounded,
+                onPressed: () => unawaited(_controller.hideWindow()),
               ),
-            ),
-            TapRegion(
-              groupId: _runtimeTapGroup,
-              onTapOutside: (_) => _controller.dismissRuntimePanel(),
-              child: _SummaryButton(
-                key: const ValueKey('runtime-summary'),
-                label: _controller.runtimeSummary,
-                semanticLabel: 'Choose agent runtime',
-                warning: _controller.statusWarning,
-                loading: _controller.runtimeBusy,
-                onPressed: _controller.toggleRuntimePanel,
-              ),
-            ),
-            if (_controller.modelSelectionSupported) ...[
-              const SizedBox(width: 5),
               TapRegion(
-                groupId: _modelTapGroup,
-                onTapOutside: (_) => _controller.dismissModelPanel(),
-                child: _SummaryButton(
-                  key: const ValueKey('model-summary'),
-                  label: _controller.modelSummary,
-                  semanticLabel: 'Choose model and reasoning level',
-                  onPressed: _controller.toggleModelPanel,
+                groupId: _sessionTapGroup,
+                onTapOutside: (_) => _controller.dismissSessionPanel(),
+                child: MouseRegion(
+                  onEnter: (_) => _openSessions(),
+                  onExit: (_) => _scheduleSessionsClose(),
+                  child: _HeaderButton(
+                    key: const ValueKey('toggle-sessions'),
+                    label: _controller.sessionPanelOpen
+                        ? 'Chat sessions — visible while hovered'
+                        : 'Chat sessions — hover to show',
+                    icon: Icons.menu_rounded,
+                    onPressed: _controller.sessionNavigationSupported
+                        ? _openSessions
+                        : null,
+                  ),
                 ),
+              ),
+              TapRegion(
+                groupId: _runtimeTapGroup,
+                onTapOutside: (_) => _controller.dismissRuntimePanel(),
+                child: _SummaryButton(
+                  key: const ValueKey('runtime-summary'),
+                  label: _controller.runtimeSummary,
+                  semanticLabel: 'Choose agent runtime',
+                  warning: _controller.statusWarning,
+                  loading: _controller.runtimeBusy,
+                  onPressed: _controller.toggleRuntimePanel,
+                ),
+              ),
+              if (_controller.modelSelectionSupported) ...[
+                const SizedBox(width: 5),
+                TapRegion(
+                  groupId: _modelTapGroup,
+                  onTapOutside: (_) => _controller.dismissModelPanel(),
+                  child: _SummaryButton(
+                    key: const ValueKey('model-summary'),
+                    label: _controller.modelSummary,
+                    semanticLabel: 'Choose model and reasoning level',
+                    onPressed: _controller.toggleModelPanel,
+                  ),
+                ),
+              ],
+              const Expanded(child: SizedBox.expand()),
+              _HeaderButton(
+                key: const ValueKey('expand-zommi'),
+                label: _controller.largePanel
+                    ? 'Restore Zommi'
+                    : 'Expand Zommi',
+                icon: _controller.largePanel
+                    ? Icons.close_fullscreen_rounded
+                    : Icons.open_in_full_rounded,
+                onPressed: () => unawaited(_controller.toggleLargePanel()),
               ),
             ],
-            Expanded(
-              child: GestureDetector(
-                key: const ValueKey('window-drag-region'),
-                behavior: HitTestBehavior.translucent,
-                onPanStart: (_) => unawaited(_startWindowDrag()),
-                child: const SizedBox.expand(),
-              ),
-            ),
-            _HeaderButton(
-              key: const ValueKey('expand-zommi'),
-              label: _controller.largePanel ? 'Restore Zommi' : 'Expand Zommi',
-              icon: _controller.largePanel
-                  ? Icons.close_fullscreen_rounded
-                  : Icons.open_in_full_rounded,
-              onPressed: () => unawaited(_controller.toggleLargePanel()),
-            ),
-          ],
+          ),
         ),
       ),
     );

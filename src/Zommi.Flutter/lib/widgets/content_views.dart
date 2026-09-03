@@ -44,9 +44,9 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
         children: [
           ConstrainedBox(
             key: ValueKey('copy-layout-${widget.text.hashCode}'),
-            constraints: const BoxConstraints(minHeight: 30),
+            constraints: const BoxConstraints(minHeight: 24),
             child: Padding(
-              padding: const EdgeInsets.only(right: 34),
+              padding: const EdgeInsets.only(right: 28),
               child: MarkdownBody(
                 data: widget.text,
                 selectable: true,
@@ -103,15 +103,15 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
                   key: ValueKey('copy-${widget.text.hashCode}'),
                   visualDensity: VisualDensity.compact,
                   constraints: const BoxConstraints.tightFor(
-                    width: 30,
-                    height: 30,
+                    width: 24,
+                    height: 24,
                   ),
                   style: IconButton.styleFrom(
-                    fixedSize: const Size(30, 30),
+                    fixedSize: const Size(24, 24),
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
                   padding: EdgeInsets.zero,
-                  splashRadius: 16,
+                  splashRadius: 13,
                   tooltip: _copied ? 'Copied' : 'Copy response',
                   onPressed: () async {
                     await widget.onCopy(widget.text);
@@ -122,7 +122,7 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
                   },
                   icon: Icon(
                     _copied ? Icons.check_rounded : Icons.copy_rounded,
-                    size: 16,
+                    size: 14,
                   ),
                 ),
               ),

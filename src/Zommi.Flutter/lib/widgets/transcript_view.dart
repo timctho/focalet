@@ -250,7 +250,7 @@ class ConversationTurnView extends StatelessWidget {
                 ),
                 padding: const EdgeInsets.symmetric(
                   horizontal: 13,
-                  vertical: 9,
+                  vertical: 6,
                 ),
                 decoration: BoxDecoration(
                   color: const Color(0xffe9e7f8),
@@ -645,7 +645,7 @@ class AssistantBlockView extends StatelessWidget {
           constraints: const BoxConstraints.tightFor(
             width: assistantMessageBoxWidth,
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 5),
           decoration: BoxDecoration(
             color: const Color(0xb3ffffff),
             borderRadius: BorderRadius.circular(18),

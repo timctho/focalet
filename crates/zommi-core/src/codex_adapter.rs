@@ -23,7 +23,7 @@ use tokio::{
 
 use crate::{
     RuntimeCommand, RuntimeTarget, artifacts::artifacts_from_thread_item, build_context_handoff,
-    sanitize_diagnostic, validate_turn_input,
+    runtime_discovery::PARENT_APP_RUNTIME_ENVIRONMENT_KEYS, sanitize_diagnostic, validate_turn_input,
 };
 
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -192,6 +192,9 @@ impl CodexAdapter {
             .stderr(Stdio::piped())
             .env("CODEX_INTERNAL_ORIGINATOR_OVERRIDE", "codex_exec")
             .kill_on_drop(true);
+        for variable in PARENT_APP_RUNTIME_ENVIRONMENT_KEYS {
+            command.env_remove(variable);
+        }
         if config.cwd.is_dir() {
             command.current_dir(&config.cwd);
         }

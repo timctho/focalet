@@ -29,8 +29,11 @@ void main() {
     },
   );
 
-  test('cancelled image selection emits no panel-opening invocation', () {
-    expect(imageSelectionInvocation(null), isNull);
+  test('cancelled image selection emits a panel-opening invocation', () {
+    final cancelled = imageSelectionInvocation(null);
+    expect(cancelled.kind, DesktopInvocationKind.image);
+    expect(cancelled.attachment, isNull);
+    expect(cancelled.message, isNull);
 
     final attachment = ContextAttachment(
       id: 'image-1',
@@ -39,9 +42,9 @@ void main() {
       bounds: {'width': 1, 'height': 1},
     );
     final invocation = imageSelectionInvocation(attachment);
-    expect(invocation?.kind, DesktopInvocationKind.image);
-    expect(invocation?.attachment, same(attachment));
-    expect(invocation?.message, 'Image context attached');
+    expect(invocation.kind, DesktopInvocationKind.image);
+    expect(invocation.attachment, same(attachment));
+    expect(invocation.message, 'Image context attached');
   });
 
   test(
