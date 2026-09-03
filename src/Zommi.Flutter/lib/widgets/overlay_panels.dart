@@ -712,6 +712,17 @@ class SessionSettingsPanel extends StatefulWidget {
 
 class _SessionSettingsPanelState extends State<SessionSettingsPanel> {
   _SessionSettingsPage? _page;
+  late int _overviewEpoch = widget.controller.sessionSettingsOverviewEpoch;
+
+  @override
+  void didUpdateWidget(covariant SessionSettingsPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final nextEpoch = widget.controller.sessionSettingsOverviewEpoch;
+    if (_overviewEpoch != nextEpoch) {
+      _overviewEpoch = nextEpoch;
+      _page = null;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -733,38 +744,39 @@ class _SessionSettingsPanelState extends State<SessionSettingsPanel> {
       ),
       null => null,
     };
-    return SizedBox(
-      key: const ValueKey('session-settings-panel'),
-      width: detail == null ? 286 : 692,
-      height: 390,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _SettingsOverview(
+    final page =
+        detail ??
+        Align(
+          key: const ValueKey('settings-overview-page'),
+          alignment: Alignment.topLeft,
+          child: _SettingsOverview(
             controller: widget.controller,
             selected: _page,
             onSelected: (page) => setState(() => _page = page),
           ),
-          if (detail != null) ...[
-            const SizedBox(width: 8),
-            Expanded(
-              child: ClipRect(
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 190),
-                  switchInCurve: Curves.easeOutCubic,
-                  transitionBuilder: (child, animation) => SlideTransition(
-                    position: Tween<Offset>(
-                      begin: const Offset(-0.10, 0),
-                      end: Offset.zero,
-                    ).animate(animation),
-                    child: FadeTransition(opacity: animation, child: child),
-                  ),
-                  child: detail,
-                ),
-              ),
-            ),
-          ],
-        ],
+        );
+    return SizedBox(
+      key: const ValueKey('session-settings-panel'),
+      width: 390,
+      height: 390,
+      child: ClipRect(
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 190),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          layoutBuilder: (currentChild, previousChildren) => Stack(
+            alignment: Alignment.topLeft,
+            children: [...previousChildren, ?currentChild],
+          ),
+          transitionBuilder: (child, animation) => SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0.10, 0),
+              end: Offset.zero,
+            ).animate(animation),
+            child: FadeTransition(opacity: animation, child: child),
+          ),
+          child: page,
+        ),
       ),
     );
   }
@@ -955,6 +967,7 @@ class _WorkspacePanelState extends State<WorkspacePanel> {
     text: widget.controller.selectedWorkspace,
   );
   final FocusNode _focus = FocusNode();
+  bool _dirty = false;
 
   @override
   void dispose() {
@@ -965,7 +978,7 @@ class _WorkspacePanelState extends State<WorkspacePanel> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_focus.hasFocus && _path.text != widget.controller.selectedWorkspace) {
+    if (!_dirty && _path.text != widget.controller.selectedWorkspace) {
       _path.text = widget.controller.selectedWorkspace;
     }
     return _SettingsDetailShell(
@@ -987,13 +1000,18 @@ class _WorkspacePanelState extends State<WorkspacePanel> {
               focusNode: _focus,
               autofocus: true,
               style: const TextStyle(fontSize: 11.5),
+              onChanged: (_) {
+                _dirty = true;
+                widget.controller.clearWorkspaceError();
+              },
               onSubmitted: widget.controller.sessionSettingsBusy
                   ? null
-                  : (value) => unawaited(widget.controller.setWorkspace(value)),
-              decoration: const InputDecoration(
+                  : (value) => unawaited(_applyWorkspace()),
+              decoration: InputDecoration(
                 labelText: 'Folder path',
+                errorText: widget.controller.workspaceError,
                 isDense: true,
-                border: OutlineInputBorder(),
+                border: const OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 10),
@@ -1004,7 +1022,7 @@ class _WorkspacePanelState extends State<WorkspacePanel> {
                   key: const ValueKey('browse-workspace'),
                   onPressed: widget.controller.sessionSettingsBusy
                       ? null
-                      : () => unawaited(widget.controller.chooseWorkspace()),
+                      : () => unawaited(_browseWorkspace()),
                   icon: const Icon(Icons.folder_open_outlined, size: 16),
                   label: const Text('Browse', style: TextStyle(fontSize: 11)),
                 ),
@@ -1013,9 +1031,7 @@ class _WorkspacePanelState extends State<WorkspacePanel> {
                   key: const ValueKey('apply-workspace'),
                   onPressed: widget.controller.sessionSettingsBusy
                       ? null
-                      : () => unawaited(
-                          widget.controller.setWorkspace(_path.text),
-                        ),
+                      : () => unawaited(_applyWorkspace()),
                   child: const Text('Apply', style: TextStyle(fontSize: 11)),
                 ),
               ],
@@ -1024,6 +1040,25 @@ class _WorkspacePanelState extends State<WorkspacePanel> {
         ),
       ),
     );
+  }
+
+  Future<void> _browseWorkspace() async {
+    final selected = await widget.controller.chooseWorkspace();
+    if (!mounted || selected == null) return;
+    setState(() {
+      _path.value = TextEditingValue(
+        text: selected,
+        selection: TextSelection.collapsed(offset: selected.length),
+      );
+      _dirty = true;
+    });
+    _focus.requestFocus();
+  }
+
+  Future<void> _applyWorkspace() async {
+    final applied = await widget.controller.setWorkspace(_path.text);
+    if (!mounted || !applied) return;
+    setState(() => _dirty = false);
   }
 }
 

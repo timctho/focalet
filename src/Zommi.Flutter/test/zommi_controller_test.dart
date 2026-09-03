@@ -675,6 +675,13 @@ void main() {
       }),
       r'C:\tools\codex.exe',
     );
+    expect(
+      normalizeWorkspacePath(r'C:\Users\example\source', const {
+        'kind': 'wsl',
+        'name': 'Ubuntu',
+      }),
+      '/mnt/c/Users/example/source',
+    );
   });
 }
 

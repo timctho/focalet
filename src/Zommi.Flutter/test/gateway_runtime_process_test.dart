@@ -239,6 +239,10 @@ void main() {
         'zommi-hermes-settings-',
       );
       addTearDown(() => temporary.delete(recursive: true));
+      final changedWorkspace = await Directory('${temporary.path}/changed')
+          .create();
+      final coderWorkspace = await Directory('${temporary.path}/coder')
+          .create();
       final requestLog = File('${temporary.path}/requests.jsonl');
       final bridge = ProcessCoreBridge(
         executablePath: _coreHostPath(),
@@ -273,28 +277,28 @@ void main() {
       final moved = await bridge.configureSession(
         runtimeTargetId: target.id,
         sessionId: connection.sessionId,
-        cwd: '/workspace/changed',
+        cwd: changedWorkspace.path,
       );
-      expect(moved.sessionMetadata['cwd'], '/workspace/changed');
+      expect(moved.sessionMetadata['cwd'], changedWorkspace.path);
 
       final switched = await bridge.configureSession(
         runtimeTargetId: target.id,
         sessionId: moved.sessionId,
-        cwd: '/workspace/coder',
+        cwd: coderWorkspace.path,
         profile: 'coder',
         model: 'copilot/gpt-test',
         effort: 'medium',
       );
       expect(switched.sessionId, 'hermes-coder-session');
       expect(switched.sessionMetadata['profile'], 'coder');
-      expect(switched.sessionMetadata['cwd'], '/workspace/coder');
+      expect(switched.sessionMetadata['cwd'], coderWorkspace.path);
 
       final requests = await _readRequests(requestLog);
       expect(
         requests.any(
           (request) =>
               request['method'] == 'session.cwd.set' &&
-              (request['params'] as Map)['cwd'] == '/workspace/changed',
+              (request['params'] as Map)['cwd'] == changedWorkspace.path,
         ),
         isTrue,
       );
@@ -303,7 +307,7 @@ void main() {
           (request) =>
               request['method'] == 'session.create' &&
               (request['params'] as Map)['profile'] == 'coder' &&
-              (request['params'] as Map)['cwd'] == '/workspace/coder',
+              (request['params'] as Map)['cwd'] == coderWorkspace.path,
         ),
         isTrue,
       );

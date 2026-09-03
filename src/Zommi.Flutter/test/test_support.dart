@@ -28,6 +28,7 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
   Future<void>? initializeGate;
   Future<void>? connectGate;
   Future<void>? startTurnGate;
+  final Set<String> missingWorkspaces = {};
   final Map<String, String> activeSessionsByRuntime = {};
   final Map<String, Map<String, Object?>> historyBySession = {};
   final Map<String, List<Map<String, Object?>>> modelCatalogByRuntime = {};
@@ -309,6 +310,12 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
     lastProfile = profile;
     lastModel = model;
     lastEffort = effort;
+    if (cwd != null && missingWorkspaces.contains(cwd)) {
+      throw const CoreProtocolException(
+        'workspace-not-found',
+        'Workspace folder does not exist.',
+      );
+    }
     if (activeTargetId == 'runtime-hermes' &&
         profile != null &&
         profile.isNotEmpty) {

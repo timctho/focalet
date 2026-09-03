@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -111,6 +110,8 @@ class _ZommiShellState extends State<ZommiShell> {
   final Object _runtimeTapGroup = Object();
   final Object _runtimeSetupTapGroup = Object();
   final Object _modelTapGroup = Object();
+  final LayerLink _runtimePanelLink = LayerLink();
+  final LayerLink _settingsPanelLink = LayerLink();
   Timer? _previewTimer;
   Timer? _sessionTimer;
   int _lastFocusEpoch = 0;
@@ -297,26 +298,6 @@ class _ZommiShellState extends State<ZommiShell> {
                             ),
                           ),
                         ),
-                      if (_controller.runtimePanelOpen)
-                        Positioned(
-                          top: 2,
-                          left: math.max(18, (width - 420) / 2),
-                          child: TapRegion(
-                            groupId: _runtimeTapGroup,
-                            child: RuntimePanel(controller: _controller),
-                          ),
-                        ),
-                      if (_controller.modelPanelOpen)
-                        Positioned(
-                          top: 2,
-                          right: 20,
-                          child: TapRegion(
-                            groupId: _modelTapGroup,
-                            child: SessionSettingsPanel(
-                              controller: _controller,
-                            ),
-                          ),
-                        ),
                       if (_controller.runtimeSetupPanelOpen)
                         Positioned.fill(
                           child: ColoredBox(
@@ -397,6 +378,38 @@ class _ZommiShellState extends State<ZommiShell> {
                 _buildFooter(),
               ],
             ),
+            if (_controller.runtimePanelOpen)
+              Positioned(
+                left: 0,
+                top: 0,
+                child: CompositedTransformFollower(
+                  link: _runtimePanelLink,
+                  showWhenUnlinked: false,
+                  targetAnchor: Alignment.bottomLeft,
+                  followerAnchor: Alignment.topLeft,
+                  offset: const Offset(0, 6),
+                  child: TapRegion(
+                    groupId: _runtimeTapGroup,
+                    child: RuntimePanel(controller: _controller),
+                  ),
+                ),
+              ),
+            if (_controller.modelPanelOpen)
+              Positioned(
+                left: 0,
+                top: 0,
+                child: CompositedTransformFollower(
+                  link: _settingsPanelLink,
+                  showWhenUnlinked: false,
+                  targetAnchor: Alignment.bottomLeft,
+                  followerAnchor: Alignment.topLeft,
+                  offset: const Offset(0, 6),
+                  child: TapRegion(
+                    groupId: _modelTapGroup,
+                    child: SessionSettingsPanel(controller: _controller),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -441,13 +454,16 @@ class _ZommiShellState extends State<ZommiShell> {
               TapRegion(
                 groupId: _runtimeTapGroup,
                 onTapOutside: (_) => _controller.dismissRuntimePanel(),
-                child: _SummaryButton(
-                  key: const ValueKey('runtime-summary'),
-                  label: _controller.runtimeSummary,
-                  semanticLabel: 'Choose agent runtime',
-                  warning: _controller.statusWarning,
-                  loading: _controller.runtimeBusy,
-                  onPressed: _controller.toggleRuntimePanel,
+                child: CompositedTransformTarget(
+                  link: _runtimePanelLink,
+                  child: _SummaryButton(
+                    key: const ValueKey('runtime-summary'),
+                    label: _controller.runtimeSummary,
+                    semanticLabel: 'Choose agent runtime',
+                    warning: _controller.statusWarning,
+                    loading: _controller.runtimeBusy,
+                    onPressed: _controller.toggleRuntimePanel,
+                  ),
                 ),
               ),
               if (_controller.sessionSettingsSupported) ...[
@@ -455,11 +471,14 @@ class _ZommiShellState extends State<ZommiShell> {
                 TapRegion(
                   groupId: _modelTapGroup,
                   onTapOutside: (_) => _controller.dismissModelPanel(),
-                  child: _SummaryButton(
-                    key: const ValueKey('model-summary'),
-                    label: _controller.modelSummary,
-                    semanticLabel: 'Session settings',
-                    onPressed: _controller.toggleModelPanel,
+                  child: CompositedTransformTarget(
+                    link: _settingsPanelLink,
+                    child: _SummaryButton(
+                      key: const ValueKey('model-summary'),
+                      label: _controller.modelSummary,
+                      semanticLabel: 'Session settings',
+                      onPressed: _controller.toggleModelPanel,
+                    ),
                   ),
                 ),
               ],

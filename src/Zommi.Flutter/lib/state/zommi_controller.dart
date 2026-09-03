@@ -44,6 +44,7 @@ final class ZommiController extends ChangeNotifier {
   String selectedModel = '';
   String selectedEffort = '';
   String selectedWorkspace = '';
+  String? workspaceError;
   String selectedProfile = '';
   List<Map<String, Object?>> profiles = [];
   String status = 'Connecting to Rust core…';
@@ -69,6 +70,7 @@ final class ZommiController extends ChangeNotifier {
   bool contextShortcutRegistered = false;
   bool imageShortcutRegistered = false;
   int focusComposerEpoch = 0;
+  int sessionSettingsOverviewEpoch = 0;
   PendingApproval? approval;
   PendingQuestion? question;
   ContextAttachment? previewAttachment;
@@ -933,21 +935,39 @@ final class ZommiController extends ChangeNotifier {
     _notify();
   }
 
-  Future<void> chooseWorkspace() async {
+  Future<String?> chooseWorkspace() async {
     final selected = await desktop.selectWorkspaceDirectory();
-    if (selected == null || selected.trim().isEmpty) return;
-    await setWorkspace(selected);
+    final runtime = activeRuntime;
+    if (selected == null || selected.trim().isEmpty || runtime == null) {
+      return null;
+    }
+    final normalized = normalizeWorkspacePath(selected, runtime.executionHost);
+    if (normalized.isEmpty) return null;
+    clearWorkspaceError();
+    return normalized;
   }
 
-  Future<void> setWorkspace(String value) async {
+  Future<bool> setWorkspace(String value) async {
     final runtime = activeRuntime;
     final sessionId = activeSessionId;
-    if (runtime == null || sessionId == null || sessionSettingsBusy) return;
+    if (runtime == null || sessionId == null || sessionSettingsBusy) {
+      return false;
+    }
     final normalized = normalizeWorkspacePath(value, runtime.executionHost);
-    if (normalized.isEmpty || normalized == selectedWorkspace) return;
+    if (normalized.isEmpty) {
+      workspaceError = 'Choose an existing folder.';
+      _setStatus('Workspace folder is required', warning: true);
+      _notify();
+      return false;
+    }
+    if (normalized == selectedWorkspace) {
+      workspaceError = null;
+      _notify();
+      return true;
+    }
     final previous = activeSessionSettings;
-    selectedWorkspace = normalized;
-    _rememberActiveSessionSettings();
+    final proposed = previous.copyWith(workspace: normalized);
+    workspaceError = null;
     sessionSettingsBusy = true;
     _notify();
     try {
@@ -959,19 +979,32 @@ final class ZommiController extends ChangeNotifier {
         model: selectedModel.isEmpty ? null : selectedModel,
         effort: selectedEffort.isEmpty ? null : selectedEffort,
       );
-      await _applySessionConnection(
-        connection,
-        inherited: activeSessionSettings,
-      );
+      await _applySessionConnection(connection, inherited: proposed);
+      workspaceError = null;
       _setStatus('Workspace updated');
+      return true;
     } on Object catch (error) {
-      _sessionSettings[_sessionKey(runtime.id, sessionId)] = previous;
       _applySettings(previous);
+      workspaceError = switch (error) {
+        CoreProtocolException(code: 'workspace-not-found') =>
+          'Folder does not exist on ${runtime.executionHost['displayName'] ?? runtime.executionHost['name'] ?? 'this runtime'}.',
+        CoreProtocolException(code: 'invalid-workspace') =>
+          'Enter an absolute folder path.',
+        CoreProtocolException(:final message) => message,
+        _ => 'Could not use this folder.',
+      };
       _setStatus('Could not change workspace · $error', warning: true);
+      return false;
     } finally {
       sessionSettingsBusy = false;
       _notify();
     }
+  }
+
+  void clearWorkspaceError() {
+    if (workspaceError == null) return;
+    workspaceError = null;
+    _notify();
   }
 
   Future<void> setProfile(String value) async {
@@ -1045,8 +1078,10 @@ final class ZommiController extends ChangeNotifier {
   }
 
   void toggleModelPanel() {
-    modelPanelOpen = !modelPanelOpen;
     if (modelPanelOpen) {
+      sessionSettingsOverviewEpoch++;
+    } else {
+      modelPanelOpen = true;
       sessionPanelOpen = false;
       runtimePanelOpen = false;
       runtimeSetupPanelOpen = false;
@@ -1588,6 +1623,7 @@ final class ZommiController extends ChangeNotifier {
 
   void _applySettings(SessionSettings settings) {
     selectedWorkspace = settings.workspace;
+    workspaceError = null;
     selectedModel = settings.model;
     selectedEffort = settings.effort;
     selectedProfile = settings.profile;
@@ -1712,6 +1748,10 @@ String normalizeRuntimeExecutablePath(
     if (lower.startsWith(prefix)) {
       return '/${normalized.substring(prefix.length)}';
     }
+  }
+  if (RegExp(r'^[A-Za-z]:/').hasMatch(normalized)) {
+    final drive = normalized.substring(0, 1).toLowerCase();
+    return '/mnt/$drive/${normalized.substring(3)}';
   }
   return path;
 }

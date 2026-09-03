@@ -198,6 +198,54 @@ pub fn discover_targets_via_cached_relays(
     Ok(discovered)
 }
 
+/// Checks a directory inside the target distribution through the same
+/// authenticated relay used to launch runtimes. This avoids changing WSL
+/// configuration or starting a second interactive terminal.
+pub fn workspace_directory_exists(target: &RuntimeTarget, path: &str) -> io::Result<bool> {
+    if target.execution_host.kind != "wsl" || !path.starts_with('/') || path.contains('\0') {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "WSL workspace paths must be absolute Linux paths.",
+        ));
+    }
+    let distribution = target
+        .execution_host
+        .name
+        .as_deref()
+        .filter(|value| valid_distribution(value))
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "WSL target has no valid distribution.",
+            )
+        })?;
+    let endpoint_path = endpoint_path(distribution)?;
+    let endpoint = ensure_relay(distribution, &endpoint_path)?;
+    let invocation = ProxyInvocation {
+        distribution: distribution.into(),
+        cwd: "/".into(),
+        command: "/usr/bin/test".into(),
+        args: vec!["-d".into(), path.into()],
+    };
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    match proxy_runtime_spool_to(
+        endpoint,
+        &endpoint_path,
+        invocation,
+        false,
+        &mut stdout,
+        &mut stderr,
+    )? {
+        0 => Ok(true),
+        1 => Ok(false),
+        status => Err(io::Error::other(format!(
+            "WSL workspace check exited with {status}: {}",
+            bounded_text(&stderr)
+        ))),
+    }
+}
+
 struct ProxyInvocation {
     distribution: String,
     cwd: String,

@@ -284,6 +284,7 @@ impl HostState {
                 Ok(connection)
             }
             "session.configure" => {
+                self.validate_workspace_payload(payload).await?;
                 let adapter = self.exact_adapter(payload)?;
                 let session_id = required_string(payload, "sessionId")?;
                 let connection = adapter
@@ -686,6 +687,77 @@ impl HostState {
         Ok(adapter.clone())
     }
 
+    async fn validate_workspace_payload(&self, payload: &Value) -> Result<(), HostError> {
+        let Some(cwd) = payload
+            .get("cwd")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return Ok(());
+        };
+        let target_id = required_string(payload, "runtimeTargetId")?;
+        let target = self
+            .targets
+            .iter()
+            .find(|target| target.id == target_id)
+            .cloned()
+            .ok_or_else(|| {
+                HostError::new(
+                    "runtime-unavailable",
+                    "The workspace execution host is no longer available.",
+                )
+            })?;
+        let absolute = if target.execution_host.kind == "wsl" {
+            cwd.starts_with('/')
+        } else {
+            std::path::Path::new(cwd).is_absolute()
+        };
+        if !absolute || cwd.contains('\0') {
+            return Err(HostError::new(
+                "invalid-workspace",
+                "Workspace must be an absolute folder path.",
+            ));
+        }
+
+        let exists = match target.execution_host.kind.as_str() {
+            "native" => std::path::Path::new(cwd).is_dir(),
+            "wsl" if cfg!(target_os = "windows") => {
+                let path = cwd.to_owned();
+                tokio::task::spawn_blocking(move || {
+                    wsl_relay::workspace_directory_exists(&target, &path)
+                })
+                .await
+                .map_err(|error| {
+                    HostError::new(
+                        "workspace-validation-failed",
+                        format!("Workspace validation stopped unexpectedly: {error}"),
+                    )
+                })?
+                .map_err(|error| {
+                    HostError::new(
+                        "workspace-validation-failed",
+                        format!("Could not validate the WSL workspace: {error}"),
+                    )
+                })?
+            }
+            "wsl" => std::path::Path::new(cwd).is_dir(),
+            _ => {
+                return Err(HostError::new(
+                    "workspace-validation-failed",
+                    "This execution host cannot validate workspace folders yet.",
+                ));
+            }
+        };
+        if !exists {
+            return Err(HostError::new(
+                "workspace-not-found",
+                format!("Workspace folder does not exist: {cwd}"),
+            ));
+        }
+        Ok(())
+    }
+
     fn save_binding(
         &self,
         runtime_target_id: &str,
@@ -874,8 +946,11 @@ fn empty_object() -> Value {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use serde_json::{Value, json};
     use tokio::sync::mpsc;
+    use zommi_core::{ExecutionHost, RuntimeTarget};
 
     use super::{CORE_PROTOCOL_VERSION, CoreRequest, HostState};
 
@@ -970,5 +1045,61 @@ mod tests {
             result["error"]["message"],
             "Runtime override must be an object."
         );
+    }
+
+    #[tokio::test]
+    async fn validates_native_workspace_directories_before_configuration() {
+        let (event_tx, _events) = mpsc::unbounded_channel();
+        let mut host = HostState::new(event_tx);
+        host.targets.push(RuntimeTarget {
+            id: "runtime-test".into(),
+            runtime_id: "codex".into(),
+            adapter_id: "codex-app-server".into(),
+            display_name: "Codex".into(),
+            protocol_name: "Codex app-server".into(),
+            executable_path: "/bin/false".into(),
+            execution_host: ExecutionHost {
+                id: format!("native:{}", std::env::consts::OS),
+                kind: "native".into(),
+                platform: std::env::consts::OS.into(),
+                display_name: "Local".into(),
+                is_default: true,
+                name: None,
+            },
+            status: "ready".into(),
+            priority: 0,
+            capability_hints: Vec::new(),
+            runtime_home: None,
+            source: None,
+            endpoint: None,
+            profile_id: None,
+        });
+        let root = std::env::temp_dir().join(format!("zommi-workspace-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).expect("create workspace fixture");
+        let valid = json!({
+            "runtimeTargetId": "runtime-test",
+            "cwd": root.to_string_lossy()
+        });
+        host.validate_workspace_payload(&valid)
+            .await
+            .expect("existing workspace is valid");
+
+        let missing = json!({
+            "runtimeTargetId": "runtime-test",
+            "cwd": root.join("missing").to_string_lossy()
+        });
+        let error = host
+            .validate_workspace_payload(&missing)
+            .await
+            .expect_err("missing workspace must be rejected");
+        assert_eq!(error.code, "workspace-not-found");
+
+        let relative = json!({"runtimeTargetId": "runtime-test", "cwd": "relative/path"});
+        let error = host
+            .validate_workspace_payload(&relative)
+            .await
+            .expect_err("relative workspace must be rejected");
+        assert_eq!(error.code, "invalid-workspace");
+        fs::remove_dir_all(root).expect("remove workspace fixture");
     }
 }

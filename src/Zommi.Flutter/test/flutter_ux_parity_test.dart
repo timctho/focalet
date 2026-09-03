@@ -513,7 +513,17 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('runtime-summary')));
     await tester.pump();
-    expect(find.byKey(const ValueKey('runtime-panel')), findsOneWidget);
+    final runtimePanel = find.byKey(const ValueKey('runtime-panel'));
+    expect(runtimePanel, findsOneWidget);
+    final runtimeButtonBounds = tester.getRect(
+      find.byKey(const ValueKey('runtime-summary')),
+    );
+    final runtimePanelBounds = tester.getRect(runtimePanel);
+    expect(runtimePanelBounds.left, closeTo(runtimeButtonBounds.left, 0.1));
+    expect(
+      runtimePanelBounds.top,
+      closeTo(runtimeButtonBounds.bottom + 6, 0.1),
+    );
     await tester.tap(composer);
     await tester.pump();
     expect(find.byKey(const ValueKey('runtime-panel')), findsNothing);
@@ -523,6 +533,17 @@ void main() {
     expect(
       find.byKey(const ValueKey('session-settings-panel')),
       findsOneWidget,
+    );
+    final settingsButtonBounds = tester.getRect(
+      find.byKey(const ValueKey('model-summary')),
+    );
+    final settingsPanelBounds = tester.getRect(
+      find.byKey(const ValueKey('session-settings-panel')),
+    );
+    expect(settingsPanelBounds.left, closeTo(settingsButtonBounds.left, 0.1));
+    expect(
+      settingsPanelBounds.top,
+      closeTo(settingsButtonBounds.bottom + 6, 0.1),
     );
     await tester.tap(composer);
     await tester.pump();
@@ -540,7 +561,7 @@ void main() {
   });
 
   testWidgets(
-    'session settings overview slides editors right and applies Hermes values',
+    'session settings navigates into editors and applies Hermes values',
     (tester) async {
       const hermes = RuntimeTarget(
         id: 'runtime-hermes',
@@ -559,7 +580,8 @@ void main() {
       final core = RichFakeCore()
         ..historyCount = 0
         ..activeTargetId = hermes.id
-        ..discoveredTargets.add(hermes);
+        ..discoveredTargets.add(hermes)
+        ..missingWorkspaces.add('/workspace/missing');
       final desktop = FakeDesktopBridge()
         ..nextWorkspaceDirectory = '/workspace/new';
       await _pumpApp(tester, core: core, desktop: desktop);
@@ -572,26 +594,40 @@ void main() {
       expect(find.byKey(const ValueKey('settings-workspace')), findsOneWidget);
       expect(find.byKey(const ValueKey('settings-model')), findsOneWidget);
       expect(find.byKey(const ValueKey('settings-profile')), findsOneWidget);
-      final compactWidth = tester.getSize(settings).width;
 
       await tester.tap(find.byKey(const ValueKey('settings-workspace')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('workspace-panel')), findsOneWidget);
-      expect(tester.getSize(settings).width, greaterThan(compactWidth));
-      expect(
-        tester.getTopLeft(find.byKey(const ValueKey('workspace-panel'))).dx,
-        greaterThan(
-          tester
-              .getTopLeft(find.byKey(const ValueKey('settings-workspace')))
-              .dx,
-        ),
+      expect(find.byKey(const ValueKey('settings-workspace')), findsNothing);
+
+      await tester.enterText(
+        find.byKey(const ValueKey('workspace-path')),
+        '/workspace/missing',
       );
+      await tester.tap(find.byKey(const ValueKey('apply-workspace')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Folder does not exist'), findsOneWidget);
+      expect(core.lastCwd, '/workspace/missing');
+
       await tester.tap(find.byKey(const ValueKey('browse-workspace')));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const ValueKey('workspace-path')))
+            .controller
+            ?.text,
+        '/workspace/new',
+      );
+      expect(core.lastCwd, '/workspace/missing');
+      await tester.tap(find.byKey(const ValueKey('apply-workspace')));
       await tester.pumpAndSettle();
       expect(core.lastCwd, '/workspace/new');
 
-      await tester.tap(find.byKey(const ValueKey('settings-back')));
+      await tester.tap(find.byKey(const ValueKey('model-summary')));
       await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('workspace-panel')), findsNothing);
+      expect(find.byKey(const ValueKey('settings-workspace')), findsOneWidget);
+      expect(settings, findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('settings-profile')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('profile-list')), findsOneWidget);

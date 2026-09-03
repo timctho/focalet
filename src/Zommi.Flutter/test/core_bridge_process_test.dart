@@ -150,6 +150,8 @@ void main() {
       'zommi-flutter-rust-codex-',
     );
     addTearDown(() => temporary.delete(recursive: true));
+    final turnWorkspace = await Directory('${temporary.path}/turn-override')
+        .create();
     final requestLog = File('${temporary.path}/requests.jsonl');
     final environment = <String, String>{
       'ZOMMI_CODEX_COMMAND': python,
@@ -203,9 +205,9 @@ void main() {
     final configured = await bridge.configureSession(
       runtimeTargetId: connection.runtimeTargetId,
       sessionId: connection.sessionId,
-      cwd: '/workspace/turn-override',
+      cwd: turnWorkspace.path,
     );
-    expect(configured.sessionMetadata['cwd'], '/workspace/turn-override');
+    expect(configured.sessionMetadata['cwd'], turnWorkspace.path);
     await expectLater(
       bridge.startTurn(
         runtimeTargetId: connection.runtimeTargetId,
@@ -235,7 +237,7 @@ void main() {
       ],
       images: const ['data:image/png;base64,aGVsbG8='],
       clientOperationId: 'client:flutter-rust-e2e',
-      cwd: '/workspace/turn-override',
+      cwd: turnWorkspace.path,
     );
     expect(receipt.turnId, 'turn-rust-flutter');
     expect((await completed.future).payload['status'], 'completed');
@@ -271,7 +273,7 @@ void main() {
       ],
       images: const ['data:image/png;base64,aGVsbG8='],
       clientOperationId: 'client:flutter-rust-e2e',
-      cwd: '/workspace/turn-override',
+      cwd: turnWorkspace.path,
     );
     expect(replay.turnId, receipt.turnId);
     await expectLater(
@@ -390,7 +392,7 @@ void main() {
     );
     final params = turnStart['params'] as Map;
     expect(params['summary'], 'detailed');
-    expect(params['cwd'], '/workspace/turn-override');
+    expect(params['cwd'], turnWorkspace.path);
     expect(jsonEncode(params), contains('PRIMARY SURFACE SELECTION'));
     expect(jsonEncode(params), contains('data:image/png;base64,aGVsbG8='));
     final interrupt = requests.whereType<Map>().firstWhere(
