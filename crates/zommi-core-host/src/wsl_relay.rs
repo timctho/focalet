@@ -22,7 +22,7 @@ use zommi_core::{
     runtime_targets_from_wsl_probe, wsl_runtime_probe_script,
 };
 
-const TRANSPORT_VERSION: u32 = 4;
+const TRANSPORT_VERSION: u32 = 5;
 const ENDPOINT_SCHEMA_VERSION: u32 = 1;
 const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 const CHANNEL_STDOUT: u8 = 1;
@@ -799,7 +799,7 @@ fn read_json_line(reader: &mut BufReader<TcpStream>) -> io::Result<Value> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ProxyInvocation, RELAY_SOURCE, hex_name, wrap_wsl_command};
+    use super::{LAUNCHER_SOURCE, ProxyInvocation, RELAY_SOURCE, hex_name, wrap_wsl_command};
     use zommi_core::{ExecutionHost, RuntimeCommand, RuntimeTarget};
 
     #[test]
@@ -898,5 +898,12 @@ mod tests {
     fn embedded_relay_strips_parent_app_routing_from_every_runtime_child() {
         assert!(RELAY_SOURCE.contains("key.startsWith('PARENT_APP_')"));
         assert_eq!(RELAY_SOURCE.matches("env: runtimeEnvironment()").count(), 2);
+    }
+
+    #[test]
+    fn embedded_launcher_waits_for_a_proven_endpoint() {
+        assert!(!LAUNCHER_SOURCE.contains("setsid -f"));
+        assert!(LAUNCHER_SOURCE.contains("[ -s \"$endpoint_file\" ] && exit 0"));
+        assert!(LAUNCHER_SOURCE.contains("kill -0 \"$relay_pid\""));
     }
 }
