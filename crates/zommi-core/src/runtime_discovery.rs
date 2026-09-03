@@ -723,12 +723,20 @@ pub const PARENT_APP_RUNTIME_ENVIRONMENT_KEYS: &[&str] = &[
 /// retain the command-name fallback for tests and non-Windows hosts.
 pub fn windows_wsl_executable() -> String {
     for variable in ["SystemRoot", "WINDIR"] {
-        if let Some(root) = env::var_os(variable) {
+        if let Some(root) = env::vars_os().find_map(|(key, value)| {
+            key.to_string_lossy()
+                .eq_ignore_ascii_case(variable)
+                .then_some(value)
+        }) {
             let candidate = PathBuf::from(root).join("System32").join("wsl.exe");
             if candidate.is_file() {
                 return candidate.to_string_lossy().into_owned();
             }
         }
+    }
+    let default = PathBuf::from(r"C:\Windows\System32\wsl.exe");
+    if default.is_file() {
+        return default.to_string_lossy().into_owned();
     }
     "wsl.exe".into()
 }

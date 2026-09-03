@@ -480,12 +480,19 @@ fn wsl_path(distribution: &str, windows_path: &Path) -> io::Result<String> {
 }
 
 fn run_wsl(arguments: &[&str], timeout: Duration) -> io::Result<std::process::Output> {
-    let mut child = Command::new(windows_wsl_executable())
+    let executable = windows_wsl_executable();
+    let mut child = Command::new(&executable)
         .args(arguments)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()?;
+        .spawn()
+        .map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("Could not launch WSL through '{executable}': {error}"),
+            )
+        })?;
     if child.wait_timeout(timeout)?.is_none() {
         let _ = child.kill();
         let _ = child.wait();
