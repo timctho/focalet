@@ -150,15 +150,18 @@ final class TranscriptBlock {
     required this.id,
     required this.kind,
     required this.title,
+    String? sourceId,
     this.text = '',
     this.lifecycle = TranscriptLifecycle.delta,
     this.status,
     this.preview = '',
     this.expanded = true,
     List<ArtifactPreview> artifacts = const [],
-  }) : artifacts = List<ArtifactPreview>.of(artifacts);
+  }) : sourceId = sourceId ?? id,
+       artifacts = List<ArtifactPreview>.of(artifacts);
 
   final String id;
+  final String sourceId;
   final TranscriptKind kind;
   String title;
   String text;
@@ -178,6 +181,7 @@ final class ConversationTurn {
     required this.userText,
     String? inlineUserText,
     this.number = 0,
+    this.activityExpanded = false,
     List<String> contextTokens = const [],
     List<ContextAttachment> attachments = const [],
     List<TranscriptBlock> blocks = const [],
@@ -190,6 +194,7 @@ final class ConversationTurn {
   final int number;
   final String userText;
   final String inlineUserText;
+  bool activityExpanded;
   final List<String> contextTokens;
   final List<ContextAttachment> attachments;
   final List<TranscriptBlock> blocks;

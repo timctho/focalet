@@ -1299,6 +1299,11 @@ final class ZommiController extends ChangeNotifier {
     _notify();
   }
 
+  void setTurnActivityExpanded(ConversationTurn turn, bool expanded) {
+    turn.activityExpanded = expanded;
+    _notify();
+  }
+
   Future<void> _handleDesktopInvocation(DesktopInvocation invocation) async {
     if (invocation.attachment case final attachment?) {
       // The capture already happened before this event. Attach it before any
@@ -1397,12 +1402,13 @@ final class ZommiController extends ChangeNotifier {
           _unreadSessions.add(sessionKey);
         }
         final statusValue = event.payload['status']?.toString() ?? 'completed';
-        for (final block in (_turnsBySession[sessionKey] ?? const []).expand(
-          (turn) => turn.blocks,
-        )) {
-          if (block.isActivity) {
-            block.lifecycle = TranscriptLifecycle.completed;
-            block.expanded = false;
+        for (final turn in _turnsBySession[sessionKey] ?? const []) {
+          turn.activityExpanded = false;
+          for (final block in turn.blocks) {
+            if (block.isActivity) {
+              block.lifecycle = TranscriptLifecycle.completed;
+              block.expanded = false;
+            }
           }
         }
         if (_isActiveSession(event.runtimeTargetId, sessionId)) {
@@ -1453,28 +1459,29 @@ final class ZommiController extends ChangeNotifier {
     }
     final kind = _transcriptKind(event.payload['kind']?.toString());
     final lifecycle = _lifecycle(event.payload['lifecycle']?.toString());
-    if (kind == TranscriptKind.tool &&
-        !turn.blocks.any((block) => block.kind == TranscriptKind.thinking)) {
-      turn.blocks.add(
-        TranscriptBlock(
-          id: 'turn-thinking',
-          kind: TranscriptKind.thinking,
-          title: 'Thinking',
-          lifecycle: lifecycle,
-          expanded: false,
-        ),
-      );
-    }
     final nativeItemId = event.payload['itemId']?.toString() ?? '';
-    final blockId = kind == TranscriptKind.thinking
-        ? 'turn-thinking'
-        : nativeItemId.isEmpty
-        ? '${kind.name}:${event.payload['title'] ?? ''}'
-        : nativeItemId;
-    var block = turn.block(blockId);
+    final incomingText = event.payload['text']?.toString() ?? '';
+    final sourceMatch = nativeItemId.isEmpty
+        ? null
+        : _latestBlockForSource(turn.blocks, kind, nativeItemId);
+    TranscriptBlock? block = nativeItemId.isEmpty
+        ? _latestIncompleteBlock(turn.blocks, kind)
+        : sourceMatch != null &&
+              _continuesCurrentSegment(turn.blocks, sourceMatch, lifecycle)
+        ? sourceMatch
+        : null;
+    if (block == null && kind == TranscriptKind.assistant) {
+      block = _overlappingTrailingAssistant(turn.blocks, incomingText);
+    }
+    final blockId = nativeItemId.isEmpty
+        ? '${kind.name}:${event.sequence}'
+        : sourceMatch == null
+        ? nativeItemId
+        : '$nativeItemId:${event.sequence}';
     if (block == null) {
       block = TranscriptBlock(
         id: blockId,
+        sourceId: nativeItemId.isEmpty ? blockId : nativeItemId,
         kind: kind,
         title: event.payload['title']?.toString() ?? _kindTitle(kind),
         lifecycle: lifecycle,
@@ -1485,7 +1492,7 @@ final class ZommiController extends ChangeNotifier {
     }
     block.text = mergeActivityText(
       block.text,
-      event.payload['text']?.toString() ?? '',
+      incomingText,
       kind,
       lifecycle,
       replace: event.payload['replace'] == true,
@@ -1784,27 +1791,19 @@ ConversationTurn mergeConversationTurn(
 ) {
   final blocks = List<TranscriptBlock>.of(primary.blocks);
   for (final candidate in secondary.blocks) {
-    if (candidate.kind == TranscriptKind.thinking) {
-      // Canonical history and the live cache can use different item IDs for
-      // commentary/reasoning. Keep both inputs here and consolidate them into
-      // one Thinking block below instead of dropping the canonical detail.
+    final match = _matchingTranscriptBlock(blocks, candidate);
+    if (match < 0) {
       blocks.add(candidate);
-      continue;
+    } else {
+      blocks[match] = mergeTranscriptBlocks(blocks[match], candidate);
     }
-    final duplicate = blocks.any(
-      (block) =>
-          block.id == candidate.id ||
-          (block.kind == candidate.kind &&
-              block.text.trim().isNotEmpty &&
-              block.text.trim() == candidate.text.trim()),
-    );
-    if (!duplicate) blocks.add(candidate);
   }
   return ConversationTurn(
     id: primary.id,
     number: primary.number,
     userText: primary.userText,
     inlineUserText: primary.inlineUserText,
+    activityExpanded: primary.activityExpanded,
     contextTokens: primary.contextTokens.isEmpty
         ? secondary.contextTokens
         : primary.contextTokens,
@@ -1813,6 +1812,65 @@ ConversationTurn mergeConversationTurn(
         : primary.attachments,
     blocks: normalizeTranscriptBlocks(blocks),
   );
+}
+
+int _matchingTranscriptBlock(
+  List<TranscriptBlock> blocks,
+  TranscriptBlock candidate,
+) {
+  final identityMatch = blocks.indexWhere(
+    (block) => block.kind == candidate.kind && block.id == candidate.id,
+  );
+  if (identityMatch >= 0) return identityMatch;
+  if (candidate.text.trim().isEmpty) return -1;
+  return blocks.indexWhere(
+    (block) =>
+        block.kind == candidate.kind &&
+        (candidate.kind == TranscriptKind.assistant
+            ? transcriptTextSnapshotsOverlap(block.text, candidate.text)
+            : block.text.trim() == candidate.text.trim()),
+  );
+}
+
+TranscriptBlock? _latestIncompleteBlock(
+  List<TranscriptBlock> blocks,
+  TranscriptKind kind,
+) {
+  if (blocks.isEmpty) return null;
+  final trailing = blocks.last;
+  return trailing.kind == kind && !trailing.completed ? trailing : null;
+}
+
+TranscriptBlock? _latestBlockForSource(
+  List<TranscriptBlock> blocks,
+  TranscriptKind kind,
+  String sourceId,
+) {
+  for (final block in blocks.reversed) {
+    if (block.kind == kind && block.sourceId == sourceId) return block;
+  }
+  return null;
+}
+
+bool _continuesCurrentSegment(
+  List<TranscriptBlock> blocks,
+  TranscriptBlock block,
+  TranscriptLifecycle lifecycle,
+) {
+  if (blocks.isNotEmpty && identical(blocks.last, block)) return true;
+  return lifecycle == TranscriptLifecycle.completed && !block.completed;
+}
+
+TranscriptBlock? _overlappingTrailingAssistant(
+  List<TranscriptBlock> blocks,
+  String incomingText,
+) {
+  if (incomingText.trim().isEmpty || blocks.isEmpty) return null;
+  final trailing = blocks.last;
+  if (trailing.kind != TranscriptKind.assistant) return null;
+  return transcriptTextSnapshotsOverlap(trailing.text, incomingText)
+      ? trailing
+      : null;
 }
 
 String normalizeRuntimeExecutablePath(

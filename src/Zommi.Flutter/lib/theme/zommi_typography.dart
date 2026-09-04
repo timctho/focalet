@@ -23,6 +23,7 @@ const TextStyle topBarAndChatTextStyle = TextStyle(
   fontFamily: codexUiFontFamily,
   fontFamilyFallback: codexUiFontFallback,
   fontSize: topBarAndChatFontSize,
+  fontWeight: FontWeight.w500,
   height: 1.35,
 );
 

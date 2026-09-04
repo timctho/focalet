@@ -4,6 +4,21 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 
 void main() {
+  test(
+    'readable message size is the default and persisted values stay valid',
+    () {
+      expect(const AppPreferences().chatFontSize, 13);
+      expect(
+        AppPreferences.fromJson(const {'chatFontSize': 2}).chatFontSize,
+        12,
+      );
+      expect(
+        AppPreferences.fromJson(const {'chatFontSize': 99}).chatFontSize,
+        15,
+      );
+    },
+  );
+
   test('app appearance preferences round trip locally', () async {
     final directory = await Directory.systemTemp.createTemp(
       'zommi-app-preferences-',

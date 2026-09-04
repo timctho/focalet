@@ -194,6 +194,7 @@ class InlineAttachmentMessage extends StatelessWidget {
     final style = DefaultTextStyle.of(context).style.copyWith(
       color: const Color(0xff272b38),
       fontSize: chatFontSizeOf(context),
+      fontWeight: FontWeight.w500,
       height: 1.35,
       fontFamily: codexUiFontFamily,
       fontFamilyFallback: codexUiFontFallback,
