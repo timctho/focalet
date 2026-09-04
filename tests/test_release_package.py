@@ -87,6 +87,24 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertEqual(result["captureHost"], "zommi-x11-capture")
         self.assertEqual(result["files"], 5 + len(verify_release.LINUX_RUNTIME_LIBRARIES))
 
+    def test_windows_manifest_requires_persistent_wsl_transport(self) -> None:
+        manifest_path = self.root / "release-manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["platform"] = "windows"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        self._write_checksums()
+        with self.assertRaisesRegex(
+            verify_release.ReleaseValidationError,
+            "persistent WSL relay",
+        ):
+            verify_release.verify_package(self.root, smoke_processes=False)
+
+        manifest["components"]["wslTransport"] = "persistent-authenticated-relay"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        self._write_checksums()
+        result = verify_release.verify_package(self.root, smoke_processes=False)
+        self.assertEqual(result["platform"], "windows")
+
     def test_missing_linux_runtime_library_is_rejected(self) -> None:
         (self.root / verify_release.LINUX_RUNTIME_LIBRARIES[0]).unlink()
         self._write_checksums()
@@ -153,6 +171,29 @@ class ReleasePackageTests(unittest.TestCase):
         ):
             self.assertIn(contract, script)
 
+    def test_windows_acceptance_requires_stable_taskbar_lifecycle(self) -> None:
+        script = (SCRIPTS / "accept-windows-capture.ps1").read_text(encoding="utf-8")
+        for contract in (
+            "TaskbarEligible",
+            "const int toolWindow = 0x00000080",
+            "const int appWindow = 0x00040000",
+            "GetWindow(window, owner)",
+            "PhysicalBounds",
+            "SetThreadDpiAwarenessContext(new IntPtr(-4))",
+            "SetPhysicalCursorPos",
+            "Start-Sleep -Milliseconds 750",
+            "Packaged application did not start as a complete taskbar chat window",
+            "Taskbar window resized on hover",
+            "Taskbar window resized after pointer exit",
+            "Packaged taskbar window did not minimize",
+            "Packaged taskbar window did not restore",
+            "Could not minimize Zommi before the Alt+Shift+A restore gate",
+            "Cancelled Alt+Shift+A did not restore, show, and focus the minimized packaged taskbar window",
+            "minimizedImageShortcutRestored = $true",
+            "Packaged taskbar window unexpectedly remained always-on-top",
+        ):
+            self.assertIn(contract, script)
+
     def test_windows_desktop_preflight_reports_runner_session_without_blame(self) -> None:
         script = (SCRIPTS / "accept-windows-capture.ps1").read_text(encoding="utf-8")
         for contract in (
@@ -199,6 +240,28 @@ class ReleasePackageTests(unittest.TestCase):
             "topMostGuard.Start()",
         ):
             self.assertIn(contract, source)
+
+    def test_windows_point_context_uses_a_crosshair_and_clicked_target(self) -> None:
+        source = (SCRIPTS.parent / "src/Zommi.Windows/PointSelectionForm.cs").read_text(
+            encoding="utf-8"
+        )
+        host = (SCRIPTS.parent / "src/Zommi.Windows/CaptureNativeHost.cs").read_text(
+            encoding="utf-8"
+        )
+        acceptance = (SCRIPTS / "accept-windows-capture.ps1").read_text(
+            encoding="utf-8"
+        )
+        for contract in (
+            "Cursor = Cursors.Cross",
+            "Result = Cursor.Position",
+            "Click a window or control to attach its context",
+            "AttachThreadInput(currentThread, foregroundThread, true)",
+            "ForceForeground();",
+        ):
+            self.assertIn(contract, source)
+        self.assertIn('case "selectContext"', host)
+        self.assertIn("CrosshairCursorActive", acceptance)
+        self.assertIn("point-context: ok (crosshair and click)", acceptance)
 
     def test_manifest_component_cannot_escape_package_root(self) -> None:
         manifest_path = self.root / "release-manifest.json"

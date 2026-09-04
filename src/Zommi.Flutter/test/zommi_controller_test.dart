@@ -9,6 +9,42 @@ import 'package:zommi_flutter/state/zommi_models.dart';
 import 'test_support.dart';
 
 void main() {
+  test(
+    'runtime capability failures are not mislabeled as core failures',
+    () async {
+      final core = RichFakeCore()
+        ..historyCount = 0
+        ..connectErrorCode = 'capability-unavailable'
+        ..connectErrorMessage =
+            'Native Windows terminal compatibility requires a ConPTY backend.';
+      final controller = ZommiController(
+        core: core,
+        desktop: FakeDesktopBridge(),
+      );
+
+      await controller.initialize();
+
+      expect(controller.status, startsWith('Agent runtime unavailable ·'));
+      expect(controller.status, isNot(contains('Rust core unavailable')));
+      await controller.close();
+    },
+  );
+
+  test('manual runtime refresh bypasses the WSL discovery backoff', () async {
+    final core = RichFakeCore()..historyCount = 0;
+    final controller = ZommiController(
+      core: core,
+      desktop: FakeDesktopBridge(),
+    );
+    await controller.initialize();
+    expect(core.lastDiscoveryForce, isFalse);
+
+    await controller.refreshRuntimes();
+
+    expect(core.lastDiscoveryForce, isTrue);
+    await controller.close();
+  });
+
   test('portal authorization does not block Rust runtime discovery', () async {
     final core = RichFakeCore()..historyCount = 0;
     final desktopReady = Completer<DesktopReadiness>();
@@ -209,9 +245,10 @@ void main() {
 
     expect(observations.first.$1, 1);
     expect(observations.first.$2, isNot(contains('showPanel')));
+    expect(desktop.calls, contains('showPanel'));
     expect(
-      desktop.calls,
-      containsAllInOrder(['surface:true:false', 'showPanel']),
+      desktop.calls.where((call) => call == 'surface:false:false'),
+      isEmpty,
     );
     expect(controller.attachments.single.token, '[example.com]');
     expect(desktop.surfaceAnimations, everyElement(isFalse));
@@ -219,42 +256,55 @@ void main() {
   });
 
   test(
-    'full chat stays unmounted until each surface transition completes',
+    'cancelled image shortcut still restores and focuses the composer',
+    () async {
+      final core = RichFakeCore()..historyCount = 0;
+      final desktop = FakeDesktopBridge();
+      final controller = ZommiController(core: core, desktop: desktop);
+      await controller.initialize();
+      desktop.calls.clear();
+
+      desktop.emit(const DesktopInvocation(kind: DesktopInvocationKind.image));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.focusComposerEpoch, 1);
+      expect(desktop.calls, contains('showPanel'));
+      expect(
+        desktop.calls.where((call) => call.startsWith('surface:')),
+        isEmpty,
+      );
+      await controller.close();
+    },
+  );
+
+  test(
+    'taskbar chat stays expanded while large-window resize completes',
     () async {
       final core = RichFakeCore()..historyCount = 0;
       final desktop = FakeDesktopBridge();
       final controller = ZommiController(core: core, desktop: desktop);
       await controller.initialize();
 
-      final expandGate = Completer<void>();
-      desktop.surfaceGate = expandGate.future;
-      final expansion = controller.setExpanded(true, focus: true);
+      expect(controller.expanded, isTrue);
+      await controller.setExpanded(true, focus: true);
+      expect(controller.focusComposerEpoch, 1);
+      expect(desktop.calls, contains('showPanel'));
+
+      final resizeGate = Completer<void>();
+      desktop.surfaceGate = resizeGate.future;
+      final resize = controller.toggleLargePanel();
       await Future<void>.delayed(Duration.zero);
       expect(controller.surfaceTransitioning, isTrue);
       expect(controller.surfaceTransitionAnimating, isTrue);
       expect(controller.transitionTargetExpanded, isTrue);
-      expect(controller.expanded, isFalse);
-      expect(controller.focusComposerEpoch, 0);
-
-      expandGate.complete();
-      await expansion;
-      expect(controller.surfaceTransitioning, isFalse);
-      expect(controller.expanded, isTrue);
-      expect(controller.focusComposerEpoch, 1);
-
-      final collapseGate = Completer<void>();
-      desktop.surfaceGate = collapseGate.future;
-      final collapse = controller.setExpanded(false);
-      await Future<void>.delayed(Duration.zero);
-      expect(controller.surfaceTransitioning, isTrue);
-      expect(controller.surfaceTransitionAnimating, isTrue);
-      expect(controller.transitionTargetExpanded, isFalse);
+      expect(controller.transitionTargetLarge, isTrue);
       expect(controller.expanded, isTrue);
 
-      collapseGate.complete();
-      await collapse;
+      resizeGate.complete();
+      await resize;
       expect(controller.surfaceTransitioning, isFalse);
-      expect(controller.expanded, isFalse);
+      expect(controller.expanded, isTrue);
+      expect(controller.largePanel, isTrue);
       await controller.close();
     },
   );
@@ -335,26 +385,154 @@ void main() {
     await controller.close();
   });
 
-  test('model choice survives session and runtime round trips', () async {
+  test(
+    'each session keeps an independent model and reasoning choice',
+    () async {
+      final core = RichFakeCore()..historyCount = 0;
+      final controller = ZommiController(
+        core: core,
+        desktop: FakeDesktopBridge(),
+      );
+      await controller.initialize();
+      controller.setModel('fixture-mini');
+      controller.setEffort('medium');
+
+      await controller.switchSession('session-2');
+      expect(controller.selectedModel, 'fixture-pro');
+      expect(controller.selectedEffort, 'high');
+      controller.setModel('fixture-mini');
+      controller.setEffort('low');
+
+      await controller.switchSession('session-1');
+      expect(controller.selectedModel, 'fixture-mini');
+      expect(controller.selectedEffort, 'medium');
+
+      await controller.selectRuntime('runtime-pi');
+      controller.setModel('fixture-pro');
+      controller.setEffort('low');
+      await controller.selectRuntime('runtime-codex');
+      expect(controller.selectedModel, 'fixture-mini');
+      expect(controller.selectedEffort, 'medium');
+      await controller.close();
+    },
+  );
+
+  test('workspace overrides stay isolated and reach the core', () async {
     final core = RichFakeCore()..historyCount = 0;
     final controller = ZommiController(
       core: core,
       desktop: FakeDesktopBridge(),
     );
     await controller.initialize();
-    controller.setModel('fixture-mini');
-    controller.setEffort('medium');
+
+    await controller.setWorkspace('/work/alpha');
+    expect(controller.selectedWorkspace, '/work/alpha');
+    expect(core.lastCwd, '/work/alpha');
 
     await controller.switchSession('session-2');
-    expect(controller.selectedModel, 'fixture-mini');
-    expect(controller.selectedEffort, 'medium');
+    expect(controller.selectedWorkspace, isEmpty);
+    await controller.setWorkspace('/work/beta');
+    await controller.switchSession('session-1');
+    expect(controller.selectedWorkspace, '/work/alpha');
+    await controller.close();
+  });
+
+  test('Hermes model catalog survives an empty reconnect response', () async {
+    const hermes = RuntimeTarget(
+      id: 'runtime-hermes',
+      runtimeId: 'hermes',
+      adapterId: 'hermes-gateway',
+      displayName: 'Hermes',
+      protocolName: 'Hermes Gateway',
+      executablePath: '/usr/bin/hermes',
+      executionHost: {
+        'id': 'native:linux',
+        'kind': 'native',
+        'displayName': 'Linux',
+      },
+      capabilityHints: RichFakeCore.capabilities,
+    );
+    final core = RichFakeCore()
+      ..historyCount = 0
+      ..activeTargetId = hermes.id
+      ..discoveredTargets.add(hermes)
+      ..modelCatalogByRuntime[hermes.id] = RichFakeCore.models;
+    final controller = ZommiController(
+      core: core,
+      desktop: FakeDesktopBridge(),
+    );
+    await controller.initialize();
+    expect(controller.activeRuntime?.id, hermes.id);
+    expect(controller.models, RichFakeCore.models);
+    expect(controller.modelSelectionSupported, isTrue);
 
     await controller.selectRuntime('runtime-pi');
-    controller.setModel('fixture-pro');
-    controller.setEffort('low');
+    core.modelCatalogByRuntime[hermes.id] = const [];
+    await controller.selectRuntime(hermes.id);
+    expect(controller.activeRuntime?.id, hermes.id);
+    expect(controller.models, RichFakeCore.models);
+    expect(controller.modelSelectionSupported, isTrue);
+    await controller.close();
+  });
+
+  test('runtime round trip consolidates canonical thinking sections', () async {
+    final core = RichFakeCore()..historyCount = 0;
+    final controller = ZommiController(
+      core: core,
+      desktop: FakeDesktopBridge(),
+    );
+    await controller.initialize();
+    await controller.submit('inspect once');
+    core.emit(
+      _event(
+        1,
+        'item.update',
+        payload: const {
+          'kind': 'thinking',
+          'lifecycle': 'delta',
+          'text': 'Reading context',
+          'itemId': 'live-thinking',
+        },
+      ),
+    );
+    core.historyBySession['runtime-codex\u0000session-1'] = {
+      'thread': {
+        'id': 'session-1',
+        'turns': [
+          {
+            'id': 'canonical-turn',
+            'items': [
+              {
+                'type': 'userMessage',
+                'content': [
+                  {'type': 'text', 'text': 'inspect once'},
+                ],
+              },
+              {
+                'id': 'commentary-1',
+                'type': 'agentMessage',
+                'phase': 'commentary',
+                'text': 'Reading context',
+              },
+              {
+                'id': 'reasoning-1',
+                'type': 'reasoning',
+                'summary': ['Comparing the selected page'],
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    await controller.selectRuntime('runtime-pi');
     await controller.selectRuntime('runtime-codex');
-    expect(controller.selectedModel, 'fixture-mini');
-    expect(controller.selectedEffort, 'medium');
+    final thinking = controller.turns.last.blocks.where(
+      (block) => block.kind == TranscriptKind.thinking,
+    );
+    expect(thinking, hasLength(1));
+    expect(thinking.single.text, contains('Reading context'));
+    expect(thinking.single.text, contains('Comparing the selected page'));
     await controller.close();
   });
 
@@ -435,30 +613,27 @@ void main() {
     await controller.close();
   });
 
-  test(
-    'runtime switching keeps the global orb activity signal alive',
-    () async {
-      final core = RichFakeCore()..historyCount = 0;
-      final controller = ZommiController(
-        core: core,
-        desktop: FakeDesktopBridge(),
-      );
-      await controller.initialize();
-      final gate = Completer<void>();
-      core.connectGate = gate.future;
+  test('runtime switching keeps the global activity signal alive', () async {
+    final core = RichFakeCore()..historyCount = 0;
+    final controller = ZommiController(
+      core: core,
+      desktop: FakeDesktopBridge(),
+    );
+    await controller.initialize();
+    final gate = Completer<void>();
+    core.connectGate = gate.future;
 
-      final switching = controller.selectRuntime('runtime-pi');
-      await Future<void>.delayed(Duration.zero);
-      expect(controller.runtimeBusy, isTrue);
-      expect(controller.orbWorking, isTrue);
+    final switching = controller.selectRuntime('runtime-pi');
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.runtimeBusy, isTrue);
+    expect(controller.anyTurnActive || controller.runtimeBusy, isTrue);
 
-      gate.complete();
-      await switching;
-      expect(controller.runtimeBusy, isFalse);
-      expect(controller.orbWorking, isFalse);
-      await controller.close();
-    },
-  );
+    gate.complete();
+    await switching;
+    expect(controller.runtimeBusy, isFalse);
+    expect(controller.anyTurnActive || controller.runtimeBusy, isFalse);
+    await controller.close();
+  });
 
   test('undetected runtime targets are excluded from the main list', () async {
     final core = RichFakeCore()..historyCount = 0;
@@ -486,6 +661,86 @@ void main() {
     await controller.close();
   });
 
+  test(
+    'Hermes ACP and Gateway stay visible while exact duplicates collapse',
+    () async {
+      const acp = RuntimeTarget(
+        id: 'runtime-hermes-acp',
+        runtimeId: 'hermes',
+        adapterId: 'hermes-acp',
+        displayName: 'Hermes',
+        protocolName: 'ACP',
+        executablePath: '/usr/bin/hermes',
+        executionHost: {'id': 'native:linux', 'kind': 'native'},
+      );
+      const gateway = RuntimeTarget(
+        id: 'runtime-hermes',
+        runtimeId: 'hermes',
+        adapterId: 'hermes-gateway',
+        displayName: 'Hermes',
+        protocolName: 'Gateway',
+        executablePath: '/usr/bin/hermes',
+        executionHost: {'id': 'native:linux', 'kind': 'native'},
+        capabilityHints: RichFakeCore.capabilities,
+      );
+      final core = RichFakeCore()
+        ..historyCount = 0
+        ..activeTargetId = acp.id;
+      core.discoveredTargets
+        ..clear()
+        ..addAll(const [acp, gateway, acp, gateway]);
+      final controller = ZommiController(
+        core: core,
+        desktop: FakeDesktopBridge(),
+      );
+
+      await controller.initialize();
+
+      final hermes = controller.visibleRuntimeTargets
+          .where((target) => target.runtimeId == 'hermes')
+          .toList();
+      expect(hermes, hasLength(2));
+      expect(
+        hermes.map((target) => target.adapterId),
+        containsAllInOrder(const ['hermes-acp', 'hermes-gateway']),
+      );
+      expect(controller.activeRuntime?.id, acp.id);
+      expect(controller.profileSelectionSupported, isFalse);
+
+      await controller.selectRuntime(gateway.id);
+
+      expect(controller.activeRuntime?.id, gateway.id);
+      expect(controller.profileSelectionSupported, isTrue);
+      await controller.close();
+    },
+  );
+
+  test('selecting an unavailable active runtime reconnects it', () async {
+    final core = RichFakeCore()..historyCount = 0;
+    final controller = ZommiController(
+      core: core,
+      desktop: FakeDesktopBridge(),
+    );
+    await controller.initialize();
+    expect(core.connectCount, 1);
+    core.emit(
+      _event(
+        1,
+        'runtime.status',
+        payload: const {
+          'status': 'unavailable',
+          'message': 'Codex app-server is not running.',
+        },
+      ),
+    );
+
+    await controller.selectRuntime('runtime-codex');
+
+    expect(core.connectCount, 2);
+    expect(controller.activeRuntime?.id, 'runtime-codex');
+    await controller.close();
+  });
+
   test('WSL file picker paths normalize to the CLI path only', () {
     expect(
       normalizeRuntimeExecutablePath(
@@ -499,6 +754,13 @@ void main() {
         'kind': 'native',
       }),
       r'C:\tools\codex.exe',
+    );
+    expect(
+      normalizeWorkspacePath(r'C:\Users\example\source', const {
+        'kind': 'wsl',
+        'name': 'Ubuntu',
+      }),
+      '/mnt/c/Users/example/source',
     );
   });
 }

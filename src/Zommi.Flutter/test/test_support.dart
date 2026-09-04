@@ -13,6 +13,8 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
   String? lastMessage;
   String? lastModel;
   String? lastEffort;
+  String? lastCwd;
+  String? lastProfile;
   List<Map<String, Object?>> lastSnapshots = [];
   List<String> lastImages = [];
   (String, String, String)? interrupted;
@@ -20,12 +22,17 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
   (String, String, String, Map<String, Object?>)? questionResolution;
   int historyCount = 45;
   bool closed = false;
+  int connectCount = 0;
   String? connectErrorCode;
+  String connectErrorMessage = 'Authentication required';
+  bool? lastDiscoveryForce;
   Future<void>? initializeGate;
   Future<void>? connectGate;
   Future<void>? startTurnGate;
+  final Set<String> missingWorkspaces = {};
   final Map<String, String> activeSessionsByRuntime = {};
   final Map<String, Map<String, Object?>> historyBySession = {};
+  final Map<String, List<Map<String, Object?>>> modelCatalogByRuntime = {};
   final List<Map<String, Object?>> configuredOverrides = [
     {
       'id': 'override-existing',
@@ -137,11 +144,15 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
   @override
   Future<RuntimeDiscovery> discoverRuntimeTargets({
     String? lastSelectedTargetId,
-  }) async => RuntimeDiscovery(
-    targets: discoveredTargets,
-    selectedTargetId: lastSelectedTargetId ?? activeTargetId,
-    settings: _settings(),
-  );
+    bool force = false,
+  }) async {
+    lastDiscoveryForce = force;
+    return RuntimeDiscovery(
+      targets: discoveredTargets,
+      selectedTargetId: lastSelectedTargetId ?? activeTargetId,
+      settings: _settings(),
+    );
+  }
 
   Map<String, Object?> _settings() => {
     'adapters': const [
@@ -208,9 +219,10 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
     String? preferredSessionId,
     String? cwd,
   }) async {
+    connectCount++;
     if (connectGate case final gate?) await gate;
     if (connectErrorCode case final code?) {
-      throw CoreProtocolException(code, 'Authentication required');
+      throw CoreProtocolException(code, connectErrorMessage);
     }
     activeTargetId = runtimeTargetId;
     activeSessionId =
@@ -226,15 +238,29 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
     sessionId: activeSessionId,
     protocolVersion: 1,
     runtimeVersion: '9.8.7',
-    models: activeTargetId == 'runtime-claude' ? const [] : models,
+    models:
+        modelCatalogByRuntime[activeTargetId] ??
+        (activeTargetId == 'runtime-claude' ? const [] : models),
     sessions: _sessions(),
     capabilities: activeTargetId == 'runtime-claude'
         ? const ['turn.stream.v1']
         : capabilities,
-    sessionMetadata: const {
-      'activeModel': 'fixture-pro',
-      'activeEffort': 'high',
-    },
+    sessionMetadata: activeTargetId == 'runtime-hermes'
+        ? const {
+            'activeModel': 'fixture-pro',
+            'activeEffort': 'high',
+            'cwd': '/workspace/hermes',
+            'profile': 'default',
+            'profiles': [
+              {'name': 'default', 'model': 'fixture-pro'},
+              {
+                'name': 'coder',
+                'model': 'fixture-pro',
+                'description': 'Coding profile',
+              },
+            ],
+          }
+        : const {'activeModel': 'fixture-pro', 'activeEffort': 'high'},
   );
 
   List<Map<String, Object?>> _sessions() => [
@@ -253,6 +279,8 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
     required String runtimeTargetId,
     String? model,
     String? effort,
+    String? cwd,
+    String? profile,
   }) async {
     activeSessionId = 'created-session';
     activeSessionsByRuntime[runtimeTargetId] = activeSessionId;
@@ -263,9 +291,39 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
   Future<RuntimeConnection> openSession({
     required String runtimeTargetId,
     required String sessionId,
+    String? cwd,
+    String? profile,
   }) async {
     activeSessionId = sessionId;
     activeSessionsByRuntime[runtimeTargetId] = sessionId;
+    return _connection();
+  }
+
+  @override
+  Future<RuntimeConnection> configureSession({
+    required String runtimeTargetId,
+    required String sessionId,
+    String? cwd,
+    String? profile,
+    String? model,
+    String? effort,
+  }) async {
+    lastCwd = cwd;
+    lastProfile = profile;
+    lastModel = model;
+    lastEffort = effort;
+    if (cwd != null && missingWorkspaces.contains(cwd)) {
+      throw const CoreProtocolException(
+        'workspace-not-found',
+        'Workspace folder does not exist.',
+      );
+    }
+    if (activeTargetId == 'runtime-hermes' &&
+        profile != null &&
+        profile.isNotEmpty) {
+      activeSessionId = 'hermes-$profile-session';
+      activeSessionsByRuntime[runtimeTargetId] = activeSessionId;
+    }
     return _connection();
   }
 
@@ -312,11 +370,15 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
     String? clientOperationId,
     String? model,
     String? effort,
+    String? cwd,
+    String? profile,
   }) async {
     if (startTurnGate case final gate?) await gate;
     lastMessage = message;
     lastModel = model;
     lastEffort = effort;
+    lastCwd = cwd;
+    lastProfile = profile;
     lastSnapshots = snapshots;
     lastImages = images;
     return TurnReceipt(
@@ -390,10 +452,13 @@ final class FakeDesktopBridge implements DesktopBridge {
   ContextAttachment? nextImage;
   String? copiedText;
   String? copiedImage;
+  Uri? openedUrl;
   String? nextRuntimeExecutable;
+  String? nextWorkspaceDirectory;
   bool closed = false;
   Future<DesktopReadiness>? initializeGate;
   Future<void>? surfaceGate;
+  bool pointerWithinSurface = false;
 
   @override
   Stream<DesktopInvocation> get invocations => _invocations.stream;
@@ -408,8 +473,14 @@ final class FakeDesktopBridge implements DesktopBridge {
   }
 
   @override
-  Future<ContextAttachment?> captureContext() async {
-    calls.add('capture');
+  Future<ContextAttachment?> captureContext({bool hidePanel = false}) async {
+    calls.add('capture:$hidePanel');
+    return nextContext;
+  }
+
+  @override
+  Future<ContextAttachment?> selectPointerContext() async {
+    calls.add('selectPointerContext');
     return nextContext;
   }
 
@@ -430,6 +501,12 @@ final class FakeDesktopBridge implements DesktopBridge {
     calls.add('surface:$expanded:$large');
     surfaceAnimations.add(animate);
     if (surfaceGate case final gate?) await gate;
+  }
+
+  @override
+  Future<bool> isPointerWithinSurface() async {
+    calls.add('isPointerWithinSurface');
+    return pointerWithinSurface;
   }
 
   @override
@@ -464,6 +541,12 @@ final class FakeDesktopBridge implements DesktopBridge {
   }
 
   @override
+  Future<String?> selectWorkspaceDirectory() async {
+    calls.add('selectWorkspaceDirectory');
+    return nextWorkspaceDirectory;
+  }
+
+  @override
   Future<void> copyText(String value) async {
     copiedText = value;
   }
@@ -471,6 +554,11 @@ final class FakeDesktopBridge implements DesktopBridge {
   @override
   Future<void> copyImage(String dataUrl) async {
     copiedImage = dataUrl;
+  }
+
+  @override
+  Future<void> openExternalUrl(Uri uri) async {
+    openedUrl = uri;
   }
 
   @override

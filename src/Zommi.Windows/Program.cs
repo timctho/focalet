@@ -20,6 +20,11 @@ internal static class Program
             return AcceptanceProbe.SelectedTextCapture();
         }
 
+        if (args.Contains("--acceptance-window-ownership", StringComparer.OrdinalIgnoreCase))
+        {
+            return AcceptanceProbe.WindowOwnership();
+        }
+
         Console.Error.WriteLine("Zommi.Capture is a capture-only helper. Start the packaged Flutter Zommi application instead.");
         return 2;
     }

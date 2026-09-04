@@ -57,6 +57,8 @@ void main() {
       expect(turns.single.blocks[0].text, 'Inspecting the selected table');
       expect(turns.single.blocks[0].expanded, isFalse);
       expect(turns.single.blocks[1].title, 'Command');
+      expect(turns.single.blocks[1].preview, 'rg table');
+      expect(turns.single.blocks[1].text, 'match');
       expect(turns.single.blocks[1].expanded, isFalse);
       expect(turns.single.blocks[2].artifacts.single.path, 'report.html');
       expect(turns.single.blocks[2].artifacts.single.cwd, '/workspace');
@@ -109,6 +111,42 @@ void main() {
       ),
       'The answer is ready now',
     );
+  });
+
+  test('canonical reasoning and commentary share one thinking section', () {
+    final blocks = normalizeTranscriptBlocks([
+      TranscriptBlock(
+        id: 'commentary',
+        kind: TranscriptKind.thinking,
+        title: 'Thinking',
+        text: 'Reading context',
+        lifecycle: TranscriptLifecycle.completed,
+        expanded: false,
+      ),
+      TranscriptBlock(
+        id: 'reasoning',
+        kind: TranscriptKind.thinking,
+        title: 'Thinking',
+        text: 'Comparing context',
+        lifecycle: TranscriptLifecycle.completed,
+        expanded: false,
+      ),
+      TranscriptBlock(
+        id: 'tool',
+        kind: TranscriptKind.tool,
+        title: 'Command',
+        text: 'rg context',
+        lifecycle: TranscriptLifecycle.completed,
+        expanded: false,
+      ),
+    ]);
+
+    expect(
+      blocks.where((block) => block.kind == TranscriptKind.thinking),
+      hasLength(1),
+    );
+    expect(blocks.first.text, 'Reading context\nComparing context');
+    expect(blocks[1].kind, TranscriptKind.tool);
   });
 
   test('artifact HTML strips executable and navigation surfaces', () {

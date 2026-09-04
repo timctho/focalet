@@ -2,10 +2,34 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:zommi_flutter/state/history_mapper.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
+import 'package:zommi_flutter/theme/app_preferences.dart';
+import 'package:zommi_flutter/theme/zommi_typography.dart';
 import 'package:zommi_flutter/widgets/content_views.dart';
 import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
+
+const double userMessageBoxWidth = 416;
+const double assistantMessageBoxWidth = 496;
+const double _baselineMessageViewportWidth = 720;
+const double _transcriptHorizontalInsets = 48;
+
+double responsiveUserMessageBoxWidth(double viewportWidth) {
+  final growth = math.max(0, viewportWidth - _baselineMessageViewportWidth);
+  return math.min(
+    math.max(0, viewportWidth - _transcriptHorizontalInsets),
+    userMessageBoxWidth + growth * 0.62,
+  );
+}
+
+double responsiveAssistantMessageBoxWidth(double viewportWidth) {
+  final growth = math.max(0, viewportWidth - _baselineMessageViewportWidth);
+  return math.min(
+    math.max(0, viewportWidth - _transcriptHorizontalInsets),
+    assistantMessageBoxWidth + growth * 0.74,
+  );
+}
 
 class TranscriptPane extends StatefulWidget {
   const TranscriptPane({
@@ -122,8 +146,6 @@ class _TranscriptPaneState extends State<TranscriptPane> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ZommiMiniOrb(working: widget.controller.turnActive, size: 44),
-            const SizedBox(height: 14),
             const Text(
               'Point, ask, keep moving.',
               style: TextStyle(
@@ -158,13 +180,17 @@ class _TranscriptPaneState extends State<TranscriptPane> {
             itemCount: visible.length,
             itemBuilder: (context, index) {
               final turn = visible[index];
-              return ConversationTurnView(
-                key: ValueKey('turn-${turn.id}'),
-                turn: turn,
-                runtimeName: widget.controller.activeRuntimeName,
-                controller: widget.controller,
-                onAttachmentEnter: widget.onAttachmentEnter,
-                onAttachmentExit: widget.onAttachmentExit,
+              return LayoutBuilder(
+                builder: (context, constraints) => ConversationTurnView(
+                  key: ValueKey('turn-${turn.id}'),
+                  turn: turn,
+                  viewportWidth:
+                      constraints.maxWidth + _transcriptHorizontalInsets,
+                  runtimeName: widget.controller.activeRuntimeName,
+                  controller: widget.controller,
+                  onAttachmentEnter: widget.onAttachmentEnter,
+                  onAttachmentExit: widget.onAttachmentExit,
+                ),
               );
             },
           ),
@@ -207,6 +233,7 @@ class _TranscriptPaneState extends State<TranscriptPane> {
 class ConversationTurnView extends StatelessWidget {
   const ConversationTurnView({
     required this.turn,
+    required this.viewportWidth,
     required this.runtimeName,
     required this.controller,
     required this.onAttachmentEnter,
@@ -215,6 +242,7 @@ class ConversationTurnView extends StatelessWidget {
   });
 
   final ConversationTurn turn;
+  final double viewportWidth;
   final String runtimeName;
   final ZommiController controller;
   final ValueChanged<ContextAttachment> onAttachmentEnter;
@@ -222,6 +250,14 @@ class ConversationTurnView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final blocks = distinctTranscriptBlocks(turn.blocks);
+    final thinking = blocks.cast<TranscriptBlock?>().firstWhere(
+      (block) => block?.kind == TranscriptKind.thinking,
+      orElse: () => null,
+    );
+    final tools = blocks
+        .where((block) => block.kind == TranscriptKind.tool)
+        .toList(growable: false);
     return Semantics(
       container: true,
       label: 'Conversation turn ${turn.number}',
@@ -234,16 +270,29 @@ class ConversationTurnView extends StatelessWidget {
               alignment: Alignment.centerRight,
               child: Container(
                 key: ValueKey('user-message-${turn.id}'),
-                constraints: const BoxConstraints(maxWidth: 520),
+                constraints: BoxConstraints(
+                  maxWidth: responsiveUserMessageBoxWidth(viewportWidth),
+                ),
                 padding: const EdgeInsets.symmetric(
                   horizontal: 13,
-                  vertical: 9,
+                  vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: const Color(0xffe9e7f8),
+                  color:
+                      Theme.of(context)
+                              .extension<ZommiVisualSettings>()
+                              ?.themeColor ==
+                          ZommiThemeColor.violet
+                      ? const Color(0xffe9e7f8)
+                      : Color.alphaBlend(
+                          Theme.of(context).colorScheme.primary
+                              .withValues(alpha: 0.10),
+                          const Color(0xfff2f3f8),
+                        ),
                   borderRadius: BorderRadius.circular(18),
                 ),
                 child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     if (turn.contextTokens.isNotEmpty &&
@@ -273,23 +322,45 @@ class ConversationTurnView extends StatelessWidget {
                         text: turn.userText,
                         compact: true,
                         onCopy: controller.copyText,
+                        onOpenLink: controller.openExternalLink,
                       ),
                   ],
                 ),
               ),
             ),
             const SizedBox(height: 8),
-            for (final block in distinctTranscriptBlocks(turn.blocks))
-              Padding(
-                padding: const EdgeInsets.only(bottom: 9),
-                child: block.kind == TranscriptKind.assistant
-                    ? AssistantBlockView(
-                        block: block,
-                        runtimeName: runtimeName,
-                        controller: controller,
-                      )
-                    : ActivityBlockView(block: block, controller: controller),
-              ),
+            for (final block in blocks)
+              if (block.kind != TranscriptKind.tool &&
+                  (block.kind != TranscriptKind.thinking ||
+                      identical(block, thinking)))
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 9),
+                  child: block.kind == TranscriptKind.assistant
+                      ? AssistantBlockView(
+                          block: block,
+                          width: responsiveAssistantMessageBoxWidth(
+                            viewportWidth,
+                          ),
+                          runtimeName: runtimeName,
+                          controller: controller,
+                        )
+                      : block.kind == TranscriptKind.thinking
+                      ? ThinkingActivityGroup(
+                          block: block,
+                          tools: tools,
+                          width: responsiveAssistantMessageBoxWidth(
+                            viewportWidth,
+                          ),
+                          controller: controller,
+                        )
+                      : ActivityBlockView(
+                          block: block,
+                          width: responsiveAssistantMessageBoxWidth(
+                            viewportWidth,
+                          ),
+                          controller: controller,
+                        ),
+                ),
           ],
         ),
       ),
@@ -311,7 +382,7 @@ int transcriptContentRevision(Iterable<ConversationTurn> turns) =>
               block.kind,
               block.text,
               block.lifecycle,
-              block.expanded,
+              block.preview,
               ...block.artifacts.map((artifact) => artifact.identity),
             ],
           ),
@@ -323,7 +394,7 @@ List<TranscriptBlock> distinctTranscriptBlocks(
   Iterable<TranscriptBlock> blocks,
 ) {
   final result = <TranscriptBlock>[];
-  for (final block in blocks) {
+  for (final block in normalizeTranscriptBlocks(blocks)) {
     final text = block.text.trim();
     final duplicate =
         block.kind == TranscriptKind.assistant &&
@@ -337,15 +408,277 @@ List<TranscriptBlock> distinctTranscriptBlocks(
   return result;
 }
 
+String activityBlockTitle(TranscriptBlock block) {
+  if (block.title.toLowerCase() != 'command') return block.title;
+  final command = block.preview.replaceAll(RegExp(r'\s+'), ' ').trim();
+  if (command.isEmpty) return block.title;
+  final codePoints = command.runes.toList(growable: false);
+  final abbreviated = codePoints.length <= 20
+      ? command
+      : '${String.fromCharCodes(codePoints.take(20))}...';
+  return 'Command · $abbreviated';
+}
+
+class _ExpandableActivityBody extends StatelessWidget {
+  const _ExpandableActivityBody({
+    required this.expanded,
+    required this.duration,
+    required this.child,
+    super.key,
+  });
+
+  final bool expanded;
+  final Duration duration;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => ClipRect(
+    child: AnimatedSize(
+      duration: duration,
+      curve: Curves.easeOutCubic,
+      alignment: Alignment.topCenter,
+      child: expanded
+          ? child
+          : const SizedBox(
+              key: ValueKey('collapsed-activity'),
+              width: double.infinity,
+            ),
+    ),
+  );
+}
+
+class ThinkingActivityGroup extends StatelessWidget {
+  const ThinkingActivityGroup({
+    required this.block,
+    required this.tools,
+    required this.width,
+    required this.controller,
+    super.key,
+  });
+
+  final TranscriptBlock block;
+  final List<TranscriptBlock> tools;
+  final double width;
+  final ZommiController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final completed = block.completed && tools.every((tool) => tool.completed);
+    return Semantics(
+      container: true,
+      label: 'Thinking ${completed ? 'completed' : 'in progress'}',
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: ConstrainedBox(
+          constraints: BoxConstraints.tightFor(width: width),
+          child: Container(
+            key: ValueKey('activity-${block.id}'),
+            decoration: BoxDecoration(
+              color: const Color(0x80ffffff),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xffe2e5ed)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                InkWell(
+                  key: const ValueKey('thinking-toggle'),
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: () =>
+                      controller.setBlockExpanded(block, !block.expanded),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 9,
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.auto_awesome_rounded,
+                          size: 15,
+                          color: Color(0xff746b99),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Thinking',
+                            style: chatTextStyleOf(context).copyWith(
+                              color: Color(0xff4b5060),
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        if (tools.isNotEmpty)
+                          Text(
+                            '${tools.length} tool${tools.length == 1 ? '' : 's'}',
+                            key: const ValueKey('thinking-tool-count'),
+                            style: chatTextStyleOf(context)
+                                .copyWith(color: Color(0xff747988)),
+                          ),
+                        if (tools.isNotEmpty) const SizedBox(width: 8),
+                        if (!completed)
+                          const SizedBox.square(
+                            dimension: 13,
+                            child: CircularProgressIndicator(strokeWidth: 1.5),
+                          )
+                        else
+                          const Icon(
+                            Icons.check_circle_outline_rounded,
+                            size: 15,
+                            color: Color(0xff659071),
+                          ),
+                        const SizedBox(width: 5),
+                        Icon(
+                          block.expanded
+                              ? Icons.expand_less_rounded
+                              : Icons.expand_more_rounded,
+                          size: 17,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                _ExpandableActivityBody(
+                  key: const ValueKey('thinking-fold'),
+                  expanded: block.expanded,
+                  duration: const Duration(milliseconds: 150),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (block.text.isNotEmpty)
+                          CopyableMarkdown(
+                            text: block.text,
+                            compact: true,
+                            onCopy: controller.copyText,
+                            onOpenLink: controller.openExternalLink,
+                          ),
+                        for (final artifact in block.artifacts)
+                          ArtifactCard(
+                            artifact: artifact,
+                            controller: controller,
+                          ),
+                        for (final tool in tools)
+                          _ToolActivitySubItem(
+                            block: tool,
+                            controller: controller,
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ToolActivitySubItem extends StatelessWidget {
+  const _ToolActivitySubItem({required this.block, required this.controller});
+
+  final TranscriptBlock block;
+  final ZommiController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: ValueKey('activity-${block.id}'),
+      margin: const EdgeInsets.only(top: 7),
+      decoration: BoxDecoration(
+        color: const Color(0x66eef0f6),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            key: ValueKey('tool-toggle-${block.id}'),
+            borderRadius: BorderRadius.circular(10),
+            onTap: () => controller.setBlockExpanded(block, !block.expanded),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.build_outlined,
+                    size: 14,
+                    color: Color(0xff746b99),
+                  ),
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: Text(
+                      activityBlockTitle(block),
+                      overflow: TextOverflow.ellipsis,
+                      style: chatTextStyleOf(context).copyWith(
+                        color: Color(0xff4b5060),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  if (!block.completed)
+                    const SizedBox.square(
+                      dimension: 11,
+                      child: CircularProgressIndicator(strokeWidth: 1.4),
+                    )
+                  else
+                    const Icon(
+                      Icons.check_rounded,
+                      size: 14,
+                      color: Color(0xff659071),
+                    ),
+                  const SizedBox(width: 4),
+                  Icon(
+                    block.expanded
+                        ? Icons.expand_less_rounded
+                        : Icons.expand_more_rounded,
+                    size: 16,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          _ExpandableActivityBody(
+            expanded: block.expanded,
+            duration: const Duration(milliseconds: 130),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(9, 0, 9, 9),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (block.text.isNotEmpty)
+                    CopyableMarkdown(
+                      text: block.text,
+                      compact: true,
+                      onCopy: controller.copyText,
+                      onOpenLink: controller.openExternalLink,
+                    ),
+                  for (final artifact in block.artifacts)
+                    ArtifactCard(artifact: artifact, controller: controller),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class AssistantBlockView extends StatelessWidget {
   const AssistantBlockView({
     required this.block,
+    required this.width,
     required this.runtimeName,
     required this.controller,
     super.key,
   });
 
   final TranscriptBlock block;
+  final double width;
   final String runtimeName;
   final ZommiController controller;
 
@@ -354,22 +687,30 @@ class AssistantBlockView extends StatelessWidget {
     return Semantics(
       container: true,
       label: '$runtimeName response',
-      child: Container(
-        key: ValueKey('assistant-${block.id}'),
-        constraints: const BoxConstraints(maxWidth: 620),
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
-        decoration: BoxDecoration(
-          color: const Color(0xb3ffffff),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: const Color(0x99ffffff)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            CopyableMarkdown(text: block.text, onCopy: controller.copyText),
-            for (final artifact in block.artifacts)
-              ArtifactCard(artifact: artifact, controller: controller),
-          ],
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Container(
+          key: ValueKey('assistant-${block.id}'),
+          constraints: BoxConstraints.tightFor(width: width),
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 5),
+          decoration: BoxDecoration(
+            color: const Color(0xb3ffffff),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: const Color(0x99ffffff)),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              CopyableMarkdown(
+                text: block.text,
+                onCopy: controller.copyText,
+                onOpenLink: controller.openExternalLink,
+              ),
+              for (final artifact in block.artifacts)
+                ArtifactCard(artifact: artifact, controller: controller),
+            ],
+          ),
         ),
       ),
     );
@@ -379,11 +720,13 @@ class AssistantBlockView extends StatelessWidget {
 class ActivityBlockView extends StatelessWidget {
   const ActivityBlockView({
     required this.block,
+    required this.width,
     required this.controller,
     super.key,
   });
 
   final TranscriptBlock block;
+  final double width;
   final ZommiController controller;
 
   @override
@@ -398,98 +741,102 @@ class ActivityBlockView extends StatelessWidget {
     return Semantics(
       container: true,
       label: '${block.title} ${completed ? 'completed' : 'in progress'}',
-      child: Container(
-        key: ValueKey('activity-${block.id}'),
-        decoration: BoxDecoration(
-          color: block.kind == TranscriptKind.error
-              ? const Color(0xffffedf0)
-              : const Color(0x80ffffff),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: block.kind == TranscriptKind.error
-                ? const Color(0xffe9b6bf)
-                : const Color(0xffe2e5ed),
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            InkWell(
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: width),
+          child: Container(
+            key: ValueKey('activity-${block.id}'),
+            decoration: BoxDecoration(
+              color: block.kind == TranscriptKind.error
+                  ? const Color(0xffffedf0)
+                  : const Color(0x80ffffff),
               borderRadius: BorderRadius.circular(14),
-              onTap: () => controller.setBlockExpanded(block, !block.expanded),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 9,
-                ),
-                child: Row(
-                  children: [
-                    Icon(icon, size: 15, color: const Color(0xff746b99)),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        block.title,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Color(0xff4b5060),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    if (!completed)
-                      const SizedBox.square(
-                        dimension: 13,
-                        child: CircularProgressIndicator(strokeWidth: 1.5),
-                      )
-                    else
-                      const Icon(
-                        Icons.check_circle_outline_rounded,
-                        size: 15,
-                        color: Color(0xff659071),
-                      ),
-                    const SizedBox(width: 5),
-                    Icon(
-                      block.expanded
-                          ? Icons.expand_less_rounded
-                          : Icons.expand_more_rounded,
-                      size: 17,
-                    ),
-                  ],
-                ),
+              border: Border.all(
+                color: block.kind == TranscriptKind.error
+                    ? const Color(0xffe9b6bf)
+                    : const Color(0xffe2e5ed),
               ),
             ),
-            AnimatedCrossFade(
-              firstChild: const SizedBox(width: double.infinity),
-              secondChild: ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 220),
-                child: SingleChildScrollView(
-                  key: ValueKey('activity-scroll-${block.id}'),
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (block.text.isNotEmpty)
-                        CopyableMarkdown(
-                          text: block.text,
-                          compact: true,
-                          onCopy: controller.copyText,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: () =>
+                      controller.setBlockExpanded(block, !block.expanded),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 9,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(icon, size: 15, color: const Color(0xff746b99)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            block.title,
+                            overflow: TextOverflow.ellipsis,
+                            style: chatTextStyleOf(context).copyWith(
+                              color: Color(0xff4b5060),
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
                         ),
-                      for (final artifact in block.artifacts)
-                        ArtifactCard(
-                          artifact: artifact,
-                          controller: controller,
+                        if (!completed)
+                          const SizedBox.square(
+                            dimension: 13,
+                            child: CircularProgressIndicator(strokeWidth: 1.5),
+                          )
+                        else
+                          const Icon(
+                            Icons.check_circle_outline_rounded,
+                            size: 15,
+                            color: Color(0xff659071),
+                          ),
+                        const SizedBox(width: 5),
+                        Icon(
+                          block.expanded
+                              ? Icons.expand_less_rounded
+                              : Icons.expand_more_rounded,
+                          size: 17,
                         ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
-              ),
-              crossFadeState: block.expanded
-                  ? CrossFadeState.showSecond
-                  : CrossFadeState.showFirst,
-              duration: const Duration(milliseconds: 150),
+                _ExpandableActivityBody(
+                  expanded: block.expanded,
+                  duration: const Duration(milliseconds: 150),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 220),
+                    child: SingleChildScrollView(
+                      key: ValueKey('activity-scroll-${block.id}'),
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (block.text.isNotEmpty)
+                            CopyableMarkdown(
+                              text: block.text,
+                              compact: true,
+                              onCopy: controller.copyText,
+                              onOpenLink: controller.openExternalLink,
+                            ),
+                          for (final artifact in block.artifacts)
+                            ArtifactCard(
+                              artifact: artifact,
+                              controller: controller,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -619,39 +966,4 @@ class _ArtifactCardState extends State<ArtifactCard> {
       ),
     );
   }
-}
-
-class ZommiMiniOrb extends StatelessWidget {
-  const ZommiMiniOrb({required this.working, this.size = 30, super.key});
-
-  final bool working;
-  final double size;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    width: size,
-    height: size,
-    decoration: BoxDecoration(
-      shape: BoxShape.circle,
-      gradient: const RadialGradient(
-        center: Alignment(-0.22, -0.28),
-        radius: 0.82,
-        colors: [
-          Color(0xfff7f6ff),
-          Color(0xffb9b8e8),
-          Color(0xff7d88c5),
-          Color(0xff6e668e),
-        ],
-        stops: [0, 0.38, 0.72, 1],
-      ),
-      border: Border.all(color: const Color(0xd9ffffff), width: 1.2),
-      boxShadow: [
-        BoxShadow(
-          color: working ? const Color(0x3d7772bd) : const Color(0x244c4b78),
-          blurRadius: working ? 14 : 8,
-          spreadRadius: working ? 1 : 0,
-        ),
-      ],
-    ),
-  );
 }

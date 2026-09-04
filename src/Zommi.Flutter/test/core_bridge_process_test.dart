@@ -132,6 +132,70 @@ void main() {
     },
   );
 
+  test('Rust host replaces an exited Codex adapter on reconnect', () async {
+    final executableName = Platform.isWindows
+        ? 'zommi-core-host.exe'
+        : 'zommi-core-host';
+    final executable = File(
+      '${Directory.current.path}/../../target/debug/$executableName',
+    ).absolute;
+    expect(executable.existsSync(), isTrue);
+    final fixture = File(
+      '${Directory.current.path}/../../crates/zommi-core-host/tests/'
+      'fake_codex_app_server.py',
+    ).absolute;
+    final python = await _findPython();
+    final temporary = await Directory.systemTemp.createTemp(
+      'zommi-codex-reconnect-',
+    );
+    addTearDown(() => temporary.delete(recursive: true));
+    final requestLog = File('${temporary.path}/requests.jsonl');
+    final bridge = ProcessCoreBridge(
+      executablePath: executable.path,
+      environment: <String, String>{
+        'ZOMMI_CODEX_COMMAND': python,
+        'ZOMMI_CODEX_ARGS_JSON': jsonEncode(<String>[fixture.path]),
+        'ZOMMI_CORE_STATE_PATH': '${temporary.path}/binding.json',
+        'ZOMMI_FAKE_REQUEST_LOG': requestLog.path,
+      },
+    );
+    addTearDown(bridge.close);
+    await bridge.initialize();
+    final discovery = await bridge.discoverRuntimeTargets();
+    final codex = discovery.targets.singleWhere(
+      (target) => target.runtimeId == 'codex',
+    );
+    final first = await bridge.connectRuntime(
+      runtimeTargetId: codex.id,
+      cwd: temporary.path,
+    );
+    final exited = bridge.events.firstWhere(
+      (event) =>
+          event.name == 'turn.completed' &&
+          event.payload['status'] == 'unknown',
+    );
+
+    await bridge.startTurn(
+      runtimeTargetId: codex.id,
+      sessionId: first.sessionId,
+      message: 'exit-runtime',
+      clientOperationId: 'client:exit-runtime',
+    );
+    await exited.timeout(const Duration(seconds: 5));
+
+    final reconnected = await bridge.connectRuntime(
+      runtimeTargetId: codex.id,
+      cwd: temporary.path,
+    );
+    expect(reconnected.runtimeTargetId, codex.id);
+    expect(await bridge.listSessions(runtimeTargetId: codex.id), isNotEmpty);
+    final processStarts = await requestLog.readAsLines().then(
+      (lines) =>
+          lines.where((line) => line.contains('fixtureOriginator')).length,
+    );
+    expect(processStarts, 2);
+  });
+
   test('Flutter drives discovery, exact binding, streaming, and interrupt through Rust', () async {
     final executableName = Platform.isWindows
         ? 'zommi-core-host.exe'
@@ -150,6 +214,8 @@ void main() {
       'zommi-flutter-rust-codex-',
     );
     addTearDown(() => temporary.delete(recursive: true));
+    final turnWorkspace = await Directory('${temporary.path}/turn-override')
+        .create();
     final requestLog = File('${temporary.path}/requests.jsonl');
     final environment = <String, String>{
       'ZOMMI_CODEX_COMMAND': python,
@@ -200,6 +266,12 @@ void main() {
       sessionId: connection.sessionId,
     );
     expect(reopened.sessionId, connection.sessionId);
+    final configured = await bridge.configureSession(
+      runtimeTargetId: connection.runtimeTargetId,
+      sessionId: connection.sessionId,
+      cwd: turnWorkspace.path,
+    );
+    expect(configured.sessionMetadata['cwd'], turnWorkspace.path);
     await expectLater(
       bridge.startTurn(
         runtimeTargetId: connection.runtimeTargetId,
@@ -229,6 +301,7 @@ void main() {
       ],
       images: const ['data:image/png;base64,aGVsbG8='],
       clientOperationId: 'client:flutter-rust-e2e',
+      cwd: turnWorkspace.path,
     );
     expect(receipt.turnId, 'turn-rust-flutter');
     expect((await completed.future).payload['status'], 'completed');
@@ -264,6 +337,7 @@ void main() {
       ],
       images: const ['data:image/png;base64,aGVsbG8='],
       clientOperationId: 'client:flutter-rust-e2e',
+      cwd: turnWorkspace.path,
     );
     expect(replay.turnId, receipt.turnId);
     await expectLater(
@@ -382,6 +456,7 @@ void main() {
     );
     final params = turnStart['params'] as Map;
     expect(params['summary'], 'detailed');
+    expect(params['cwd'], turnWorkspace.path);
     expect(jsonEncode(params), contains('PRIMARY SURFACE SELECTION'));
     expect(jsonEncode(params), contains('data:image/png;base64,aGVsbG8='));
     final interrupt = requests.whereType<Map>().firstWhere(

@@ -35,7 +35,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);
-  Win32Window::Size size(900, 760);
+  // The taskbar-first UI starts as the complete chat surface; there is no
+  // compact orb bootstrap frame to morph away from.
+  Win32Window::Size size(720, 620);
   if (!window.Create(L"Zommi", origin, size)) {
     if (instance_mutex != nullptr) {
       ReleaseMutex(instance_mutex);

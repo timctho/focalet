@@ -1,113 +1,26 @@
 import 'dart:async';
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
-import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/zommi_app.dart';
 
 void main() {
-  test('surface bloom has symmetric exact endpoints and layers', () {
-    expect(
-      surfaceTransitionSize(
-        const Size(compactOrbSize, compactOrbSize),
-        const Size(expandedPanelWidth, expandedPanelHeight),
-        0,
-      ),
-      const Size(compactOrbSize, compactOrbSize),
-    );
-    expect(
-      surfaceTransitionSize(
-        const Size(compactOrbSize, compactOrbSize),
-        const Size(expandedPanelWidth, expandedPanelHeight),
-        1,
-      ),
-      const Size(expandedPanelWidth, expandedPanelHeight),
-    );
-    final forward = surfaceTransitionSize(
-      compactWindowSize,
-      normalWindowSize,
-      0.35,
-    );
-    final reverse = surfaceTransitionSize(
-      normalWindowSize,
-      compactWindowSize,
-      0.65,
-    );
-    expect(forward.width, closeTo(reverse.width, 0.001));
-    expect(forward.height, closeTo(reverse.height, 0.001));
-    expect(
-      surfaceTransitionCompactness(compactWindowSize, normalWindowSize, 0.35),
-      closeTo(
-        surfaceTransitionCompactness(normalWindowSize, compactWindowSize, 0.65),
-        0.001,
-      ),
-    );
-    final start = surfaceTransitionVisuals(
-      compactWindowSize,
-      normalWindowSize,
-      0,
-    );
-    final end = surfaceTransitionVisuals(
-      compactWindowSize,
-      normalWindowSize,
-      1,
-    );
-    expect(start.orbOpacity, 1);
-    expect(start.panelOpacity, 0);
-    expect(end.orbOpacity, 0);
-    expect(end.panelOpacity, 1);
-    for (final progress in <double>[0.1, 0.25, 0.5, 0.75, 0.9]) {
-      final forward = surfaceTransitionVisuals(
-        compactWindowSize,
-        normalWindowSize,
-        progress,
-      );
-      final reverse = surfaceTransitionVisuals(
-        normalWindowSize,
-        compactWindowSize,
-        1 - progress,
-      );
-      expect(forward.orbOpacity, closeTo(reverse.orbOpacity, 0.000001));
-      expect(forward.orbScale, closeTo(reverse.orbScale, 0.000001));
-      expect(forward.panelOpacity, closeTo(reverse.panelOpacity, 0.000001));
-      expect(forward.panelScale, closeTo(reverse.panelScale, 0.000001));
-    }
-  });
-
-  testWidgets('quiet orb expands into the anchored composer on hover', (
+  testWidgets('taskbar shell starts expanded and never renders an orb', (
     tester,
   ) async {
     await _setDesktopSurface(tester);
-    final core = FakeCoreBridge();
-    await tester.pumpWidget(ZommiApp(core: core));
-    await tester.pump();
-
-    expect(find.bySemanticsLabel('ZommiOrb'), findsOneWidget);
-    expect(
-      tester.getSize(find.byKey(const ValueKey('zommi-surface'))),
-      const Size(compactOrbSize, compactOrbSize),
-    );
-
-    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-    addTearDown(mouse.removePointer);
-    await mouse.addPointer(location: Offset.zero);
-    await mouse.moveTo(
-      tester.getCenter(find.byKey(const ValueKey('zommi-surface'))),
-    );
+    await tester.pumpWidget(ZommiApp(core: FakeCoreBridge()));
     await tester.pumpAndSettle();
 
-    expect(find.text('Point, ask, keep moving.'), findsOneWidget);
+    expect(find.byKey(const ValueKey('zommi-orb')), findsNothing);
+    expect(find.bySemanticsLabel('ZommiOrb'), findsNothing);
     expect(find.byKey(const ValueKey('zommi-composer')), findsOneWidget);
+    expect(find.text('Point, ask, keep moving.'), findsOneWidget);
     expect(
       tester.getSize(find.byKey(const ValueKey('zommi-surface'))),
-      const Size(expandedPanelWidth, expandedPanelHeight),
+      const Size(900, 760),
     );
-    final composer = tester.widget<TextField>(
-      find.byKey(const ValueKey('zommi-composer')),
-    );
-    expect(composer.focusNode?.hasFocus, isTrue);
     expect(find.text('Codex 9.8.7 ready'), findsOneWidget);
   });
 
@@ -274,67 +187,30 @@ void main() {
     );
   });
 
-  testWidgets('hover collapse waits 500 ms and returns to the anchored orb', (
-    tester,
-  ) async {
-    await _setDesktopSurface(tester);
-    await tester.pumpWidget(ZommiApp(core: FakeCoreBridge()));
-    await tester.pump();
-    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-    addTearDown(mouse.removePointer);
-    await mouse.addPointer(location: Offset.zero);
-    await mouse.moveTo(
-      tester.getCenter(find.byKey(const ValueKey('zommi-surface'))),
-    );
-    await tester.pumpAndSettle();
-    await mouse.moveTo(const Offset(5, 5));
-    await tester.pump(const Duration(milliseconds: 499));
-    expect(
-      tester.getSize(find.byKey(const ValueKey('zommi-surface'))),
-      const Size(expandedPanelWidth, expandedPanelHeight),
-    );
-    await tester.pump(const Duration(milliseconds: 1));
-    await tester.pumpAndSettle();
-    expect(
-      tester.getSize(find.byKey(const ValueKey('zommi-surface'))),
-      const Size(compactOrbSize, compactOrbSize),
-    );
-  });
+  testWidgets(
+    'working state stays in the taskbar window without orb fallback',
+    (tester) async {
+      await _setDesktopSurface(tester);
+      final core = FakeCoreBridge();
+      await tester.pumpWidget(ZommiApp(core: core));
+      await tester.pumpAndSettle();
+      core.emit(
+        const CoreEvent(
+          name: 'turn.started',
+          sequence: 1,
+          runtimeTargetId: 'runtime-codex',
+          sessionId: 'thread-codex',
+          turnId: 'turn-codex',
+          payload: {'status': 'inProgress'},
+        ),
+      );
+      await tester.pump();
 
-  testWidgets('reduced motion freezes the working orb', (tester) async {
-    tester.binding.platformDispatcher.accessibilityFeaturesTestValue =
-        const FakeAccessibilityFeatures(disableAnimations: true);
-    addTearDown(
-      tester.binding.platformDispatcher.clearAccessibilityFeaturesTestValue,
-    );
-    await _setDesktopSurface(tester);
-    final core = FakeCoreBridge();
-    await tester.pumpWidget(ZommiApp(core: core));
-    await tester.pump();
-    core.emit(
-      const CoreEvent(
-        name: 'turn.started',
-        sequence: 1,
-        runtimeTargetId: 'runtime-codex',
-        sessionId: 'thread-codex',
-        turnId: 'turn-codex',
-        payload: {'status': 'inProgress'},
-      ),
-    );
-    await tester.pump(const Duration(seconds: 3));
-    expect(find.byKey(const ValueKey('zommi-orb-canvas')), findsOneWidget);
-    expect(tester.hasRunningAnimations, isFalse);
-  });
-
-  testWidgets('compact orb matches the migration UX baseline', (tester) async {
-    await _setDesktopSurface(tester);
-    await tester.pumpWidget(ZommiApp(core: FakeCoreBridge()));
-    await tester.pump();
-    await expectLater(
-      find.byType(ZommiShell),
-      matchesGoldenFile('goldens/zommi_shell_compact.png'),
-    );
-  });
+      expect(find.byKey(const ValueKey('zommi-orb')), findsNothing);
+      expect(find.byKey(const ValueKey('zommi-composer')), findsOneWidget);
+      expect(find.byKey(const ValueKey('stop-turn')), findsOneWidget);
+    },
+  );
 }
 
 Future<void> _setDesktopSurface(WidgetTester tester) async {
@@ -343,12 +219,6 @@ Future<void> _setDesktopSurface(WidgetTester tester) async {
 }
 
 Future<void> _expand(WidgetTester tester) async {
-  final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-  addTearDown(mouse.removePointer);
-  await mouse.addPointer(location: Offset.zero);
-  await mouse.moveTo(
-    tester.getCenter(find.byKey(const ValueKey('zommi-surface'))),
-  );
   await tester.pumpAndSettle();
 }
 
@@ -410,11 +280,28 @@ final class FakeCoreBridge implements CoreBridge {
     required String runtimeTargetId,
     String? model,
     String? effort,
+    String? cwd,
+    String? profile,
   }) => connectRuntime(runtimeTargetId: runtimeTargetId);
+
+  @override
+  Future<RuntimeConnection> configureSession({
+    required String runtimeTargetId,
+    required String sessionId,
+    String? cwd,
+    String? profile,
+    String? model,
+    String? effort,
+  }) => connectRuntime(
+    runtimeTargetId: runtimeTargetId,
+    preferredSessionId: sessionId,
+    cwd: cwd,
+  );
 
   @override
   Future<RuntimeDiscovery> discoverRuntimeTargets({
     String? lastSelectedTargetId,
+    bool force = false,
   }) async => const RuntimeDiscovery(
     targets: [
       RuntimeTarget(
@@ -455,6 +342,8 @@ final class FakeCoreBridge implements CoreBridge {
   Future<RuntimeConnection> openSession({
     required String runtimeTargetId,
     required String sessionId,
+    String? cwd,
+    String? profile,
   }) => connectRuntime(
     runtimeTargetId: runtimeTargetId,
     preferredSessionId: sessionId,
@@ -503,6 +392,8 @@ final class FakeCoreBridge implements CoreBridge {
     String? clientOperationId,
     String? model,
     String? effort,
+    String? cwd,
+    String? profile,
   }) {
     lastMessage = message;
     return _turn;

@@ -15,7 +15,9 @@ final class ZommiController extends ChangeNotifier {
     required this.core,
     required this.desktop,
     ArtifactLoader? artifactLoader,
-  }) : artifactLoader = artifactLoader ?? const LocalArtifactLoader();
+    bool initialLargePanel = false,
+  }) : artifactLoader = artifactLoader ?? const LocalArtifactLoader(),
+       largePanel = initialLargePanel;
 
   final CoreBridge core;
   final DesktopBridge desktop;
@@ -33,7 +35,9 @@ final class ZommiController extends ChangeNotifier {
   final Set<String> _interruptingSessions = {};
   final Set<String> _completedTurnIds = {};
   final Map<String, int> _lastSequences = {};
-  final Map<String, (String, String)> _modelSelections = {};
+  final Map<String, SessionSettings> _sessionSettings = {};
+  final Map<String, List<Map<String, Object?>>> _modelCatalogs = {};
+  final Map<String, String> _runtimeTargetAliases = {};
 
   StreamSubscription<CoreEvent>? _coreEvents;
   StreamSubscription<DesktopInvocation>? _desktopEvents;
@@ -42,6 +46,10 @@ final class ZommiController extends ChangeNotifier {
   Set<String> capabilities = {};
   String selectedModel = '';
   String selectedEffort = '';
+  String selectedWorkspace = '';
+  String? workspaceError;
+  String selectedProfile = '';
+  List<Map<String, Object?>> profiles = [];
   String status = 'Connecting to Rust core…';
   bool statusWarning = false;
   bool initialized = false;
@@ -50,19 +58,24 @@ final class ZommiController extends ChangeNotifier {
   String? switchingRuntimeId;
   bool runtimeOverrideBusy = false;
   bool sessionBusy = false;
+  bool sessionSettingsBusy = false;
   bool submitting = false;
-  bool expanded = false;
-  bool largePanel = false;
+  bool expanded = true;
+  bool largePanel;
   bool surfaceTransitioning = false;
   bool surfaceTransitionAnimating = false;
-  bool transitionTargetExpanded = false;
+  bool transitionTargetExpanded = true;
   bool transitionTargetLarge = false;
   bool sessionPanelOpen = false;
   bool runtimePanelOpen = false;
+  bool runtimeSetupPanelOpen = false;
   bool modelPanelOpen = false;
+  bool appSettingsPanelOpen = false;
+  bool sessionSettingsDetailOpen = false;
   bool contextShortcutRegistered = false;
   bool imageShortcutRegistered = false;
   int focusComposerEpoch = 0;
+  int sessionSettingsOverviewEpoch = 0;
   PendingApproval? approval;
   PendingQuestion? question;
   ContextAttachment? previewAttachment;
@@ -93,10 +106,15 @@ final class ZommiController extends ChangeNotifier {
 
   bool get anyTurnActive => _activeTurns.isNotEmpty;
 
-  bool get orbWorking => anyTurnActive || runtimeBusy;
+  SessionSettings get activeSessionSettings => SessionSettings(
+    workspace: selectedWorkspace,
+    model: selectedModel,
+    effort: selectedEffort,
+    profile: selectedProfile,
+  );
 
   List<RuntimeTarget> get visibleRuntimeTargets =>
-      runtimeTargets.where(_isVisibleRuntimeTarget).toList(growable: false);
+      _deduplicateRuntimeTargets(runtimeTargets);
 
   bool get imageInputSupported =>
       activeRuntime == null || capabilities.contains('input.image.v1');
@@ -110,6 +128,13 @@ final class ZommiController extends ChangeNotifier {
 
   bool get modelSelectionSupported =>
       capabilities.contains('model.select.v1') && models.isNotEmpty;
+
+  bool get sessionSettingsSupported => activeSessionId != null;
+
+  bool get profileSelectionSupported =>
+      activeRuntime?.runtimeId == 'hermes' &&
+      activeRuntime?.adapterId == 'hermes-gateway' &&
+      profiles.isNotEmpty;
 
   bool get runtimeOverridesSupported => core is RuntimeConfigurationBridge;
 
@@ -165,6 +190,18 @@ final class ZommiController extends ChangeNotifier {
         : '$name · ${_formatEffort(selectedEffort)}';
   }
 
+  String get workspaceSummary {
+    final value = selectedWorkspace.trim();
+    if (value.isEmpty) return 'Runtime default';
+    final normalized = value.replaceAll('\\', '/');
+    final segments = normalized.split('/').where((part) => part.isNotEmpty);
+    return segments.isEmpty ? value : segments.last;
+  }
+
+  String get profileSummary => selectedProfile.trim().isEmpty
+      ? 'Default profile'
+      : selectedProfile.trim();
+
   Future<void> initialize() async {
     if (initialized || _closed) return;
     initialized = true;
@@ -193,7 +230,19 @@ final class ZommiController extends ChangeNotifier {
         if (!_applyConnectionError(targetId, error)) rethrow;
       }
     } on Object catch (error) {
-      _setStatus('Rust core unavailable · $error', warning: true);
+      if (error is CoreProtocolException &&
+          !{
+            'core-exited',
+            'core-timeout',
+            'unsupported-version',
+          }.contains(error.code)) {
+        _setStatus(
+          'Agent runtime unavailable · ${error.message}',
+          warning: true,
+        );
+      } else {
+        _setStatus('Rust core unavailable · $error', warning: true);
+      }
     } finally {
       await desktopInitialization;
       starting = false;
@@ -204,6 +253,9 @@ final class ZommiController extends ChangeNotifier {
   Future<void> _initializeDesktopIntegration() async {
     try {
       final readiness = await desktop.initialize();
+      if (largePanel) {
+        await desktop.setSurface(expanded: true, large: true, animate: false);
+      }
       contextShortcutRegistered = readiness.contextShortcut;
       imageShortcutRegistered = readiness.imageShortcut;
       _notify();
@@ -219,6 +271,7 @@ final class ZommiController extends ChangeNotifier {
     try {
       final discovery = await core.discoverRuntimeTargets(
         lastSelectedTargetId: activeRuntime?.id,
+        force: true,
       );
       _replaceDiscovery(discovery);
       final selected = _visibleSelectedTargetId(discovery.selectedTargetId);
@@ -241,7 +294,10 @@ final class ZommiController extends ChangeNotifier {
   }
 
   Future<void> selectRuntime(String targetId) async {
-    if (runtimeBusy || activeRuntime?.id == targetId) {
+    final selectingActiveRuntime = activeRuntime?.id == targetId;
+    final activeRuntimeUnavailable =
+        selectingActiveRuntime && activeRuntime?.status == 'unavailable';
+    if (runtimeBusy || (selectingActiveRuntime && !activeRuntimeUnavailable)) {
       closeTransientPanels();
       return;
     }
@@ -382,7 +438,7 @@ final class ZommiController extends ChangeNotifier {
   }
 
   Future<void> _connectRuntime(String targetId, {String? coreVersion}) async {
-    _rememberActiveModelSelection();
+    _rememberActiveSessionSettings();
     final connection = await core.connectRuntime(runtimeTargetId: targetId);
     activeRuntime = runtimeTargets.cast<RuntimeTarget?>().firstWhere(
       (target) => target?.id == connection.runtimeTargetId,
@@ -393,16 +449,21 @@ final class ZommiController extends ChangeNotifier {
       ...?activeRuntime?.capabilityHints,
       ...connection.capabilities,
     };
+    if (connection.models.isNotEmpty) {
+      _modelCatalogs[connection.runtimeTargetId] = List.of(connection.models);
+    }
     models
       ..clear()
-      ..addAll(connection.models);
+      ..addAll(
+        connection.models.isNotEmpty
+            ? connection.models
+            : _modelCatalogs[connection.runtimeTargetId] ?? const [],
+      );
     sessions
       ..clear()
       ..addAll(_sessionSummaries(connection.sessions));
     _ensureSession(connection.sessionId);
-    if (!_restoreModelSelection(connection.runtimeTargetId)) {
-      _selectInitialModel(connection);
-    }
+    _hydrateProfiles(connection);
     if (capabilities.contains('session.list.v1')) {
       try {
         final values = await core.listSessions(
@@ -416,28 +477,12 @@ final class ZommiController extends ChangeNotifier {
         // The exact connection remains usable when optional listing fails.
       }
     }
+    _hydrateSessionSettingsFromSummaries(connection.runtimeTargetId);
+    _restoreSessionSettings(connection);
     await _readActiveHistory();
-    _rememberActiveModelSelection();
+    _rememberActiveSessionSettings();
     final version = connection.runtimeVersion ?? coreVersion;
     _setStatus('$activeRuntimeName${version == null ? '' : ' $version'} ready');
-  }
-
-  void _selectInitialModel(RuntimeConnection connection) {
-    selectedModel =
-        connection.sessionMetadata['activeModel']?.toString() ??
-        connection.sessionMetadata['model']?.toString() ??
-        _defaultModelId();
-    final model = _selectedModel();
-    final efforts = effortsForModel(model);
-    selectedEffort =
-        connection.sessionMetadata['activeEffort']?.toString() ??
-        connection.sessionMetadata['effort']?.toString() ??
-        model?['defaultReasoningEffort']?.toString() ??
-        (efforts.isEmpty ? '' : efforts.first);
-    if (efforts.isNotEmpty && !efforts.contains(selectedEffort)) {
-      selectedEffort =
-          model?['defaultReasoningEffort']?.toString() ?? efforts.first;
-    }
   }
 
   Future<void> _readActiveHistory() async {
@@ -476,12 +521,15 @@ final class ZommiController extends ChangeNotifier {
     sessionBusy = true;
     _notify();
     try {
+      final inherited = activeSessionSettings;
       final connection = await core.createSession(
         runtimeTargetId: runtimeTargetId,
         model: selectedModel.isEmpty ? null : selectedModel,
         effort: selectedEffort.isEmpty ? null : selectedEffort,
+        cwd: selectedWorkspace.isEmpty ? null : selectedWorkspace,
+        profile: selectedProfile.isEmpty ? null : selectedProfile,
       );
-      await _applySessionConnection(connection);
+      await _applySessionConnection(connection, inherited: inherited);
       _setStatus('New chat ready');
     } on Object catch (error) {
       _setStatus('Could not create chat · $error', warning: true);
@@ -501,11 +549,15 @@ final class ZommiController extends ChangeNotifier {
       return;
     }
     sessionBusy = true;
+    _rememberActiveSessionSettings();
     _notify();
     try {
+      final targetSettings = _settingsForSession(runtimeTargetId, sessionId);
       final connection = await core.openSession(
         runtimeTargetId: runtimeTargetId,
         sessionId: sessionId,
+        cwd: targetSettings.workspace.isEmpty ? null : targetSettings.workspace,
+        profile: targetSettings.profile.isEmpty ? null : targetSettings.profile,
       );
       await _applySessionConnection(connection);
       _setStatus('Chat switched');
@@ -518,16 +570,22 @@ final class ZommiController extends ChangeNotifier {
     }
   }
 
-  Future<void> _applySessionConnection(RuntimeConnection connection) async {
+  Future<void> _applySessionConnection(
+    RuntimeConnection connection, {
+    SessionSettings? inherited,
+  }) async {
     activeSessionId = connection.sessionId;
     _unreadSessions.remove(
       _sessionKey(connection.runtimeTargetId, connection.sessionId),
     );
     capabilities = {...capabilities, ...connection.capabilities};
     if (connection.models.isNotEmpty) {
+      _modelCatalogs[connection.runtimeTargetId] = List.of(connection.models);
       models
         ..clear()
         ..addAll(connection.models);
+    } else if (models.isEmpty) {
+      models.addAll(_modelCatalogs[connection.runtimeTargetId] ?? const []);
     }
     if (connection.sessions.isNotEmpty) {
       sessions
@@ -535,10 +593,12 @@ final class ZommiController extends ChangeNotifier {
         ..addAll(_sessionSummaries(connection.sessions));
     }
     _ensureSession(connection.sessionId);
-    if (!_selectionRemainsValid()) {
-      _selectInitialModel(connection);
-    }
-    _rememberActiveModelSelection();
+    _hydrateProfiles(connection);
+    _hydrateSessionSettingsFromSummaries(connection.runtimeTargetId);
+    final key = _sessionKey(connection.runtimeTargetId, connection.sessionId);
+    if (inherited != null) _sessionSettings[key] = inherited;
+    _restoreSessionSettings(connection);
+    _rememberActiveSessionSettings();
     await _readActiveHistory();
     focusComposerEpoch++;
   }
@@ -598,6 +658,8 @@ final class ZommiController extends ChangeNotifier {
         clientOperationId: operationId,
         model: selectedModel.isEmpty ? null : selectedModel,
         effort: selectedEffort.isEmpty ? null : selectedEffort,
+        cwd: selectedWorkspace.isEmpty ? null : selectedWorkspace,
+        profile: selectedProfile.isEmpty ? null : selectedProfile,
       );
       final completedIdentity = _turnIdentity(
         receipt.runtimeTargetId,
@@ -714,6 +776,31 @@ final class ZommiController extends ChangeNotifier {
       }
     } on Object catch (error) {
       _setStatus('Image selection failed · $error', warning: true);
+    }
+  }
+
+  Future<void> addPointerContext() async {
+    var attachmentAdded = false;
+    try {
+      final attachment = await desktop.selectPointerContext();
+      if (attachment != null) {
+        addAttachment(attachment);
+        attachmentAdded = true;
+        _setStatus('Context attached');
+      } else {
+        _setStatus(
+          'No accessible context was exposed under the pointer',
+          warning: true,
+        );
+      }
+    } on Object catch (error) {
+      _setStatus('Context capture failed · $error', warning: true);
+    } finally {
+      if (!attachmentAdded) {
+        focusComposerEpoch++;
+        _notify();
+      }
+      await desktop.showPanel();
     }
   }
 
@@ -849,14 +936,125 @@ final class ZommiController extends ChangeNotifier {
           _selectedModel()?['defaultReasoningEffort']?.toString() ??
           efforts.first;
     }
-    _rememberActiveModelSelection();
+    _rememberActiveSessionSettings();
     _notify();
   }
 
   void setEffort(String value) {
     selectedEffort = value;
-    _rememberActiveModelSelection();
+    _rememberActiveSessionSettings();
     _notify();
+  }
+
+  Future<String?> chooseWorkspace() async {
+    final selected = await desktop.selectWorkspaceDirectory();
+    final runtime = activeRuntime;
+    if (selected == null || selected.trim().isEmpty || runtime == null) {
+      return null;
+    }
+    final normalized = normalizeWorkspacePath(selected, runtime.executionHost);
+    if (normalized.isEmpty) return null;
+    clearWorkspaceError();
+    return normalized;
+  }
+
+  Future<bool> setWorkspace(String value) async {
+    final runtime = activeRuntime;
+    final sessionId = activeSessionId;
+    if (runtime == null || sessionId == null || sessionSettingsBusy) {
+      return false;
+    }
+    final normalized = normalizeWorkspacePath(value, runtime.executionHost);
+    if (normalized.isEmpty) {
+      workspaceError = 'Choose an existing folder.';
+      _setStatus('Workspace folder is required', warning: true);
+      _notify();
+      return false;
+    }
+    if (normalized == selectedWorkspace) {
+      workspaceError = null;
+      _notify();
+      return true;
+    }
+    final previous = activeSessionSettings;
+    final proposed = previous.copyWith(workspace: normalized);
+    workspaceError = null;
+    sessionSettingsBusy = true;
+    _notify();
+    try {
+      final connection = await core.configureSession(
+        runtimeTargetId: runtime.id,
+        sessionId: sessionId,
+        cwd: normalized,
+        profile: selectedProfile.isEmpty ? null : selectedProfile,
+        model: selectedModel.isEmpty ? null : selectedModel,
+        effort: selectedEffort.isEmpty ? null : selectedEffort,
+      );
+      await _applySessionConnection(connection, inherited: proposed);
+      workspaceError = null;
+      _setStatus('Workspace updated');
+      return true;
+    } on Object catch (error) {
+      _applySettings(previous);
+      workspaceError = switch (error) {
+        CoreProtocolException(code: 'workspace-not-found') =>
+          'Folder does not exist on ${runtime.executionHost['displayName'] ?? runtime.executionHost['name'] ?? 'this runtime'}.',
+        CoreProtocolException(code: 'invalid-workspace') =>
+          'Enter an absolute folder path.',
+        CoreProtocolException(:final message) => message,
+        _ => 'Could not use this folder.',
+      };
+      _setStatus('Could not change workspace · $error', warning: true);
+      return false;
+    } finally {
+      sessionSettingsBusy = false;
+      _notify();
+    }
+  }
+
+  void clearWorkspaceError() {
+    if (workspaceError == null) return;
+    workspaceError = null;
+    _notify();
+  }
+
+  Future<void> setProfile(String value) async {
+    final runtime = activeRuntime;
+    final sessionId = activeSessionId;
+    final profile = value.trim();
+    if (runtime == null ||
+        sessionId == null ||
+        sessionSettingsBusy ||
+        profile.isEmpty ||
+        profile == selectedProfile) {
+      return;
+    }
+    final previous = activeSessionSettings;
+    final selected = previous.copyWith(profile: profile);
+    sessionSettingsBusy = true;
+    _notify();
+    try {
+      final connection = await core.configureSession(
+        runtimeTargetId: runtime.id,
+        sessionId: sessionId,
+        cwd: selected.workspace.isEmpty ? null : selected.workspace,
+        profile: profile,
+        model: selected.model.isEmpty ? null : selected.model,
+        effort: selected.effort.isEmpty ? null : selected.effort,
+      );
+      await _applySessionConnection(connection, inherited: selected);
+      _setStatus(
+        connection.sessionId == sessionId
+            ? 'Profile updated'
+            : '$profile profile · new chat ready',
+      );
+    } on Object catch (error) {
+      _applySettings(previous);
+      _setStatus('Could not change Hermes profile · $error', warning: true);
+    } finally {
+      sessionSettingsBusy = false;
+      _notify();
+    }
   }
 
   List<String> get selectedModelEfforts => effortsForModel(_selectedModel());
@@ -866,6 +1064,8 @@ final class ZommiController extends ChangeNotifier {
     if (sessionPanelOpen) {
       runtimePanelOpen = false;
       modelPanelOpen = false;
+      sessionSettingsDetailOpen = false;
+      appSettingsPanelOpen = false;
     }
     _notify();
   }
@@ -874,16 +1074,41 @@ final class ZommiController extends ChangeNotifier {
     runtimePanelOpen = !runtimePanelOpen;
     if (runtimePanelOpen) {
       sessionPanelOpen = false;
+      runtimeSetupPanelOpen = false;
       modelPanelOpen = false;
+      sessionSettingsDetailOpen = false;
+      appSettingsPanelOpen = false;
+    }
+    _notify();
+  }
+
+  void toggleRuntimeSetupPanel([bool? open]) {
+    runtimeSetupPanelOpen = open ?? !runtimeSetupPanelOpen;
+    if (runtimeSetupPanelOpen) {
+      sessionPanelOpen = false;
+      runtimePanelOpen = false;
+      modelPanelOpen = false;
+      sessionSettingsDetailOpen = false;
+      appSettingsPanelOpen = false;
     }
     _notify();
   }
 
   void toggleModelPanel() {
-    modelPanelOpen = !modelPanelOpen;
     if (modelPanelOpen) {
+      if (sessionSettingsDetailOpen) {
+        sessionSettingsDetailOpen = false;
+        sessionSettingsOverviewEpoch++;
+      } else {
+        modelPanelOpen = false;
+      }
+    } else {
+      modelPanelOpen = true;
+      sessionSettingsDetailOpen = false;
       sessionPanelOpen = false;
       runtimePanelOpen = false;
+      runtimeSetupPanelOpen = false;
+      appSettingsPanelOpen = false;
     }
     _notify();
   }
@@ -891,7 +1116,34 @@ final class ZommiController extends ChangeNotifier {
   void closeTransientPanels() {
     sessionPanelOpen = false;
     runtimePanelOpen = false;
+    runtimeSetupPanelOpen = false;
     modelPanelOpen = false;
+    sessionSettingsDetailOpen = false;
+    appSettingsPanelOpen = false;
+    _notify();
+  }
+
+  void toggleAppSettingsPanel() {
+    appSettingsPanelOpen = !appSettingsPanelOpen;
+    if (appSettingsPanelOpen) {
+      sessionPanelOpen = false;
+      runtimePanelOpen = false;
+      runtimeSetupPanelOpen = false;
+      modelPanelOpen = false;
+      sessionSettingsDetailOpen = false;
+    }
+    _notify();
+  }
+
+  void dismissAppSettingsPanel() {
+    if (!appSettingsPanelOpen) return;
+    appSettingsPanelOpen = false;
+    _notify();
+  }
+
+  void setSessionSettingsDetailOpen(bool value) {
+    if (sessionSettingsDetailOpen == value) return;
+    sessionSettingsDetailOpen = value;
     _notify();
   }
 
@@ -907,9 +1159,16 @@ final class ZommiController extends ChangeNotifier {
     _notify();
   }
 
+  void dismissRuntimeSetupPanel() {
+    if (!runtimeSetupPanelOpen) return;
+    runtimeSetupPanelOpen = false;
+    _notify();
+  }
+
   void dismissModelPanel() {
     if (!modelPanelOpen) return;
     modelPanelOpen = false;
+    sessionSettingsDetailOpen = false;
     _notify();
   }
 
@@ -1011,6 +1270,19 @@ final class ZommiController extends ChangeNotifier {
   Future<void> copyText(String value) => desktop.copyText(value);
 
   Future<void> copyImage(String dataUrl) => desktop.copyImage(dataUrl);
+
+  Future<void> openExternalLink(String value) async {
+    final uri = Uri.tryParse(value.trim());
+    if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
+      _setStatus('Only web links can be opened in the browser.', warning: true);
+      return;
+    }
+    try {
+      await desktop.openExternalUrl(uri);
+    } on Object catch (error) {
+      _setStatus('Could not open link · $error', warning: true);
+    }
+  }
 
   SessionPresence presenceFor(String sessionId) {
     final runtimeTargetId = activeRuntime?.id;
@@ -1181,6 +1453,18 @@ final class ZommiController extends ChangeNotifier {
     }
     final kind = _transcriptKind(event.payload['kind']?.toString());
     final lifecycle = _lifecycle(event.payload['lifecycle']?.toString());
+    if (kind == TranscriptKind.tool &&
+        !turn.blocks.any((block) => block.kind == TranscriptKind.thinking)) {
+      turn.blocks.add(
+        TranscriptBlock(
+          id: 'turn-thinking',
+          kind: TranscriptKind.thinking,
+          title: 'Thinking',
+          lifecycle: lifecycle,
+          expanded: false,
+        ),
+      );
+    }
     final nativeItemId = event.payload['itemId']?.toString() ?? '';
     final blockId = kind == TranscriptKind.thinking
         ? 'turn-thinking'
@@ -1208,6 +1492,8 @@ final class ZommiController extends ChangeNotifier {
     );
     block.lifecycle = lifecycle;
     block.status = event.payload['status']?.toString() ?? block.status;
+    final preview = event.payload['preview']?.toString() ?? '';
+    if (preview.isNotEmpty) block.preview = preview;
     for (final artifactValue in mapList(event.payload['artifacts'])) {
       final artifact = ArtifactPreview.fromJson(artifactValue);
       if (!block.artifacts.any(
@@ -1262,13 +1548,20 @@ final class ZommiController extends ChangeNotifier {
       );
 
   void _replaceDiscovery(RuntimeDiscovery discovery) {
+    _runtimeTargetAliases.clear();
+    final visible = _deduplicateRuntimeTargets(
+      discovery.targets,
+      aliases: _runtimeTargetAliases,
+    );
     runtimeTargets
       ..clear()
-      ..addAll(discovery.targets.where(_isVisibleRuntimeTarget));
+      ..addAll(visible);
     runtimeSettings = discovery.settings;
   }
 
   String? _visibleSelectedTargetId(String? selectedTargetId) {
+    selectedTargetId =
+        _runtimeTargetAliases[selectedTargetId] ?? selectedTargetId;
     if (selectedTargetId != null &&
         runtimeTargets.any((target) => target.id == selectedTargetId)) {
       return selectedTargetId;
@@ -1290,31 +1583,134 @@ final class ZommiController extends ChangeNotifier {
     return detected && hasLocator;
   }
 
-  void _rememberActiveModelSelection() {
-    final runtimeTargetId = activeRuntime?.id;
-    if (runtimeTargetId == null) return;
-    _modelSelections[runtimeTargetId] = (selectedModel, selectedEffort);
-  }
-
-  bool _restoreModelSelection(String runtimeTargetId) {
-    final saved = _modelSelections[runtimeTargetId];
-    if (saved == null || !models.any((model) => _modelId(model) == saved.$1)) {
-      return false;
+  List<RuntimeTarget> _deduplicateRuntimeTargets(
+    Iterable<RuntimeTarget> targets, {
+    Map<String, String>? aliases,
+  }) {
+    final selectedByKey = <String, RuntimeTarget>{};
+    final orderedKeys = <String>[];
+    final candidatesByKey = <String, List<RuntimeTarget>>{};
+    for (final target in targets.where(_isVisibleRuntimeTarget)) {
+      final key = target.id;
+      candidatesByKey.putIfAbsent(key, () => []).add(target);
+      if (!selectedByKey.containsKey(key)) {
+        orderedKeys.add(key);
+        selectedByKey[key] = target;
+      }
     }
-    selectedModel = saved.$1;
-    final efforts = effortsForModel(_selectedModel());
-    selectedEffort = efforts.isEmpty || efforts.contains(saved.$2)
-        ? saved.$2
-        : (_selectedModel()?['defaultReasoningEffort']?.toString() ??
-              efforts.first);
-    return true;
+    for (final entry in candidatesByKey.entries) {
+      final selected = selectedByKey[entry.key]!;
+      for (final candidate in entry.value) {
+        aliases?[candidate.id] = selected.id;
+      }
+    }
+    return orderedKeys
+        .map((key) => selectedByKey[key]!)
+        .toList(growable: false);
   }
 
-  bool _selectionRemainsValid() {
-    if (selectedModel.isEmpty) return models.isEmpty;
-    if (!models.any((model) => _modelId(model) == selectedModel)) return false;
+  void _rememberActiveSessionSettings() {
+    final runtimeTargetId = activeRuntime?.id;
+    final sessionId = activeSessionId;
+    if (runtimeTargetId == null || sessionId == null) return;
+    _sessionSettings[_sessionKey(runtimeTargetId, sessionId)] =
+        activeSessionSettings;
+  }
+
+  void _hydrateProfiles(RuntimeConnection connection) {
+    final values = mapList(connection.sessionMetadata['profiles']);
+    if (values.isNotEmpty) profiles = values;
+    if (activeRuntime?.runtimeId != 'hermes') profiles = [];
+  }
+
+  void _hydrateSessionSettingsFromSummaries(String runtimeTargetId) {
+    for (final session in sessions) {
+      final key = _sessionKey(runtimeTargetId, session.id);
+      _sessionSettings.putIfAbsent(
+        key,
+        () => SessionSettings(
+          workspace: session.cwd ?? '',
+          model: selectedModel,
+          effort: selectedEffort,
+          profile: session.profile ?? '',
+        ),
+      );
+    }
+  }
+
+  SessionSettings _settingsForSession(
+    String runtimeTargetId,
+    String sessionId,
+  ) {
+    final saved = _sessionSettings[_sessionKey(runtimeTargetId, sessionId)];
+    if (saved != null) return saved;
+    final summary = sessions.cast<SessionSummary?>().firstWhere(
+      (session) => session?.id == sessionId,
+      orElse: () => null,
+    );
+    return SessionSettings(
+      workspace: summary?.cwd ?? selectedWorkspace,
+      model: selectedModel,
+      effort: selectedEffort,
+      profile: summary?.profile ?? selectedProfile,
+    );
+  }
+
+  void _restoreSessionSettings(RuntimeConnection connection) {
+    final key = _sessionKey(connection.runtimeTargetId, connection.sessionId);
+    final summary = sessions.cast<SessionSummary?>().firstWhere(
+      (session) => session?.id == connection.sessionId,
+      orElse: () => null,
+    );
+    final saved = _sessionSettings[key];
+    final metadata = connection.sessionMetadata;
+    var model = saved?.model ?? '';
+    if (model.isEmpty ||
+        (models.isNotEmpty && !models.any((item) => _modelId(item) == model))) {
+      model =
+          metadata['activeModel']?.toString() ??
+          metadata['model']?.toString() ??
+          _defaultModelId();
+    }
+    selectedModel = model;
     final efforts = effortsForModel(_selectedModel());
-    return efforts.isEmpty || efforts.contains(selectedEffort);
+    var effort = saved?.effort ?? '';
+    if (effort.isEmpty) {
+      effort =
+          metadata['activeEffort']?.toString() ??
+          metadata['effort']?.toString() ??
+          metadata['reasoningEffort']?.toString() ??
+          _selectedModel()?['defaultReasoningEffort']?.toString() ??
+          (efforts.isEmpty ? '' : efforts.first);
+    }
+    if (efforts.isNotEmpty && !efforts.contains(effort)) {
+      effort =
+          _selectedModel()?['defaultReasoningEffort']?.toString() ??
+          efforts.first;
+    }
+    final restored = SessionSettings(
+      workspace:
+          saved?.workspace ?? metadata['cwd']?.toString() ?? summary?.cwd ?? '',
+      model: selectedModel,
+      effort: effort,
+      profile:
+          saved?.profile ??
+          metadata['profile']?.toString() ??
+          metadata['profileName']?.toString() ??
+          summary?.profile ??
+          activeRuntime?.profileId ??
+          '',
+    );
+    _sessionSettings[key] = restored;
+    _applySettings(restored);
+  }
+
+  void _applySettings(SessionSettings settings) {
+    selectedWorkspace = settings.workspace;
+    workspaceError = null;
+    selectedModel = settings.model;
+    selectedEffort = settings.effort;
+    selectedProfile = settings.profile;
   }
 
   bool _isActiveSession(String runtimeTargetId, String sessionId) =>
@@ -1388,6 +1784,13 @@ ConversationTurn mergeConversationTurn(
 ) {
   final blocks = List<TranscriptBlock>.of(primary.blocks);
   for (final candidate in secondary.blocks) {
+    if (candidate.kind == TranscriptKind.thinking) {
+      // Canonical history and the live cache can use different item IDs for
+      // commentary/reasoning. Keep both inputs here and consolidate them into
+      // one Thinking block below instead of dropping the canonical detail.
+      blocks.add(candidate);
+      continue;
+    }
     final duplicate = blocks.any(
       (block) =>
           block.id == candidate.id ||
@@ -1408,7 +1811,7 @@ ConversationTurn mergeConversationTurn(
     attachments: primary.attachments.isEmpty
         ? secondary.attachments
         : primary.attachments,
-    blocks: blocks,
+    blocks: normalizeTranscriptBlocks(blocks),
   );
 }
 
@@ -1430,8 +1833,17 @@ String normalizeRuntimeExecutablePath(
       return '/${normalized.substring(prefix.length)}';
     }
   }
+  if (RegExp(r'^[A-Za-z]:/').hasMatch(normalized)) {
+    final drive = normalized.substring(0, 1).toLowerCase();
+    return '/mnt/$drive/${normalized.substring(3)}';
+  }
   return path;
 }
+
+String normalizeWorkspacePath(
+  String selectedPath,
+  Map<String, Object?> executionHost,
+) => normalizeRuntimeExecutablePath(selectedPath, executionHost);
 
 List<String> effortsForModel(Map<String, Object?>? model) =>
     (model?['supportedReasoningEfforts'] as List<Object?>? ?? const [])

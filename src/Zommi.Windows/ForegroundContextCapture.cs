@@ -134,7 +134,13 @@ internal sealed class ForegroundContextCapture : IDisposable
             Mark("window");
             string surfaceKind;
             LocatorInfo? locator = null;
-            var surfaceSelection = TryReadSurfaceSelection(windowHandle);
+            var browserContext = BrowserProcesses.Contains(processName)
+                ? TryReadBrowserContext(windowHandle)
+                : null;
+            Mark("browser");
+            var surfaceSelection = TryReadSurfaceSelection(
+                windowHandle,
+                browserContext?.Locator);
             Mark("selection");
             var powerPointSelection = processName.Equals("POWERPNT", StringComparison.OrdinalIgnoreCase)
                 ? TryReadPowerPointSelection(windowHandle)
@@ -153,9 +159,8 @@ internal sealed class ForegroundContextCapture : IDisposable
             {
                 surfaceKind = "Browser";
                 application = FriendlyBrowserName(processName);
-                var browserContext = TryReadBrowserContext(windowHandle);
-                locator = browserContext.Locator;
-                if (browserContext.SheetsRange is { } sheetsRange)
+                locator = browserContext?.Locator;
+                if (browserContext?.SheetsRange is { } sheetsRange)
                 {
                     surfaceSelection = AddSelectionItems(surfaceSelection, [sheetsRange], 1);
                 }
@@ -205,13 +210,20 @@ internal sealed class ForegroundContextCapture : IDisposable
                 windowHandle,
                 pointer,
                 surfaceSelection.Elements,
-                surfaceKind == "Browser");
+                surfaceKind == "Browser",
+                locator);
             Mark("accessibility");
-            var indicatedTarget = TryReadPointerTarget(windowHandle, pointer);
+            var indicatedTarget = TryReadPointerTarget(
+                windowHandle,
+                pointer,
+                surfaceKind == "Browser" ? locator : null);
             Mark("pointer");
             var visibleText = accessibilityContext is { Truncated: false }
                 ? []
-                : TryReadVisibleText(windowHandle, pointer);
+                : TryReadVisibleText(
+                    windowHandle,
+                    pointer,
+                    surfaceKind == "Browser" ? locator : null);
             Mark("visibleText");
             var hasSurfaceSelection = selection.Count > 0 || surfaceSelection.Items.Count > 0;
             var hasSpecificPointerTarget = IsSpecificPointerTarget(indicatedTarget);
@@ -307,14 +319,19 @@ internal sealed class ForegroundContextCapture : IDisposable
         }
     }
 
-    private SurfaceSelectionCapture TryReadSurfaceSelection(IntPtr windowHandle)
+    private SurfaceSelectionCapture TryReadSurfaceSelection(
+        IntPtr windowHandle,
+        LocatorInfo? browserLocator = null)
     {
         try
         {
             var root = automation.FromHandle(windowHandle);
             var candidates = new List<AutomationElement>();
             var focused = automation.FocusedElement();
-            if (focused is not null && IsWithinWindow(focused, root))
+            if (focused is not null &&
+                IsWithinWindow(focused, root) &&
+                (browserLocator is null ||
+                    IsWithinBrowserDocument(focused, root, browserLocator)))
             {
                 var current = focused;
                 for (var depth = 0; current is not null && depth < 12; depth++)
@@ -332,6 +349,7 @@ internal sealed class ForegroundContextCapture : IDisposable
             var documentCondition = automation.ConditionFactory.ByControlType(ControlType.Document);
             var documents = root
                 .FindAll(TreeScope.Descendants, documentCondition)
+                .Where(document => BrowserDocumentMatches(document, browserLocator))
                 .Take(12)
                 .ToArray();
             candidates.AddRange(documents);
@@ -922,13 +940,19 @@ internal sealed class ForegroundContextCapture : IDisposable
         return (null, []);
     }
 
-    private IndicatedTargetInfo? TryReadPointerTarget(IntPtr windowHandle, NativeMethods.Point point)
+    private IndicatedTargetInfo? TryReadPointerTarget(
+        IntPtr windowHandle,
+        NativeMethods.Point point,
+        LocatorInfo? browserLocator = null)
     {
         try
         {
             var root = automation.FromHandle(windowHandle);
             var element = automation.FromPoint(new Point(point.X, point.Y));
-            if (!IsWithinWindow(element, root) || element.Properties.IsPassword.ValueOrDefault)
+            if (!IsWithinWindow(element, root) ||
+                element.Properties.IsPassword.ValueOrDefault ||
+                browserLocator is not null &&
+                    !IsWithinBrowserDocument(element, root, browserLocator))
             {
                 return null;
             }
@@ -959,7 +983,10 @@ internal sealed class ForegroundContextCapture : IDisposable
         }
     }
 
-    private IReadOnlyList<string> TryReadVisibleText(IntPtr windowHandle, NativeMethods.Point point)
+    private IReadOnlyList<string> TryReadVisibleText(
+        IntPtr windowHandle,
+        NativeMethods.Point point,
+        LocatorInfo? browserLocator = null)
     {
         try
         {
@@ -972,7 +999,10 @@ internal sealed class ForegroundContextCapture : IDisposable
             var root = automation.FromHandle(windowHandle);
 
             var hovered = automation.FromPoint(new Point(point.X, point.Y));
-            if (IsWithinWindow(hovered, root) && !hovered.Properties.IsPassword.ValueOrDefault)
+            if (IsWithinWindow(hovered, root) &&
+                !hovered.Properties.IsPassword.ValueOrDefault &&
+                (browserLocator is null ||
+                    IsWithinBrowserDocument(hovered, root, browserLocator)))
             {
                 var current = hovered;
                 for (var depth = 0; depth < 16 && current is not null; depth++)
@@ -992,6 +1022,7 @@ internal sealed class ForegroundContextCapture : IDisposable
                 var documentCondition = automation.ConditionFactory.ByControlType(ControlType.Document);
                 foreach (var document in root
                     .FindAll(TreeScope.Descendants, documentCondition)
+                    .Where(document => BrowserDocumentMatches(document, browserLocator))
                     .Take(8))
                 {
                     if (!HasTime()) break;
@@ -1009,6 +1040,14 @@ internal sealed class ForegroundContextCapture : IDisposable
                 {
                     return collector.Items;
                 }
+            }
+
+            // Chrome can expose sibling-window documents below the HWND root.
+            // When an address-bar URL is available, never fall back to a full
+            // shared-process tree scan after the matching document is empty.
+            if (browserLocator is not null)
+            {
+                return collector.Items;
             }
 
             var queue = new Queue<AutomationElement>();
@@ -1043,19 +1082,31 @@ internal sealed class ForegroundContextCapture : IDisposable
         IntPtr windowHandle,
         NativeMethods.Point point,
         IReadOnlyList<AutomationElement> selectionElements,
-        bool isBrowser)
+        bool isBrowser,
+        LocatorInfo? locator)
     {
         try
         {
             var root = automation.FromHandle(windowHandle);
             AutomationElement? contextRoot = null;
-            if (selectionElements.FirstOrDefault(element => IsWithinWindow(element, root)) is { } selectedElement)
+            if (isBrowser)
+            {
+                var selectedElement = selectionElements.FirstOrDefault(element =>
+                    IsWithinWindow(element, root) &&
+                    IsWithinBrowserDocument(element, root, locator));
+                if (selectedElement is not null)
+                {
+                    contextRoot = FindNearbyContextRoot(root, selectedElement);
+                }
+                else
+                {
+                    contextRoot = FindDocumentUnderPointer(root, point, locator) ??
+                        FindFirstDocument(root, locator);
+                }
+            }
+            else if (selectionElements.FirstOrDefault(element => IsWithinWindow(element, root)) is { } selectedElement)
             {
                 contextRoot = FindNearbyContextRoot(root, selectedElement);
-            }
-            else if (isBrowser)
-            {
-                contextRoot = FindDocumentUnderPointer(root, point) ?? FindFirstDocument(root);
             }
             else
             {
@@ -1112,12 +1163,15 @@ internal sealed class ForegroundContextCapture : IDisposable
 
     private AutomationElement? FindDocumentUnderPointer(
         AutomationElement root,
-        NativeMethods.Point point)
+        NativeMethods.Point point,
+        LocatorInfo? locator)
     {
         var current = automation.FromPoint(new Point(point.X, point.Y));
         for (var depth = 0; current is not null && depth < 48; depth++)
         {
-            if (current.Properties.ControlType.ValueOrDefault == ControlType.Document && IsWithinWindow(current, root))
+            if (current.Properties.ControlType.ValueOrDefault == ControlType.Document &&
+                IsWithinWindow(current, root) &&
+                BrowserDocumentMatches(current, locator))
             {
                 return current;
             }
@@ -1128,10 +1182,77 @@ internal sealed class ForegroundContextCapture : IDisposable
         return null;
     }
 
-    private AutomationElement? FindFirstDocument(AutomationElement root)
+    private AutomationElement? FindFirstDocument(
+        AutomationElement root,
+        LocatorInfo? locator)
     {
         var documentCondition = automation.ConditionFactory.ByControlType(ControlType.Document);
-        return root.FindFirst(TreeScope.Descendants, documentCondition);
+        return root
+            .FindAll(TreeScope.Descendants, documentCondition)
+            .FirstOrDefault(document => BrowserDocumentMatches(document, locator));
+    }
+
+    private bool IsWithinBrowserDocument(
+        AutomationElement element,
+        AutomationElement root,
+        LocatorInfo? locator)
+    {
+        var current = element;
+        for (var depth = 0; current is not null && depth < 48; depth++)
+        {
+            if (current.Properties.ControlType.ValueOrDefault == ControlType.Document)
+            {
+                return IsWithinWindow(current, root) &&
+                    BrowserDocumentMatches(current, locator);
+            }
+
+            current = controlViewWalker.GetParent(current);
+        }
+
+        return false;
+    }
+
+    private static bool BrowserDocumentMatches(
+        AutomationElement document,
+        LocatorInfo? locator)
+    {
+        var candidateValue = document.Patterns.Value.PatternOrDefault?
+            .Value.ValueOrDefault;
+        return BrowserDocumentUrlMatches(candidateValue, locator);
+    }
+
+    internal static bool BrowserDocumentUrlMatches(
+        string? candidateValue,
+        LocatorInfo? locator)
+    {
+        if (locator is null ||
+            !locator.Kind.Equals("URL", StringComparison.OrdinalIgnoreCase) ||
+            !Uri.TryCreate(locator.Value, UriKind.Absolute, out var expected))
+        {
+            return true;
+        }
+
+        if (!Uri.TryCreate(candidateValue, UriKind.Absolute, out var candidate))
+        {
+            return false;
+        }
+
+        static string NormalizeHost(string host) =>
+            host.StartsWith("www.", StringComparison.OrdinalIgnoreCase)
+                ? host[4..]
+                : host;
+        if (!NormalizeHost(candidate.Host).Equals(
+            NormalizeHost(expected.Host),
+            StringComparison.OrdinalIgnoreCase) ||
+            !candidate.AbsolutePath.Equals(
+                expected.AbsolutePath,
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return string.IsNullOrEmpty(expected.Query) ||
+            candidate.Query.Equals(expected.Query, StringComparison.Ordinal);
     }
 
     private AccessibilityNodeInfo? CaptureAccessibilityNode(
@@ -1277,17 +1398,20 @@ internal sealed class ForegroundContextCapture : IDisposable
                 $"{rectangle.Value.X},{rectangle.Value.Y},{rectangle.Value.Width},{rectangle.Value.Height}");
     }
 
+    internal bool IsWithinWindowForAcceptance(IntPtr elementWindow, IntPtr rootWindow)
+    {
+        var element = automation.FromHandle(elementWindow);
+        var root = automation.FromHandle(rootWindow);
+        return IsWithinWindow(element, root);
+    }
+
     private bool IsWithinWindow(AutomationElement element, AutomationElement root)
     {
         try
         {
-            var elementProcessId = element.Properties.ProcessId.ValueOrDefault;
-            var rootProcessId = root.Properties.ProcessId.ValueOrDefault;
-            if (elementProcessId != 0 && elementProcessId == rootProcessId)
-            {
-                return true;
-            }
-
+            // Chrome windows share one browser process. Process identity alone
+            // therefore admits a stale UIA element from an obscured sibling
+            // window. Require actual raw-tree ancestry to the exact HWND root.
             var current = element;
             for (var depth = 0; depth < 48 && current is not null; depth++)
             {

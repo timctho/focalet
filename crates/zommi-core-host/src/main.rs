@@ -1,4 +1,9 @@
-use std::{collections::HashMap, env, io, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    env, io,
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -8,17 +13,20 @@ use tokio::{
 };
 use uuid::Uuid;
 use zommi_core::{
-    ConfiguredRuntimeOverride, RuntimeOverrideStore, SessionBinding, SessionBindingStore,
-    build_context_handoff,
+    ConfiguredRuntimeOverride, RuntimeDiscoveryCacheStore, RuntimeOverrideStore, SessionBinding,
+    SessionBindingStore, build_context_handoff,
     codex_adapter::{CodexError, CoreEvent, EventSender},
-    command_for_target, discover_runtime_targets_with_overrides, operation_fingerprint,
+    command_for_target, discover_runtime_targets_resilient_with_overrides, operation_fingerprint,
     runtime_adapter::{AdapterTurnRequest, RuntimeAdapter},
     runtime_discovery_settings, select_default_target, target_from_override,
     validate_broker_request, validate_turn_input,
 };
 
+mod wsl_relay;
+
 const CORE_PROTOCOL_VERSION: u64 = 1;
 const MAX_REQUEST_BYTES: usize = 64 * 1024 * 1024;
+const WSL_PROBE_BACKOFF: Duration = Duration::from_secs(45);
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -67,6 +75,8 @@ struct HostState {
     adapters: HashMap<String, RuntimeAdapter>,
     binding_store: SessionBindingStore,
     override_store: RuntimeOverrideStore,
+    discovery_cache: RuntimeDiscoveryCacheStore,
+    wsl_probe_retry_at: Option<Instant>,
     overrides: Vec<ConfiguredRuntimeOverride>,
     operations: HashMap<String, OperationRecord>,
     event_tx: EventSender,
@@ -85,6 +95,8 @@ impl HostState {
             adapters: HashMap::new(),
             binding_store: SessionBindingStore::platform_default(),
             override_store: RuntimeOverrideStore::platform_default(),
+            discovery_cache: RuntimeDiscoveryCacheStore::platform_default(),
+            wsl_probe_retry_at: None,
             overrides: Vec::new(),
             operations: HashMap::new(),
             event_tx,
@@ -152,6 +164,7 @@ impl HostState {
                     "session.list.v1",
                     "session.create.v1",
                     "session.resume.v1",
+                    "session.configure.v1",
                     "history.read.v1",
                     "turn.stream.v1",
                     "turn.interrupt.v1",
@@ -178,7 +191,10 @@ impl HostState {
                 Ok(json!({"text": build_context_handoff(message, snapshots, image_count)}))
             }
             "runtime.discover" => {
-                self.refresh_runtime_targets().await?;
+                self.refresh_runtime_targets(
+                    payload.get("force").and_then(Value::as_bool) == Some(true),
+                )
+                .await?;
                 Ok(self.discovery_value(payload))
             }
             "runtime.addOverride" => {
@@ -209,7 +225,7 @@ impl HostState {
                 self.override_store
                     .save(&self.overrides)
                     .map_err(|error| HostError::new("persistence-failed", error.to_string()))?;
-                self.refresh_runtime_targets().await?;
+                self.refresh_runtime_targets(true).await?;
                 Ok(self.discovery_value(payload))
             }
             "runtime.removeOverride" => {
@@ -225,7 +241,7 @@ impl HostState {
                 self.override_store
                     .save(&self.overrides)
                     .map_err(|error| HostError::new("persistence-failed", error.to_string()))?;
-                self.refresh_runtime_targets().await?;
+                self.refresh_runtime_targets(true).await?;
                 Ok(self.discovery_value(payload))
             }
             "runtime.connect" => self.connect_runtime(payload).await,
@@ -239,6 +255,8 @@ impl HostState {
                     .create_session(
                         payload.get("model").and_then(Value::as_str),
                         payload.get("effort").and_then(Value::as_str),
+                        payload.get("cwd").and_then(Value::as_str),
+                        payload.get("profile").and_then(Value::as_str),
                     )
                     .await?;
                 let session_id = adapter.active_session_id().await?;
@@ -253,7 +271,31 @@ impl HostState {
             "session.open" => {
                 let adapter = self.exact_adapter(payload)?;
                 let session_id = required_string(payload, "sessionId")?;
-                let connection = adapter.open_session(session_id).await?;
+                let connection = adapter
+                    .open_session(session_id, payload.get("profile").and_then(Value::as_str))
+                    .await?;
+                let active_session_id = adapter.active_session_id().await?;
+                self.save_binding(
+                    adapter.target_id(),
+                    &active_session_id,
+                    adapter.binding_metadata().await,
+                    payload,
+                )?;
+                Ok(connection)
+            }
+            "session.configure" => {
+                self.validate_workspace_payload(payload).await?;
+                let adapter = self.exact_adapter(payload)?;
+                let session_id = required_string(payload, "sessionId")?;
+                let connection = adapter
+                    .configure_session(
+                        session_id,
+                        payload.get("cwd").and_then(Value::as_str),
+                        payload.get("profile").and_then(Value::as_str),
+                        payload.get("model").and_then(Value::as_str),
+                        payload.get("effort").and_then(Value::as_str),
+                    )
+                    .await?;
                 let active_session_id = adapter.active_session_id().await?;
                 self.save_binding(
                     adapter.target_id(),
@@ -318,7 +360,9 @@ impl HostState {
                     "snapshots": input.snapshots,
                     "images": input.images,
                     "model": payload.get("model"),
-                    "effort": payload.get("effort")
+                    "effort": payload.get("effort"),
+                    "cwd": payload.get("cwd"),
+                    "profile": payload.get("profile")
                 }));
                 if let Some(previous) = self.operations.get(&client_operation_id) {
                     if previous.fingerprint != fingerprint {
@@ -338,6 +382,8 @@ impl HostState {
                         client_operation_id: &client_operation_id,
                         model: payload.get("model").and_then(Value::as_str),
                         effort: payload.get("effort").and_then(Value::as_str),
+                        cwd: payload.get("cwd").and_then(Value::as_str),
+                        profile: payload.get("profile").and_then(Value::as_str),
                     })
                     .await
                     .map_err(HostError::from)
@@ -416,17 +462,58 @@ impl HostState {
         }
     }
 
-    async fn refresh_runtime_targets(&mut self) -> Result<(), HostError> {
+    async fn refresh_runtime_targets(&mut self, force: bool) -> Result<(), HostError> {
         self.overrides = self
             .override_store
             .load()
             .map_err(|error| HostError::new("persistence-failed", error.to_string()))?;
         let overrides = self.overrides.clone();
-        self.targets = tokio::task::spawn_blocking(move || {
-            discover_runtime_targets_with_overrides(&overrides)
+        let cache = self.discovery_cache.clone();
+        let now = Instant::now();
+        let retry_allowed = force
+            || self
+                .wsl_probe_retry_at
+                .is_none_or(|retry_at| now >= retry_at);
+        let (outcome, probed_wsl) = tokio::task::spawn_blocking(move || {
+            let cached = cache.load().unwrap_or_default();
+            let relay_ready =
+                cfg!(target_os = "windows") && wsl_relay::cached_default_relay_available(&cached);
+            if retry_allowed && relay_ready {
+                let mut outcome =
+                    discover_runtime_targets_resilient_with_overrides(&overrides, &cache, false);
+                if let Ok(discovered) = wsl_relay::discover_targets_via_cached_relays(&cached) {
+                    // Replace only automatic/cached WSL entries. User-configured
+                    // targets remain available even if their executable is not
+                    // currently on the login shell PATH.
+                    outcome.targets.retain(|target| {
+                        target.execution_host.kind != "wsl"
+                            || target.source.as_deref() == Some("configured-ui")
+                    });
+                    outcome.targets.extend(discovered.iter().cloned());
+                    let mut seen = HashSet::new();
+                    outcome
+                        .targets
+                        .retain(|target| seen.insert(target.id.clone()));
+                    outcome.wsl_probe_succeeded = true;
+                    let _ = cache.save(&discovered);
+                }
+                return (outcome, true);
+            }
+            let probe_wsl = retry_allowed;
+            let outcome =
+                discover_runtime_targets_resilient_with_overrides(&overrides, &cache, probe_wsl);
+            (outcome, probe_wsl)
         })
         .await
         .map_err(|error| HostError::new("discovery-failed", error.to_string()))?;
+        if probed_wsl {
+            self.wsl_probe_retry_at = if outcome.wsl_probe_succeeded {
+                None
+            } else {
+                Some(Instant::now() + WSL_PROBE_BACKOFF)
+            };
+        }
+        self.targets = outcome.targets;
         Ok(())
     }
 
@@ -450,7 +537,7 @@ impl HostState {
 
     async fn connect_runtime(&mut self, payload: &Value) -> Result<Value, HostError> {
         if self.targets.is_empty() {
-            self.refresh_runtime_targets().await?;
+            self.refresh_runtime_targets(false).await?;
         }
         let binding = self.binding_store.load();
         let requested_target_id = payload
@@ -479,11 +566,13 @@ impl HostState {
             )
         })?;
 
-        let requested_cwd = payload
+        let explicit_cwd = payload
             .get("cwd")
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
+            .map(PathBuf::from);
+        let requested_cwd = explicit_cwd
+            .clone()
             .or_else(|| {
                 binding
                     .as_ref()
@@ -492,7 +581,7 @@ impl HostState {
             })
             .or_else(|| env::current_dir().ok())
             .unwrap_or_else(env::temp_dir);
-        let cwd = if target.execution_host.kind == "wsl" {
+        let cwd = if target.execution_host.kind == "wsl" && explicit_cwd.is_none() {
             target
                 .runtime_home
                 .as_deref()
@@ -527,17 +616,22 @@ impl HostState {
                     .map(str::to_owned)
             });
         if let Some(adapter) = self.adapters.get(&target.id).cloned() {
-            let connection = adapter.connection_value().await?;
-            let session_id = adapter.active_session_id().await?;
-            self.binding_store
-                .save(&SessionBinding {
-                    runtime_target_id: adapter.target_id().to_owned(),
-                    session_id,
-                    cwd: cwd.to_string_lossy().into_owned(),
-                    session_metadata: adapter.binding_metadata().await,
-                })
-                .map_err(|error| HostError::new("persistence-failed", error.to_string()))?;
-            return Ok(connection);
+            if adapter.is_running().await {
+                let connection = adapter.connection_value().await?;
+                let session_id = adapter.active_session_id().await?;
+                self.binding_store
+                    .save(&SessionBinding {
+                        runtime_target_id: adapter.target_id().to_owned(),
+                        session_id,
+                        cwd: cwd.to_string_lossy().into_owned(),
+                        session_metadata: adapter.binding_metadata().await,
+                    })
+                    .map_err(|error| HostError::new("persistence-failed", error.to_string()))?;
+                return Ok(connection);
+            }
+            if let Some(stale) = self.adapters.remove(&target.id) {
+                stale.shutdown().await;
+            }
         }
         let mut runtime_command = command_for_target(&target);
         let adapter_override = format!(
@@ -557,6 +651,10 @@ impl HostState {
                     )
                 })?;
             runtime_command.args = parsed;
+        }
+        if cfg!(target_os = "windows") && target.execution_host.kind == "wsl" {
+            runtime_command = wsl_relay::wrap_wsl_command(&target, runtime_command)
+                .map_err(|error| HostError::new("runtime-unavailable", error.to_string()))?;
         }
         let adapter = RuntimeAdapter::connect(
             target,
@@ -592,6 +690,77 @@ impl HostState {
             )
         })?;
         Ok(adapter.clone())
+    }
+
+    async fn validate_workspace_payload(&self, payload: &Value) -> Result<(), HostError> {
+        let Some(cwd) = payload
+            .get("cwd")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return Ok(());
+        };
+        let target_id = required_string(payload, "runtimeTargetId")?;
+        let target = self
+            .targets
+            .iter()
+            .find(|target| target.id == target_id)
+            .cloned()
+            .ok_or_else(|| {
+                HostError::new(
+                    "runtime-unavailable",
+                    "The workspace execution host is no longer available.",
+                )
+            })?;
+        let absolute = if target.execution_host.kind == "wsl" {
+            cwd.starts_with('/')
+        } else {
+            std::path::Path::new(cwd).is_absolute()
+        };
+        if !absolute || cwd.contains('\0') {
+            return Err(HostError::new(
+                "invalid-workspace",
+                "Workspace must be an absolute folder path.",
+            ));
+        }
+
+        let exists = match target.execution_host.kind.as_str() {
+            "native" => std::path::Path::new(cwd).is_dir(),
+            "wsl" if cfg!(target_os = "windows") => {
+                let path = cwd.to_owned();
+                tokio::task::spawn_blocking(move || {
+                    wsl_relay::workspace_directory_exists(&target, &path)
+                })
+                .await
+                .map_err(|error| {
+                    HostError::new(
+                        "workspace-validation-failed",
+                        format!("Workspace validation stopped unexpectedly: {error}"),
+                    )
+                })?
+                .map_err(|error| {
+                    HostError::new(
+                        "workspace-validation-failed",
+                        format!("Could not validate the WSL workspace: {error}"),
+                    )
+                })?
+            }
+            "wsl" => std::path::Path::new(cwd).is_dir(),
+            _ => {
+                return Err(HostError::new(
+                    "workspace-validation-failed",
+                    "This execution host cannot validate workspace folders yet.",
+                ));
+            }
+        };
+        if !exists {
+            return Err(HostError::new(
+                "workspace-not-found",
+                format!("Workspace folder does not exist: {cwd}"),
+            ));
+        }
+        Ok(())
     }
 
     fn save_binding(
@@ -659,6 +828,20 @@ impl From<serde_json::Error> for HostError {
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
+    let arguments = env::args().skip(1).collect::<Vec<_>>();
+    if arguments
+        .first()
+        .is_some_and(|argument| argument == "--wsl-proxy")
+    {
+        let exit_code = match wsl_relay::run_proxy(&arguments[1..]) {
+            Ok(code) => code,
+            Err(error) => {
+                eprintln!("Persistent WSL relay failed: {error}");
+                70
+            }
+        };
+        std::process::exit(exit_code);
+    }
     let (output_tx, mut output_rx) = mpsc::unbounded_channel::<Value>();
     let writer = tokio::spawn(async move {
         let mut stdout = BufWriter::new(tokio::io::stdout());
@@ -768,8 +951,11 @@ fn empty_object() -> Value {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use serde_json::{Value, json};
     use tokio::sync::mpsc;
+    use zommi_core::{ExecutionHost, RuntimeTarget};
 
     use super::{CORE_PROTOCOL_VERSION, CoreRequest, HostState};
 
@@ -864,5 +1050,61 @@ mod tests {
             result["error"]["message"],
             "Runtime override must be an object."
         );
+    }
+
+    #[tokio::test]
+    async fn validates_native_workspace_directories_before_configuration() {
+        let (event_tx, _events) = mpsc::unbounded_channel();
+        let mut host = HostState::new(event_tx);
+        host.targets.push(RuntimeTarget {
+            id: "runtime-test".into(),
+            runtime_id: "codex".into(),
+            adapter_id: "codex-app-server".into(),
+            display_name: "Codex".into(),
+            protocol_name: "Codex app-server".into(),
+            executable_path: "/bin/false".into(),
+            execution_host: ExecutionHost {
+                id: format!("native:{}", std::env::consts::OS),
+                kind: "native".into(),
+                platform: std::env::consts::OS.into(),
+                display_name: "Local".into(),
+                is_default: true,
+                name: None,
+            },
+            status: "ready".into(),
+            priority: 0,
+            capability_hints: Vec::new(),
+            runtime_home: None,
+            source: None,
+            endpoint: None,
+            profile_id: None,
+        });
+        let root = std::env::temp_dir().join(format!("zommi-workspace-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).expect("create workspace fixture");
+        let valid = json!({
+            "runtimeTargetId": "runtime-test",
+            "cwd": root.to_string_lossy()
+        });
+        host.validate_workspace_payload(&valid)
+            .await
+            .expect("existing workspace is valid");
+
+        let missing = json!({
+            "runtimeTargetId": "runtime-test",
+            "cwd": root.join("missing").to_string_lossy()
+        });
+        let error = host
+            .validate_workspace_payload(&missing)
+            .await
+            .expect_err("missing workspace must be rejected");
+        assert_eq!(error.code, "workspace-not-found");
+
+        let relative = json!({"runtimeTargetId": "runtime-test", "cwd": "relative/path"});
+        let error = host
+            .validate_workspace_payload(&relative)
+            .await
+            .expect_err("relative workspace must be rejected");
+        assert_eq!(error.code, "invalid-workspace");
+        fs::remove_dir_all(root).expect("remove workspace fixture");
     }
 }

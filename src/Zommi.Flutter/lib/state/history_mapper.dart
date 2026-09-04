@@ -29,6 +29,10 @@ ConversationTurn _mapTurn(
     final block = _historyBlock(item, threadCwd);
     if (block != null) result.blocks.add(block);
   }
+  final normalized = normalizeTranscriptBlocks(result.blocks);
+  result.blocks
+    ..clear()
+    ..addAll(normalized);
   return result;
 }
 
@@ -96,10 +100,11 @@ TranscriptBlock? _historyBlock(Map<String, Object?> item, String? cwd) {
       return _toolBlock(
         id,
         'Command',
-        [item['command'], item['aggregatedOutput']],
+        [item['aggregatedOutput']],
         lifecycle,
         status,
         artifacts,
+        preview: item['command']?.toString() ?? '',
       );
     case 'fileChange':
       final changes = mapList(item['changes'])
@@ -184,8 +189,9 @@ TranscriptBlock _toolBlock(
   List<Object?> values,
   TranscriptLifecycle lifecycle,
   String? status,
-  List<ArtifactPreview> artifacts,
-) => TranscriptBlock(
+  List<ArtifactPreview> artifacts, {
+  String preview = '',
+}) => TranscriptBlock(
   id: id,
   kind: TranscriptKind.tool,
   title: title,
@@ -195,6 +201,7 @@ TranscriptBlock _toolBlock(
       .join('\n'),
   lifecycle: lifecycle,
   status: status,
+  preview: preview,
   expanded: false,
   artifacts: artifacts,
 );
@@ -385,6 +392,71 @@ String mergeDistinctTextSections(Iterable<String> sections) {
     values.add(value);
   }
   return values.join('\n');
+}
+
+List<TranscriptBlock> normalizeTranscriptBlocks(
+  Iterable<TranscriptBlock> source,
+) {
+  final blocks = source.toList(growable: false);
+  final thinkingBlocks = blocks
+      .where((block) => block.kind == TranscriptKind.thinking)
+      .toList(growable: false);
+  final toolBlocks = blocks
+      .where((block) => block.kind == TranscriptKind.tool)
+      .toList(growable: false);
+  if (thinkingBlocks.isEmpty && toolBlocks.isEmpty) {
+    return List<TranscriptBlock>.of(blocks);
+  }
+
+  final activityBlocks = [...thinkingBlocks, ...toolBlocks];
+  final artifacts = <ArtifactPreview>[];
+  for (final block in thinkingBlocks) {
+    for (final artifact in block.artifacts) {
+      if (!artifacts.any(
+        (existing) => existing.identity == artifact.identity,
+      )) {
+        artifacts.add(artifact);
+      }
+    }
+  }
+  final thinking = thinkingBlocks.length == 1
+      ? thinkingBlocks.single
+      : TranscriptBlock(
+          id: 'turn-thinking',
+          kind: TranscriptKind.thinking,
+          title: 'Thinking',
+          text: mergeDistinctTextSections(
+            thinkingBlocks.map((block) => block.text),
+          ),
+          lifecycle: activityBlocks.every((block) => block.completed)
+              ? TranscriptLifecycle.completed
+              : TranscriptLifecycle.delta,
+          status: thinkingBlocks.reversed
+              .map((block) => block.status)
+              .whereType<String>()
+              .firstOrNull,
+          expanded: thinkingBlocks.any((block) => block.expanded),
+          artifacts: artifacts,
+        );
+
+  final result = <TranscriptBlock>[];
+  var insertedThinking = false;
+  for (final block in blocks) {
+    if (block.kind == TranscriptKind.thinking) {
+      if (!insertedThinking) {
+        result.add(thinking);
+        insertedThinking = true;
+      }
+      continue;
+    }
+    if (block.kind == TranscriptKind.tool && !insertedThinking) {
+      result.add(thinking);
+      insertedThinking = true;
+    }
+    result.add(block);
+  }
+  if (!insertedThinking) result.insert(0, thinking);
+  return result;
 }
 
 String _userItemText(Map<String, Object?> item) {

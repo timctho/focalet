@@ -10,6 +10,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
+Import-Module (Join-Path $PSScriptRoot 'windows-deployment-helpers.psm1') -Force
 $architecture = if ($Runtime -eq 'win-arm64') { 'arm64' } else { 'x64' }
 $packageName = "zommi-windows-$architecture"
 $sourceDirectory = Join-Path $repositoryRoot "artifacts/$packageName"
@@ -27,6 +28,7 @@ $archiveReplaced = $false
 $hadDirectoryBackup = $false
 $hadArchiveBackup = $false
 $stoppedProcessCount = 0
+$redirectedExplorerWindowHandles = @()
 
 function Get-DirectoryHashes {
     param([string] $Root)
@@ -154,30 +156,66 @@ try {
     }
 
     $targetExecutable = Join-Path $targetDirectory 'Zommi.exe'
+    $redirectedExplorerWindowHandles = @(
+        Redirect-ExplorerWindowsFromPath `
+            -Source $targetDirectory `
+            -Destination $downloadsRoot
+    )
     # Stop every Zommi package launched from Downloads, including older package
     # folder names, so a stale UI or helper cannot survive the replacement.
+    # Include the complete descendant tree: the Rust core can own conhost, WSL,
+    # and runtime processes whose executable paths are outside Downloads but
+    # whose inherited working-directory handles still lock the package folder.
     $targetProcesses = @(Get-DownloadsZommiProcesses)
-    $stoppedProcessCount = $targetProcesses.Count
-    foreach ($process in $targetProcesses) {
-        Stop-Process -Id $process.ProcessId -Force
+    $processSnapshot = @(Get-CimInstance Win32_Process)
+    $runtimeRootProcessIds = @(
+        Get-ZommiRuntimeRootProcessIds -Processes $processSnapshot
+    )
+    $rootProcessIds = @(
+        @($targetProcesses.ProcessId) + $runtimeRootProcessIds |
+            Select-Object -Unique
+    )
+    $targetProcessIds = if ($rootProcessIds.Count -eq 0) {
+        @()
     }
-    Start-Sleep -Milliseconds 500
+    else {
+        @(
+            Get-DescendantProcessIds `
+                -Processes $processSnapshot `
+                -RootProcessIds $rootProcessIds
+        )
+    }
+    $stoppedProcessCount = $targetProcessIds.Count
+    foreach ($processId in $targetProcessIds) {
+        Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+    }
+    foreach ($processId in $targetProcessIds) {
+        Wait-Process -Id $processId -Timeout 10 -ErrorAction SilentlyContinue
+    }
     if (@(Get-DownloadsZommiProcesses).Count -ne 0) {
         throw 'A Zommi process inside Downloads remained running.'
     }
+    $remainingTreeProcesses = @(
+        Get-CimInstance Win32_Process | Where-Object {
+            $targetProcessIds -contains [uint32] $_.ProcessId
+        }
+    )
+    if ($remainingTreeProcesses.Count -ne 0) {
+        throw "A Zommi descendant remained running: $($remainingTreeProcesses.ProcessId -join ',')."
+    }
 
     if (Test-Path -LiteralPath $targetDirectory) {
-        Move-Item -LiteralPath $targetDirectory -Destination $backupDirectory
+        Move-PathWithRetry -Source $targetDirectory -Destination $backupDirectory
         $hadDirectoryBackup = $true
     }
-    Move-Item -LiteralPath $pendingDirectory -Destination $targetDirectory
+    Move-PathWithRetry -Source $pendingDirectory -Destination $targetDirectory
     $directoryReplaced = $true
 
     if (Test-Path -LiteralPath $targetArchive) {
-        Move-Item -LiteralPath $targetArchive -Destination $backupArchive
+        Move-PathWithRetry -Source $targetArchive -Destination $backupArchive
         $hadArchiveBackup = $true
     }
-    Move-Item -LiteralPath $pendingArchive -Destination $targetArchive
+    Move-PathWithRetry -Source $pendingArchive -Destination $targetArchive
     $archiveReplaced = $true
 
     $deployedFileCount = Assert-DirectoryMatches $sourceDirectory $targetDirectory
@@ -252,6 +290,7 @@ try {
         executableSha256 = (Get-FileHash -LiteralPath (Join-Path $targetDirectory 'Zommi.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
         archiveSha256 = $targetArchiveHash.ToLowerInvariant()
         stoppedProcesses = $stoppedProcessCount
+        redirectedExplorerWindows = $redirectedExplorerWindowHandles.Count
         startedProcessId = $startedProcessId
         flutterProcessCount = $flutterProcessCount
         singleInstanceVerified = $singleInstanceVerified
@@ -268,10 +307,10 @@ catch {
         Remove-Item -LiteralPath $targetArchive -Force -ErrorAction SilentlyContinue
     }
     if ($hadDirectoryBackup -and (Test-Path -LiteralPath $backupDirectory)) {
-        Move-Item -LiteralPath $backupDirectory -Destination $targetDirectory
+        Move-PathWithRetry -Source $backupDirectory -Destination $targetDirectory
     }
     if ($hadArchiveBackup -and (Test-Path -LiteralPath $backupArchive)) {
-        Move-Item -LiteralPath $backupArchive -Destination $targetArchive
+        Move-PathWithRetry -Source $backupArchive -Destination $targetArchive
     }
     if ($stoppedProcessCount -gt 0 -and
         (Test-Path -LiteralPath (Join-Path $targetDirectory 'Zommi.exe') -PathType Leaf)) {
@@ -284,4 +323,9 @@ catch {
 finally {
     Remove-Item -LiteralPath $pendingDirectory -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $pendingArchive -Force -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $targetDirectory -PathType Container) {
+        Restore-ExplorerWindowsToPath `
+            -WindowHandles $redirectedExplorerWindowHandles `
+            -Destination $targetDirectory
+    }
 }

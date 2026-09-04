@@ -198,6 +198,11 @@ def verify_package(
         components.get(key) != value for key, value in required["components"].items()
     ):
         raise ReleaseValidationError("Release manifest does not identify Flutter + Rust.")
+    if (
+        manifest.get("platform") == "windows"
+        and components.get("wslTransport") != "persistent-authenticated-relay"
+    ):
+        raise ReleaseValidationError("Windows release does not identify the persistent WSL relay.")
     if expected_platform and manifest.get("platform") != expected_platform:
         raise ReleaseValidationError("Release platform does not match the requested target.")
     if expected_commit and manifest.get("gitCommit") != expected_commit:

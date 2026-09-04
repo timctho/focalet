@@ -23,7 +23,7 @@ use tokio::{
 
 use crate::{
     RuntimeCommand, RuntimeTarget, artifacts::artifacts_from_thread_item, build_context_handoff,
-    sanitize_diagnostic, validate_turn_input,
+    runtime_discovery::PARENT_APP_RUNTIME_ENVIRONMENT_KEYS, sanitize_diagnostic, validate_turn_input,
 };
 
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -117,6 +117,7 @@ pub struct CodexConnection {
     pub runtime_version: Option<String>,
     pub models: Vec<Value>,
     pub sessions: Vec<Value>,
+    pub session_metadata: Value,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -137,6 +138,7 @@ pub struct CodexTurnRequest<'a> {
     pub client_operation_id: &'a str,
     pub model: Option<&'a str>,
     pub effort: Option<&'a str>,
+    pub cwd: Option<&'a str>,
 }
 
 #[derive(Clone)]
@@ -166,6 +168,7 @@ struct AdapterState {
     thread_id: Option<String>,
     active_model: Option<String>,
     active_effort: Option<String>,
+    active_cwd: Option<String>,
     models: Vec<Value>,
     sessions: HashMap<String, Value>,
     materialized_threads: HashSet<String>,
@@ -192,6 +195,9 @@ impl CodexAdapter {
             .stderr(Stdio::piped())
             .env("CODEX_INTERNAL_ORIGINATOR_OVERRIDE", "codex_exec")
             .kill_on_drop(true);
+        for variable in PARENT_APP_RUNTIME_ENVIRONMENT_KEYS {
+            command.env_remove(variable);
+        }
         if config.cwd.is_dir() {
             command.current_dir(&config.cwd);
         }
@@ -351,7 +357,7 @@ impl CodexAdapter {
             false
         };
         if !resumed {
-            self.start_thread(None).await?;
+            self.start_thread(None, None).await?;
         }
         let session_id = self.active_session_id().await?;
         self.inner.emit_status(
@@ -365,6 +371,11 @@ impl CodexAdapter {
 
     pub async fn connection(&self) -> Result<CodexConnection, CodexError> {
         let state = self.inner.state.lock().await;
+        let session_metadata = json!({
+            "activeModel": state.active_model,
+            "activeEffort": state.active_effort,
+            "cwd": state.active_cwd.as_deref().unwrap_or_else(|| self.inner.cwd.to_str().unwrap_or_default())
+        });
         Ok(CodexConnection {
             runtime_target_id: self.inner.target_id.clone(),
             session_id: state
@@ -375,6 +386,7 @@ impl CodexAdapter {
             runtime_version: state.runtime_version.clone(),
             models: state.models.clone(),
             sessions: sorted_sessions(&state.sessions),
+            session_metadata,
         })
     }
 
@@ -390,6 +402,10 @@ impl CodexAdapter {
 
     pub fn target_id(&self) -> &str {
         &self.inner.target_id
+    }
+
+    pub async fn is_running(&self) -> bool {
+        !self.inner.state.lock().await.exited
     }
 
     pub async fn list_sessions(&self) -> Result<Vec<Value>, CodexError> {
@@ -435,8 +451,9 @@ impl CodexAdapter {
         &self,
         model: Option<&str>,
         effort: Option<&str>,
+        cwd: Option<&str>,
     ) -> Result<CodexConnection, CodexError> {
-        self.start_thread(model).await?;
+        self.start_thread(model, cwd).await?;
         if let Some(effort) = effort {
             self.inner.state.lock().await.active_effort = Some(effort.into());
         }
@@ -475,6 +492,23 @@ impl CodexAdapter {
         self.connection().await
     }
 
+    pub async fn configure_session(
+        &self,
+        session_id: &str,
+        cwd: Option<&str>,
+    ) -> Result<CodexConnection, CodexError> {
+        if self.active_session_id().await? != session_id {
+            return Err(CodexError::new(
+                "identity-mismatch",
+                "The requested session is not the exact active Codex session.",
+            ));
+        }
+        if let Some(cwd) = cwd.filter(|value| !value.trim().is_empty()) {
+            self.inner.state.lock().await.active_cwd = Some(cwd.into());
+        }
+        self.connection().await
+    }
+
     pub async fn read_session(&self, session_id: &str) -> Result<Value, CodexError> {
         self.inner
             .request(
@@ -496,6 +530,7 @@ impl CodexAdapter {
             client_operation_id,
             model,
             effort,
+            cwd,
         } = request;
         let input = validate_turn_input(message, snapshots, images)?;
         let active_session_id = self.active_session_id().await?;
@@ -553,6 +588,9 @@ impl CodexAdapter {
         if let Some(effort) = effort {
             params["effort"] = Value::String(effort.into());
         }
+        if let Some(cwd) = cwd.filter(|value| !value.trim().is_empty()) {
+            params["cwd"] = Value::String(cwd.into());
+        }
         let result = match self.inner.request("turn/start", params).await {
             Ok(result) => result,
             Err(error) => {
@@ -596,6 +634,9 @@ impl CodexAdapter {
             }
             if let Some(effort) = effort {
                 state.active_effort = Some(effort.into());
+            }
+            if let Some(cwd) = cwd.filter(|value| !value.trim().is_empty()) {
+                state.active_cwd = Some(cwd.into());
             }
         }
         if let Some(error) = exited_after_accept {
@@ -680,9 +721,13 @@ impl CodexAdapter {
         Ok(models)
     }
 
-    async fn start_thread(&self, model: Option<&str>) -> Result<Value, CodexError> {
+    async fn start_thread(
+        &self,
+        model: Option<&str>,
+        cwd: Option<&str>,
+    ) -> Result<Value, CodexError> {
         let mut params = json!({
-            "cwd": self.inner.cwd.to_string_lossy(),
+            "cwd": cwd.filter(|value| !value.trim().is_empty()).unwrap_or_else(|| self.inner.cwd.to_str().unwrap_or_default()),
             "threadSource": "zommi",
             "developerInstructions": DEVELOPER_INSTRUCTIONS
         });
@@ -718,6 +763,12 @@ impl CodexAdapter {
             .and_then(Value::as_str)
             .map(str::to_owned)
             .or_else(|| state.active_effort.clone());
+        state.active_cwd = thread
+            .get("cwd")
+            .or_else(|| result.get("cwd"))
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .or_else(|| state.active_cwd.clone());
         let materialized = thread
             .get("name")
             .and_then(Value::as_str)
@@ -1269,6 +1320,12 @@ fn parse_stream_update(
         status,
         false,
     );
+    if item_type == "commandExecution" {
+        let command = value_string(item.get("command"));
+        if !command.is_empty() {
+            value["preview"] = Value::String(command);
+        }
+    }
     if !artifacts.is_empty() {
         value["artifacts"] = Value::Array(artifacts);
     }
@@ -1534,5 +1591,17 @@ mod tests {
             .expect("tool output")["kind"],
             "toolOutput"
         );
+        let command = parse_stream_update(
+            "item/completed",
+            &json!({"item": {
+                "id": "c", "type": "commandExecution", "status": "completed",
+                "command": "cargo test --workspace", "aggregatedOutput": "ok"
+            }}),
+            &kinds,
+            None,
+        )
+        .expect("completed command");
+        assert_eq!(command["preview"], "cargo test --workspace");
+        assert_eq!(command["text"], "ok");
     }
 }

@@ -89,6 +89,8 @@ struct State {
     runtime_session_id: Option<String>,
     runtime_session_ids: HashMap<String, String>,
     sessions: Vec<Value>,
+    profiles: Vec<Value>,
+    active_profile: String,
     histories: HashMap<String, Vec<Value>>,
     models: Vec<Value>,
     session_info: Value,
@@ -175,6 +177,24 @@ impl HermesGatewayAdapter {
                 "Hermes Gateway unexpectedly required public-bind authentication.",
             ));
         }
+        let profile_payload = read_http_json(port, "/api/profiles", Some(&session_token))
+            .await
+            .unwrap_or_else(|_| json!({"profiles": [{"name": "default", "is_default": true}]}));
+        let profiles = profile_payload
+            .get("profiles")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_else(|| vec![json!({"name": "default", "is_default": true})]);
+        let active_profile = read_http_json(port, "/api/profiles/active", Some(&session_token))
+            .await
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("current")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .unwrap_or_else(|| "default".into());
         let endpoint = format!("ws://127.0.0.1:{port}/api/ws?token={session_token}");
         let (socket, _) = timeout(REQUEST_TIMEOUT, connect_async(&endpoint))
             .await
@@ -204,6 +224,8 @@ impl HermesGatewayAdapter {
                         .map(str::to_owned),
                     capabilities: gateway_capabilities(),
                     session_info: json!({}),
+                    profiles,
+                    active_profile,
                     ..State::default()
                 }),
                 stderr: stderr_buffer,
@@ -255,13 +277,14 @@ impl HermesGatewayAdapter {
         }
         let sessions = self.load_sessions().await?;
         if let Some(session_id) = preferred_session_id
-            && sessions
+            && let Some(session) = sessions
                 .iter()
-                .any(|session| session.get("id").and_then(Value::as_str) == Some(&session_id))
+                .find(|session| session.get("id").and_then(Value::as_str) == Some(&session_id))
         {
-            self.resume_session(&session_id).await?;
+            self.resume_session(&session_id, session.get("profile").and_then(Value::as_str))
+                .await?;
         } else {
-            self.new_session(None, None).await?;
+            self.new_session(None, None, None, None).await?;
         }
         self.refresh_models().await;
         let session_id = self.active_session_id().await?;
@@ -288,11 +311,34 @@ impl HermesGatewayAdapter {
             .ok_or_else(|| gateway_error("runtime-failed", "Hermes Gateway has no active session."))
     }
 
+    pub async fn binding_metadata(&self) -> Option<Value> {
+        let state = self.inner.state.lock().await;
+        let session_id = state.active_session_id.clone()?;
+        Some(json!({
+            "sessionKey": session_id,
+            "profile": state
+                .session_info
+                .get("profile_name")
+                .and_then(Value::as_str)
+                .unwrap_or(&state.active_profile),
+            "cwd": state.session_info.get("cwd")
+        }))
+    }
+
     pub async fn connection_value(&self) -> Result<Value, CodexError> {
         let state = self.inner.state.lock().await;
         let session_id = state.active_session_id.clone().ok_or_else(|| {
             gateway_error("runtime-failed", "Hermes Gateway has no active session.")
         })?;
+        let profile = state
+            .session_info
+            .get("profile_name")
+            .and_then(Value::as_str)
+            .unwrap_or(&state.active_profile);
+        let model = encode_model_id(
+            state.session_info.get("provider").and_then(Value::as_str),
+            state.session_info.get("model").and_then(Value::as_str),
+        );
         Ok(json!({
             "runtimeTargetId": self.inner.target.id,
             "sessionId": session_id,
@@ -301,7 +347,14 @@ impl HermesGatewayAdapter {
             "capabilities": state.capabilities,
             "models": state.models,
             "sessions": state.sessions,
-            "sessionMetadata": {"sessionKey": session_id}
+            "sessionMetadata": {
+                "sessionKey": session_id,
+                "activeModel": model,
+                "activeEffort": state.session_info.get("reasoning_effort"),
+                "cwd": state.session_info.get("cwd"),
+                "profile": profile,
+                "profiles": state.profiles
+            }
         }))
     }
 
@@ -313,13 +366,19 @@ impl HermesGatewayAdapter {
         &self,
         model: Option<&str>,
         effort: Option<&str>,
+        cwd: Option<&str>,
+        profile: Option<&str>,
     ) -> Result<Value, CodexError> {
-        self.new_session(model, effort).await?;
+        self.new_session(model, effort, cwd, profile).await?;
         self.load_sessions().await?;
         self.connection_value().await
     }
 
-    pub async fn open_session(&self, session_id: &str) -> Result<Value, CodexError> {
+    pub async fn open_session(
+        &self,
+        session_id: &str,
+        profile: Option<&str>,
+    ) -> Result<Value, CodexError> {
         let sessions = self.load_sessions().await?;
         if !sessions
             .iter()
@@ -330,8 +389,74 @@ impl HermesGatewayAdapter {
                 format!("Hermes session '{session_id}' was not returned by this Gateway."),
             ));
         }
-        self.resume_session(session_id).await?;
+        let profile = profile.or_else(|| {
+            sessions
+                .iter()
+                .find(|session| session.get("id").and_then(Value::as_str) == Some(session_id))
+                .and_then(|session| session.get("profile"))
+                .and_then(Value::as_str)
+        });
+        self.resume_session(session_id, profile).await?;
         self.refresh_models().await;
+        self.connection_value().await
+    }
+
+    pub async fn configure_session(
+        &self,
+        session_id: &str,
+        cwd: Option<&str>,
+        profile: Option<&str>,
+        model: Option<&str>,
+        effort: Option<&str>,
+    ) -> Result<Value, CodexError> {
+        if self.active_session_id().await? != session_id {
+            return Err(gateway_error(
+                "identity-mismatch",
+                "The requested session is not the exact active Hermes Gateway session.",
+            ));
+        }
+        let current_profile = {
+            let state = self.inner.state.lock().await;
+            state
+                .session_info
+                .get("profile_name")
+                .and_then(Value::as_str)
+                .unwrap_or(&state.active_profile)
+                .to_owned()
+        };
+        if profile.is_some_and(|value| !value.is_empty() && value != current_profile) {
+            self.new_session(model, effort, cwd, profile).await?;
+            self.load_sessions().await?;
+            self.refresh_models().await;
+            return self.connection_value().await;
+        }
+        if let Some(cwd) = cwd.filter(|value| !value.trim().is_empty()) {
+            let runtime_session_id = self
+                .inner
+                .state
+                .lock()
+                .await
+                .runtime_session_id
+                .clone()
+                .ok_or_else(|| {
+                    gateway_error("runtime-failed", "Hermes runtime session is missing.")
+                })?;
+            let info = self
+                .inner
+                .request(
+                    "session.cwd.set",
+                    json!({"session_id": runtime_session_id, "cwd": cwd}),
+                )
+                .await?;
+            let mut state = self.inner.state.lock().await;
+            if let Some(object) = info.as_object() {
+                for (key, value) in object {
+                    state.session_info[key] = value.clone();
+                }
+            } else {
+                state.session_info["cwd"] = Value::String(cwd.into());
+            }
+        }
         self.connection_value().await
     }
 
@@ -605,33 +730,84 @@ impl HermesGatewayAdapter {
     }
 
     async fn load_sessions(&self) -> Result<Vec<Value>, CodexError> {
-        let result = self
-            .inner
-            .request("session.list", json!({"limit": 200}))
-            .await?;
-        let mut sessions = result
-            .get("sessions")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|session| {
-                let id = session.get("id")?.as_str()?;
-                Some(json!({
-                    "id": id,
-                    "name": session.get("title"),
-                    "preview": session.get("preview").or_else(|| session.get("title")).and_then(Value::as_str).unwrap_or("Hermes session"),
-                    "updatedAt": session.get("started_at").and_then(Value::as_i64).unwrap_or_default(),
-                    "messageCount": session.get("message_count").and_then(Value::as_u64).unwrap_or_default()
-                }))
-            })
-            .collect::<Vec<_>>();
-        let current = self.inner.state.lock().await.active_session_id.clone();
+        let profile_names = {
+            let state = self.inner.state.lock().await;
+            let mut names = state
+                .profiles
+                .iter()
+                .filter_map(|profile| profile.get("name").and_then(Value::as_str))
+                .filter(|name| !name.is_empty())
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            if names.is_empty() {
+                names.push(state.active_profile.clone());
+            }
+            names
+        };
+        let mut sessions = Vec::new();
+        for profile in profile_names {
+            let result = self
+                .inner
+                .request("session.list", json!({"limit": 200, "profile": profile}))
+                .await?;
+            sessions.extend(
+                result
+                    .get("sessions")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|session| {
+                        let id = session.get("id")?.as_str()?;
+                        Some(json!({
+                            "id": id,
+                            "name": session.get("title"),
+                            "preview": session.get("preview").or_else(|| session.get("title")).and_then(Value::as_str).unwrap_or("Hermes session"),
+                            "updatedAt": session.get("started_at").and_then(Value::as_i64).unwrap_or_default(),
+                            "messageCount": session.get("message_count").and_then(Value::as_u64).unwrap_or_default(),
+                            "profile": profile
+                        }))
+                    }),
+            );
+        }
+        sessions.sort_by_key(|session| {
+            std::cmp::Reverse(
+                session
+                    .get("updatedAt")
+                    .and_then(Value::as_i64)
+                    .unwrap_or_default(),
+            )
+        });
+        let (current, current_profile, current_cwd) = {
+            let state = self.inner.state.lock().await;
+            (
+                state.active_session_id.clone(),
+                state
+                    .session_info
+                    .get("profile_name")
+                    .and_then(Value::as_str)
+                    .unwrap_or(&state.active_profile)
+                    .to_owned(),
+                state
+                    .session_info
+                    .get("cwd")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            )
+        };
         if let Some(current) = current
             && !sessions
                 .iter()
                 .any(|session| session.get("id").and_then(Value::as_str) == Some(&current))
         {
-            sessions.insert(0, json!({"id": current, "preview": "New Hermes chat"}));
+            sessions.insert(
+                0,
+                json!({
+                    "id": current,
+                    "preview": "New Hermes chat",
+                    "profile": current_profile,
+                    "cwd": current_cwd
+                }),
+            );
         }
         self.inner.state.lock().await.sessions = sessions.clone();
         Ok(sessions)
@@ -641,6 +817,8 @@ impl HermesGatewayAdapter {
         &self,
         model: Option<&str>,
         effort: Option<&str>,
+        cwd: Option<&str>,
+        profile: Option<&str>,
     ) -> Result<(), CodexError> {
         let selected = self.selected_model(model).await;
         let mut params = json!({"source": "zommi", "close_on_disconnect": false});
@@ -655,6 +833,12 @@ impl HermesGatewayAdapter {
         if let Some(effort) = effort {
             params["reasoning_effort"] = Value::String(effort.into());
         }
+        if let Some(cwd) = cwd.filter(|value| !value.trim().is_empty()) {
+            params["cwd"] = Value::String(cwd.into());
+        }
+        if let Some(profile) = profile.filter(|value| !value.trim().is_empty()) {
+            params["profile"] = Value::String(profile.into());
+        }
         let result = self.inner.request("session.create", params).await?;
         let session_id = value_string(
             result
@@ -664,18 +848,20 @@ impl HermesGatewayAdapter {
         self.bind_session(&result, &session_id).await
     }
 
-    async fn resume_session(&self, session_id: &str) -> Result<(), CodexError> {
-        let result = self
-            .inner
-            .request(
-                "session.resume",
-                json!({
-                    "session_id": session_id,
-                    "source": "zommi",
-                    "close_on_disconnect": false
-                }),
-            )
-            .await?;
+    async fn resume_session(
+        &self,
+        session_id: &str,
+        profile: Option<&str>,
+    ) -> Result<(), CodexError> {
+        let mut params = json!({
+            "session_id": session_id,
+            "source": "zommi",
+            "close_on_disconnect": false
+        });
+        if let Some(profile) = profile.filter(|value| !value.trim().is_empty()) {
+            params["profile"] = Value::String(profile.into());
+        }
+        let result = self.inner.request("session.resume", params).await?;
         let stored_id = result
             .get("session_key")
             .or_else(|| result.get("resumed"))
@@ -1451,14 +1637,25 @@ async fn read_socket(
 }
 
 async fn read_health(port: u16) -> Result<Value, CodexError> {
+    read_http_json(port, "/api/health", None).await
+}
+
+async fn read_http_json(
+    port: u16,
+    path: &str,
+    session_token: Option<&str>,
+) -> Result<Value, CodexError> {
     let mut stream = timeout(REQUEST_TIMEOUT, TcpStream::connect(("127.0.0.1", port)))
         .await
-        .map_err(|_| gateway_error("runtime-unavailable", "Hermes health connection timed out."))?
+        .map_err(|_| gateway_error("runtime-unavailable", "Hermes HTTP connection timed out."))?
         .map_err(|error| gateway_error("runtime-unavailable", error.to_string()))?;
+    let authentication = session_token
+        .map(|token| format!("X-Hermes-Session-Token: {token}\r\n"))
+        .unwrap_or_default();
     stream
         .write_all(
             format!(
-                "GET /api/health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\nAccept: application/json\r\n\r\n"
+                "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\nAccept: application/json\r\n{authentication}\r\n"
             )
             .as_bytes(),
         )
@@ -1467,14 +1664,12 @@ async fn read_health(port: u16) -> Result<Value, CodexError> {
     let mut response = Vec::new();
     timeout(REQUEST_TIMEOUT, stream.read_to_end(&mut response))
         .await
-        .map_err(|_| gateway_error("runtime-unavailable", "Hermes health response timed out."))?
+        .map_err(|_| gateway_error("runtime-unavailable", "Hermes HTTP response timed out."))?
         .map_err(|error| gateway_error("runtime-unavailable", error.to_string()))?;
     let split = response
         .windows(4)
         .position(|window| window == b"\r\n\r\n")
-        .ok_or_else(|| {
-            gateway_error("invalid-response", "Hermes health response was malformed.")
-        })?;
+        .ok_or_else(|| gateway_error("invalid-response", "Hermes HTTP response was malformed."))?;
     let headers = String::from_utf8_lossy(&response[..split]);
     if !headers
         .lines()
@@ -1483,7 +1678,7 @@ async fn read_health(port: u16) -> Result<Value, CodexError> {
     {
         return Err(gateway_error(
             "runtime-unavailable",
-            "Hermes Gateway health check returned a non-success response.",
+            format!("Hermes Gateway returned a non-success response for {path}."),
         ));
     }
     serde_json::from_slice(&response[split + 4..])
@@ -1748,23 +1943,53 @@ fn hermes_gateway_arguments(
     if !is_wsl {
         return Ok(arguments);
     }
-    let separator = arguments
+    let direct_separator = arguments
         .iter()
         .position(|value| value == "-e")
-        .filter(|index| index + 1 < arguments.len())
+        .filter(|index| index + 1 < arguments.len());
+    let relay_separator = arguments
+        .first()
+        .is_some_and(|value| value == "--wsl-proxy")
+        .then(|| arguments.iter().position(|value| value == "--"))
+        .flatten()
+        .filter(|index| index + 1 < arguments.len());
+    let (separator, relay_wrapped) = direct_separator
+        .map(|index| (index, false))
+        .or_else(|| relay_separator.map(|index| (index, true)))
         .ok_or_else(|| {
             gateway_error(
                 "invalid-configuration",
                 "Invalid WSL Hermes Gateway launch vector.",
             )
         })?;
-    arguments.splice(
-        separator + 1..separator + 1,
-        [
-            "env".to_owned(),
-            format!("HERMES_DASHBOARD_SESSION_TOKEN={session_token}"),
-        ],
-    );
+    let command_index = separator + 1;
+    let token = format!("HERMES_DASHBOARD_SESSION_TOKEN={session_token}");
+    if arguments
+        .get(command_index)
+        .is_some_and(|value| value.rsplit('/').next() == Some("env"))
+    {
+        let mut assignment_index = command_index + 1;
+        while arguments
+            .get(assignment_index)
+            .is_some_and(|value| value == "-u" || value == "--unset")
+            && arguments.get(assignment_index + 1).is_some()
+        {
+            assignment_index += 2;
+        }
+        arguments.insert(assignment_index, token);
+    } else {
+        arguments.splice(
+            command_index..command_index,
+            [
+                if relay_wrapped {
+                    "/usr/bin/env".to_owned()
+                } else {
+                    "env".to_owned()
+                },
+                token,
+            ],
+        );
+    }
     Ok(arguments)
 }
 
@@ -1809,5 +2034,69 @@ mod tests {
         let error = hermes_gateway_arguments(&["-d".into(), "Ubuntu".into()], true, "token")
             .expect_err("missing WSL exec separator must fail");
         assert_eq!(error.code, "invalid-configuration");
+    }
+
+    #[test]
+    fn wsl_launch_preserves_the_zommi_runtime_marker() {
+        let base = [
+            "-d",
+            "Ubuntu",
+            "-e",
+            "env",
+            "ZOMMI_RUNTIME_CHILD=1",
+            "/home/u/bin/hermes",
+            "serve",
+        ]
+        .map(str::to_owned);
+        assert_eq!(
+            hermes_gateway_arguments(&base, true, "fixture-token").expect("WSL launch"),
+            [
+                "-d",
+                "Ubuntu",
+                "-e",
+                "env",
+                "HERMES_DASHBOARD_SESSION_TOKEN=fixture-token",
+                "ZOMMI_RUNTIME_CHILD=1",
+                "/home/u/bin/hermes",
+                "serve",
+            ]
+        );
+    }
+
+    #[test]
+    fn persistent_relay_launch_injects_the_dashboard_token_after_env() {
+        let base = [
+            "--wsl-proxy",
+            "--distribution",
+            "Ubuntu",
+            "--cwd",
+            "/home/u",
+            "--",
+            "/usr/bin/env",
+            "-u",
+            "PARENT_APP_SESSION_ID",
+            "ZOMMI_RUNTIME_CHILD=1",
+            "/home/u/bin/hermes",
+            "serve",
+        ]
+        .map(str::to_owned);
+        assert_eq!(
+            hermes_gateway_arguments(&base, true, "fixture-token").expect("relay launch"),
+            [
+                "--wsl-proxy",
+                "--distribution",
+                "Ubuntu",
+                "--cwd",
+                "/home/u",
+                "--",
+                "/usr/bin/env",
+                "-u",
+                "PARENT_APP_SESSION_ID",
+                "HERMES_DASHBOARD_SESSION_TOKEN=fixture-token",
+                "ZOMMI_RUNTIME_CHILD=1",
+                "/home/u/bin/hermes",
+                "serve",
+            ]
+        );
     }
 }

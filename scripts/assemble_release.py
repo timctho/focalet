@@ -101,6 +101,11 @@ def _write_manifest(
             "desktopUi": "flutter",
             "runtimeCore": "rust",
             "captureProvider": "dotnet-uia" if capture_host else "platform-native",
+            **(
+                {"wslTransport": "persistent-authenticated-relay"}
+                if target_platform == "windows"
+                else {}
+            ),
         },
         "signing": signing,
     }

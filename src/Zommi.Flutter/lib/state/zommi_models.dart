@@ -40,6 +40,7 @@ final class SessionSummary {
     required this.id,
     required this.title,
     this.cwd,
+    this.profile,
     this.updatedAt,
   });
 
@@ -49,6 +50,7 @@ final class SessionSummary {
       id: json['id']?.toString() ?? json['sessionId']?.toString() ?? '',
       title: compactSessionTitle(source),
       cwd: json['cwd']?.toString(),
+      profile: json['profile']?.toString(),
       updatedAt: json['updatedAt']?.toString(),
     );
   }
@@ -56,13 +58,42 @@ final class SessionSummary {
   final String id;
   final String title;
   final String? cwd;
+  final String? profile;
   final String? updatedAt;
 
-  SessionSummary copyWith({String? title, String? cwd}) => SessionSummary(
-    id: id,
-    title: title ?? this.title,
-    cwd: cwd ?? this.cwd,
-    updatedAt: updatedAt,
+  SessionSummary copyWith({String? title, String? cwd, String? profile}) =>
+      SessionSummary(
+        id: id,
+        title: title ?? this.title,
+        cwd: cwd ?? this.cwd,
+        profile: profile ?? this.profile,
+        updatedAt: updatedAt,
+      );
+}
+
+final class SessionSettings {
+  const SessionSettings({
+    this.workspace = '',
+    this.model = '',
+    this.effort = '',
+    this.profile = '',
+  });
+
+  final String workspace;
+  final String model;
+  final String effort;
+  final String profile;
+
+  SessionSettings copyWith({
+    String? workspace,
+    String? model,
+    String? effort,
+    String? profile,
+  }) => SessionSettings(
+    workspace: workspace ?? this.workspace,
+    model: model ?? this.model,
+    effort: effort ?? this.effort,
+    profile: profile ?? this.profile,
   );
 }
 
@@ -122,6 +153,7 @@ final class TranscriptBlock {
     this.text = '',
     this.lifecycle = TranscriptLifecycle.delta,
     this.status,
+    this.preview = '',
     this.expanded = true,
     List<ArtifactPreview> artifacts = const [],
   }) : artifacts = List<ArtifactPreview>.of(artifacts);
@@ -132,6 +164,7 @@ final class TranscriptBlock {
   String text;
   TranscriptLifecycle lifecycle;
   String? status;
+  String preview;
   bool expanded;
   final List<ArtifactPreview> artifacts;
 

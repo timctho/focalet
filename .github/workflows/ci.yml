@@ -74,6 +74,8 @@ jobs:
 
       - name: Test release package contracts
         run: |
+          node --check scripts/zommi-wsl-relay.js
+          node --test tests/wsl_relay.test.mjs
           python3 -m py_compile scripts/assemble_release.py scripts/verify_release.py tests/test_release_package.py
           python3 tests/test_release_package.py -v
           python3 tests/test_linux_startup_smoke.py -v
@@ -123,6 +125,8 @@ jobs:
           python -c "import glob,json; p=glob.glob('artifacts/zommi-*/release-manifest.json'); assert len(p)==1, p; print(json.dumps(json.load(open(p[0], encoding='utf-8')), indent=2))"
 
       - name: Upload native release
+        if: github.event_name != 'pull_request'
+        continue-on-error: ${{ github.event_name == 'workflow_dispatch' && inputs.windows_deploy_downloads }}
         uses: actions/upload-artifact@v7
         with:
           name: zommi-linux-${{ runner.arch }}-${{ github.sha }}
@@ -170,6 +174,10 @@ jobs:
         shell: pwsh
         run: python -c "import sys; assert sys.version_info >= (3, 10), sys.version; print(sys.version)"
 
+      - name: Test Windows deployment lock retry
+        shell: pwsh
+        run: ./scripts/test-windows-deployment-helpers.ps1
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@1.93.0
 
@@ -210,6 +218,8 @@ jobs:
           python -c "import glob,json; p=glob.glob('artifacts/zommi-*/release-manifest.json'); assert len(p)==1, p; print(json.dumps(json.load(open(p[0], encoding='utf-8')), indent=2))"
 
       - name: Upload native release
+        if: github.event_name != 'pull_request'
+        continue-on-error: ${{ github.event_name == 'workflow_dispatch' && inputs.windows_deploy_downloads }}
         uses: actions/upload-artifact@v7
         with:
           name: zommi-windows-${{ runner.arch }}-${{ github.sha }}
@@ -257,11 +267,160 @@ jobs:
           if (-not $process.Responding) {
             throw "Deployed Zommi process $($process.Id) is not responding."
           }
+          $coreExecutable = Join-Path $targetDirectory 'zommi-core-host.exe'
+          $runtimeDeadline = [DateTime]::UtcNow.AddSeconds(20)
+          $coreProcess = $null
+          $proxyProcess = $null
+          do {
+            $snapshot = @(Get-CimInstance Win32_Process)
+            $coreProcess = @($snapshot | Where-Object {
+              $_.ParentProcessId -eq $process.Id -and
+              $_.ExecutablePath -and
+              [string]::Equals(
+                [IO.Path]::GetFullPath($_.ExecutablePath),
+                [IO.Path]::GetFullPath($coreExecutable),
+                [StringComparison]::OrdinalIgnoreCase)
+            }) | Select-Object -First 1
+            if ($null -ne $coreProcess) {
+              $proxyProcess = @($snapshot | Where-Object {
+                $_.ParentProcessId -eq $coreProcess.ProcessId -and
+                $_.ExecutablePath -and
+                [string]::Equals(
+                  [IO.Path]::GetFullPath($_.ExecutablePath),
+                  [IO.Path]::GetFullPath($coreExecutable),
+                  [StringComparison]::OrdinalIgnoreCase) -and
+                $_.CommandLine -match '(?:^|\s)--wsl-proxy(?:\s|$)'
+              }) | Select-Object -First 1
+            }
+            if ($null -ne $coreProcess -and $null -ne $proxyProcess) { break }
+            Start-Sleep -Milliseconds 250
+          } while ([DateTime]::UtcNow -lt $runtimeDeadline)
+          $cachePath = Join-Path $env:LOCALAPPDATA 'Zommi/runtime-targets.json'
+          $cache = Get-Content -LiteralPath $cachePath -Raw | ConvertFrom-Json
+          $cachedTarget = $cache.targets | Where-Object {
+            $_.executionHost.kind -eq 'wsl' -and $_.executionHost.isDefault
+          } | Select-Object -First 1
+          $distribution = $cachedTarget.executionHost.name
+          if ([string]::IsNullOrWhiteSpace($distribution)) {
+            throw 'The deployed runtime cache has no default WSL distribution.'
+          }
+          $defaultAdapters = @(
+            $cache.targets | Where-Object {
+              $_.executionHost.kind -eq 'wsl' -and
+              $_.executionHost.isDefault -and
+              $_.status -eq 'detected'
+            } | ForEach-Object { $_.adapterId }
+          )
+          foreach ($expectedAdapter in @(
+            'codex-app-server', 'pi-rpc', 'hermes-acp', 'hermes-gateway',
+            'openclaw-acp', 'pty-compatibility'
+          )) {
+            if ($defaultAdapters -notcontains $expectedAdapter) {
+              throw "The deployed runtime cache did not restore $expectedAdapter. Found: $($defaultAdapters -join ', ')."
+            }
+          }
+          $probe = [Diagnostics.ProcessStartInfo]::new()
+          $probe.FileName = $coreExecutable
+          $probe.UseShellExecute = $false
+          $probe.CreateNoWindow = $true
+          $probe.RedirectStandardInput = $true
+          $probe.RedirectStandardOutput = $true
+          $probe.RedirectStandardError = $true
+          foreach ($argument in @(
+            '--wsl-proxy', '--distribution', $distribution,
+            '--cwd', '/', '--', '/bin/sh', '-c',
+            'printf ZOMMI_WINDOWS_WSL_RELAY_OK'
+          )) {
+            $probe.ArgumentList.Add($argument)
+          }
+          $probeProcess = [Diagnostics.Process]::Start($probe)
+          $probeProcess.StandardInput.Close()
+          if (-not $probeProcess.WaitForExit(15000)) {
+            $probeProcess.Kill($true)
+            throw 'The deployed WSL relay probe timed out.'
+          }
+          $probeOutput = $probeProcess.StandardOutput.ReadToEnd()
+          $probeError = $probeProcess.StandardError.ReadToEnd()
+          if ($probeProcess.ExitCode -ne 0 -or $probeOutput.Trim() -ne 'ZOMMI_WINDOWS_WSL_RELAY_OK') {
+            throw "The deployed WSL relay probe failed ($($probeProcess.ExitCode)): $probeError"
+          }
+          Write-Host "Persistent WSL relay probe succeeded for $distribution."
+          $runtimeExecutable = $cachedTarget.executablePath
+          $runtimeHome = $cachedTarget.runtimeHome
+          if ([string]::IsNullOrWhiteSpace($runtimeExecutable) -or -not $runtimeExecutable.StartsWith('/')) {
+            throw 'The deployed runtime cache has no absolute Codex executable.'
+          }
+          if ([string]::IsNullOrWhiteSpace($runtimeHome) -or -not $runtimeHome.StartsWith('/')) {
+            throw 'The deployed runtime cache has no absolute runtime home.'
+          }
+          $handshake = [Diagnostics.ProcessStartInfo]::new()
+          $handshake.FileName = $coreExecutable
+          $handshake.UseShellExecute = $false
+          $handshake.CreateNoWindow = $true
+          $handshake.RedirectStandardInput = $true
+          $handshake.RedirectStandardOutput = $true
+          $handshake.RedirectStandardError = $true
+          foreach ($argument in @(
+            '--wsl-proxy', '--distribution', $distribution,
+            '--cwd', $runtimeHome, '--', '/usr/bin/env',
+            'ZOMMI_RUNTIME_CHILD=1', $runtimeExecutable, 'app-server'
+          )) {
+            $handshake.ArgumentList.Add($argument)
+          }
+          $handshakeProcess = [Diagnostics.Process]::Start($handshake)
+          $initialize = [ordered]@{
+            id = 1
+            method = 'initialize'
+            params = [ordered]@{
+              clientInfo = [ordered]@{
+                name = 'zommi-windows-release-gate'
+                title = 'Zommi Windows Release Gate'
+                version = '0.1.0'
+              }
+            }
+          } | ConvertTo-Json -Compress -Depth 5
+          $handshakeProcess.StandardInput.WriteLine($initialize)
+          $handshakeProcess.StandardInput.Flush()
+          $responseTask = $handshakeProcess.StandardOutput.ReadLineAsync()
+          if (-not $responseTask.Wait(20000)) {
+            $handshakeProcess.Kill($true)
+            $handshakeProcess.WaitForExit()
+            $handshakeError = $handshakeProcess.StandardError.ReadToEnd()
+            throw "Codex app-server initialize timed out: $handshakeError"
+          }
+          $responseLine = $responseTask.Result
+          $handshakeProcess.StandardInput.Close()
+          if (-not $handshakeProcess.WaitForExit(5000)) {
+            $handshakeProcess.Kill($true)
+            $handshakeProcess.WaitForExit()
+          }
+          $handshakeError = $handshakeProcess.StandardError.ReadToEnd()
+          try {
+            $initializeResponse = $responseLine | ConvertFrom-Json
+          } catch {
+            throw "Codex app-server initialize returned invalid JSON: $responseLine $handshakeError"
+          }
+          if ($initializeResponse.id -ne 1 -or [string]::IsNullOrWhiteSpace($initializeResponse.result.userAgent)) {
+            throw "Codex app-server initialize was rejected: $responseLine $handshakeError"
+          }
+          Write-Host "Codex app-server initialize succeeded through the shared WSL spool."
+          if ($null -eq $coreProcess) {
+            throw 'The deployed Flutter process did not retain its adjacent Rust core host.'
+          }
+          if ($null -eq $proxyProcess) {
+            throw 'The deployed Rust core did not establish its persistent WSL runtime proxy.'
+          }
           [ordered]@{
             gitCommit = $manifest.gitCommit
             processId = $process.Id
             processCount = $processes.Count
             responding = $process.Responding
+            coreProcessId = $coreProcess.ProcessId
+            proxyProcessId = $proxyProcess.ProcessId
+            wslDistribution = $distribution
+            runtimeAdapters = $defaultAdapters
+            relayProbe = $probeOutput.Trim()
+            codexInitialize = $initializeResponse.result.userAgent
           } | ConvertTo-Json
 
   release_macos:

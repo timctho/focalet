@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
+import 'package:zommi_flutter/theme/app_preferences.dart';
 import 'package:zommi_flutter/widgets/content_views.dart';
 
 class SessionSidebar extends StatelessWidget {
@@ -235,7 +236,20 @@ class RuntimePanel extends StatelessWidget {
                         ),
                       ),
                     const Divider(height: 1),
-                    RuntimeOverrideEditor(controller: controller),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 10, 4, 2),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          key: const ValueKey('open-runtime-setup'),
+                          onPressed: controller.runtimeOverridesSupported
+                              ? () => controller.toggleRuntimeSetupPanel(true)
+                              : null,
+                          icon: const Icon(Icons.tune_rounded, size: 16),
+                          label: const Text('Advanced agent runtime setup'),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -294,16 +308,16 @@ class _RuntimeTargetTile extends StatelessWidget {
   }
 }
 
-class RuntimeOverrideEditor extends StatefulWidget {
-  const RuntimeOverrideEditor({required this.controller, super.key});
+class RuntimeSetupPanel extends StatefulWidget {
+  const RuntimeSetupPanel({required this.controller, super.key});
 
   final ZommiController controller;
 
   @override
-  State<RuntimeOverrideEditor> createState() => _RuntimeOverrideEditorState();
+  State<RuntimeSetupPanel> createState() => _RuntimeSetupPanelState();
 }
 
-class _RuntimeOverrideEditorState extends State<RuntimeOverrideEditor> {
+class _RuntimeSetupPanelState extends State<RuntimeSetupPanel> {
   String _adapterId = '';
   String _hostId = '';
   String? _executablePath;
@@ -328,15 +342,6 @@ class _RuntimeOverrideEditorState extends State<RuntimeOverrideEditor> {
 
   @override
   Widget build(BuildContext context) {
-    if (!widget.controller.runtimeOverridesSupported) {
-      return const Padding(
-        padding: EdgeInsets.fromLTRB(16, 10, 16, 14),
-        child: Text(
-          'Runtime overrides are unavailable in this core version.',
-          style: TextStyle(fontSize: 11, color: Color(0xff737887)),
-        ),
-      );
-    }
     final adapters = widget.controller.configurableRuntimeAdapters;
     final selectedAdapter = _adapter;
     final adapterId = selectedAdapter?['adapterId']?.toString() ?? '';
@@ -344,169 +349,314 @@ class _RuntimeOverrideEditorState extends State<RuntimeOverrideEditor> {
     final selectedHost = hosts.any((host) => host['id'] == _hostId)
         ? _hostId
         : (hosts.isEmpty ? '' : hosts.first['id']?.toString() ?? '');
-    return ExpansionTile(
-      key: const ValueKey('runtime-advanced'),
-      dense: true,
-      leading: const Icon(Icons.tune_rounded, size: 16),
-      title: const Text(
-        'Advanced runtime setup',
-        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+    return Material(
+      key: const ValueKey('runtime-setup-panel'),
+      color: const Color(0xfff8f9fd),
+      elevation: 10,
+      shadowColor: const Color(0x330d172a),
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(22),
+        side: const BorderSide(color: Color(0xffe0e3ec)),
       ),
-      subtitle: const Text(
-        'Add a supported local CLI that discovery missed',
-        style: TextStyle(fontSize: 10),
-      ),
-      childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
-      children: [
-        DropdownButtonFormField<String>(
-          key: const ValueKey('runtime-override-adapter'),
-          initialValue: adapterId.isEmpty ? null : adapterId,
-          isDense: true,
-          isExpanded: true,
-          style: const TextStyle(fontSize: 11),
-          decoration: const InputDecoration(labelText: 'Agent', isDense: true),
-          items: [
-            for (final adapter in adapters)
-              DropdownMenuItem(
-                value: adapter['adapterId']?.toString(),
-                child: Text(
-                  '${adapter['displayName']} · ${adapter['protocolName']}',
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 11),
-                ),
-              ),
-          ],
-          onChanged: (value) => setState(() {
-            _adapterId = value ?? '';
-            _hostId = '';
-            _executablePath = null;
-          }),
-        ),
-        DropdownButtonFormField<String>(
-          key: const ValueKey('runtime-override-host'),
-          initialValue: selectedHost.isEmpty ? null : selectedHost,
-          isDense: true,
-          isExpanded: true,
-          style: const TextStyle(fontSize: 11),
-          decoration: const InputDecoration(labelText: 'Run on', isDense: true),
-          items: [
-            for (final host in hosts)
-              DropdownMenuItem(
-                value: host['id']?.toString(),
-                child: Text(
-                  host['displayName']?.toString() ?? 'Local',
-                  style: const TextStyle(fontSize: 11),
-                ),
-              ),
-          ],
-          onChanged: (value) => setState(() {
-            _hostId = value ?? '';
-            _executablePath = null;
-          }),
-        ),
-        const SizedBox(height: 8),
-        Container(
-          key: const ValueKey('runtime-override-path'),
-          width: double.infinity,
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: const Color(0xfff1f2f7),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Row(
-            children: [
-              const Icon(Icons.terminal_rounded, size: 17),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  _executablePath ?? 'Choose the installed CLI executable',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    color: _executablePath == null
-                        ? const Color(0xff777c89)
-                        : const Color(0xff333744),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton(
-                key: const ValueKey('select-runtime-executable'),
-                onPressed: selectedHost.isEmpty
-                    ? null
-                    : () async {
-                        final path = await widget.controller
-                            .chooseRuntimeExecutable(
-                              executionHostId: selectedHost,
-                            );
-                        if (mounted && path != null) {
-                          setState(() => _executablePath = path);
-                        }
-                      },
-                child: const Text('Choose…'),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 8),
-        Align(
-          alignment: Alignment.centerRight,
-          child: FilledButton.tonal(
-            key: const ValueKey('save-runtime-override'),
-            onPressed:
-                widget.controller.runtimeOverrideBusy ||
-                    adapterId.isEmpty ||
-                    _executablePath == null ||
-                    selectedHost.isEmpty
-                ? null
-                : () async {
-                    await widget.controller.saveRuntimeOverride(
-                      adapterId: adapterId,
-                      locator: _executablePath!,
-                      executionHostId: selectedHost,
-                    );
-                    if (mounted) setState(() => _executablePath = null);
-                  },
-            child: const Text('Add runtime'),
-          ),
-        ),
-        for (final override in widget.controller.runtimeOverrides)
-          ListTile(
-            key: ValueKey('runtime-override-${override['id']}'),
-            dense: true,
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.terminal_rounded, size: 17),
-            title: Text(
-              runtimeAdapterDisplayName(
-                widget.controller,
-                override['adapterId']?.toString() ?? '',
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
-            ),
-            subtitle: Text(
-              override['executablePath']?.toString() ?? '',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 10),
-            ),
-            trailing: IconButton(
-              tooltip: 'Remove runtime',
-              onPressed: widget.controller.runtimeOverrideBusy
-                  ? null
-                  : () => unawaited(
-                      widget.controller.removeRuntimeOverride(
-                        override['id']?.toString() ?? '',
-                      ),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        width: 520,
+        height: 500,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 14, 8, 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.tune_rounded, size: 18),
+                  const SizedBox(width: 9),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Advanced agent runtime',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        Text(
+                          'Add a supported CLI that automatic discovery missed',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Color(0xff737887),
+                          ),
+                        ),
+                      ],
                     ),
-              icon: const Icon(Icons.delete_outline_rounded, size: 17),
+                  ),
+                  IconButton(
+                    key: const ValueKey('close-runtime-setup'),
+                    tooltip: 'Close advanced runtime setup',
+                    onPressed: () =>
+                        widget.controller.toggleRuntimeSetupPanel(false),
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                  ),
+                ],
+              ),
             ),
-          ),
-      ],
+            const Divider(height: 1),
+            Expanded(
+              child: !widget.controller.runtimeOverridesSupported
+                  ? const Center(
+                      child: Text(
+                        'Runtime setup is unavailable in this core version.',
+                      ),
+                    )
+                  : ListView(
+                      key: const ValueKey('runtime-setup-options'),
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                      children: [
+                        const _RuntimeSetupSectionLabel('Agent'),
+                        RadioGroup<String>(
+                          groupValue: adapterId,
+                          onChanged: (value) => setState(() {
+                            _adapterId = value ?? '';
+                            _hostId = '';
+                            _executablePath = null;
+                          }),
+                          child: Column(
+                            key: const ValueKey('runtime-setup-adapter-list'),
+                            children: [
+                              for (final adapter in adapters)
+                                _RuntimeSetupOption(
+                                  key: ValueKey(
+                                    'runtime-setup-adapter-${adapter['adapterId']}',
+                                  ),
+                                  value: adapter['adapterId']?.toString() ?? '',
+                                  title:
+                                      adapter['displayName']?.toString() ?? '',
+                                  subtitle:
+                                      adapter['protocolName']?.toString() ?? '',
+                                  selected:
+                                      adapter['adapterId']?.toString() ==
+                                      adapterId,
+                                ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        const _RuntimeSetupSectionLabel('Run on'),
+                        RadioGroup<String>(
+                          groupValue: selectedHost,
+                          onChanged: (value) => setState(() {
+                            _hostId = value ?? '';
+                            _executablePath = null;
+                          }),
+                          child: Column(
+                            key: const ValueKey('runtime-setup-host-list'),
+                            children: [
+                              for (final host in hosts)
+                                _RuntimeSetupOption(
+                                  key: ValueKey(
+                                    'runtime-setup-host-${host['id']}',
+                                  ),
+                                  value: host['id']?.toString() ?? '',
+                                  title:
+                                      host['displayName']?.toString() ??
+                                      'Local',
+                                  subtitle: host['kind']?.toString() ?? '',
+                                  selected: host['id'] == selectedHost,
+                                ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        const _RuntimeSetupSectionLabel('CLI executable'),
+                        Container(
+                          key: const ValueKey('runtime-override-path'),
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xfff1f2f7),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.terminal_rounded, size: 17),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  _executablePath ??
+                                      'Choose the installed CLI executable',
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    color: _executablePath == null
+                                        ? const Color(0xff777c89)
+                                        : const Color(0xff333744),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              OutlinedButton(
+                                key: const ValueKey(
+                                  'select-runtime-executable',
+                                ),
+                                onPressed: selectedHost.isEmpty
+                                    ? null
+                                    : () async {
+                                        final path = await widget.controller
+                                            .chooseRuntimeExecutable(
+                                              executionHostId: selectedHost,
+                                            );
+                                        if (mounted && path != null) {
+                                          setState(
+                                            () => _executablePath = path,
+                                          );
+                                        }
+                                      },
+                                child: const Text('Choose…'),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: FilledButton.tonal(
+                            key: const ValueKey('save-runtime-override'),
+                            onPressed:
+                                widget.controller.runtimeOverrideBusy ||
+                                    adapterId.isEmpty ||
+                                    _executablePath == null ||
+                                    selectedHost.isEmpty
+                                ? null
+                                : () async {
+                                    await widget.controller.saveRuntimeOverride(
+                                      adapterId: adapterId,
+                                      locator: _executablePath!,
+                                      executionHostId: selectedHost,
+                                    );
+                                    if (mounted) {
+                                      setState(() => _executablePath = null);
+                                    }
+                                  },
+                            child: const Text('Add runtime'),
+                          ),
+                        ),
+                        if (widget.controller.runtimeOverrides.isNotEmpty) ...[
+                          const SizedBox(height: 14),
+                          const Divider(height: 1),
+                          const SizedBox(height: 10),
+                          const _RuntimeSetupSectionLabel(
+                            'Configured runtimes',
+                          ),
+                          for (final override
+                              in widget.controller.runtimeOverrides)
+                            ListTile(
+                              key: ValueKey(
+                                'runtime-override-${override['id']}',
+                              ),
+                              dense: true,
+                              contentPadding: EdgeInsets.zero,
+                              leading: const Icon(
+                                Icons.terminal_rounded,
+                                size: 17,
+                              ),
+                              title: Text(
+                                runtimeAdapterDisplayName(
+                                  widget.controller,
+                                  override['adapterId']?.toString() ?? '',
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              subtitle: Text(
+                                override['executablePath']?.toString() ?? '',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 10),
+                              ),
+                              trailing: IconButton(
+                                tooltip: 'Remove runtime',
+                                onPressed: widget.controller.runtimeOverrideBusy
+                                    ? null
+                                    : () => unawaited(
+                                        widget.controller.removeRuntimeOverride(
+                                          override['id']?.toString() ?? '',
+                                        ),
+                                      ),
+                                icon: const Icon(
+                                  Icons.delete_outline_rounded,
+                                  size: 17,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ],
+                    ),
+            ),
+          ],
+        ),
+      ),
     );
   }
+}
+
+class _RuntimeSetupSectionLabel extends StatelessWidget {
+  const _RuntimeSetupSectionLabel(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+    child: Text(
+      label,
+      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+    ),
+  );
+}
+
+class _RuntimeSetupOption extends StatelessWidget {
+  const _RuntimeSetupOption({
+    required this.value,
+    required this.title,
+    required this.subtitle,
+    required this.selected,
+    super.key,
+  });
+
+  final String value;
+  final String title;
+  final String subtitle;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) => RadioListTile<String>(
+    value: value,
+    dense: true,
+    visualDensity: const VisualDensity(vertical: -3),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+    selected: selected,
+    selectedTileColor: const Color(0xffebe9f7),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    title: Text(
+      title,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(fontSize: 11.5),
+    ),
+    subtitle: Text(
+      subtitle,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(fontSize: 10),
+    ),
+  );
 }
 
 String runtimeAdapterDisplayName(
@@ -550,10 +700,677 @@ String _runtimeStatus(String value) => switch (value.toLowerCase()) {
   _ => 'Detected',
 };
 
-class ModelPanel extends StatefulWidget {
-  const ModelPanel({required this.controller, super.key});
+enum _SessionSettingsPage { workspace, model, profile }
+
+class SessionSettingsPanel extends StatefulWidget {
+  const SessionSettingsPanel({required this.controller, super.key});
 
   final ZommiController controller;
+
+  @override
+  State<SessionSettingsPanel> createState() => _SessionSettingsPanelState();
+}
+
+class _SessionSettingsPanelState extends State<SessionSettingsPanel> {
+  _SessionSettingsPage? _page;
+  late int _overviewEpoch = widget.controller.sessionSettingsOverviewEpoch;
+
+  void _setPage(_SessionSettingsPage? page) {
+    if (_page == page) return;
+    setState(() => _page = page);
+    widget.controller.setSessionSettingsDetailOpen(page != null);
+  }
+
+  @override
+  void didUpdateWidget(covariant SessionSettingsPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final nextEpoch = widget.controller.sessionSettingsOverviewEpoch;
+    if (_overviewEpoch != nextEpoch) {
+      _overviewEpoch = nextEpoch;
+      _page = null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final detail = switch (_page) {
+      _SessionSettingsPage.workspace => WorkspacePanel(
+        key: const ValueKey('workspace-panel'),
+        controller: widget.controller,
+        onBack: () => _setPage(null),
+      ),
+      _SessionSettingsPage.model => ModelPanel(
+        key: const ValueKey('model-panel'),
+        controller: widget.controller,
+        onBack: () => _setPage(null),
+      ),
+      _SessionSettingsPage.profile => ProfilePanel(
+        key: const ValueKey('profile-panel'),
+        controller: widget.controller,
+        onBack: () => _setPage(null),
+      ),
+      null => null,
+    };
+    final page =
+        detail ??
+        Align(
+          key: const ValueKey('settings-overview-page'),
+          alignment: Alignment.topLeft,
+          child: _SettingsOverview(
+            controller: widget.controller,
+            selected: _page,
+            onSelected: _setPage,
+          ),
+        );
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 190),
+      curve: Curves.easeOutCubic,
+      alignment: Alignment.topLeft,
+      child: SizedBox(
+        key: const ValueKey('session-settings-panel'),
+        width: detail == null ? 286 : 390,
+        height: detail == null ? null : 390,
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 190),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          layoutBuilder: (currentChild, previousChildren) => Stack(
+            alignment: Alignment.topLeft,
+            clipBehavior: Clip.none,
+            children: [...previousChildren, ?currentChild],
+          ),
+          transitionBuilder: (child, animation) => SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0.10, 0),
+              end: Offset.zero,
+            ).animate(animation),
+            child: FadeTransition(opacity: animation, child: child),
+          ),
+          child: page,
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsOverview extends StatelessWidget {
+  const _SettingsOverview({
+    required this.controller,
+    required this.selected,
+    required this.onSelected,
+  });
+
+  final ZommiController controller;
+  final _SessionSettingsPage? selected;
+  final ValueChanged<_SessionSettingsPage> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xfaf7f9fd),
+      elevation: 18,
+      borderRadius: BorderRadius.circular(18),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        width: 286,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 14, 10, 10),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 8),
+                child: Text(
+                  'Session settings',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Text(
+                  'Saved separately for this chat',
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    color: Colors.blueGrey.shade500,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              _SettingsRow(
+                key: const ValueKey('settings-workspace'),
+                icon: Icons.folder_outlined,
+                label: 'Workspace',
+                value: controller.workspaceSummary,
+                selected: selected == _SessionSettingsPage.workspace,
+                onTap: () => onSelected(_SessionSettingsPage.workspace),
+              ),
+              const SizedBox(height: 5),
+              _SettingsRow(
+                key: const ValueKey('settings-model'),
+                icon: Icons.auto_awesome_outlined,
+                label: 'Model / reasoning',
+                value: controller.modelSummary,
+                selected: selected == _SessionSettingsPage.model,
+                enabled: controller.modelSelectionSupported,
+                onTap: () => onSelected(_SessionSettingsPage.model),
+              ),
+              if (controller.profileSelectionSupported) ...[
+                const SizedBox(height: 5),
+                _SettingsRow(
+                  key: const ValueKey('settings-profile'),
+                  icon: Icons.person_outline_rounded,
+                  label: 'Hermes profile',
+                  value: controller.profileSummary,
+                  selected: selected == _SessionSettingsPage.profile,
+                  onTap: () => onSelected(_SessionSettingsPage.profile),
+                ),
+              ],
+              if (controller.sessionSettingsBusy)
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  child: LinearProgressIndicator(
+                    key: ValueKey('settings-loading'),
+                    minHeight: 3,
+                    borderRadius: BorderRadius.all(Radius.circular(99)),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class AppSettingsPanel extends StatelessWidget {
+  const AppSettingsPanel({
+    required this.controller,
+    required this.preferences,
+    required this.onChanged,
+    super.key,
+  });
+
+  final ZommiController controller;
+  final AppPreferences preferences;
+  final ValueChanged<AppPreferences> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      key: const ValueKey('app-settings-panel'),
+      color: const Color(0xfaf7f9fd),
+      elevation: 18,
+      borderRadius: BorderRadius.circular(18),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        width: 310,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'App settings',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Chat message size',
+                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 7),
+              SegmentedButton<double>(
+                key: const ValueKey('chat-font-size-control'),
+                showSelectedIcon: false,
+                segments: const [
+                  ButtonSegment(value: 11, label: Text('Small')),
+                  ButtonSegment(value: 12, label: Text('Default')),
+                  ButtonSegment(value: 13, label: Text('Large')),
+                  ButtonSegment(value: 14, label: Text('XL')),
+                ],
+                selected: {preferences.chatFontSize},
+                onSelectionChanged: (selection) => onChanged(
+                  preferences.copyWith(chatFontSize: selection.single),
+                ),
+                style: const ButtonStyle(
+                  visualDensity: VisualDensity(horizontal: -3, vertical: -3),
+                  textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 10)),
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Theme color',
+                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 7),
+              Row(
+                key: const ValueKey('theme-color-control'),
+                children: [
+                  for (final color in ZommiThemeColor.values) ...[
+                    if (color != ZommiThemeColor.values.first)
+                      const SizedBox(width: 7),
+                    Expanded(
+                      child: _ThemeColorChoice(
+                        color: color,
+                        selected: preferences.themeColor == color,
+                        onTap: () =>
+                            onChanged(preferences.copyWith(themeColor: color)),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Window size',
+                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 7),
+              SegmentedButton<bool>(
+                key: const ValueKey('window-size-control'),
+                showSelectedIcon: false,
+                segments: const [
+                  ButtonSegment(
+                    value: false,
+                    icon: Icon(Icons.crop_portrait_rounded, size: 15),
+                    label: Text('Standard'),
+                  ),
+                  ButtonSegment(
+                    value: true,
+                    icon: Icon(Icons.open_in_full_rounded, size: 15),
+                    label: Text('Wide'),
+                  ),
+                ],
+                selected: {controller.largePanel},
+                onSelectionChanged: (selection) {
+                  if (selection.single != controller.largePanel) {
+                    onChanged(
+                      preferences.copyWith(largeWindow: selection.single),
+                    );
+                    unawaited(controller.toggleLargePanel());
+                  }
+                },
+                style: const ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                  textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 10.5)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ThemeColorChoice extends StatelessWidget {
+  const _ThemeColorChoice({
+    required this.color,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final ZommiThemeColor color;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: color.label,
+      child: InkWell(
+        key: ValueKey('theme-color-${color.id}'),
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          height: 34,
+          decoration: BoxDecoration(
+            color: selected
+                ? color.seed.withValues(alpha: 0.13)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: selected ? color.seed : const Color(0xffd9dde7),
+            ),
+          ),
+          child: Center(
+            child: Container(
+              width: 15,
+              height: 15,
+              decoration: BoxDecoration(
+                color: color.seed,
+                shape: BoxShape.circle,
+              ),
+              child: selected
+                  ? const Icon(
+                      Icons.check_rounded,
+                      color: Colors.white,
+                      size: 11,
+                    )
+                  : null,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsRow extends StatelessWidget {
+  const _SettingsRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.selected,
+    required this.onTap,
+    this.enabled = true,
+    super.key,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final bool selected;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: enabled ? onTap : null,
+      borderRadius: BorderRadius.circular(12),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xffe9edf8) : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 17, color: const Color(0xff4f596d)),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w700,
+                      color: enabled
+                          ? const Color(0xff3c4352)
+                          : Colors.blueGrey.shade300,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    enabled ? value : 'Not available',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      color: Colors.blueGrey.shade500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 17,
+              color: enabled
+                  ? Colors.blueGrey.shade400
+                  : Colors.blueGrey.shade200,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class WorkspacePanel extends StatefulWidget {
+  const WorkspacePanel({
+    required this.controller,
+    required this.onBack,
+    super.key,
+  });
+
+  final ZommiController controller;
+  final VoidCallback onBack;
+
+  @override
+  State<WorkspacePanel> createState() => _WorkspacePanelState();
+}
+
+class _WorkspacePanelState extends State<WorkspacePanel> {
+  late final TextEditingController _path = TextEditingController(
+    text: widget.controller.selectedWorkspace,
+  );
+  final FocusNode _focus = FocusNode();
+  bool _dirty = false;
+
+  @override
+  void dispose() {
+    _path.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_dirty && _path.text != widget.controller.selectedWorkspace) {
+      _path.text = widget.controller.selectedWorkspace;
+    }
+    return _SettingsDetailShell(
+      title: 'Workspace',
+      onBack: widget.onBack,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Commands and file tools for this chat run from this folder.',
+              style: TextStyle(fontSize: 10.5, color: Colors.blueGrey.shade600),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              key: const ValueKey('workspace-path'),
+              controller: _path,
+              focusNode: _focus,
+              autofocus: true,
+              style: const TextStyle(fontSize: 11.5),
+              onChanged: (_) {
+                _dirty = true;
+                widget.controller.clearWorkspaceError();
+              },
+              onSubmitted: widget.controller.sessionSettingsBusy
+                  ? null
+                  : (value) => unawaited(_applyWorkspace()),
+              decoration: InputDecoration(
+                labelText: 'Folder path',
+                errorText: widget.controller.workspaceError,
+                isDense: true,
+                border: const OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton.icon(
+                  key: const ValueKey('browse-workspace'),
+                  onPressed: widget.controller.sessionSettingsBusy
+                      ? null
+                      : () => unawaited(_browseWorkspace()),
+                  icon: const Icon(Icons.folder_open_outlined, size: 16),
+                  label: const Text('Browse', style: TextStyle(fontSize: 11)),
+                ),
+                const SizedBox(width: 6),
+                FilledButton(
+                  key: const ValueKey('apply-workspace'),
+                  onPressed: widget.controller.sessionSettingsBusy
+                      ? null
+                      : () => unawaited(_applyWorkspace()),
+                  child: const Text('Apply', style: TextStyle(fontSize: 11)),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _browseWorkspace() async {
+    final selected = await widget.controller.chooseWorkspace();
+    if (!mounted || selected == null) return;
+    setState(() {
+      _path.value = TextEditingValue(
+        text: selected,
+        selection: TextSelection.collapsed(offset: selected.length),
+      );
+      _dirty = true;
+    });
+    _focus.requestFocus();
+  }
+
+  Future<void> _applyWorkspace() async {
+    final applied = await widget.controller.setWorkspace(_path.text);
+    if (!mounted || !applied) return;
+    setState(() => _dirty = false);
+    widget.onBack();
+  }
+}
+
+class ProfilePanel extends StatelessWidget {
+  const ProfilePanel({
+    required this.controller,
+    required this.onBack,
+    super.key,
+  });
+
+  final ZommiController controller;
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    return _SettingsDetailShell(
+      title: 'Hermes profile',
+      onBack: onBack,
+      child: Expanded(
+        child: ListView.builder(
+          key: const ValueKey('profile-list'),
+          padding: const EdgeInsets.fromLTRB(8, 4, 8, 10),
+          itemCount: controller.profiles.length,
+          itemBuilder: (context, index) {
+            final profile = controller.profiles[index];
+            final name = profile['name']?.toString() ?? '';
+            final description = profile['description']?.toString().trim();
+            final model = profile['model']?.toString().trim();
+            final subtitle = description?.isNotEmpty == true
+                ? description!
+                : model?.isNotEmpty == true
+                ? model!
+                : 'Hermes profile';
+            return RadioGroup<String>(
+              groupValue: controller.selectedProfile,
+              onChanged: (value) {
+                if (!controller.sessionSettingsBusy && value != null) {
+                  unawaited(controller.setProfile(value));
+                }
+              },
+              child: RadioListTile<String>(
+                key: ValueKey('profile-$name'),
+                value: name,
+                dense: true,
+                visualDensity: const VisualDensity(vertical: -3),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 7),
+                title: Text(
+                  name,
+                  style: const TextStyle(fontSize: 11.5),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  subtitle,
+                  style: const TextStyle(fontSize: 10),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsDetailShell extends StatelessWidget {
+  const _SettingsDetailShell({
+    required this.title,
+    required this.onBack,
+    required this.child,
+  });
+
+  final String title;
+  final VoidCallback onBack;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xfaf7f9fd),
+      elevation: 18,
+      borderRadius: BorderRadius.circular(18),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        width: 390,
+        height: 390,
+        child: Column(
+          children: [
+            SizedBox(
+              height: 48,
+              child: Row(
+                children: [
+                  IconButton(
+                    key: const ValueKey('settings-back'),
+                    tooltip: 'Back to session settings',
+                    onPressed: onBack,
+                    icon: const Icon(Icons.arrow_back_rounded, size: 17),
+                  ),
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            child,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class ModelPanel extends StatefulWidget {
+  const ModelPanel({required this.controller, required this.onBack, super.key});
+
+  final ZommiController controller;
+  final VoidCallback onBack;
 
   @override
   State<ModelPanel> createState() => _ModelPanelState();
@@ -580,14 +1397,10 @@ class _ModelPanelState extends State<ModelPanel> {
           return name.contains(query);
         })
         .toList(growable: false);
-    return Material(
-      key: const ValueKey('model-panel'),
-      color: const Color(0xfaf7f9fd),
-      elevation: 18,
-      borderRadius: BorderRadius.circular(18),
-      child: SizedBox(
-        width: 390,
-        height: 380,
+    return _SettingsDetailShell(
+      title: 'Model / reasoning',
+      onBack: widget.onBack,
+      child: Expanded(
         child: Column(
           children: [
             Padding(

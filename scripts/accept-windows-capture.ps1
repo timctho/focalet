@@ -28,6 +28,9 @@ public static class ZommiWindowsAcceptanceNative
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern int GetWindowText(IntPtr window, StringBuilder text, int maximum);
 
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int GetClassName(IntPtr window, StringBuilder text, int maximum);
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool PostMessage(IntPtr window, uint message, IntPtr word, IntPtr data);
 
@@ -42,6 +45,18 @@ public static class ZommiWindowsAcceptanceNative
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetWindow(IntPtr window, uint command);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsIconic(IntPtr window);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr window, int command);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr window);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool GetWindowRect(IntPtr window, out NativeRect bounds);
@@ -69,6 +84,12 @@ public static class ZommiWindowsAcceptanceNative
 
     [DllImport("user32.dll")]
     private static extern IntPtr WindowFromPoint(NativePoint point);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr window, uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowPos(
@@ -119,6 +140,15 @@ public static class ZommiWindowsAcceptanceNative
     [DllImport("user32.dll")]
     private static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
 
+    [DllImport("user32.dll")]
+    private static extern void mouse_event(uint flags, uint x, uint y, uint data, UIntPtr extraInfo);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetCursorInfo(ref CursorInfo cursor);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr LoadCursor(IntPtr instance, IntPtr cursorName);
+
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeRect
     {
@@ -133,6 +163,15 @@ public static class ZommiWindowsAcceptanceNative
     {
         public int X;
         public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct CursorInfo
+    {
+        public int Size;
+        public int Flags;
+        public IntPtr Cursor;
+        public NativePoint ScreenPosition;
     }
 
     public static IntPtr FindWindow(int processId, string title)
@@ -192,6 +231,59 @@ public static class ZommiWindowsAcceptanceNative
         };
     }
 
+    public static int[] PhysicalBounds(IntPtr window)
+    {
+        var previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
+        try
+        {
+            NativeRect bounds;
+            if (!GetWindowRect(window, out bounds))
+            {
+                return new int[0];
+            }
+            return new[]
+            {
+                bounds.Left,
+                bounds.Top,
+                bounds.Right - bounds.Left,
+                bounds.Bottom - bounds.Top,
+            };
+        }
+        finally
+        {
+            if (previous != IntPtr.Zero)
+            {
+                SetThreadDpiAwarenessContext(previous);
+            }
+        }
+    }
+
+    public static bool SetPhysicalCursorPos(int x, int y)
+    {
+        var previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
+        try
+        {
+            return SetCursorPos(x, y);
+        }
+        finally
+        {
+            if (previous != IntPtr.Zero)
+            {
+                SetThreadDpiAwarenessContext(previous);
+            }
+        }
+    }
+
+    public static bool CrosshairCursorActive()
+    {
+        const int showing = 0x00000001;
+        const int crosshair = 32515;
+        var info = new CursorInfo { Size = Marshal.SizeOf<CursorInfo>() };
+        return GetCursorInfo(ref info) &&
+            (info.Flags & showing) != 0 &&
+            info.Cursor == LoadCursor(IntPtr.Zero, new IntPtr(crosshair));
+    }
+
     public static bool Visible(IntPtr window)
     {
         return IsWindowVisible(window);
@@ -202,6 +294,46 @@ public static class ZommiWindowsAcceptanceNative
         const int extendedStyle = -20;
         const int topMost = 0x00000008;
         return (GetWindowLong(window, extendedStyle) & topMost) != 0;
+    }
+
+    public static bool TaskbarEligible(IntPtr window)
+    {
+        const int extendedStyle = -20;
+        const int toolWindow = 0x00000080;
+        const int appWindow = 0x00040000;
+        const uint owner = 4;
+        var style = GetWindowLong(window, extendedStyle);
+        return (style & toolWindow) == 0 &&
+            (((style & appWindow) != 0) || GetWindow(window, owner) == IntPtr.Zero);
+    }
+
+    public static bool NativeTaskbarToggleAvailable(IntPtr window)
+    {
+        const int windowStyle = -16;
+        const int minimizeBox = 0x00020000;
+        const int systemMenu = 0x00080000;
+        var style = GetWindowLong(window, windowStyle);
+        return (style & minimizeBox) != 0 && (style & systemMenu) != 0;
+    }
+
+    public static bool Minimized(IntPtr window)
+    {
+        return IsIconic(window);
+    }
+
+    public static void Minimize(IntPtr window)
+    {
+        const uint systemCommand = 0x0112;
+        const int minimize = 0xF020;
+        SendMessage(window, systemCommand, new IntPtr(minimize), IntPtr.Zero);
+    }
+
+    public static void Restore(IntPtr window)
+    {
+        const uint systemCommand = 0x0112;
+        const int restore = 0xF120;
+        SendMessage(window, systemCommand, new IntPtr(restore), IntPtr.Zero);
+        SetForegroundWindow(window);
     }
 
     public static bool Foreground(IntPtr window)
@@ -250,6 +382,65 @@ public static class ZommiWindowsAcceptanceNative
         return WindowFromPoint(new NativePoint { X = x, Y = y }) == window;
     }
 
+    public static bool IsOwnedWindowAtPoint(IntPtr window, int x, int y)
+    {
+        const uint root = 2;
+        var hit = WindowFromPhysicalPoint(x, y);
+        return hit != IntPtr.Zero && GetAncestor(hit, root) == window;
+    }
+
+    public static string DescribeWindowAtPoint(int x, int y)
+    {
+        const uint root = 2;
+        const uint rootOwner = 3;
+        var hit = WindowFromPhysicalPoint(x, y);
+        var rootWindow = hit == IntPtr.Zero ? IntPtr.Zero : GetAncestor(hit, root);
+        var ownerWindow = hit == IntPtr.Zero ? IntPtr.Zero : GetAncestor(hit, rootOwner);
+        uint processId = 0;
+        if (hit != IntPtr.Zero)
+        {
+            GetWindowThreadProcessId(hit, out processId);
+        }
+        var className = new StringBuilder(256);
+        if (hit != IntPtr.Zero)
+        {
+            GetClassName(hit, className, className.Capacity);
+        }
+        return string.Format(
+            "point={0},{1};hit={2};root={3};rootOwner={4};pid={5};class={6}",
+            x,
+            y,
+            hit.ToInt64(),
+            rootWindow.ToInt64(),
+            ownerWindow.ToInt64(),
+            processId,
+            className.ToString());
+    }
+
+    public static bool PostMouseLeaveAtPoint(int x, int y)
+    {
+        const uint mouseLeave = 0x02A3;
+        var hit = WindowFromPhysicalPoint(x, y);
+        return hit != IntPtr.Zero &&
+            PostMessage(hit, mouseLeave, IntPtr.Zero, IntPtr.Zero);
+    }
+
+    private static IntPtr WindowFromPhysicalPoint(int x, int y)
+    {
+        var previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
+        try
+        {
+            return WindowFromPoint(new NativePoint { X = x, Y = y });
+        }
+        finally
+        {
+            if (previous != IntPtr.Zero)
+            {
+                SetThreadDpiAwarenessContext(previous);
+            }
+        }
+    }
+
     public static void CloseCompetingWindow(IntPtr window)
     {
         if (window != IntPtr.Zero)
@@ -279,6 +470,24 @@ public static class ZommiWindowsAcceptanceNative
         keybd_event(alt, 0, keyUp, UIntPtr.Zero);
     }
 
+    public static bool DragWindowFromTitlebar(int startX, int startY, int endX, int endY)
+    {
+        const uint leftDown = 0x0002;
+        const uint leftUp = 0x0004;
+        if (!SetPhysicalCursorPos(startX, startY))
+        {
+            return false;
+        }
+        mouse_event(leftDown, 0, 0, 0, UIntPtr.Zero);
+        System.Threading.Thread.Sleep(80);
+        SetPhysicalCursorPos(startX + Math.Sign(endX - startX) * 10, startY);
+        System.Threading.Thread.Sleep(120);
+        SetPhysicalCursorPos(endX, endY);
+        System.Threading.Thread.Sleep(120);
+        mouse_event(leftUp, 0, 0, 0, UIntPtr.Zero);
+        return true;
+    }
+
     public static bool CancelSelection(IntPtr window)
     {
         const uint keyDown = 0x0100;
@@ -299,6 +508,22 @@ public static class ZommiWindowsAcceptanceNative
         SendMessage(window, mouseMove, new IntPtr(leftButton), Point(endX, endY));
         System.Threading.Thread.Sleep(100);
         SendMessage(window, leftUp, IntPtr.Zero, Point(endX, endY));
+        return true;
+    }
+
+    public static bool ClickSelection(IntPtr window, int x, int y)
+    {
+        var bounds = PhysicalBounds(window);
+        if (bounds.Length != 4 || !SetPhysicalCursorPos(bounds[0] + x, bounds[1] + y))
+        {
+            return false;
+        }
+        const uint leftDown = 0x0201;
+        const uint leftUp = 0x0202;
+        const int leftButton = 0x0001;
+        SendMessage(window, leftDown, new IntPtr(leftButton), Point(x, y));
+        System.Threading.Thread.Sleep(80);
+        SendMessage(window, leftUp, IntPtr.Zero, Point(x, y));
         return true;
     }
 
@@ -397,7 +622,7 @@ function Wait-ForVisibleProcessWindow {
         if ($window -ne [IntPtr]::Zero) {
             return $window
         }
-        Start-Sleep -Milliseconds 50
+        Start-Sleep -Milliseconds 10
     }
     throw "Timed out waiting for a visible window from process $ProcessId."
 }
@@ -576,6 +801,51 @@ function Invoke-CaptureSelectedTextProbe {
         $result = $stdout | ConvertFrom-Json
         if ($result.marker -notin @($result.selection)) {
             throw 'Packaged selected-text probe did not preserve its exact marker.'
+        }
+        return $result
+    }
+    finally {
+        if (-not $process.HasExited) {
+            $process.Kill()
+            $process.WaitForExit()
+        }
+        $process.Dispose()
+    }
+}
+
+function Invoke-CaptureWindowOwnershipProbe {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Executable
+    )
+
+    $start = [System.Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $Executable
+    $start.Arguments = '--acceptance-window-ownership'
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $start
+    if (-not $process.Start()) {
+        throw "Could not start window-ownership probe $Executable."
+    }
+    try {
+        $output = $process.StandardOutput.ReadToEnd()
+        $errorOutput = $process.StandardError.ReadToEnd()
+        if (-not $process.WaitForExit(15000)) {
+            throw 'Window-ownership probe did not stop.'
+        }
+        if ($process.ExitCode -ne 0) {
+            throw "Window-ownership probe exited $($process.ExitCode): $errorOutput"
+        }
+        $result = $output | ConvertFrom-Json
+        if ($result.ownWindowAccepted -ne $true -or
+            $result.siblingWindowRejected -ne $true -or
+            $result.matchingBrowserDocumentAccepted -ne $true -or
+            $result.siblingBrowserDocumentRejected -ne $true) {
+            throw "Window-ownership probe admitted a same-process sibling window: $output"
         }
         return $result
     }
@@ -811,6 +1081,14 @@ function Invoke-PackagedApplicationAcceptance {
     }
 
     try {
+        $window = Wait-ForVisibleProcessWindow -ProcessId $application.Id
+        $firstVisibleBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
+        if ($firstVisibleBounds.Count -ne 4 -or
+            $firstVisibleBounds[2] -lt 640 -or
+            $firstVisibleBounds[3] -lt 500) {
+            throw "Packaged application did not start as a complete taskbar chat window: $($firstVisibleBounds -join ',')."
+        }
+
         $readyResult = Wait-ForAcceptanceEvent -Path $acceptanceLog -Name 'desktop.ready'
         $ready = $readyResult.Event
         $eventCount = $readyResult.Count
@@ -818,17 +1096,82 @@ function Invoke-PackagedApplicationAcceptance {
             throw "Packaged shortcuts were not both registered: $($ready | ConvertTo-Json -Compress)"
         }
 
-        $window = Wait-ForVisibleProcessWindow -ProcessId $application.Id
-        $compactBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
-        if ($compactBounds.Count -ne 4 -or $compactBounds[2] -le 0 -or $compactBounds[3] -le 0) {
-            throw 'Packaged Flutter window has invalid compact bounds.'
-        }
-        if ($compactBounds[2] -ne $compactBounds[3]) {
-            throw "Packaged compact surface retained a native frame: $($compactBounds -join ',')."
-        }
+        $taskbarBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
         if (-not [ZommiWindowsAcceptanceNative]::Visible($window) -or
-            -not [ZommiWindowsAcceptanceNative]::TopMost($window)) {
-            throw 'Packaged Flutter window is not visible and topmost.'
+            -not [ZommiWindowsAcceptanceNative]::TaskbarEligible($window)) {
+            throw 'Packaged Flutter window is not visible and taskbar eligible.'
+        }
+        if (-not [ZommiWindowsAcceptanceNative]::NativeTaskbarToggleAvailable($window)) {
+            throw 'Packaged taskbar window has no native minimize/system-menu styles.'
+        }
+        if ([ZommiWindowsAcceptanceNative]::TopMost($window)) {
+            throw 'Packaged taskbar window unexpectedly remained always-on-top.'
+        }
+
+        $physicalBounds = [ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
+        if ($physicalBounds.Count -ne 4) {
+            throw 'Could not read the packaged taskbar window physical bounds.'
+        }
+        $centerX = [int]($physicalBounds[0] + $physicalBounds[2] / 2.0)
+        $centerY = [int]($physicalBounds[1] + $physicalBounds[3] / 2.0)
+        if (-not [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos($centerX, $centerY)) {
+            throw 'Could not hover the packaged taskbar window.'
+        }
+        Start-Sleep -Milliseconds 750
+        $hoverBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
+        if (($hoverBounds -join ',') -ne ($taskbarBounds -join ',')) {
+            throw "Taskbar window resized on hover: before=$($taskbarBounds -join ',') after=$($hoverBounds -join ',')."
+        }
+        if (-not [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(300, 300)) {
+            throw 'Could not move the pointer away from the packaged taskbar window.'
+        }
+        Start-Sleep -Milliseconds 750
+        $leaveBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
+        if (($leaveBounds -join ',') -ne ($taskbarBounds -join ',')) {
+            throw "Taskbar window resized after pointer exit: before=$($taskbarBounds -join ',') after=$($leaveBounds -join ',')."
+        }
+
+        $dragStartX = [int]($physicalBounds[0] + $physicalBounds[2] / 2.0)
+        $dragStartY = [int]($physicalBounds[1] + 28)
+        if (-not [ZommiWindowsAcceptanceNative]::DragWindowFromTitlebar(
+            $dragStartX,
+            $dragStartY,
+            $dragStartX + 48,
+            $dragStartY
+        )) {
+            throw 'Could not drag the packaged custom titlebar.'
+        }
+        $dragDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        do {
+            Start-Sleep -Milliseconds 50
+            $draggedBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
+        } while (($draggedBounds[0] -eq $taskbarBounds[0]) -and
+                 ($draggedBounds[1] -eq $taskbarBounds[1]) -and
+                 [DateTime]::UtcNow -lt $dragDeadline)
+        if (($draggedBounds[0] -eq $taskbarBounds[0]) -and
+            ($draggedBounds[1] -eq $taskbarBounds[1])) {
+            throw "Packaged custom titlebar did not move the window: before=$($taskbarBounds -join ',') after=$($draggedBounds -join ',')."
+        }
+
+        [ZommiWindowsAcceptanceNative]::Minimize($window)
+        $minimizeDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        while (-not [ZommiWindowsAcceptanceNative]::Minimized($window) -and
+               [DateTime]::UtcNow -lt $minimizeDeadline) {
+            Start-Sleep -Milliseconds 50
+        }
+        if (-not [ZommiWindowsAcceptanceNative]::Minimized($window)) {
+            throw 'Packaged taskbar window did not minimize.'
+        }
+        [ZommiWindowsAcceptanceNative]::Restore($window)
+        $restoreDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        while (([ZommiWindowsAcceptanceNative]::Minimized($window) -or
+                -not [ZommiWindowsAcceptanceNative]::Visible($window)) -and
+               [DateTime]::UtcNow -lt $restoreDeadline) {
+            Start-Sleep -Milliseconds 50
+        }
+        if ([ZommiWindowsAcceptanceNative]::Minimized($window) -or
+            -not [ZommiWindowsAcceptanceNative]::Visible($window)) {
+            throw 'Packaged taskbar window did not restore.'
         }
 
         if (-not [ZommiWindowsAcceptanceNative]::SetCursorPos(300, 300)) {
@@ -844,28 +1187,27 @@ function Invoke-PackagedApplicationAcceptance {
         if ($context.attached -ne $true) {
             throw "Packaged context shortcut did not attach context: $($context | ConvertTo-Json -Compress)"
         }
-
-        $expandedDeadline = [DateTime]::UtcNow.AddSeconds(5)
-        do {
-            $expandedBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
-            if ($expandedBounds.Count -eq 4 -and
-                $expandedBounds[2] -gt $compactBounds[2] -and
-                $expandedBounds[3] -gt $compactBounds[3]) {
-                break
-            }
+        $contextFocusDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        while (-not [ZommiWindowsAcceptanceNative]::Foreground($window) -and
+               [DateTime]::UtcNow -lt $contextFocusDeadline) {
             Start-Sleep -Milliseconds 50
-        } while ([DateTime]::UtcNow -lt $expandedDeadline)
-        if ($expandedBounds[2] -le $compactBounds[2] -or
-            $expandedBounds[3] -le $compactBounds[3]) {
-            throw 'Packaged context shortcut did not expand the Flutter surface.'
         }
-        $compactCenterX = $compactBounds[0] + $compactBounds[2] / 2.0
-        $expandedCenterX = $expandedBounds[0] + $expandedBounds[2] / 2.0
-        $compactBottom = $compactBounds[1] + $compactBounds[3]
-        $expandedBottom = $expandedBounds[1] + $expandedBounds[3]
-        if ([Math]::Abs($compactCenterX - $expandedCenterX) -gt 1 -or
-            [Math]::Abs($compactBottom - $expandedBottom) -gt 1) {
-            throw "Packaged surface endpoints do not preserve one anchor: compact=$($compactBounds -join ','), expanded=$($expandedBounds -join ',')."
+        if (-not [ZommiWindowsAcceptanceNative]::Foreground($window)) {
+            throw 'Alt+A did not restore and focus the packaged taskbar window.'
+        }
+        $shortcutBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
+        if (($shortcutBounds[2..3] -join ',') -ne ($taskbarBounds[2..3] -join ',')) {
+            throw "Context shortcut resized the taskbar chat window: before=$($taskbarBounds -join ',') after=$($shortcutBounds -join ',')."
+        }
+
+        [ZommiWindowsAcceptanceNative]::Minimize($window)
+        $imageShortcutMinimizeDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        while (-not [ZommiWindowsAcceptanceNative]::Minimized($window) -and
+               [DateTime]::UtcNow -lt $imageShortcutMinimizeDeadline) {
+            Start-Sleep -Milliseconds 50
+        }
+        if (-not [ZommiWindowsAcceptanceNative]::Minimized($window)) {
+            throw 'Could not minimize Zommi before the Alt+Shift+A restore gate.'
         }
 
         [ZommiWindowsAcceptanceNative]::SendAltA($true)
@@ -903,6 +1245,18 @@ function Invoke-PackagedApplicationAcceptance {
             -Name 'shortcut.image.cancelled' `
             -After $eventCount
         $eventCount = $cancelResult.Count
+        $cancelFocusDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        while (([ZommiWindowsAcceptanceNative]::Minimized($window) -or
+                -not [ZommiWindowsAcceptanceNative]::Visible($window) -or
+                -not [ZommiWindowsAcceptanceNative]::Foreground($window)) -and
+               [DateTime]::UtcNow -lt $cancelFocusDeadline) {
+            Start-Sleep -Milliseconds 50
+        }
+        if ([ZommiWindowsAcceptanceNative]::Minimized($window) -or
+            -not [ZommiWindowsAcceptanceNative]::Visible($window) -or
+            -not [ZommiWindowsAcceptanceNative]::Foreground($window)) {
+            throw 'Cancelled Alt+Shift+A did not restore, show, and focus the minimized packaged taskbar window.'
+        }
 
         [ZommiWindowsAcceptanceNative]::SendAltA($true)
         $selector = Wait-ForPackagedSelector -CaptureExecutable $CaptureExecutable
@@ -936,6 +1290,14 @@ function Invoke-PackagedApplicationAcceptance {
             $image.hasPointerContext -ne $true) {
             throw "Packaged image shortcut contract failed: $($image | ConvertTo-Json -Compress)"
         }
+        $imageFocusDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        while (-not [ZommiWindowsAcceptanceNative]::Foreground($window) -and
+               [DateTime]::UtcNow -lt $imageFocusDeadline) {
+            Start-Sleep -Milliseconds 50
+        }
+        if (-not [ZommiWindowsAcceptanceNative]::Foreground($window)) {
+            throw 'Alt+Shift+A did not restore and focus the packaged taskbar window.'
+        }
 
         Start-Sleep -Milliseconds 300
         if ($application.HasExited -or -not [ZommiWindowsAcceptanceNative]::Visible($window)) {
@@ -945,10 +1307,19 @@ function Invoke-PackagedApplicationAcceptance {
             $_.ExecutablePath -in $packageExecutables
         })
         $coreProcesses = @($processes | Where-Object { $_.ExecutablePath -eq $core })
+        $applicationCoreProcesses = @($coreProcesses | Where-Object {
+            $_.ParentProcessId -eq $application.Id -and
+            $_.CommandLine -notmatch '(?:^|\s)--wsl-proxy(?:\s|$)'
+        })
+        $proxyCoreProcesses = @($coreProcesses | Where-Object {
+            $_.CommandLine -match '(?:^|\s)--wsl-proxy(?:\s|$)'
+        })
         $captureProcesses = @($processes | Where-Object {
             $_.ExecutablePath -eq $CaptureExecutable
         })
-        if ($coreProcesses.Count -ne 1 -or $captureProcesses.Count -ne 2) {
+        if ($applicationCoreProcesses.Count -ne 1 -or
+            $proxyCoreProcesses.Count -lt 1 -or
+            $captureProcesses.Count -ne 2) {
             throw "Unexpected packaged process topology: $($processes | Select-Object Name,ProcessId,ExecutablePath | ConvertTo-Json -Compress)"
         }
 
@@ -959,11 +1330,21 @@ function Invoke-PackagedApplicationAcceptance {
             imageCancelled = $true
             imageDimensions = @($image.width, $image.height)
             imagePointerContext = $true
-            compactBounds = @($compactBounds)
-            expandedBounds = @($expandedBounds)
+            taskbarBounds = @($taskbarBounds)
+            physicalBounds = @($physicalBounds)
+            draggedBounds = @($draggedBounds)
+            firstVisibleBounds = @($firstVisibleBounds)
+            hoverBounds = @($hoverBounds)
+            leaveBounds = @($leaveBounds)
+            shortcutBounds = @($shortcutBounds)
+            minimizedAndRestored = $true
+            minimizedImageShortcutRestored = $true
+            nativeTaskbarToggle = $true
+            shortcutsRestoreFocus = $true
             processCount = $processes.Count
             shortcutsRegistered = $true
-            topMost = $true
+            taskbarEligible = $true
+            topMost = $false
         }
     }
     finally {
@@ -1031,6 +1412,9 @@ if (-not (Test-Path -LiteralPath $capture -PathType Leaf)) {
 $selectedText = Invoke-CaptureSelectedTextProbe -Executable $capture
 Write-Host "selected-text: ok ($($selectedText.marker))"
 
+$windowOwnership = Invoke-CaptureWindowOwnershipProbe -Executable $capture
+Write-Host 'window-ownership: ok (same-process sibling rejected)'
+
 $cancelled = Invoke-CaptureRequest -Executable $capture -Method 'selectImage' -Interact {
     param($process)
     $window = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi image selection'
@@ -1047,6 +1431,7 @@ if ($NonVisualOnly) {
     Write-AcceptanceResult -Result @{
         captureHelper = $capture
         selectedText = $true
+        windowOwnership = $true
         cancellation = $true
         regionPixels = 'not-requested'
     }
@@ -1054,6 +1439,40 @@ if ($NonVisualOnly) {
 }
 
 Assert-DesktopCaptureSurface
+
+$pointContext = Invoke-CaptureRequest -Executable $capture -Method 'selectContext' -Interact {
+    param($process)
+    $window = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi context selection'
+    $activationDeadline = [DateTime]::UtcNow.AddSeconds(5)
+    while ((-not [ZommiWindowsAcceptanceNative]::TopMost($window) -or
+            -not [ZommiWindowsAcceptanceNative]::Foreground($window)) -and
+           [DateTime]::UtcNow -lt $activationDeadline) {
+        Start-Sleep -Milliseconds 50
+    }
+    if (-not [ZommiWindowsAcceptanceNative]::TopMost($window) -or
+        -not [ZommiWindowsAcceptanceNative]::Foreground($window)) {
+        throw 'Context point selector was not the active topmost window.'
+    }
+    $bounds = [ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
+    if ($bounds.Count -ne 4 -or
+        -not [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(
+            $bounds[0] + 220,
+            $bounds[1] + 220
+        )) {
+        throw 'Could not position the pointer inside the context selector.'
+    }
+    Start-Sleep -Milliseconds 120
+    if (-not [ZommiWindowsAcceptanceNative]::CrosshairCursorActive()) {
+        throw 'Context point selector did not expose its crosshair cursor.'
+    }
+    if (-not [ZommiWindowsAcceptanceNative]::ClickSelection($window, 220, 220)) {
+        throw 'Could not click the context point selector.'
+    }
+}
+if ($pointContext.cancelled -eq $true -or $null -eq $pointContext.snapshot) {
+    throw 'Context point selector did not capture the clicked desktop target.'
+}
+Write-Host 'point-context: ok (crosshair and click)'
 
 $selected = Invoke-CaptureRequest -Executable $capture -Method 'selectImage' -Interact {
     param($process)
@@ -1106,7 +1525,9 @@ $applicationResult = Invoke-PackagedApplicationAcceptance `
 Write-AcceptanceResult -Result @{
     captureHelper = $capture
     selectedText = $true
+    windowOwnership = $true
     cancellation = $true
+    pointContext = $true
     selectedBounds = @($selected.bounds.x, $selected.bounds.y, $selected.bounds.width, $selected.bounds.height)
     pngDimensions = @($width, $height)
     pngBytes = $png.Length

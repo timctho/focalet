@@ -1869,6 +1869,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "uuid",
+ "wait-timeout",
  "zommi-core",
 ]
 

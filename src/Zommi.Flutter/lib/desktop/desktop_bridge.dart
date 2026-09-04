@@ -10,6 +10,7 @@ import 'package:screen_capturer/screen_capturer.dart';
 import 'package:screen_retriever/screen_retriever.dart';
 import 'package:super_clipboard/super_clipboard.dart';
 import 'package:tray_manager/tray_manager.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
@@ -47,8 +48,10 @@ final class DesktopInvocation {
   final bool warning;
 }
 
-DesktopInvocation? imageSelectionInvocation(ContextAttachment? attachment) {
-  if (attachment == null) return null;
+DesktopInvocation imageSelectionInvocation(ContextAttachment? attachment) {
+  if (attachment == null) {
+    return const DesktopInvocation(kind: DesktopInvocationKind.image);
+  }
   return DesktopInvocation(
     kind: DesktopInvocationKind.image,
     attachment: attachment,
@@ -99,7 +102,9 @@ abstract interface class DesktopBridge {
 
   Future<DesktopReadiness> initialize();
 
-  Future<ContextAttachment?> captureContext();
+  Future<ContextAttachment?> captureContext({bool hidePanel = false});
+
+  Future<ContextAttachment?> selectPointerContext();
 
   Future<ContextAttachment?> selectImageContext({
     bool includePointerContext = false,
@@ -110,6 +115,8 @@ abstract interface class DesktopBridge {
     bool large = false,
     bool animate = true,
   });
+
+  Future<bool> isPointerWithinSurface();
 
   Future<void> showPanel();
 
@@ -123,9 +130,13 @@ abstract interface class DesktopBridge {
 
   Future<String?> selectRuntimeExecutable();
 
+  Future<String?> selectWorkspaceDirectory();
+
   Future<void> copyText(String value);
 
   Future<void> copyImage(String dataUrl);
+
+  Future<void> openExternalUrl(Uri uri);
 
   Future<void> close();
 }
@@ -140,7 +151,11 @@ final class NoopDesktopBridge implements DesktopBridge {
   Future<DesktopReadiness> initialize() async => const DesktopReadiness();
 
   @override
-  Future<ContextAttachment?> captureContext() async => null;
+  Future<ContextAttachment?> captureContext({bool hidePanel = false}) async =>
+      null;
+
+  @override
+  Future<ContextAttachment?> selectPointerContext() async => null;
 
   @override
   Future<ContextAttachment?> selectImageContext({
@@ -153,6 +168,9 @@ final class NoopDesktopBridge implements DesktopBridge {
     bool large = false,
     bool animate = true,
   }) async {}
+
+  @override
+  Future<bool> isPointerWithinSurface() async => false;
 
   @override
   Future<void> showPanel() async {}
@@ -173,11 +191,17 @@ final class NoopDesktopBridge implements DesktopBridge {
   Future<String?> selectRuntimeExecutable() async => null;
 
   @override
+  Future<String?> selectWorkspaceDirectory() async => null;
+
+  @override
   Future<void> copyText(String value) =>
       Clipboard.setData(ClipboardData(text: value));
 
   @override
   Future<void> copyImage(String dataUrl) async {}
+
+  @override
+  Future<void> openExternalUrl(Uri uri) async {}
 
   @override
   Future<void> close() async {}
@@ -205,36 +229,26 @@ final class FlutterDesktopBridge
   static Future<FlutterDesktopBridge> bootstrap() async {
     await windowManager.ensureInitialized();
     const options = WindowOptions(
-      size: compactWindowSize,
-      minimumSize: compactWindowSize,
+      size: normalWindowSize,
+      minimumSize: Size(640, 500),
       backgroundColor: Color(0x00000000),
-      alwaysOnTop: true,
-      skipTaskbar: true,
-      title: 'Zommi — floating agent chat',
+      alwaysOnTop: false,
+      skipTaskbar: false,
+      title: 'Zommi',
       titleBarStyle: TitleBarStyle.hidden,
       windowButtonVisibility: false,
     );
-    unawaited(
-      windowManager.waitUntilReadyToShow(options, () async {
-        await windowManager.setAsFrameless();
-        if (supportsNativeWindowShadow(Platform.operatingSystem)) {
-          await windowManager.setHasShadow(false);
-        }
-        // Zommi owns its surface sizes. Changing the native resize style on
-        // every orb morph forces a Win32 frame recalculation and produces a
-        // visible one-frame wobble even though the window is frameless.
-        await windowManager.setResizable(false);
-        await configureNativeSurfaceWindow();
-        // WindowOptions applies 56px before the Win32 caption is removed, so
-        // Windows may clamp the initial width to SM_CXMINTRACK. Reapply the
-        // compact size with the popup style active while preserving the
-        // requested top-left anchor.
-        await windowManager.setSize(compactWindowSize, animate: false);
-        await windowManager.setAlwaysOnTop(true);
-        await windowManager.setSkipTaskbar(true);
-        await windowManager.show();
-      }),
-    );
+    await windowManager.waitUntilReadyToShow(options, () async {
+      await windowManager.setAsFrameless();
+      if (supportsNativeWindowShadow(Platform.operatingSystem)) {
+        await windowManager.setHasShadow(false);
+      }
+      await windowManager.setResizable(false);
+      await configureNativeSurfaceWindow();
+      await windowManager.setSize(normalWindowSize, animate: false);
+      await windowManager.setAlwaysOnTop(false);
+      await windowManager.setSkipTaskbar(false);
+    });
     return FlutterDesktopBridge();
   }
 
@@ -274,9 +288,10 @@ final class FlutterDesktopBridge
     }
     _initialized = true;
     windowManager.addListener(this);
-    await windowManager.setPreventClose(true);
-    await windowManager.setAlwaysOnTop(true);
-    await setSurface(expanded: false);
+    await windowManager.setPreventClose(false);
+    await windowManager.setAlwaysOnTop(false);
+    await setSurface(expanded: true, animate: false);
+    await windowManager.show();
     try {
       await _captureProvider.initialize();
     } on Object catch (error) {
@@ -372,16 +387,17 @@ final class FlutterDesktopBridge
     try {
       final attachment = await selectImageContext(includePointerContext: true);
       final invocation = imageSelectionInvocation(attachment);
-      if (invocation == null) {
+      if (attachment == null) {
         await _recordAcceptance('shortcut.image.cancelled', const {});
+        _invocations.add(invocation);
         return;
       }
       await _recordAcceptance('shortcut.image', {
         'attached': true,
-        'hasImage': attachment?.imageDataUrl?.isNotEmpty == true,
-        'hasPointerContext': attachment?.snapshot != null,
-        'width': attachment?.bounds?['width'],
-        'height': attachment?.bounds?['height'],
+        'hasImage': attachment.imageDataUrl?.isNotEmpty == true,
+        'hasPointerContext': attachment.snapshot != null,
+        'width': attachment.bounds?['width'],
+        'height': attachment.bounds?['height'],
       });
       _invocations.add(invocation);
     } on Object catch (error) {
@@ -422,7 +438,51 @@ final class FlutterDesktopBridge
   }
 
   @override
-  Future<ContextAttachment?> captureContext() async {
+  Future<ContextAttachment?> captureContext({bool hidePanel = false}) async {
+    if (!hidePanel) return _capturePointerContext();
+    final wasVisible = await windowManager.isVisible();
+    final wasMinimized = await windowManager.isMinimized();
+    await windowManager.hide();
+    try {
+      // Let the compositor expose the application underneath Zommi before
+      // resolving the window and accessibility element at the pointer.
+      await Future<void>.delayed(const Duration(milliseconds: 90));
+      return await _capturePointerContext();
+    } finally {
+      await _restorePanelAfterCapture(
+        wasVisible: wasVisible,
+        wasMinimized: wasMinimized,
+      );
+    }
+  }
+
+  @override
+  Future<ContextAttachment?> selectPointerContext() async {
+    final wasVisible = await windowManager.isVisible();
+    final wasMinimized = await windowManager.isMinimized();
+    await windowManager.hide();
+    try {
+      // The explicit picker owns the next click and changes the system cursor,
+      // so selecting context from the composer cannot feel like an immediate,
+      // invisible capture of the old pointer position.
+      await Future<void>.delayed(const Duration(milliseconds: 90));
+      final result = await _captureProvider.selectContext();
+      if (result?.snapshot == null) return null;
+      return ContextAttachment(
+        id: _nextAttachmentId(),
+        token: '',
+        snapshot: result!.snapshot,
+        previewText: result.previewText,
+      );
+    } finally {
+      await _restorePanelAfterCapture(
+        wasVisible: wasVisible,
+        wasMinimized: wasMinimized,
+      );
+    }
+  }
+
+  Future<ContextAttachment?> _capturePointerContext() async {
     Offset? point;
     try {
       point = await screenRetriever.getCursorScreenPoint();
@@ -439,11 +499,23 @@ final class FlutterDesktopBridge
     );
   }
 
+  Future<void> _restorePanelAfterCapture({
+    required bool wasVisible,
+    required bool wasMinimized,
+  }) async {
+    if (!wasVisible && !wasMinimized) return;
+    if (wasMinimized || await windowManager.isMinimized()) {
+      await windowManager.restore();
+    }
+    await windowManager.show();
+  }
+
   @override
   Future<ContextAttachment?> selectImageContext({
     bool includePointerContext = false,
   }) async {
     final wasVisible = await windowManager.isVisible();
+    final wasMinimized = await windowManager.isMinimized();
     await windowManager.hide();
     try {
       final contextFuture = includePointerContext
@@ -464,7 +536,10 @@ final class FlutterDesktopBridge
         bounds: selected.bounds,
       );
     } finally {
-      if (wasVisible) await windowManager.show();
+      await _restorePanelAfterCapture(
+        wasVisible: wasVisible,
+        wasMinimized: wasMinimized,
+      );
     }
   }
 
@@ -541,20 +616,23 @@ final class FlutterDesktopBridge
     await windowManager.setMinimumSize(
       expanded ? const Size(640, 500) : compactWindowSize,
     );
-    await windowManager.setAlwaysOnTop(true);
+    await windowManager.setAlwaysOnTop(false);
   }
 
   @override
   Future<void> showPanel() async {
     await presentPanelWithoutResizing(
-      show: windowManager.show,
+      show: () async {
+        if (await windowManager.isMinimized()) await windowManager.restore();
+        await windowManager.show();
+      },
       focus: windowManager.focus,
-      keepOnTop: () => windowManager.setAlwaysOnTop(true),
+      keepOnTop: () => windowManager.setAlwaysOnTop(false),
     );
   }
 
   @override
-  Future<void> hide() => windowManager.hide();
+  Future<void> hide() => windowManager.minimize();
 
   @override
   Future<void> toggleMaximized() async {
@@ -563,6 +641,19 @@ final class FlutterDesktopBridge
       await setSurface(expanded: true);
     } else {
       await windowManager.maximize();
+    }
+  }
+
+  @override
+  Future<bool> isPointerWithinSurface() async {
+    final nativeResult = await isPointerWithinNativeSurface();
+    if (nativeResult != null) return nativeResult;
+    try {
+      final pointer = await screenRetriever.getCursorScreenPoint();
+      final bounds = await windowManager.getBounds();
+      return bounds.contains(pointer);
+    } on Object {
+      return false;
     }
   }
 
@@ -636,6 +727,10 @@ final class FlutterDesktopBridge
   }
 
   @override
+  Future<String?> selectWorkspaceDirectory() =>
+      getDirectoryPath(confirmButtonText: 'Use this workspace');
+
+  @override
   Future<void> copyText(String value) async {
     final clipboard = SystemClipboard.instance;
     if (clipboard == null) {
@@ -658,6 +753,13 @@ final class FlutterDesktopBridge
     await clipboard.write([item]);
   }
 
+  @override
+  Future<void> openExternalUrl(Uri uri) async {
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      throw StateError('The default browser could not open $uri.');
+    }
+  }
+
   Future<void> _configureTray() async {
     try {
       final asset = Platform.isWindows
@@ -672,11 +774,11 @@ final class FlutterDesktopBridge
       await file.writeAsBytes(bytes.buffer.asUint8List(), flush: true);
       _trayIconPath = file.path;
       await trayManager.setIcon(file.path, isTemplate: Platform.isMacOS);
-      await trayManager.setToolTip('Zommi floating agent chat');
+      await trayManager.setToolTip('Zommi agent chat');
       await trayManager.setContextMenu(
         Menu(
           items: [
-            MenuItem(key: 'open', label: 'Open floating chat'),
+            MenuItem(key: 'open', label: 'Open Zommi'),
             MenuItem(key: 'capture', label: 'Capture context (Alt+A)'),
             MenuItem(
               key: 'image',
@@ -723,14 +825,10 @@ final class FlutterDesktopBridge
   }
 
   @override
-  void onWindowClose() {
-    unawaited(windowManager.hide());
-  }
+  void onWindowClose() {}
 
   @override
-  void onWindowFocus() {
-    unawaited(windowManager.setAlwaysOnTop(true));
-  }
+  void onWindowFocus() {}
 
   @override
   Future<void> close() async {
@@ -821,6 +919,19 @@ Future<bool?> setNativeSurfaceBoundsWithoutCopy({
         'toHeight': bounds.height,
         'scaleFactor': scaleFactor,
       },
+    );
+  } on MissingPluginException {
+    return null;
+  } on PlatformException {
+    return null;
+  }
+}
+
+Future<bool?> isPointerWithinNativeSurface({bool? platformIsWindows}) async {
+  if (!(platformIsWindows ?? Platform.isWindows)) return null;
+  try {
+    return await _windowAnimationChannel.invokeMethod<bool>(
+      'isPointerWithinWindow',
     );
   } on MissingPluginException {
     return null;
@@ -1035,6 +1146,8 @@ abstract interface class CaptureProvider {
 
   Future<CaptureResult> capture({Offset? point});
 
+  Future<CaptureResult?> selectContext();
+
   Future<ImageSelection?> selectImage();
 
   Future<void> close();
@@ -1101,6 +1214,16 @@ final class WindowsCaptureProvider implements CaptureProvider {
   }
 
   @override
+  Future<CaptureResult?> selectContext() async {
+    final response = await _selectorClient.request('selectContext');
+    if (response['cancelled'] == true) return null;
+    return CaptureResult(
+      snapshot: _nullableMap(response['snapshot']),
+      previewText: response['previewText']?.toString() ?? '',
+    );
+  }
+
+  @override
   Future<ImageSelection?> selectImage() async {
     final response = await _selectorClient.request('selectImage');
     if (response['cancelled'] == true) return null;
@@ -1146,17 +1269,35 @@ final class LinuxCaptureProvider implements CaptureProvider {
     final response = await _request([
       _useWaylandPortals ? 'portal-context' : 'context',
     ], const Duration(seconds: 5));
-    return portableCaptureResult(
-      application:
-          response['application']?.toString() ??
-          (_useWaylandPortals ? 'Linux desktop' : 'X11 application'),
-      processName: response['processName']?.toString(),
-      windowTitle: response['windowTitle']?.toString() ?? '',
-      url: '',
-      limitation:
-          response['limitation']?.toString() ??
-          'X11 semantic enrichment depends on AT-SPI.',
-    );
+    return _portableResultFromLinuxResponse(response);
+  }
+
+  CaptureResult _portableResultFromLinuxResponse(
+    Map<String, Object?> response,
+  ) => portableCaptureResult(
+    application:
+        response['application']?.toString() ??
+        (_useWaylandPortals ? 'Linux desktop' : 'X11 application'),
+    processName: response['processName']?.toString(),
+    windowTitle: response['windowTitle']?.toString() ?? '',
+    url: '',
+    limitation:
+        response['limitation']?.toString() ??
+        'X11 semantic enrichment depends on AT-SPI.',
+  );
+
+  @override
+  Future<CaptureResult?> selectContext() async {
+    if (_useWaylandPortals) {
+      // Wayland does not expose an unrestricted global pointer grab. Preserve
+      // the portal's explicit foreground-context authority on that platform.
+      return capture();
+    }
+    final response = await _request([
+      'point-context',
+    ], const Duration(minutes: 5));
+    if (response['cancelled'] == true) return null;
+    return _portableResultFromLinuxResponse(response);
   }
 
   @override
@@ -1229,6 +1370,9 @@ final class PortableCaptureProvider implements CaptureProvider {
   Future<CaptureResult> capture({Offset? point}) async {
     return _captureMac();
   }
+
+  @override
+  Future<CaptureResult?> selectContext() => capture();
 
   Future<CaptureResult> _captureMac() async {
     const script = '''

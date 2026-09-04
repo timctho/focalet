@@ -24,6 +24,8 @@ pub struct AdapterTurnRequest<'a> {
     pub client_operation_id: &'a str,
     pub model: Option<&'a str>,
     pub effort: Option<&'a str>,
+    pub cwd: Option<&'a str>,
+    pub profile: Option<&'a str>,
 }
 
 #[derive(Clone)]
@@ -129,6 +131,13 @@ impl RuntimeAdapter {
         }
     }
 
+    pub async fn is_running(&self) -> bool {
+        match self {
+            Self::Codex(adapter) => adapter.is_running().await,
+            _ => true,
+        }
+    }
+
     pub async fn active_session_id(&self) -> Result<String, CodexError> {
         match self {
             Self::Codex(adapter) => adapter.active_session_id().await,
@@ -179,10 +188,12 @@ impl RuntimeAdapter {
         &self,
         model: Option<&str>,
         effort: Option<&str>,
+        cwd: Option<&str>,
+        profile: Option<&str>,
     ) -> Result<Value, CodexError> {
         match self {
             Self::Codex(adapter) => serde_json::to_value(
-                adapter.create_session(model, effort).await?,
+                adapter.create_session(model, effort, cwd).await?,
             )
             .map_err(|error| CodexError {
                 code: "protocol-error".into(),
@@ -190,7 +201,9 @@ impl RuntimeAdapter {
                 retryable: false,
             }),
             Self::Acp(adapter) => adapter.create_session(model).await,
-            Self::HermesGateway(adapter) => adapter.create_session(model, effort).await,
+            Self::HermesGateway(adapter) => {
+                adapter.create_session(model, effort, cwd, profile).await
+            }
             Self::OpenClawGateway(adapter) => adapter.create_session(model, effort).await,
             Self::Pi(adapter) => adapter.create_session(model, effort).await,
             Self::Pty(_) => Err(CodexError {
@@ -202,7 +215,11 @@ impl RuntimeAdapter {
         }
     }
 
-    pub async fn open_session(&self, session_id: &str) -> Result<Value, CodexError> {
+    pub async fn open_session(
+        &self,
+        session_id: &str,
+        profile: Option<&str>,
+    ) -> Result<Value, CodexError> {
         match self {
             Self::Codex(adapter) => serde_json::to_value(adapter.open_session(session_id).await?)
                 .map_err(|error| CodexError {
@@ -211,12 +228,42 @@ impl RuntimeAdapter {
                     retryable: false,
                 }),
             Self::Acp(adapter) => adapter.open_session(session_id).await,
-            Self::HermesGateway(adapter) => adapter.open_session(session_id).await,
+            Self::HermesGateway(adapter) => adapter.open_session(session_id, profile).await,
             Self::OpenClawGateway(adapter) => adapter.open_session(session_id).await,
             Self::Pi(adapter) => adapter.open_session(session_id).await,
             Self::Pty(_) => Err(CodexError {
                 code: "capability-unavailable".into(),
                 message: "Terminal compatibility does not provide canonical session resume.".into(),
+                retryable: false,
+            }),
+        }
+    }
+
+    pub async fn configure_session(
+        &self,
+        session_id: &str,
+        cwd: Option<&str>,
+        profile: Option<&str>,
+        model: Option<&str>,
+        effort: Option<&str>,
+    ) -> Result<Value, CodexError> {
+        match self {
+            Self::Codex(adapter) => serde_json::to_value(
+                adapter.configure_session(session_id, cwd).await?,
+            )
+            .map_err(|error| CodexError {
+                code: "protocol-error".into(),
+                message: error.to_string(),
+                retryable: false,
+            }),
+            Self::HermesGateway(adapter) => {
+                adapter
+                    .configure_session(session_id, cwd, profile, model, effort)
+                    .await
+            }
+            _ => Err(CodexError {
+                code: "capability-unavailable".into(),
+                message: "This runtime cannot change the workspace of a live session.".into(),
                 retryable: false,
             }),
         }
@@ -248,6 +295,7 @@ impl RuntimeAdapter {
                         client_operation_id: request.client_operation_id,
                         model: request.model,
                         effort: request.effort,
+                        cwd: request.cwd,
                     })
                     .await
             }
@@ -442,11 +490,7 @@ impl RuntimeAdapter {
     pub async fn binding_metadata(&self) -> Option<Value> {
         match self {
             Self::Pi(adapter) => adapter.binding_metadata().await,
-            Self::HermesGateway(adapter) => adapter
-                .active_session_id()
-                .await
-                .ok()
-                .map(|session_id| serde_json::json!({"sessionKey": session_id})),
+            Self::HermesGateway(adapter) => adapter.binding_metadata().await,
             Self::OpenClawGateway(adapter) => adapter
                 .active_session_id()
                 .await

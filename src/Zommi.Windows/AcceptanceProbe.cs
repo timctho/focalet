@@ -62,4 +62,73 @@ internal static class AcceptanceProbe
             return 1;
         }
     }
+
+    public static int WindowOwnership()
+    {
+        try
+        {
+            using var first = new Form
+            {
+                Text = "Zommi ownership first",
+                ClientSize = new Size(320, 180),
+                StartPosition = FormStartPosition.Manual,
+                Location = new Point(60, 60),
+                ShowInTaskbar = false,
+            };
+            using var second = new Form
+            {
+                Text = "Zommi ownership second",
+                ClientSize = new Size(320, 180),
+                StartPosition = FormStartPosition.Manual,
+                Location = new Point(90, 90),
+                ShowInTaskbar = false,
+            };
+            first.Show();
+            second.Show();
+            Application.DoEvents();
+
+            using var capture = new ForegroundContextCapture();
+            var ownWindowAccepted = capture.IsWithinWindowForAcceptance(
+                second.Handle,
+                second.Handle);
+            var siblingWindowRejected = !capture.IsWithinWindowForAcceptance(
+                first.Handle,
+                second.Handle);
+            var matchingBrowserDocumentAccepted =
+                ForegroundContextCapture.BrowserDocumentUrlMatches(
+                    "https://www.amazon.com/s?k=drum+stick+holder",
+                    new Zommi.Capture.LocatorInfo
+                    {
+                        Kind = "URL",
+                        Value = "https://amazon.com/s?k=drum+stick+holder",
+                    });
+            var siblingBrowserDocumentRejected =
+                !ForegroundContextCapture.BrowserDocumentUrlMatches(
+                    "https://github.com/timctho/zommi/actions",
+                    new Zommi.Capture.LocatorInfo
+                    {
+                        Kind = "URL",
+                        Value = "https://amazon.com/s?k=drum+stick+holder",
+                    });
+            Console.Out.Write(JsonSerializer.Serialize(new
+            {
+                ownWindowAccepted,
+                siblingWindowRejected,
+                matchingBrowserDocumentAccepted,
+                siblingBrowserDocumentRejected,
+                sameProcess = Environment.ProcessId,
+            }));
+            return ownWindowAccepted &&
+                siblingWindowRejected &&
+                matchingBrowserDocumentAccepted &&
+                siblingBrowserDocumentRejected
+                    ? 0
+                    : 3;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.Write(exception);
+            return 1;
+        }
+    }
 }

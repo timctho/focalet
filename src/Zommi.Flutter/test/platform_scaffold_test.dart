@@ -33,6 +33,7 @@ void main() {
   test('desktop shell registers cross-platform window, shortcut, tray, and capture plugins', () {
     final root = Directory.current;
     final pubspec = File('${root.path}/pubspec.yaml').readAsStringSync();
+    expect(pubspec, isNot(contains('fossui:')));
     for (final dependency in [
       'window_manager:',
       'hotkey_manager:',
@@ -49,7 +50,8 @@ void main() {
     for (final contract in [
       'HotKeyModifier.alt',
       'CaptureMode.region',
-      'setAlwaysOnTop(true)',
+      'skipTaskbar: false',
+      'windowManager.minimize()',
       'Capture completes before Flutter is shown or focused',
       "'--capture-host'",
       'Zommi.Capture.exe',
@@ -78,15 +80,29 @@ void main() {
     final windowsFlutterWindow = File(
       '${root.path}/windows/runner/flutter_window.cpp',
     ).readAsStringSync();
+    final desktopBridge = File('${root.path}/lib/desktop/desktop_bridge.dart')
+        .readAsStringSync();
     expect(
       windowsMain,
       allOf(
         contains('CreateMutexW(nullptr, TRUE, kZommiInstanceMutexName)'),
         contains('ERROR_ALREADY_EXISTS'),
         contains('PostMessageW(HWND_BROADCAST, ZommiShowWindowMessage()'),
+        contains('Win32Window::Size size(720, 620)'),
       ),
     );
     expect(windowsInstance, contains('Zommi.Desktop.SingleInstance'));
+    expect(
+      desktopBridge,
+      allOf(
+        contains('await windowManager.waitUntilReadyToShow'),
+        isNot(contains('unawaited(\n      windowManager.waitUntilReadyToShow')),
+      ),
+    );
+    expect(
+      windowsFlutterWindow,
+      isNot(contains('SetNextFrameCallback([&]() { this->Show(); }')),
+    );
     expect(
       windowsFlutterWindow,
       allOf(
@@ -95,17 +111,28 @@ void main() {
         contains('"zommi/window_animation"'),
         contains('kWindowAnimationFrameMs'),
         contains('message == WM_TIMER'),
-        contains('SymmetricSurfaceEase(linear)'),
         allOf(
-          contains('"setBoundsWithoutCopy"'),
-          contains('SetNextFrameCallback([this]()'),
-          contains('flutter_controller_->ForceRedraw()'),
-          contains('SWP_NOCOPYBITS'),
+          contains('SymmetricSurfaceEase(linear)'),
+          contains('WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX'),
+        ),
+        allOf(
           allOf(
-            contains('BeginSurfaceFrameTransition(current)'),
-            contains('DWMWA_CLOAK'),
-            contains('STM_SETIMAGE'),
-            contains('SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER'),
+            contains('"isPointerWithinWindow"'),
+            contains('GetCursorPos(&cursor)'),
+            contains('WindowFromPoint(cursor)'),
+            contains('GetAncestor(hit_window, GA_ROOT)'),
+          ),
+          allOf(
+            contains('"setBoundsWithoutCopy"'),
+            contains('SetNextFrameCallback([this]()'),
+            contains('flutter_controller_->ForceRedraw()'),
+            contains('SWP_NOCOPYBITS'),
+            allOf(
+              contains('BeginSurfaceFrameTransition(current)'),
+              contains('DWMWA_CLOAK'),
+              contains('STM_SETIMAGE'),
+              contains('SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER'),
+            ),
           ),
         ),
       ),
@@ -120,6 +147,7 @@ void main() {
       allOf(
         contains('hotkey_manager_windows'),
         contains('screen_capturer_windows'),
+        contains('url_launcher_windows'),
         contains('window_manager'),
       ),
     );
@@ -129,6 +157,7 @@ void main() {
       allOf(
         contains('hotkey_manager_linux'),
         contains('screen_capturer_linux'),
+        contains('url_launcher_linux'),
         contains('window_manager'),
       ),
     );
@@ -138,9 +167,42 @@ void main() {
       allOf(
         contains('HotkeyManagerMacosPlugin'),
         contains('ScreenCapturerMacosPlugin'),
+        contains('UrlLauncherPlugin'),
         contains('WindowManagerPlugin'),
       ),
     );
+    final captureSource = File(
+      '${root.parent.path}/Zommi.Windows/ForegroundContextCapture.cs',
+    ).readAsStringSync();
+    expect(
+      captureSource,
+      allOf(
+        contains('Require actual raw-tree ancestry to the exact HWND root'),
+        isNot(
+          contains(
+            'if (elementProcessId != 0 && elementProcessId == rootProcessId)',
+          ),
+        ),
+      ),
+    );
+    final pointSelector = File(
+      '${root.parent.path}/Zommi.Windows/PointSelectionForm.cs',
+    ).readAsStringSync();
+    expect(
+      pointSelector,
+      allOf(
+        contains('Text = "Zommi context selection"'),
+        contains('Cursor = Cursors.Cross'),
+        contains('Click a window or control to attach its context'),
+        contains('Result = Cursor.Position'),
+        contains('AttachThreadInput(currentThread, foregroundThread, true)'),
+        contains('ForceForeground();'),
+      ),
+    );
+    final nativeHost = File(
+      '${root.parent.path}/Zommi.Windows/CaptureNativeHost.cs',
+    ).readAsStringSync();
+    expect(nativeHost, contains('case "selectContext"'));
   });
 
   test(
@@ -247,7 +309,7 @@ void main() {
       File(
         '${repository.path}/src/Zommi.Flutter/linux/runner/my_application.cc',
       ).readAsStringSync(),
-      contains('gtk_window_set_default_size(window, 56, 56)'),
+      contains('gtk_window_set_default_size(window, 720, 620)'),
     );
     final hotkeyPlugin = File(
       '${repository.path}/third_party/hotkey_manager_linux/linux/'

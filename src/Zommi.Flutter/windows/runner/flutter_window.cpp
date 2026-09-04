@@ -84,13 +84,9 @@ bool FlutterWindow::OnCreate() {
       });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
-  flutter_controller_->engine()->SetNextFrameCallback([&]() { this->Show(); });
-
-  // Flutter can complete the first frame before the "show window" callback is
-  // registered. The following call ensures a frame is pending to ensure the
-  // window is shown. It is a no-op if the first frame hasn't completed yet.
-  flutter_controller_->ForceRedraw();
-
+  // FlutterDesktopBridge shows the window only after it has applied the
+  // compact frameless bounds and monitor anchor. Showing from this first-frame
+  // callback races that configuration and exposes the runner template box.
   return true;
 }
 
@@ -141,6 +137,19 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
 void FlutterWindow::HandleWindowAnimationMethodCall(
     const flutter::MethodCall<flutter::EncodableValue> &call,
     std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+  if (call.method_name() == "isPointerWithinWindow") {
+    POINT cursor{};
+    if (!GetCursorPos(&cursor)) {
+      result->Error("cursor_unavailable",
+                    "Could not read the current pointer position.");
+      return;
+    }
+    const HWND hit_window = WindowFromPoint(cursor);
+    const HWND root_window =
+        hit_window == nullptr ? nullptr : GetAncestor(hit_window, GA_ROOT);
+    result->Success(flutter::EncodableValue(root_window == GetHandle()));
+    return;
+  }
   if (call.method_name() == "configureSurfaceWindow") {
     CancelWindowAnimation();
     const auto window = GetHandle();
@@ -151,10 +160,13 @@ void FlutterWindow::HandleWindowAnimationMethodCall(
                     "Could not read the Zommi window style.");
       return;
     }
+    // Keep the native system/minimize capabilities even though the caption is
+    // custom drawn. Windows uses these styles for taskbar click toggling, and
+    // window_manager uses SC_MOVE to drag a frameless surface.
     const LONG_PTR surface_style =
-        (style & ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX |
-                   WS_MAXIMIZEBOX | WS_SYSMENU)) |
-        WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+        (style & ~(WS_CAPTION | WS_THICKFRAME | WS_MAXIMIZEBOX)) |
+        WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPCHILDREN |
+        WS_CLIPSIBLINGS;
     SetLastError(ERROR_SUCCESS);
     if (SetWindowLongPtr(window, GWL_STYLE, surface_style) == 0 &&
         GetLastError() != ERROR_SUCCESS) {

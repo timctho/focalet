@@ -11,6 +11,7 @@ abstract interface class CoreBridge {
 
   Future<RuntimeDiscovery> discoverRuntimeTargets({
     String? lastSelectedTargetId,
+    bool force = false,
   });
 
   Future<RuntimeConnection> connectRuntime({
@@ -27,11 +28,24 @@ abstract interface class CoreBridge {
     required String runtimeTargetId,
     String? model,
     String? effort,
+    String? cwd,
+    String? profile,
   });
 
   Future<RuntimeConnection> openSession({
     required String runtimeTargetId,
     required String sessionId,
+    String? cwd,
+    String? profile,
+  });
+
+  Future<RuntimeConnection> configureSession({
+    required String runtimeTargetId,
+    required String sessionId,
+    String? cwd,
+    String? profile,
+    String? model,
+    String? effort,
   });
 
   Future<Map<String, Object?>> readSession({
@@ -48,6 +62,8 @@ abstract interface class CoreBridge {
     String? clientOperationId,
     String? model,
     String? effort,
+    String? cwd,
+    String? profile,
   });
 
   Future<void> interruptTurn({
@@ -328,9 +344,11 @@ final class ProcessCoreBridge
   @override
   Future<RuntimeDiscovery> discoverRuntimeTargets({
     String? lastSelectedTargetId,
+    bool force = false,
   }) async {
     final result = await _request('runtime.discover', <String, Object?>{
       'lastSelectedTargetId': ?lastSelectedTargetId,
+      'force': force,
     });
     final targets = (result['targets'] as List<Object?>? ?? const [])
         .map(_map)
@@ -402,11 +420,15 @@ final class ProcessCoreBridge
     required String runtimeTargetId,
     String? model,
     String? effort,
+    String? cwd,
+    String? profile,
   }) async {
     final result = await _request('session.create', <String, Object?>{
       'runtimeTargetId': runtimeTargetId,
       'model': ?model,
       'effort': ?effort,
+      'cwd': ?cwd,
+      'profile': ?profile,
     });
     return RuntimeConnection.fromJson(result);
   }
@@ -415,10 +437,34 @@ final class ProcessCoreBridge
   Future<RuntimeConnection> openSession({
     required String runtimeTargetId,
     required String sessionId,
+    String? cwd,
+    String? profile,
   }) async {
     final result = await _request('session.open', <String, Object?>{
       'runtimeTargetId': runtimeTargetId,
       'sessionId': sessionId,
+      'cwd': ?cwd,
+      'profile': ?profile,
+    });
+    return RuntimeConnection.fromJson(result);
+  }
+
+  @override
+  Future<RuntimeConnection> configureSession({
+    required String runtimeTargetId,
+    required String sessionId,
+    String? cwd,
+    String? profile,
+    String? model,
+    String? effort,
+  }) async {
+    final result = await _request('session.configure', <String, Object?>{
+      'runtimeTargetId': runtimeTargetId,
+      'sessionId': sessionId,
+      'cwd': ?cwd,
+      'profile': ?profile,
+      'model': ?model,
+      'effort': ?effort,
     });
     return RuntimeConnection.fromJson(result);
   }
@@ -442,6 +488,8 @@ final class ProcessCoreBridge
     String? clientOperationId,
     String? model,
     String? effort,
+    String? cwd,
+    String? profile,
   }) async {
     final result = await _request('turn.start', <String, Object?>{
       'runtimeTargetId': runtimeTargetId,
@@ -452,6 +500,8 @@ final class ProcessCoreBridge
       'clientOperationId': ?clientOperationId,
       'model': ?model,
       'effort': ?effort,
+      'cwd': ?cwd,
+      'profile': ?profile,
     });
     return TurnReceipt.fromJson(result);
   }
