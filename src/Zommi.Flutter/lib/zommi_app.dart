@@ -847,37 +847,30 @@ class _ComposerAttachmentMenuSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
+    return ZommiOverlayPanelSurface(
       key: const ValueKey('composer-attachment-menu-surface'),
-      color: const Color(0xfaf7f9fd),
-      elevation: 18,
-      borderRadius: BorderRadius.circular(18),
-      clipBehavior: Clip.antiAlias,
-      child: SizedBox(
-        width: 286,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 7),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _ComposerAttachmentMenuItem(
-                key: const ValueKey('capture-pointer-context'),
-                icon: Icons.ads_click_rounded,
-                label: 'Click to capture context',
-                shortcut: 'Alt+A',
-                onTap: () =>
-                    onSelected(_ComposerAttachmentAction.pointerContext),
-              ),
-              _ComposerAttachmentMenuItem(
-                key: const ValueKey('select-image-context'),
-                icon: Icons.crop_free_rounded,
-                label: 'Select image',
-                shortcut: 'Alt+Shift+A',
-                enabled: imageEnabled,
-                onTap: () => onSelected(_ComposerAttachmentAction.image),
-              ),
-            ],
-          ),
+      width: 286,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 7),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _ComposerAttachmentMenuItem(
+              key: const ValueKey('capture-pointer-context'),
+              icon: Icons.ads_click_rounded,
+              label: 'Click to capture context',
+              shortcut: 'Alt+A',
+              onTap: () => onSelected(_ComposerAttachmentAction.pointerContext),
+            ),
+            _ComposerAttachmentMenuItem(
+              key: const ValueKey('select-image-context'),
+              icon: Icons.crop_free_rounded,
+              label: 'Select image',
+              shortcut: 'Alt+Shift+A',
+              enabled: imageEnabled,
+              onTap: () => onSelected(_ComposerAttachmentAction.image),
+            ),
+          ],
         ),
       ),
     );

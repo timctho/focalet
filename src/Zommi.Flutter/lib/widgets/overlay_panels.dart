@@ -8,6 +8,37 @@ import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 import 'package:zommi_flutter/widgets/content_views.dart';
 
+const Color zommiOverlayPanelColor = Color(0xfaf7f9fd);
+const Color zommiOverlayPanelShadowColor = Color(0x260d172a);
+const double zommiOverlayPanelRadius = 18;
+const double zommiOverlayPanelElevation = 18;
+
+class ZommiOverlayPanelSurface extends StatelessWidget {
+  const ZommiOverlayPanelSurface({
+    required this.width,
+    required this.child,
+    this.height,
+    super.key,
+  });
+
+  final double width;
+  final double? height;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: zommiOverlayPanelColor,
+      surfaceTintColor: Colors.transparent,
+      shadowColor: zommiOverlayPanelShadowColor,
+      elevation: zommiOverlayPanelElevation,
+      borderRadius: BorderRadius.circular(zommiOverlayPanelRadius),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(width: width, height: height, child: child),
+    );
+  }
+}
+
 class SessionSidebar extends StatelessWidget {
   const SessionSidebar({
     required this.controller,
@@ -769,7 +800,6 @@ class _SessionSettingsPanelState extends State<SessionSettingsPanel> {
       child: SizedBox(
         key: const ValueKey('session-settings-panel'),
         width: detail == null ? 286 : 390,
-        height: detail == null ? null : 390,
         child: AnimatedSwitcher(
           duration: const Duration(milliseconds: 190),
           switchInCurve: Curves.easeOutCubic,
@@ -806,78 +836,72 @@ class _SettingsOverview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: const Color(0xfaf7f9fd),
-      elevation: 18,
-      borderRadius: BorderRadius.circular(18),
-      clipBehavior: Clip.antiAlias,
-      child: SizedBox(
-        width: 286,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(10, 14, 10, 10),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 8),
-                child: Text(
-                  'Session settings',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+    return ZommiOverlayPanelSurface(
+      width: 286,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 14, 10, 10),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 8),
+              child: Text(
+                'Session settings',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Text(
+                'Saved separately for this chat',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  color: Colors.blueGrey.shade500,
                 ),
               ),
-              const SizedBox(height: 4),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Text(
-                  'Saved separately for this chat',
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    color: Colors.blueGrey.shade500,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              _SettingsRow(
-                key: const ValueKey('settings-workspace'),
-                icon: Icons.folder_outlined,
-                label: 'Workspace',
-                value: controller.workspaceSummary,
-                selected: selected == _SessionSettingsPage.workspace,
-                onTap: () => onSelected(_SessionSettingsPage.workspace),
-              ),
+            ),
+            const SizedBox(height: 12),
+            _SettingsRow(
+              key: const ValueKey('settings-workspace'),
+              icon: Icons.folder_outlined,
+              label: 'Workspace',
+              value: controller.workspaceSummary,
+              selected: selected == _SessionSettingsPage.workspace,
+              onTap: () => onSelected(_SessionSettingsPage.workspace),
+            ),
+            const SizedBox(height: 5),
+            _SettingsRow(
+              key: const ValueKey('settings-model'),
+              icon: Icons.auto_awesome_outlined,
+              label: 'Model / reasoning',
+              value: controller.modelSummary,
+              selected: selected == _SessionSettingsPage.model,
+              enabled: controller.modelSelectionSupported,
+              onTap: () => onSelected(_SessionSettingsPage.model),
+            ),
+            if (controller.profileSelectionSupported) ...[
               const SizedBox(height: 5),
               _SettingsRow(
-                key: const ValueKey('settings-model'),
-                icon: Icons.auto_awesome_outlined,
-                label: 'Model / reasoning',
-                value: controller.modelSummary,
-                selected: selected == _SessionSettingsPage.model,
-                enabled: controller.modelSelectionSupported,
-                onTap: () => onSelected(_SessionSettingsPage.model),
+                key: const ValueKey('settings-profile'),
+                icon: Icons.person_outline_rounded,
+                label: 'Hermes profile',
+                value: controller.profileSummary,
+                selected: selected == _SessionSettingsPage.profile,
+                onTap: () => onSelected(_SessionSettingsPage.profile),
               ),
-              if (controller.profileSelectionSupported) ...[
-                const SizedBox(height: 5),
-                _SettingsRow(
-                  key: const ValueKey('settings-profile'),
-                  icon: Icons.person_outline_rounded,
-                  label: 'Hermes profile',
-                  value: controller.profileSummary,
-                  selected: selected == _SessionSettingsPage.profile,
-                  onTap: () => onSelected(_SessionSettingsPage.profile),
-                ),
-              ],
-              if (controller.sessionSettingsBusy)
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                  child: LinearProgressIndicator(
-                    key: ValueKey('settings-loading'),
-                    minHeight: 3,
-                    borderRadius: BorderRadius.all(Radius.circular(99)),
-                  ),
-                ),
             ],
-          ),
+            if (controller.sessionSettingsBusy)
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                child: LinearProgressIndicator(
+                  key: ValueKey('settings-loading'),
+                  minHeight: 3,
+                  borderRadius: BorderRadius.all(Radius.circular(99)),
+                ),
+              ),
+          ],
         ),
       ),
     );
@@ -898,108 +922,102 @@ class AppSettingsPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
+    return ZommiOverlayPanelSurface(
       key: const ValueKey('app-settings-panel'),
-      color: const Color(0xfaf7f9fd),
-      elevation: 18,
-      borderRadius: BorderRadius.circular(18),
-      clipBehavior: Clip.antiAlias,
-      child: SizedBox(
-        width: 310,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text(
-                'App settings',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+      width: 310,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'App settings',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'Chat message size',
+              style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 7),
+            SegmentedButton<double>(
+              key: const ValueKey('chat-font-size-control'),
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(value: 12, label: Text('Small')),
+                ButtonSegment(value: 13, label: Text('Default')),
+                ButtonSegment(value: 14, label: Text('Large')),
+                ButtonSegment(value: 15, label: Text('XL')),
+              ],
+              selected: {preferences.chatFontSize},
+              onSelectionChanged: (selection) => onChanged(
+                preferences.copyWith(chatFontSize: selection.single),
               ),
-              const SizedBox(height: 14),
-              const Text(
-                'Chat message size',
-                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+              style: const ButtonStyle(
+                visualDensity: VisualDensity(horizontal: -3, vertical: -3),
+                textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 10)),
               ),
-              const SizedBox(height: 7),
-              SegmentedButton<double>(
-                key: const ValueKey('chat-font-size-control'),
-                showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment(value: 11, label: Text('Small')),
-                  ButtonSegment(value: 12, label: Text('Default')),
-                  ButtonSegment(value: 13, label: Text('Large')),
-                  ButtonSegment(value: 14, label: Text('XL')),
-                ],
-                selected: {preferences.chatFontSize},
-                onSelectionChanged: (selection) => onChanged(
-                  preferences.copyWith(chatFontSize: selection.single),
-                ),
-                style: const ButtonStyle(
-                  visualDensity: VisualDensity(horizontal: -3, vertical: -3),
-                  textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 10)),
-                ),
-              ),
-              const SizedBox(height: 14),
-              const Text(
-                'Theme color',
-                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 7),
-              Row(
-                key: const ValueKey('theme-color-control'),
-                children: [
-                  for (final color in ZommiThemeColor.values) ...[
-                    if (color != ZommiThemeColor.values.first)
-                      const SizedBox(width: 7),
-                    Expanded(
-                      child: _ThemeColorChoice(
-                        color: color,
-                        selected: preferences.themeColor == color,
-                        onTap: () =>
-                            onChanged(preferences.copyWith(themeColor: color)),
-                      ),
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'Theme color',
+              style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 7),
+            Row(
+              key: const ValueKey('theme-color-control'),
+              children: [
+                for (final color in ZommiThemeColor.values) ...[
+                  if (color != ZommiThemeColor.values.first)
+                    const SizedBox(width: 7),
+                  Expanded(
+                    child: _ThemeColorChoice(
+                      color: color,
+                      selected: preferences.themeColor == color,
+                      onTap: () =>
+                          onChanged(preferences.copyWith(themeColor: color)),
                     ),
-                  ],
-                ],
-              ),
-              const SizedBox(height: 14),
-              const Text(
-                'Window size',
-                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 7),
-              SegmentedButton<bool>(
-                key: const ValueKey('window-size-control'),
-                showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment(
-                    value: false,
-                    icon: Icon(Icons.crop_portrait_rounded, size: 15),
-                    label: Text('Standard'),
-                  ),
-                  ButtonSegment(
-                    value: true,
-                    icon: Icon(Icons.open_in_full_rounded, size: 15),
-                    label: Text('Wide'),
                   ),
                 ],
-                selected: {controller.largePanel},
-                onSelectionChanged: (selection) {
-                  if (selection.single != controller.largePanel) {
-                    onChanged(
-                      preferences.copyWith(largeWindow: selection.single),
-                    );
-                    unawaited(controller.toggleLargePanel());
-                  }
-                },
-                style: const ButtonStyle(
-                  visualDensity: VisualDensity.compact,
-                  textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 10.5)),
+              ],
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'Window size',
+              style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 7),
+            SegmentedButton<bool>(
+              key: const ValueKey('window-size-control'),
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(
+                  value: false,
+                  icon: Icon(Icons.crop_portrait_rounded, size: 15),
+                  label: Text('Standard'),
                 ),
+                ButtonSegment(
+                  value: true,
+                  icon: Icon(Icons.open_in_full_rounded, size: 15),
+                  label: Text('Wide'),
+                ),
+              ],
+              selected: {controller.largePanel},
+              onSelectionChanged: (selection) {
+                if (selection.single != controller.largePanel) {
+                  onChanged(
+                    preferences.copyWith(largeWindow: selection.single),
+                  );
+                  unawaited(controller.toggleLargePanel());
+                }
+              },
+              style: const ButtonStyle(
+                visualDensity: VisualDensity.compact,
+                textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 10.5)),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -1319,51 +1337,56 @@ class _SettingsDetailShell extends StatelessWidget {
     required this.title,
     required this.onBack,
     required this.child,
+    this.height = 390,
   });
 
   final String title;
   final VoidCallback onBack;
   final Widget child;
+  final double height;
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: const Color(0xfaf7f9fd),
-      elevation: 18,
-      borderRadius: BorderRadius.circular(18),
-      clipBehavior: Clip.antiAlias,
-      child: SizedBox(
-        width: 390,
-        height: 390,
-        child: Column(
-          children: [
-            SizedBox(
-              height: 48,
-              child: Row(
-                children: [
-                  IconButton(
-                    key: const ValueKey('settings-back'),
-                    tooltip: 'Back to session settings',
-                    onPressed: onBack,
-                    icon: const Icon(Icons.arrow_back_rounded, size: 17),
+    return ZommiOverlayPanelSurface(
+      width: 390,
+      height: height,
+      child: Column(
+        children: [
+          SizedBox(
+            height: 48,
+            child: Row(
+              children: [
+                IconButton(
+                  key: const ValueKey('settings-back'),
+                  tooltip: 'Back to session settings',
+                  onPressed: onBack,
+                  icon: const Icon(Icons.arrow_back_rounded, size: 17),
+                ),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
                   ),
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-            const Divider(height: 1),
-            child,
-          ],
-        ),
+          ),
+          const Divider(height: 1),
+          child,
+        ],
       ),
     );
   }
+}
+
+double modelSettingsPanelHeight(
+  int optionCount, {
+  required bool showReasoning,
+}) {
+  final visibleRows = optionCount.clamp(1, 5);
+  final height = 110 + (visibleRows * 48) + (showReasoning ? 72 : 12);
+  return height.clamp(190, 390).toDouble();
 }
 
 class ModelPanel extends StatefulWidget {
@@ -1400,6 +1423,10 @@ class _ModelPanelState extends State<ModelPanel> {
     return _SettingsDetailShell(
       title: 'Model / reasoning',
       onBack: widget.onBack,
+      height: modelSettingsPanelHeight(
+        models.length,
+        showReasoning: widget.controller.selectedModelEfforts.isNotEmpty,
+      ),
       child: Expanded(
         child: Column(
           children: [

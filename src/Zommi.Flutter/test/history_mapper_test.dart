@@ -113,13 +113,21 @@ void main() {
     );
   });
 
-  test('canonical reasoning and commentary share one thinking section', () {
+  test('thinking and tools preserve their chronological timeline', () {
     final blocks = normalizeTranscriptBlocks([
       TranscriptBlock(
         id: 'commentary',
         kind: TranscriptKind.thinking,
         title: 'Thinking',
         text: 'Reading context',
+        lifecycle: TranscriptLifecycle.completed,
+        expanded: false,
+      ),
+      TranscriptBlock(
+        id: 'tool-1',
+        kind: TranscriptKind.tool,
+        title: 'Command',
+        text: 'rg context',
         lifecycle: TranscriptLifecycle.completed,
         expanded: false,
       ),
@@ -132,21 +140,27 @@ void main() {
         expanded: false,
       ),
       TranscriptBlock(
-        id: 'tool',
+        id: 'tool-2',
         kind: TranscriptKind.tool,
-        title: 'Command',
-        text: 'rg context',
+        title: 'Read',
+        text: 'README.md',
         lifecycle: TranscriptLifecycle.completed,
         expanded: false,
       ),
     ]);
 
-    expect(
-      blocks.where((block) => block.kind == TranscriptKind.thinking),
-      hasLength(1),
-    );
-    expect(blocks.first.text, 'Reading context\nComparing context');
-    expect(blocks[1].kind, TranscriptKind.tool);
+    expect(blocks.map((block) => block.kind), const [
+      TranscriptKind.thinking,
+      TranscriptKind.tool,
+      TranscriptKind.thinking,
+      TranscriptKind.tool,
+    ]);
+    expect(blocks.map((block) => block.text), const [
+      'Reading context',
+      'rg context',
+      'Comparing context',
+      'README.md',
+    ]);
   });
 
   test('artifact HTML strips executable and navigation surfaces', () {

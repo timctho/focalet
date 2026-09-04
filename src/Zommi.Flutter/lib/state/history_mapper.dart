@@ -394,69 +394,75 @@ String mergeDistinctTextSections(Iterable<String> sections) {
   return values.join('\n');
 }
 
+bool transcriptTextSnapshotsOverlap(String first, String second) {
+  final left = first.trim();
+  final right = second.trim();
+  if (left.isEmpty || right.isEmpty) return false;
+  return left == right || left.startsWith(right) || right.startsWith(left);
+}
+
 List<TranscriptBlock> normalizeTranscriptBlocks(
   Iterable<TranscriptBlock> source,
 ) {
-  final blocks = source.toList(growable: false);
-  final thinkingBlocks = blocks
-      .where((block) => block.kind == TranscriptKind.thinking)
-      .toList(growable: false);
-  final toolBlocks = blocks
-      .where((block) => block.kind == TranscriptKind.tool)
-      .toList(growable: false);
-  if (thinkingBlocks.isEmpty && toolBlocks.isEmpty) {
-    return List<TranscriptBlock>.of(blocks);
-  }
-
-  final activityBlocks = [...thinkingBlocks, ...toolBlocks];
-  final artifacts = <ArtifactPreview>[];
-  for (final block in thinkingBlocks) {
-    for (final artifact in block.artifacts) {
-      if (!artifacts.any(
-        (existing) => existing.identity == artifact.identity,
-      )) {
-        artifacts.add(artifact);
-      }
-    }
-  }
-  final thinking = thinkingBlocks.length == 1
-      ? thinkingBlocks.single
-      : TranscriptBlock(
-          id: 'turn-thinking',
-          kind: TranscriptKind.thinking,
-          title: 'Thinking',
-          text: mergeDistinctTextSections(
-            thinkingBlocks.map((block) => block.text),
-          ),
-          lifecycle: activityBlocks.every((block) => block.completed)
-              ? TranscriptLifecycle.completed
-              : TranscriptLifecycle.delta,
-          status: thinkingBlocks.reversed
-              .map((block) => block.status)
-              .whereType<String>()
-              .firstOrNull,
-          expanded: thinkingBlocks.any((block) => block.expanded),
-          artifacts: artifacts,
-        );
-
   final result = <TranscriptBlock>[];
-  var insertedThinking = false;
-  for (final block in blocks) {
-    if (block.kind == TranscriptKind.thinking) {
-      if (!insertedThinking) {
-        result.add(thinking);
-        insertedThinking = true;
-      }
+  for (final block in source) {
+    final duplicateIndex = result.indexWhere(
+      (existing) => existing.kind == block.kind && existing.id == block.id,
+    );
+    if (duplicateIndex >= 0) {
+      result[duplicateIndex] = mergeTranscriptBlocks(
+        result[duplicateIndex],
+        block,
+      );
       continue;
     }
-    if (block.kind == TranscriptKind.tool && !insertedThinking) {
-      result.add(thinking);
-      insertedThinking = true;
+    if (block.kind == TranscriptKind.thinking &&
+        result.isNotEmpty &&
+        result.last.kind == TranscriptKind.thinking &&
+        result.last.text.trim().isNotEmpty &&
+        result.last.text.trim() == block.text.trim()) {
+      result[result.length - 1] = mergeTranscriptBlocks(result.last, block);
+      continue;
     }
     result.add(block);
   }
-  if (!insertedThinking) result.insert(0, thinking);
   return result;
+}
+
+TranscriptBlock mergeTranscriptBlocks(
+  TranscriptBlock primary,
+  TranscriptBlock secondary,
+) {
+  final text = transcriptTextSnapshotsOverlap(primary.text, secondary.text)
+      ? (secondary.text.trim().length >= primary.text.trim().length
+            ? secondary.text
+            : primary.text)
+      : mergeActivityText(
+          primary.text,
+          secondary.text,
+          primary.kind,
+          secondary.lifecycle,
+        );
+  final artifacts = List<ArtifactPreview>.of(primary.artifacts);
+  for (final artifact in secondary.artifacts) {
+    if (!artifacts.any((existing) => existing.identity == artifact.identity)) {
+      artifacts.add(artifact);
+    }
+  }
+  return TranscriptBlock(
+    id: primary.id,
+    sourceId: primary.sourceId,
+    kind: primary.kind,
+    title: primary.title.isEmpty ? secondary.title : primary.title,
+    text: text,
+    lifecycle: primary.completed || secondary.completed
+        ? TranscriptLifecycle.completed
+        : secondary.lifecycle,
+    status: secondary.status ?? primary.status,
+    preview: primary.preview.isEmpty ? secondary.preview : primary.preview,
+    expanded: primary.expanded,
+    artifacts: artifacts,
+  );
 }
 
 String _userItemText(Map<String, Object?> item) {

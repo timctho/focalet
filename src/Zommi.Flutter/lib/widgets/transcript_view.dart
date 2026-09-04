@@ -251,13 +251,18 @@ class ConversationTurnView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final blocks = distinctTranscriptBlocks(turn.blocks);
-    final thinking = blocks.cast<TranscriptBlock?>().firstWhere(
-      (block) => block?.kind == TranscriptKind.thinking,
-      orElse: () => null,
-    );
-    final tools = blocks
-        .where((block) => block.kind == TranscriptKind.tool)
+    final activities = blocks
+        .where(
+          (block) =>
+              block.kind == TranscriptKind.thinking ||
+              block.kind == TranscriptKind.tool,
+        )
         .toList(growable: false);
+    final firstActivityIndex = blocks.indexWhere(
+      (block) =>
+          block.kind == TranscriptKind.thinking ||
+          block.kind == TranscriptKind.tool,
+    );
     return Semantics(
       container: true,
       label: 'Conversation turn ${turn.number}',
@@ -329,37 +334,37 @@ class ConversationTurnView extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
-            for (final block in blocks)
-              if (block.kind != TranscriptKind.tool &&
-                  (block.kind != TranscriptKind.thinking ||
-                      identical(block, thinking)))
+            for (var index = 0; index < blocks.length; index++)
+              if (blocks[index].kind != TranscriptKind.tool &&
+                  blocks[index].kind != TranscriptKind.thinking)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 9),
-                  child: block.kind == TranscriptKind.assistant
+                  child: blocks[index].kind == TranscriptKind.assistant
                       ? AssistantBlockView(
-                          block: block,
+                          block: blocks[index],
                           width: responsiveAssistantMessageBoxWidth(
                             viewportWidth,
                           ),
                           runtimeName: runtimeName,
                           controller: controller,
                         )
-                      : block.kind == TranscriptKind.thinking
-                      ? ThinkingActivityGroup(
-                          block: block,
-                          tools: tools,
-                          width: responsiveAssistantMessageBoxWidth(
-                            viewportWidth,
-                          ),
-                          controller: controller,
-                        )
                       : ActivityBlockView(
-                          block: block,
+                          block: blocks[index],
                           width: responsiveAssistantMessageBoxWidth(
                             viewportWidth,
                           ),
                           controller: controller,
                         ),
+                )
+              else if (index == firstActivityIndex)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 9),
+                  child: ThinkingActivityGroup(
+                    turn: turn,
+                    activities: activities,
+                    width: responsiveAssistantMessageBoxWidth(viewportWidth),
+                    controller: controller,
+                  ),
                 ),
           ],
         ),
@@ -395,15 +400,24 @@ List<TranscriptBlock> distinctTranscriptBlocks(
 ) {
   final result = <TranscriptBlock>[];
   for (final block in normalizeTranscriptBlocks(blocks)) {
-    final text = block.text.trim();
-    final duplicate =
-        block.kind == TranscriptKind.assistant &&
-        text.isNotEmpty &&
-        result.any(
-          (existing) =>
-              existing.kind == block.kind && existing.text.trim() == text,
-        );
-    if (!duplicate) result.add(block);
+    final duplicateIndex = block.kind == TranscriptKind.assistant
+        ? result.indexWhere(
+            (existing) =>
+                existing.kind == TranscriptKind.assistant &&
+                transcriptTextSnapshotsOverlap(existing.text, block.text),
+          )
+        : -1;
+    if (duplicateIndex < 0) {
+      result.add(block);
+    } else if (result[duplicateIndex].text.trim().length >=
+        block.text.trim().length) {
+      continue;
+    } else {
+      result[duplicateIndex] = mergeTranscriptBlocks(
+        result[duplicateIndex],
+        block,
+      );
+    }
   }
   return result;
 }
@@ -449,21 +463,24 @@ class _ExpandableActivityBody extends StatelessWidget {
 
 class ThinkingActivityGroup extends StatelessWidget {
   const ThinkingActivityGroup({
-    required this.block,
-    required this.tools,
+    required this.turn,
+    required this.activities,
     required this.width,
     required this.controller,
     super.key,
   });
 
-  final TranscriptBlock block;
-  final List<TranscriptBlock> tools;
+  final ConversationTurn turn;
+  final List<TranscriptBlock> activities;
   final double width;
   final ZommiController controller;
 
   @override
   Widget build(BuildContext context) {
-    final completed = block.completed && tools.every((tool) => tool.completed);
+    final completed = activities.every((activity) => activity.completed);
+    final toolCount = activities
+        .where((activity) => activity.kind == TranscriptKind.tool)
+        .length;
     return Semantics(
       container: true,
       label: 'Thinking ${completed ? 'completed' : 'in progress'}',
@@ -472,7 +489,7 @@ class ThinkingActivityGroup extends StatelessWidget {
         child: ConstrainedBox(
           constraints: BoxConstraints.tightFor(width: width),
           child: Container(
-            key: ValueKey('activity-${block.id}'),
+            key: ValueKey('activity-section-${turn.id}'),
             decoration: BoxDecoration(
               color: const Color(0x80ffffff),
               borderRadius: BorderRadius.circular(14),
@@ -482,10 +499,12 @@ class ThinkingActivityGroup extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 InkWell(
-                  key: const ValueKey('thinking-toggle'),
+                  key: ValueKey('thinking-toggle-${turn.id}'),
                   borderRadius: BorderRadius.circular(14),
-                  onTap: () =>
-                      controller.setBlockExpanded(block, !block.expanded),
+                  onTap: () => controller.setTurnActivityExpanded(
+                    turn,
+                    !turn.activityExpanded,
+                  ),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
@@ -508,14 +527,14 @@ class ThinkingActivityGroup extends StatelessWidget {
                             ),
                           ),
                         ),
-                        if (tools.isNotEmpty)
+                        if (toolCount > 0)
                           Text(
-                            '${tools.length} tool${tools.length == 1 ? '' : 's'}',
+                            '$toolCount tool${toolCount == 1 ? '' : 's'}',
                             key: const ValueKey('thinking-tool-count'),
                             style: chatTextStyleOf(context)
                                 .copyWith(color: Color(0xff747988)),
                           ),
-                        if (tools.isNotEmpty) const SizedBox(width: 8),
+                        if (toolCount > 0) const SizedBox(width: 8),
                         if (!completed)
                           const SizedBox.square(
                             dimension: 13,
@@ -529,7 +548,7 @@ class ThinkingActivityGroup extends StatelessWidget {
                           ),
                         const SizedBox(width: 5),
                         Icon(
-                          block.expanded
+                          turn.activityExpanded
                               ? Icons.expand_less_rounded
                               : Icons.expand_more_rounded,
                           size: 17,
@@ -539,31 +558,25 @@ class ThinkingActivityGroup extends StatelessWidget {
                   ),
                 ),
                 _ExpandableActivityBody(
-                  key: const ValueKey('thinking-fold'),
-                  expanded: block.expanded,
+                  key: ValueKey('thinking-fold-${turn.id}'),
+                  expanded: turn.activityExpanded,
                   duration: const Duration(milliseconds: 150),
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        if (block.text.isNotEmpty)
-                          CopyableMarkdown(
-                            text: block.text,
-                            compact: true,
-                            onCopy: controller.copyText,
-                            onOpenLink: controller.openExternalLink,
-                          ),
-                        for (final artifact in block.artifacts)
-                          ArtifactCard(
-                            artifact: artifact,
-                            controller: controller,
-                          ),
-                        for (final tool in tools)
-                          _ToolActivitySubItem(
-                            block: tool,
-                            controller: controller,
-                          ),
+                        for (final activity in activities)
+                          if (activity.kind == TranscriptKind.thinking)
+                            _ThinkingActivitySubItem(
+                              block: activity,
+                              controller: controller,
+                            )
+                          else
+                            _ToolActivitySubItem(
+                              block: activity,
+                              controller: controller,
+                            ),
                       ],
                     ),
                   ),
@@ -572,6 +585,76 @@ class ThinkingActivityGroup extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _ThinkingActivitySubItem extends StatelessWidget {
+  const _ThinkingActivitySubItem({
+    required this.block,
+    required this.controller,
+  });
+
+  final TranscriptBlock block;
+  final ZommiController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: ValueKey('activity-${block.id}'),
+      margin: const EdgeInsets.only(top: 7),
+      padding: const EdgeInsets.fromLTRB(9, 7, 9, 9),
+      decoration: BoxDecoration(
+        color: const Color(0x52f3f1fb),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.auto_awesome_rounded,
+                size: 14,
+                color: Color(0xff746b99),
+              ),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  block.title,
+                  overflow: TextOverflow.ellipsis,
+                  style: chatTextStyleOf(context).copyWith(
+                    color: const Color(0xff4b5060),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              if (!block.completed)
+                const SizedBox.square(
+                  dimension: 11,
+                  child: CircularProgressIndicator(strokeWidth: 1.4),
+                )
+              else
+                const Icon(
+                  Icons.check_rounded,
+                  size: 14,
+                  color: Color(0xff659071),
+                ),
+            ],
+          ),
+          if (block.text.isNotEmpty) ...[
+            const SizedBox(height: 5),
+            CopyableMarkdown(
+              text: block.text,
+              compact: true,
+              onCopy: controller.copyText,
+              onOpenLink: controller.openExternalLink,
+            ),
+          ],
+          for (final artifact in block.artifacts)
+            ArtifactCard(artifact: artifact, controller: controller),
+        ],
       ),
     );
   }
@@ -689,27 +772,30 @@ class AssistantBlockView extends StatelessWidget {
       label: '$runtimeName response',
       child: Align(
         alignment: Alignment.centerLeft,
-        child: Container(
-          key: ValueKey('assistant-${block.id}'),
-          constraints: BoxConstraints.tightFor(width: width),
-          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 5),
-          decoration: BoxDecoration(
-            color: const Color(0xb3ffffff),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: const Color(0x99ffffff)),
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              CopyableMarkdown(
-                text: block.text,
-                onCopy: controller.copyText,
-                onOpenLink: controller.openExternalLink,
-              ),
-              for (final artifact in block.artifacts)
-                ArtifactCard(artifact: artifact, controller: controller),
-            ],
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: width),
+          child: Container(
+            key: ValueKey('assistant-${block.id}'),
+            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 5),
+            decoration: BoxDecoration(
+              color: const Color(0xb3ffffff),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: const Color(0x99ffffff)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                CopyableMarkdown(
+                  text: block.text,
+                  onCopy: controller.copyText,
+                  onOpenLink: controller.openExternalLink,
+                ),
+                for (final artifact in block.artifacts)
+                  ArtifactCard(artifact: artifact, controller: controller),
+              ],
+            ),
           ),
         ),
       ),

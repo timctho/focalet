@@ -24,7 +24,7 @@ enum ZommiThemeColor {
 @immutable
 final class AppPreferences {
   const AppPreferences({
-    this.chatFontSize = 12,
+    this.chatFontSize = 13,
     this.themeColor = ZommiThemeColor.violet,
     this.largeWindow = false,
   });
@@ -51,9 +51,9 @@ final class AppPreferences {
 
   static AppPreferences fromJson(Map<String, Object?> value) {
     final rawFontSize = value['chatFontSize'];
-    final fontSize = rawFontSize is num ? rawFontSize.toDouble() : 12.0;
+    final fontSize = rawFontSize is num ? rawFontSize.toDouble() : 13.0;
     return AppPreferences(
-      chatFontSize: fontSize.clamp(11, 15).toDouble(),
+      chatFontSize: fontSize.clamp(12, 15).toDouble(),
       themeColor: ZommiThemeColor.fromId(value['themeColor']?.toString()),
       largeWindow: value['largeWindow'] == true,
     );

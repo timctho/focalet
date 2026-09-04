@@ -49,13 +49,14 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
             constraints: const BoxConstraints(minHeight: 24),
             child: Align(
               alignment: Alignment.centerLeft,
+              widthFactor: 1,
               heightFactor: 1,
               child: Padding(
                 padding: const EdgeInsets.only(right: 28),
                 child: MarkdownBody(
                   data: widget.text,
                   selectable: true,
-                  fitContent: false,
+                  fitContent: true,
                   onTapLink: (_, href, _) {
                     if (href != null) unawaited(widget.onOpenLink(href));
                   },

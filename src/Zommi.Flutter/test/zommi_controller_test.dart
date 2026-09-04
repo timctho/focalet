@@ -171,6 +171,107 @@ void main() {
     },
   );
 
+  test(
+    'terminal response snapshots with a new item id coalesce once',
+    () async {
+      final core = RichFakeCore()..historyCount = 0;
+      final controller = ZommiController(
+        core: core,
+        desktop: FakeDesktopBridge(),
+      );
+      await controller.initialize();
+      await controller.submit('stream once');
+
+      core.emit(
+        _event(
+          1,
+          'item.update',
+          payload: const {
+            'kind': 'assistant',
+            'lifecycle': 'delta',
+            'text': 'Hello from',
+            'itemId': 'stream-answer',
+          },
+        ),
+      );
+      core.emit(
+        _event(
+          2,
+          'item.update',
+          payload: const {
+            'kind': 'assistant',
+            'lifecycle': 'completed',
+            'text': 'Hello from Codex',
+            'replace': true,
+            'itemId': 'terminal-answer',
+          },
+        ),
+      );
+
+      final answers = controller.turns.single.blocks.where(
+        (block) => block.kind == TranscriptKind.assistant,
+      );
+      expect(answers, hasLength(1));
+      expect(answers.single.text, 'Hello from Codex');
+      await controller.close();
+    },
+  );
+
+  test(
+    'thinking and tools append in event order without overwriting',
+    () async {
+      final core = RichFakeCore()..historyCount = 0;
+      final controller = ZommiController(
+        core: core,
+        desktop: FakeDesktopBridge(),
+      );
+      await controller.initialize();
+      await controller.submit('show the work');
+
+      final updates = [
+        ('thinking', 'turn-thinking', 'Inspecting'),
+        ('tool', 'tool-1', 'rg selected'),
+        ('thinking', 'turn-thinking', 'Comparing'),
+        ('tool', 'tool-2', 'read README'),
+      ];
+      for (var index = 0; index < updates.length; index++) {
+        final update = updates[index];
+        core.emit(
+          _event(
+            index + 1,
+            'item.update',
+            payload: {
+              'kind': update.$1,
+              'lifecycle': 'completed',
+              'text': update.$3,
+              'itemId': update.$2,
+            },
+          ),
+        );
+      }
+
+      expect(controller.turns.single.blocks.map((block) => block.kind), const [
+        TranscriptKind.thinking,
+        TranscriptKind.tool,
+        TranscriptKind.thinking,
+        TranscriptKind.tool,
+      ]);
+      expect(
+        controller.turns.single.blocks
+            .where((block) => block.kind == TranscriptKind.thinking)
+            .map((block) => block.sourceId),
+        const ['turn-thinking', 'turn-thinking'],
+      );
+      expect(controller.turns.single.blocks.map((block) => block.text), const [
+        'Inspecting',
+        'rg selected',
+        'Comparing',
+        'read README',
+      ]);
+      await controller.close();
+    },
+  );
+
   test('implicit cumulative stream frames do not duplicate text', () async {
     final core = RichFakeCore()..historyCount = 0;
     final controller = ZommiController(
@@ -475,66 +576,71 @@ void main() {
     await controller.close();
   });
 
-  test('runtime round trip consolidates canonical thinking sections', () async {
-    final core = RichFakeCore()..historyCount = 0;
-    final controller = ZommiController(
-      core: core,
-      desktop: FakeDesktopBridge(),
-    );
-    await controller.initialize();
-    await controller.submit('inspect once');
-    core.emit(
-      _event(
-        1,
-        'item.update',
-        payload: const {
-          'kind': 'thinking',
-          'lifecycle': 'delta',
-          'text': 'Reading context',
-          'itemId': 'live-thinking',
-        },
-      ),
-    );
-    core.historyBySession['runtime-codex\u0000session-1'] = {
-      'thread': {
-        'id': 'session-1',
-        'turns': [
-          {
-            'id': 'canonical-turn',
-            'items': [
-              {
-                'type': 'userMessage',
-                'content': [
-                  {'type': 'text', 'text': 'inspect once'},
-                ],
-              },
-              {
-                'id': 'commentary-1',
-                'type': 'agentMessage',
-                'phase': 'commentary',
-                'text': 'Reading context',
-              },
-              {
-                'id': 'reasoning-1',
-                'type': 'reasoning',
-                'summary': ['Comparing the selected page'],
-              },
-            ],
+  test(
+    'runtime round trip deduplicates replay and keeps later thinking',
+    () async {
+      final core = RichFakeCore()..historyCount = 0;
+      final controller = ZommiController(
+        core: core,
+        desktop: FakeDesktopBridge(),
+      );
+      await controller.initialize();
+      await controller.submit('inspect once');
+      core.emit(
+        _event(
+          1,
+          'item.update',
+          payload: const {
+            'kind': 'thinking',
+            'lifecycle': 'delta',
+            'text': 'Reading context',
+            'itemId': 'live-thinking',
           },
-        ],
-      },
-    };
+        ),
+      );
+      core.historyBySession['runtime-codex\u0000session-1'] = {
+        'thread': {
+          'id': 'session-1',
+          'turns': [
+            {
+              'id': 'canonical-turn',
+              'items': [
+                {
+                  'type': 'userMessage',
+                  'content': [
+                    {'type': 'text', 'text': 'inspect once'},
+                  ],
+                },
+                {
+                  'id': 'commentary-1',
+                  'type': 'agentMessage',
+                  'phase': 'commentary',
+                  'text': 'Reading context',
+                },
+                {
+                  'id': 'reasoning-1',
+                  'type': 'reasoning',
+                  'summary': ['Comparing the selected page'],
+                },
+              ],
+            },
+          ],
+        },
+      };
 
-    await controller.selectRuntime('runtime-pi');
-    await controller.selectRuntime('runtime-codex');
-    final thinking = controller.turns.last.blocks.where(
-      (block) => block.kind == TranscriptKind.thinking,
-    );
-    expect(thinking, hasLength(1));
-    expect(thinking.single.text, contains('Reading context'));
-    expect(thinking.single.text, contains('Comparing the selected page'));
-    await controller.close();
-  });
+      await controller.selectRuntime('runtime-pi');
+      await controller.selectRuntime('runtime-codex');
+      final thinking = controller.turns.last.blocks.where(
+        (block) => block.kind == TranscriptKind.thinking,
+      );
+      expect(thinking, hasLength(2));
+      expect(thinking.map((block) => block.text), const [
+        'Reading context',
+        'Comparing the selected page',
+      ]);
+      await controller.close();
+    },
+  );
 
   test(
     'running transcript survives leaving and reopening its session',

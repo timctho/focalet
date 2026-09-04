@@ -11,6 +11,7 @@ import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 import 'package:zommi_flutter/widgets/content_views.dart';
 import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
+import 'package:zommi_flutter/widgets/overlay_panels.dart';
 import 'package:zommi_flutter/widgets/transcript_view.dart';
 import 'package:zommi_flutter/zommi_app.dart';
 
@@ -380,6 +381,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('composer-attachment-menu')));
     await tester.pump();
     final menu = find.byKey(const ValueKey('composer-attachment-menu-surface'));
+    expect(tester.widget<ZommiOverlayPanelSurface>(menu).width, 286);
     final startingTop = tester.getTopLeft(menu).dy;
     await tester.pump(const Duration(milliseconds: 90));
     final movingTop = tester.getTopLeft(menu).dy;
@@ -387,6 +389,11 @@ void main() {
     final menuBounds = tester.getRect(menu);
     expect(movingTop, lessThan(startingTop));
     expect(menuBounds.bottom, lessThanOrEqualTo(composerBounds.top));
+    final menuMaterial = tester.widget<Material>(
+      find.descendant(of: menu, matching: find.byType(Material)).first,
+    );
+    expect(menuMaterial.surfaceTintColor, Colors.transparent);
+    expect(menuMaterial.shadowColor, zommiOverlayPanelShadowColor);
     expect(find.text('Click to capture context'), findsOneWidget);
     expect(find.text('Select image'), findsOneWidget);
     expect(find.text('Alt+A'), findsOneWidget);
@@ -466,6 +473,14 @@ void main() {
       );
       await tester.tap(find.byKey(const ValueKey('settings-model')));
       await tester.pumpAndSettle();
+      final modelPanel = find.byKey(const ValueKey('model-panel'));
+      final unfilteredPanelHeight = tester.getSize(modelPanel).height;
+      expect(unfilteredPanelHeight, lessThan(390));
+      final modelSurface = tester.widget<Material>(
+        find.descendant(of: modelPanel, matching: find.byType(Material)).first,
+      );
+      expect(modelSurface.surfaceTintColor, Colors.transparent);
+      expect(modelSurface.shadowColor, zommiOverlayPanelShadowColor);
       final reasoningRow = find.byKey(const ValueKey('reasoning-options-row'));
       expect(reasoningRow, findsOneWidget);
       expect(tester.getSize(reasoningRow).height, lessThan(34));
@@ -482,6 +497,10 @@ void main() {
       );
       await tester.pump();
       expect(find.text('Fixture Mini'), findsOneWidget);
+      expect(
+        tester.getSize(modelPanel).height,
+        lessThan(unfilteredPanelHeight),
+      );
       expect(
         tester.widget<Text>(find.text('Fixture Mini')).style?.fontSize,
         lessThanOrEqualTo(11.5),
@@ -840,7 +859,7 @@ void main() {
       Theme.of(tester.element(find.byType(ZommiShell)))
           .extension<ZommiVisualSettings>()
           ?.chatFontSize,
-      13,
+      14,
     );
 
     await tester.tap(find.byKey(const ValueKey('theme-color-ocean')));
@@ -866,7 +885,7 @@ void main() {
       tester
           .widgetList<MarkdownBody>(find.byType(MarkdownBody))
           .map((body) => body.styleSheet?.p?.fontSize),
-      contains(13),
+      contains(14),
     );
   });
 
@@ -910,7 +929,15 @@ void main() {
           .map((body) => body.styleSheet?.p?.fontSize)
           .whereType<double>()
           .toSet();
-      expect(bodySizes, <double>{topBarAndChatFontSize});
+      expect(bodySizes, <double>{13});
+      expect(
+        markdown.map((body) => body.styleSheet?.p?.fontWeight),
+        everyElement(FontWeight.w500),
+      );
+      expect(
+        markdown.map((body) => body.styleSheet?.p?.fontWeight),
+        isNot(contains(FontWeight.bold)),
+      );
       expect(userMessageFontSize, assistantMessageFontSize);
       expect(userMessageFontSize, topBarAndChatFontSize);
       expect(codexUiFontFamily, 'Segoe UI');
@@ -940,9 +967,7 @@ void main() {
               ),
         ),
       );
-      final assistantBox = tester.widget<Container>(
-        find.byKey(const ValueKey('assistant-answer')),
-      );
+      final assistantBox = find.byKey(const ValueKey('assistant-answer'));
       expect(userMessageBoxWidth, 520 * 0.8);
       expect(assistantMessageBoxWidth, 620 * 0.8);
       expect(
@@ -950,8 +975,8 @@ void main() {
         responsiveUserMessageBoxWidth(1000),
       );
       expect(
-        assistantBox.constraints?.maxWidth,
-        responsiveAssistantMessageBoxWidth(1000),
+        tester.getSize(assistantBox).width,
+        lessThan(responsiveAssistantMessageBoxWidth(1000)),
       );
       const linkUrl = 'https://example.com/item?q=1';
       final link = find.byKey(const ValueKey('markdown-link-$linkUrl'));
@@ -1023,12 +1048,14 @@ void main() {
       ),
     ];
     final distinct = distinctTranscriptBlocks(blocks);
-    expect(distinct.where((block) => block.kind == TranscriptKind.assistant), [
-      blocks.first,
-    ]);
+    expect(
+      distinct.where((block) => block.kind == TranscriptKind.assistant),
+      hasLength(1),
+    );
+    expect(distinct.first.text, 'same answer');
     expect(
       distinct.where((block) => block.kind == TranscriptKind.thinking),
-      hasLength(1),
+      isEmpty,
     );
     expect(distinct.last, blocks.last);
   });
@@ -1237,11 +1264,54 @@ void main() {
           'item.update',
           turnId: 'session-1-live-turn',
           payload: const {
+            'kind': 'thinking',
+            'lifecycle': 'completed',
+            'title': 'Thinking',
+            'text': 'Comparing the selected rows.',
+            'itemId': 'thinking-c',
+          },
+        ),
+      );
+      core.emit(
+        _event(
+          6,
+          'item.update',
+          turnId: 'session-1-live-turn',
+          payload: const {
+            'kind': 'tool',
+            'lifecycle': 'completed',
+            'title': 'Read',
+            'text': 'README.md',
+            'itemId': 'tool-2',
+          },
+        ),
+      );
+      core.emit(
+        _event(
+          7,
+          'item.update',
+          turnId: 'session-1-live-turn',
+          payload: const {
+            'kind': 'assistant',
+            'lifecycle': 'delta',
+            'title': 'Codex',
+            'text': '## Result',
+            'itemId': 'answer-stream',
+          },
+        ),
+      );
+      core.emit(
+        _event(
+          8,
+          'item.update',
+          turnId: 'session-1-live-turn',
+          payload: const {
             'kind': 'assistant',
             'lifecycle': 'completed',
             'title': 'Codex',
             'text': '## Result\n\n- first\n- second\n\n```text\ncopy me\n```',
-            'itemId': 'answer-1',
+            'replace': true,
+            'itemId': 'answer-terminal',
             'artifacts': [
               {
                 'id': 'html-1',
@@ -1262,14 +1332,27 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 200));
 
-      final thinkingCard = find.byKey(const ValueKey('activity-turn-thinking'));
+      final thinkingCard = find.byWidgetPredicate(
+        (widget) =>
+            widget is Container &&
+            widget.key is ValueKey<String> &&
+            (widget.key! as ValueKey<String>).value.startsWith(
+              'activity-section-',
+            ),
+      );
       expect(thinkingCard, findsOneWidget);
       expect(find.byKey(const ValueKey('activity-tool-1')), findsNothing);
       expect(find.byType(AnimatedCrossFade), findsNothing);
       expect(
         find.descendant(
           of: thinkingCard,
-          matching: find.byKey(const ValueKey('thinking-fold')),
+          matching: find.byWidgetPredicate(
+            (widget) =>
+                widget.key is ValueKey<String> &&
+                (widget.key! as ValueKey<String>).value.startsWith(
+                  'thinking-fold-',
+                ),
+          ),
         ),
         findsOneWidget,
       );
@@ -1284,7 +1367,15 @@ void main() {
         matchesGoldenFile('goldens/thinking_tools_collapsed.png'),
       );
 
-      await tester.tap(find.byKey(const ValueKey('thinking-toggle')));
+      await tester.tap(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget.key is ValueKey<String> &&
+              (widget.key! as ValueKey<String>).value.startsWith(
+                'thinking-toggle-',
+              ),
+        ),
+      );
       await tester.pumpAndSettle();
 
       final toolCard = find.byKey(const ValueKey('activity-tool-1'));
@@ -1295,11 +1386,35 @@ void main() {
       );
       expect(find.text('Command · 12345678901234567890...'), findsOneWidget);
       expect(find.text('Reading the selected table.'), findsOneWidget);
+      expect(find.text('Comparing the selected rows.'), findsOneWidget);
+      final timeline = [
+        find.byKey(const ValueKey('activity-thinking-a')),
+        toolCard,
+        find.byKey(const ValueKey('activity-thinking-c')),
+        find.byKey(const ValueKey('activity-tool-2')),
+      ];
+      expect(timeline, everyElement(findsOneWidget));
+      final timelineTops = timeline
+          .map((finder) => tester.getTopLeft(finder).dy)
+          .toList(growable: false);
+      expect(timelineTops, orderedEquals([...timelineTops]..sort()));
       await expectLater(
         thinkingCard,
         matchesGoldenFile('goldens/thinking_tools_expanded.png'),
       );
-      expect(find.byKey(const ValueKey('assistant-answer-1')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('assistant-answer-stream')),
+        findsOneWidget,
+      );
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is Container &&
+              widget.key is ValueKey<String> &&
+              (widget.key! as ValueKey<String>).value.startsWith('assistant-'),
+        ),
+        findsOneWidget,
+      );
       expect(find.byKey(const ValueKey('artifact-html-1')), findsOneWidget);
       expect(
         find.byKey(const ValueKey('artifact-image-artifact-1')),
@@ -1345,7 +1460,7 @@ void main() {
 
       core.emit(
         _event(
-          6,
+          9,
           'approval.requested',
           payload: const {
             'approvalId': 'approval-1',
@@ -1380,7 +1495,7 @@ void main() {
 
       core.emit(
         _event(
-          7,
+          10,
           'question.requested',
           payload: const {
             'questionId': 'question-1',
@@ -1418,7 +1533,7 @@ void main() {
 
       core.emit(
         _event(
-          8,
+          11,
           'turn.completed',
           turnId: 'session-1-live-turn',
           payload: const {'status': 'completed'},
@@ -1543,7 +1658,9 @@ void main() {
     expect(position.pixels, closeTo(before, 0.01));
   });
 
-  testWidgets('message boxes widen with the enlarged window', (tester) async {
+  testWidgets('short message boxes stay close to their content width', (
+    tester,
+  ) async {
     await tester.binding.setSurfaceSize(normalWindowSize);
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final core = RichFakeCore()..historyCount = 1;
@@ -1554,34 +1671,23 @@ void main() {
     );
     final user = find.byKey(const ValueKey('user-message-session-1-turn-1'));
     final normalAssistantWidth = tester.getSize(assistant).width;
-    final normalUserConstraint = tester.widget<Container>(user).constraints!;
+    final normalUserWidth = tester.getSize(user).width;
 
     await tester.binding.setSurfaceSize(largeWindowSize);
     await tester.pumpAndSettle();
 
     final largeAssistantWidth = tester.getSize(assistant).width;
-    final largeUserConstraint = tester.widget<Container>(user).constraints!;
+    final largeUserWidth = tester.getSize(user).width;
     expect(
       normalAssistantWidth,
-      responsiveAssistantMessageBoxWidth(normalWindowSize.width),
+      lessThan(responsiveAssistantMessageBoxWidth(normalWindowSize.width)),
     );
     expect(
-      largeAssistantWidth,
-      responsiveAssistantMessageBoxWidth(largeWindowSize.width),
+      normalUserWidth,
+      lessThan(responsiveUserMessageBoxWidth(normalWindowSize.width)),
     );
-    expect(largeAssistantWidth, greaterThan(normalAssistantWidth));
-    expect(
-      normalUserConstraint.maxWidth,
-      responsiveUserMessageBoxWidth(normalWindowSize.width),
-    );
-    expect(
-      largeUserConstraint.maxWidth,
-      responsiveUserMessageBoxWidth(largeWindowSize.width),
-    );
-    expect(
-      largeUserConstraint.maxWidth,
-      greaterThan(normalUserConstraint.maxWidth),
-    );
+    expect(largeAssistantWidth, closeTo(normalAssistantWidth, 0.1));
+    expect(largeUserWidth, closeTo(normalUserWidth, 0.1));
   });
 
   testWidgets(
