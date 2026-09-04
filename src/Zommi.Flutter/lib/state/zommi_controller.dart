@@ -1234,6 +1234,7 @@ final class ZommiController extends ChangeNotifier {
     transitionTargetExpanded = targetExpanded;
     transitionTargetLarge = targetLarge;
     _notify();
+    var applied = false;
     try {
       final transitionClock = Stopwatch()..start();
       Future<void>? growingSurfaceChange;
@@ -1263,16 +1264,19 @@ final class ZommiController extends ChangeNotifier {
           animate: false,
         );
       }
+      applied = true;
     } on Object catch (error) {
       _setStatus('$errorLabel · $error', warning: true);
     } finally {
       if (transitionEpoch == _surfaceTransitionEpoch) {
-        expanded = targetExpanded;
-        windowSize = targetMaximized
-            ? WindowSizeSetting.maximized
-            : targetLarge
-            ? WindowSizeSetting.wide
-            : WindowSizeSetting.standard;
+        if (applied) {
+          expanded = targetExpanded;
+          windowSize = targetMaximized
+              ? WindowSizeSetting.maximized
+              : targetLarge
+              ? WindowSizeSetting.wide
+              : WindowSizeSetting.standard;
+        }
         surfaceTransitioning = false;
         surfaceTransitionAnimating = false;
         if (targetExpanded && focus) focusComposerEpoch++;

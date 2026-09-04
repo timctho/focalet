@@ -237,6 +237,15 @@ class _ZommiShellState extends State<ZommiShell> {
     unawaited(submission);
   }
 
+  Future<void> _selectWindowSize(WindowSizeSetting setting) async {
+    await _controller.setWindowSize(setting);
+    if (mounted && _controller.windowSize == setting) {
+      widget.onPreferencesChanged(
+        widget.preferences.copyWith(windowSize: setting),
+      );
+    }
+  }
+
   KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     if (event.logicalKey == LogicalKeyboardKey.escape) {
@@ -463,6 +472,7 @@ class _ZommiShellState extends State<ZommiShell> {
                       controller: _controller,
                       preferences: widget.preferences,
                       onChanged: widget.onPreferencesChanged,
+                      onWindowSizeChanged: _selectWindowSize,
                     ),
                   ),
                 ),

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/history_mapper.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
@@ -18,6 +19,96 @@ import 'package:zommi_flutter/zommi_app.dart';
 import 'test_support.dart';
 
 void main() {
+  testWidgets('expanded live runtime events keep settings and Stop responsive', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(normalWindowSize);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final core = RichFakeCore()..historyCount = 0;
+    await tester.pumpWidget(ZommiApp(core: core, desktop: FakeDesktopBridge()));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('zommi-composer')),
+      'Inspect while streaming',
+    );
+    await tester.tap(find.byKey(const ValueKey('send-message')));
+    await tester.pump();
+    var sequence = 0;
+    void emit(String name, Map<String, Object?> payload) => core.emit(
+      CoreEvent(
+        name: name,
+        sequence: ++sequence,
+        runtimeTargetId: 'runtime-codex',
+        sessionId: 'session-1',
+        turnId: 'session-1-live-turn',
+        clientOperationId: 'flutter:test',
+        payload: payload,
+      ),
+    );
+    emit('turn.started', {'status': 'inProgress'});
+    for (var index = 0; index < 50; index++) {
+      emit('item.update', {
+        'kind': 'thinking',
+        'lifecycle': 'completed',
+        'itemId': 'history-$index',
+        'text': 'Completed investigation step $index.',
+      });
+    }
+    emit('item.update', {
+      'kind': 'thinking',
+      'lifecycle': 'delta',
+      'itemId': 'live-reasoning',
+      'text': 'Starting live inspection.',
+    });
+    await tester.pump();
+    final group = tester.widget<ThinkingActivityGroup>(
+      find.byType(ThinkingActivityGroup),
+    );
+    final toggle = find.byKey(ValueKey('thinking-toggle-${group.turn.id}'));
+    await tester.ensureVisible(toggle);
+    await tester.tap(toggle);
+    await tester.pump();
+    expect(
+      find.byKey(const ValueKey('thinking-activity-list')),
+      findsOneWidget,
+    );
+    for (var delta = 0; delta < 60; delta++) {
+      emit('item.update', {
+        'kind': 'thinking',
+        'lifecycle': 'delta',
+        'itemId': 'live-reasoning',
+        'replace': true,
+        'text':
+            'Live step $delta.\n\n${'Checking **stream state** and retaining full context. ' * 20}',
+      });
+      await tester.pump(const Duration(milliseconds: 16));
+      if (delta == 20) {
+        await tester.tap(find.byKey(const ValueKey('app-settings')));
+        await tester.pump();
+        expect(
+          find.byKey(const ValueKey('app-settings-panel')),
+          findsOneWidget,
+        );
+        await tester.tap(find.byKey(const ValueKey('app-settings')));
+        await tester.pump();
+      }
+    }
+    expect(
+      tester
+          .widgetList<MarkdownBody>(find.byType(MarkdownBody))
+          .any((body) => body.data.contains('Live step 59.')),
+      isTrue,
+    );
+    await tester.tap(find.byKey(const ValueKey('stop-turn')));
+    await tester.pump();
+    expect(core.interrupted, (
+      'runtime-codex',
+      'session-1',
+      'session-1-live-turn',
+    ));
+    expect(tester.takeException(), isNull);
+  });
+
   test('overlap matches exhaustive reference without quadratic snapshots', () {
     final random = Random(42);
     String text() => List.generate(
@@ -171,6 +262,37 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('failed native maximize keeps the applied and persisted mode', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(normalWindowSize);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final desktop = FakeDesktopBridge();
+    final preferences = _RecordingPreferencesStore();
+    await tester.pumpWidget(
+      ZommiApp(
+        core: RichFakeCore()..historyCount = 0,
+        desktop: desktop,
+        preferencesStore: preferences,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('app-settings')));
+    await tester.pumpAndSettle();
+    final nativeResize = Completer<void>();
+    desktop.surfaceGate = nativeResize.future;
+    await tester.tap(find.text('Maximize'));
+    await tester.pump();
+    nativeResize.completeError(StateError('native resize rejected'));
+    await tester.pumpAndSettle();
+    final selector = tester.widget<SegmentedButton<WindowSizeSetting>>(
+      find.byKey(const ValueKey('window-size-control')),
+    );
+    expect(selector.selected, {WindowSizeSetting.standard});
+    expect(preferences.saved, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
   test('window preferences migrate old Wide and persist native Maximize', () {
     expect(
       AppPreferences.fromJson({'largeWindow': true}).windowSize,
@@ -312,4 +434,14 @@ Future<void> _pumpTurn(
     ),
   );
   await tester.pump();
+}
+
+final class _RecordingPreferencesStore implements AppPreferencesStore {
+  final List<AppPreferences> saved = [];
+
+  @override
+  Future<AppPreferences> load() async => const AppPreferences();
+
+  @override
+  Future<void> save(AppPreferences preferences) async => saved.add(preferences);
 }

@@ -913,12 +913,14 @@ class AppSettingsPanel extends StatelessWidget {
     required this.controller,
     required this.preferences,
     required this.onChanged,
+    required this.onWindowSizeChanged,
     super.key,
   });
 
   final ZommiController controller;
   final AppPreferences preferences;
   final ValueChanged<AppPreferences> onChanged;
+  final ValueChanged<WindowSizeSetting> onWindowSizeChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -1009,12 +1011,13 @@ class AppSettingsPanel extends StatelessWidget {
                 ),
               ],
               selected: {controller.windowSize},
-              onSelectionChanged: (selection) {
-                if (selection.single != controller.windowSize) {
-                  onChanged(preferences.copyWith(windowSize: selection.single));
-                  unawaited(controller.setWindowSize(selection.single));
-                }
-              },
+              onSelectionChanged: controller.surfaceTransitioning
+                  ? null
+                  : (selection) {
+                      if (selection.single != controller.windowSize) {
+                        onWindowSizeChanged(selection.single);
+                      }
+                    },
               style: const ButtonStyle(
                 visualDensity: VisualDensity.compact,
                 textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 10.5)),
