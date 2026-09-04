@@ -28,7 +28,7 @@ void main() {
     const expected = AppPreferences(
       chatFontSize: 14,
       themeColor: ZommiThemeColor.ocean,
-      largeWindow: true,
+      windowSize: WindowSizeSetting.wide,
     );
 
     await store.save(expected);
@@ -36,7 +36,7 @@ void main() {
 
     expect(restored.chatFontSize, 14);
     expect(restored.themeColor, ZommiThemeColor.ocean);
-    expect(restored.largeWindow, isTrue);
+    expect(restored.windowSize, WindowSizeSetting.wide);
   });
 
   test('app preference paths follow each desktop convention', () {

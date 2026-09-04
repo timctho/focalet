@@ -83,9 +83,18 @@ internal static class CaptureNativeHost
                 return false;
             case "capture":
             {
+                void TargetResolved()
+                {
+                    if (request.Params.ValueKind == JsonValueKind.Object &&
+                        request.Params.TryGetProperty("reportReady", out var reportReady) &&
+                        reportReady.ValueKind == JsonValueKind.True)
+                    {
+                        Write(new { type = "captureReady", id = request.Id });
+                    }
+                }
                 var captured = TryReadCapturePoint(request.Params, out var pointerX, out var pointerY)
-                    ? capture.CaptureAt(DateTimeOffset.UtcNow, pointerX, pointerY)
-                    : capture.Capture(DateTimeOffset.UtcNow);
+                    ? capture.CaptureAt(DateTimeOffset.UtcNow, pointerX, pointerY, TargetResolved)
+                    : capture.Capture(DateTimeOffset.UtcNow, TargetResolved);
                 var previewStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
                 var previewText = captured.Snapshot is null
                     ? null
@@ -103,10 +112,10 @@ internal static class CaptureNativeHost
                 return false;
             }
             case "selectContext":
-                result = SelectContext(capture);
+                result = SelectContext(capture, ReturnProcessId(request.Params));
                 return false;
             case "selectImage":
-                result = SelectImage();
+                result = SelectImage(ReturnProcessId(request.Params));
                 return false;
             case "shutdown":
                 result = new { stopped = true };
@@ -129,9 +138,16 @@ internal static class CaptureNativeHost
             yValue.TryGetInt32(out y);
     }
 
-    private static object SelectImage()
+    private static uint ReturnProcessId(JsonElement parameters) =>
+        parameters.ValueKind == JsonValueKind.Object &&
+        parameters.TryGetProperty("returnProcessId", out var value) &&
+        value.TryGetUInt32(out var processId) && processId != uint.MaxValue
+            ? processId
+            : 0;
+
+    private static object SelectImage(uint returnProcessId)
     {
-        using var selector = new RegionSelectionForm();
+        using var selector = new RegionSelectionForm(returnProcessId: returnProcessId);
         var dialogResult = selector.ShowDialog();
         if (dialogResult != DialogResult.OK || selector.Result is not { } selected)
         {
@@ -156,9 +172,9 @@ internal static class CaptureNativeHost
         };
     }
 
-    private static object SelectContext(ForegroundContextCapture capture)
+    private static object SelectContext(ForegroundContextCapture capture, uint returnProcessId)
     {
-        using var selector = new PointSelectionForm();
+        using var selector = new PointSelectionForm(returnProcessId);
         var dialogResult = selector.ShowDialog();
         if (dialogResult != DialogResult.OK || selector.Result is not { } point)
         {

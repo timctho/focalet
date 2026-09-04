@@ -372,10 +372,26 @@ int suffixPrefixOverlap(String current, String incoming) {
   final limit = current.length < incoming.length
       ? current.length
       : incoming.length;
-  for (var length = limit; length > 0; length--) {
-    if (current.endsWith(incoming.substring(0, length))) return length;
+  if (limit == 0) return 0;
+  final prefixes = List<int>.filled(limit, 0);
+  var matched = 0;
+  for (var index = 1; index < limit; index++) {
+    while (matched > 0 &&
+        incoming.codeUnitAt(index) != incoming.codeUnitAt(matched)) {
+      matched = prefixes[matched - 1];
+    }
+    if (incoming.codeUnitAt(index) == incoming.codeUnitAt(matched)) matched++;
+    prefixes[index] = matched;
   }
-  return 0;
+  matched = 0;
+  for (var index = current.length - limit; index < current.length; index++) {
+    while (matched > 0 &&
+        current.codeUnitAt(index) != incoming.codeUnitAt(matched)) {
+      matched = prefixes[matched - 1];
+    }
+    if (current.codeUnitAt(index) == incoming.codeUnitAt(matched)) matched++;
+  }
+  return matched;
 }
 
 String mergeDistinctTextSections(Iterable<String> sections) {
@@ -405,11 +421,11 @@ List<TranscriptBlock> normalizeTranscriptBlocks(
   Iterable<TranscriptBlock> source,
 ) {
   final result = <TranscriptBlock>[];
+  final indexes = <(TranscriptKind, String), int>{};
   for (final block in source) {
-    final duplicateIndex = result.indexWhere(
-      (existing) => existing.kind == block.kind && existing.id == block.id,
-    );
-    if (duplicateIndex >= 0) {
+    final identity = (block.kind, block.id);
+    final duplicateIndex = indexes[identity];
+    if (duplicateIndex != null) {
       result[duplicateIndex] = mergeTranscriptBlocks(
         result[duplicateIndex],
         block,
@@ -421,9 +437,11 @@ List<TranscriptBlock> normalizeTranscriptBlocks(
         result.last.kind == TranscriptKind.thinking &&
         result.last.text.trim().isNotEmpty &&
         result.last.text.trim() == block.text.trim()) {
+      indexes[identity] = result.length - 1;
       result[result.length - 1] = mergeTranscriptBlocks(result.last, block);
       continue;
     }
+    indexes[identity] = result.length;
     result.add(block);
   }
   return result;

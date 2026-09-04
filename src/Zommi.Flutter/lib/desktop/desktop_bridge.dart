@@ -32,7 +32,7 @@ double symmetricSurfaceEase(double progress) {
       : 1 - math.pow(-2 * value + 2, 3).toDouble() / 2;
 }
 
-enum DesktopInvocationKind { open, context, image, status }
+enum DesktopInvocationKind { open, captureStarted, context, image, status }
 
 final class DesktopInvocation {
   const DesktopInvocation({
@@ -113,12 +113,13 @@ abstract interface class DesktopBridge {
   Future<void> setSurface({
     required bool expanded,
     bool large = false,
+    bool maximized = false,
     bool animate = true,
   });
 
   Future<bool> isPointerWithinSurface();
 
-  Future<void> showPanel();
+  Future<void> showPanel({bool focus = true});
 
   Future<void> hide();
 
@@ -166,6 +167,7 @@ final class NoopDesktopBridge implements DesktopBridge {
   Future<void> setSurface({
     required bool expanded,
     bool large = false,
+    bool maximized = false,
     bool animate = true,
   }) async {}
 
@@ -173,7 +175,7 @@ final class NoopDesktopBridge implements DesktopBridge {
   Future<bool> isPointerWithinSurface() async => false;
 
   @override
-  Future<void> showPanel() async {}
+  Future<void> showPanel({bool focus = true}) async {}
 
   @override
   Future<void> hide() async {}
@@ -253,6 +255,7 @@ final class FlutterDesktopBridge
   }
 
   final CaptureProvider _captureProvider;
+  bool _invocationPending = false;
   final WaylandPortalShortcutClient _waylandPortalShortcutClient;
   final bool _useWaylandPortals;
   final DesktopAcceptanceRecorder? _acceptanceRecorder;
@@ -304,8 +307,9 @@ final class FlutterDesktopBridge
       try {
         final registration = await registerWaylandPortalShortcuts(
           _waylandPortalShortcutClient,
-          onContext: () => unawaited(_captureAndEmit()),
-          onImage: () => unawaited(_selectImageAndEmit()),
+          onContext: () =>
+              unawaited(invokeShortcut(DesktopInvocationKind.context)),
+          onImage: () => unawaited(invokeShortcut(DesktopInvocationKind.image)),
           onError: (error) =>
               _emitWarning('Wayland global shortcuts stopped: $error'),
         );
@@ -319,7 +323,8 @@ final class FlutterDesktopBridge
       try {
         await hotKeyManager.register(
           _contextHotKey,
-          keyDownHandler: (_) => unawaited(_captureAndEmit()),
+          keyDownHandler: (_) =>
+              unawaited(invokeShortcut(DesktopInvocationKind.context)),
         );
         contextRegistered = true;
         _nativeContextRegistered = true;
@@ -329,7 +334,8 @@ final class FlutterDesktopBridge
       try {
         await hotKeyManager.register(
           _imageHotKey,
-          keyDownHandler: (_) => unawaited(_selectImageAndEmit()),
+          keyDownHandler: (_) =>
+              unawaited(invokeShortcut(DesktopInvocationKind.image)),
         );
         imageRegistered = true;
         _nativeImageRegistered = true;
@@ -349,12 +355,37 @@ final class FlutterDesktopBridge
     return _readiness;
   }
 
+  Future<void> invokeShortcut(DesktopInvocationKind kind) => switch (kind) {
+    DesktopInvocationKind.context => _captureAndEmit(),
+    DesktopInvocationKind.image => _selectImageAndEmit(),
+    _ => Future.error(
+      ArgumentError.value(kind, 'kind', 'Not a capture shortcut'),
+    ),
+  };
+
   Future<void> _captureAndEmit() async {
+    if (_invocationPending) return;
+    _invocationPending = true;
+    final clock = Stopwatch()..start();
     try {
-      // Capture completes before Flutter is shown or focused. This ordering is
-      // the Invocation Context boundary and must not be reversed.
-      final attachment = await captureContext();
+      final attachment = await _capturePointerContext(
+        onReady: () {
+          if (_invocations.isClosed) return;
+          unawaited(
+            _recordAcceptance('shortcut.context.ready', {
+              'elapsedMilliseconds': clock.elapsedMilliseconds,
+            }),
+          );
+          _invocations.add(
+            const DesktopInvocation(
+              kind: DesktopInvocationKind.captureStarted,
+              message: 'Capturing context…',
+            ),
+          );
+        },
+      );
       await _recordAcceptance('shortcut.context', {
+        'elapsedMilliseconds': clock.elapsedMilliseconds,
         'attached': attachment != null,
         'application': attachment?.snapshot?['application'],
         'windowTitle': attachment?.snapshot?['windowTitle'],
@@ -380,10 +411,15 @@ final class FlutterDesktopBridge
           warning: true,
         ),
       );
+    } finally {
+      _invocationPending = false;
     }
   }
 
   Future<void> _selectImageAndEmit() async {
+    if (_invocationPending) return;
+    _invocationPending = true;
+    final clock = Stopwatch()..start();
     try {
       final attachment = await selectImageContext(includePointerContext: true);
       final invocation = imageSelectionInvocation(attachment);
@@ -393,6 +429,7 @@ final class FlutterDesktopBridge
         return;
       }
       await _recordAcceptance('shortcut.image', {
+        'elapsedMilliseconds': clock.elapsedMilliseconds,
         'attached': true,
         'hasImage': attachment.imageDataUrl?.isNotEmpty == true,
         'hasPointerContext': attachment.snapshot != null,
@@ -411,6 +448,8 @@ final class FlutterDesktopBridge
           warning: true,
         ),
       );
+    } finally {
+      _invocationPending = false;
     }
   }
 
@@ -482,14 +521,19 @@ final class FlutterDesktopBridge
     }
   }
 
-  Future<ContextAttachment?> _capturePointerContext() async {
+  Future<ContextAttachment?> _capturePointerContext({
+    void Function()? onReady,
+  }) async {
     Offset? point;
     try {
       point = await screenRetriever.getCursorScreenPoint();
     } on Object {
       point = null;
     }
-    final result = await _captureProvider.capture(point: point);
+    final result = await _captureProvider.capture(
+      point: point,
+      onReady: onReady,
+    );
     if (result.snapshot == null) return null;
     return ContextAttachment(
       id: _nextAttachmentId(),
@@ -507,7 +551,7 @@ final class FlutterDesktopBridge
     if (wasMinimized || await windowManager.isMinimized()) {
       await windowManager.restore();
     }
-    await windowManager.show();
+    await showPanel();
   }
 
   @override
@@ -518,14 +562,26 @@ final class FlutterDesktopBridge
     final wasMinimized = await windowManager.isMinimized();
     await windowManager.hide();
     try {
+      final targetReady = Completer<void>();
       final contextFuture = includePointerContext
-          ? captureContext().timeout(
-              const Duration(seconds: 4),
-              onTimeout: () => null,
-            )
+          ? _capturePointerContext(
+                  onReady: () {
+                    if (!targetReady.isCompleted) targetReady.complete();
+                  },
+                )
+                .timeout(const Duration(seconds: 4), onTimeout: () => null)
+                .catchError((Object error) {
+                  _emitWarning('Pointer context unavailable: $error');
+                  return null;
+                })
           : Future<ContextAttachment?>.value();
+      if (includePointerContext && _captureProvider is WindowsCaptureProvider) {
+        await Future.any<Object?>([targetReady.future, contextFuture]);
+      }
       final selected = await _captureProvider.selectImage();
       if (selected == null) return null;
+      await showPanel();
+      await _recordAcceptance('capture.image.presented', const {});
       final context = await contextFuture;
       return ContextAttachment(
         id: _nextAttachmentId(),
@@ -547,8 +603,19 @@ final class FlutterDesktopBridge
   Future<void> setSurface({
     required bool expanded,
     bool large = false,
+    bool maximized = false,
     bool animate = true,
   }) async {
+    if (expanded && maximized) {
+      ++_surfaceTransitionEpoch;
+      await windowManager.setMinimumSize(const Size(640, 500));
+      await windowManager.maximize();
+      await windowManager.setAlwaysOnTop(false);
+      return;
+    }
+    if (await windowManager.isMaximized()) {
+      await windowManager.unmaximize();
+    }
     final size = expanded
         ? (large ? largeWindowSize : normalWindowSize)
         : compactWindowSize;
@@ -620,7 +687,12 @@ final class FlutterDesktopBridge
   }
 
   @override
-  Future<void> showPanel() async {
+  Future<void> showPanel({bool focus = true}) async {
+    if (await presentNativePanel(focus: focus) == true) return;
+    if (!focus) {
+      await windowManager.show(inactive: true);
+      return;
+    }
     await presentPanelWithoutResizing(
       show: () async {
         if (await windowManager.isMinimized()) await windowManager.restore();
@@ -816,9 +888,9 @@ final class FlutterDesktopBridge
       case 'open':
         onTrayIconMouseDown();
       case 'capture':
-        unawaited(_captureAndEmit());
+        unawaited(invokeShortcut(DesktopInvocationKind.context));
       case 'image':
-        unawaited(_selectImageAndEmit());
+        unawaited(invokeShortcut(DesktopInvocationKind.image));
       case 'exit':
         unawaited(windowManager.destroy());
     }
@@ -863,6 +935,22 @@ Future<void> presentPanelWithoutResizing({
   await show();
   await focus();
   await keepOnTop();
+}
+
+Future<bool?> presentNativePanel({
+  bool focus = true,
+  bool? platformIsWindows,
+}) async {
+  if (!(platformIsWindows ?? Platform.isWindows)) return null;
+  try {
+    return await _windowAnimationChannel.invokeMethod<bool>('presentPanel', {
+      'focus': focus,
+    });
+  } on MissingPluginException {
+    return null;
+  } on PlatformException {
+    return null;
+  }
 }
 
 Rect anchoredSurfaceBounds({
@@ -1144,7 +1232,7 @@ final class ProcessWaylandPortalShortcutClient
 abstract interface class CaptureProvider {
   Future<void> initialize();
 
-  Future<CaptureResult> capture({Offset? point});
+  Future<CaptureResult> capture({Offset? point, void Function()? onReady});
 
   Future<CaptureResult?> selectContext();
 
@@ -1182,10 +1270,10 @@ final class WindowsCaptureProvider implements CaptureProvider {
     NativeCaptureClient? selectorClient,
   }) : _captureClient =
            captureClient ??
-           _NativeCaptureHost(executablePath ?? _nativeHostPath()),
+           ProcessNativeCaptureClient(executablePath ?? _nativeHostPath()),
        _selectorClient =
            selectorClient ??
-           _NativeCaptureHost(executablePath ?? _nativeHostPath());
+           ProcessNativeCaptureClient(executablePath ?? _nativeHostPath());
 
   final NativeCaptureClient _captureClient;
   final NativeCaptureClient _selectorClient;
@@ -1202,11 +1290,18 @@ final class WindowsCaptureProvider implements CaptureProvider {
   }
 
   @override
-  Future<CaptureResult> capture({Offset? point}) async {
-    final response = await _captureClient.request('capture', {
-      if (point != null)
-        'point': {'x': point.dx.round(), 'y': point.dy.round()},
-    });
+  Future<CaptureResult> capture({
+    Offset? point,
+    void Function()? onReady,
+  }) async {
+    final response = await _captureClient.request(
+      'capture',
+      parameters: {
+        if (point != null)
+          'point': {'x': point.dx.round(), 'y': point.dy.round()},
+      },
+      onReady: onReady,
+    );
     return CaptureResult(
       snapshot: _nullableMap(response['snapshot']),
       previewText: response['previewText']?.toString() ?? '',
@@ -1215,7 +1310,10 @@ final class WindowsCaptureProvider implements CaptureProvider {
 
   @override
   Future<CaptureResult?> selectContext() async {
-    final response = await _selectorClient.request('selectContext');
+    final response = await _selectorClient.request(
+      'selectContext',
+      parameters: {'returnProcessId': pid},
+    );
     if (response['cancelled'] == true) return null;
     return CaptureResult(
       snapshot: _nullableMap(response['snapshot']),
@@ -1225,7 +1323,10 @@ final class WindowsCaptureProvider implements CaptureProvider {
 
   @override
   Future<ImageSelection?> selectImage() async {
-    final response = await _selectorClient.request('selectImage');
+    final response = await _selectorClient.request(
+      'selectImage',
+      parameters: {'returnProcessId': pid},
+    );
     if (response['cancelled'] == true) return null;
     final dataUrl = response['dataUrl']?.toString() ?? '';
     if (dataUrl.isEmpty) return null;
@@ -1265,7 +1366,10 @@ final class LinuxCaptureProvider implements CaptureProvider {
   Future<void> initialize() async {}
 
   @override
-  Future<CaptureResult> capture({Offset? point}) async {
+  Future<CaptureResult> capture({
+    Offset? point,
+    void Function()? onReady,
+  }) async {
     final response = await _request([
       _useWaylandPortals ? 'portal-context' : 'context',
     ], const Duration(seconds: 5));
@@ -1367,7 +1471,10 @@ final class PortableCaptureProvider implements CaptureProvider {
   Future<void> initialize() async {}
 
   @override
-  Future<CaptureResult> capture({Offset? point}) async {
+  Future<CaptureResult> capture({
+    Offset? point,
+    void Function()? onReady,
+  }) async {
     return _captureMac();
   }
 
@@ -1502,18 +1609,22 @@ String resolveLinuxCaptureExecutable({
 
 abstract interface class NativeCaptureClient {
   Future<Map<String, Object?>> request(
-    String method, [
+    String method, {
     Map<String, Object?> parameters = const {},
-  ]);
+    void Function()? onReady,
+  });
 
   Future<void> close();
 }
 
-final class _NativeCaptureHost implements NativeCaptureClient {
-  _NativeCaptureHost(this.executablePath);
+final class ProcessNativeCaptureClient implements NativeCaptureClient {
+  ProcessNativeCaptureClient(this.executablePath);
 
   final String executablePath;
   final Map<String, Completer<Map<String, Object?>>> _pending = {};
+  final Map<String, void Function()> _ready = {};
+  Future<void>? _starting;
+  Future<void> _writes = Future.value();
   Process? _process;
   StreamSubscription<String>? _stdout;
   StreamSubscription<String>? _stderr;
@@ -1522,9 +1633,10 @@ final class _NativeCaptureHost implements NativeCaptureClient {
 
   @override
   Future<Map<String, Object?>> request(
-    String method, [
+    String method, {
     Map<String, Object?> parameters = const {},
-  ]) async {
+    void Function()? onReady,
+  }) async {
     await _ensureStarted();
     final process = _process;
     if (process == null) {
@@ -1533,23 +1645,47 @@ final class _NativeCaptureHost implements NativeCaptureClient {
     final id = (++_nextId).toString();
     final completer = Completer<Map<String, Object?>>();
     _pending[id] = completer;
-    process.stdin.writeln(
-      jsonEncode({'id': id, 'method': method, 'params': parameters}),
-    );
-    await process.stdin.flush();
-    return completer.future.timeout(
+    if (onReady != null) _ready[id] = onReady;
+    final response = completer.future.timeout(
       const Duration(seconds: 30),
       onTimeout: () {
         _pending.remove(id);
+        _ready.remove(id);
         throw TimeoutException(
           'Windows capture host timed out during $method.',
         );
       },
     );
+    _writes = _writes
+        .then((_) async {
+          if (!identical(_process, process)) {
+            throw StateError('Windows capture host stopped before $method.');
+          }
+          process.stdin.writeln(
+            jsonEncode({
+              'id': id,
+              'method': method,
+              'params': {
+                ...parameters,
+                if (onReady != null) 'reportReady': true,
+              },
+            }),
+          );
+          await process.stdin.flush();
+        })
+        .catchError((Object error, StackTrace stackTrace) {
+          _ready.remove(id);
+          _pending.remove(id)?.completeError(error, stackTrace);
+        });
+    return response;
   }
 
-  Future<void> _ensureStarted() async {
-    if (_process != null) return;
+  Future<void> _ensureStarted() {
+    if (_process != null) return Future.value();
+    return _starting ??= _startProcess().whenComplete(() => _starting = null);
+  }
+
+  Future<void> _startProcess() async {
     if (!await File(executablePath).exists()) {
       throw StateError(
         'Windows capture host was not found at $executablePath.',
@@ -1580,6 +1716,7 @@ final class _NativeCaptureHost implements NativeCaptureClient {
           pending.completeError(error);
         }
         _pending.clear();
+        _ready.clear();
       }),
     );
   }
@@ -1590,6 +1727,11 @@ final class _NativeCaptureHost implements NativeCaptureClient {
       if (value is! Map) return;
       final json = value.map((key, value) => MapEntry(key.toString(), value));
       final id = json['id']?.toString();
+      if (json['type'] == 'captureReady') {
+        _ready.remove(id)?.call();
+        return;
+      }
+      _ready.remove(id);
       final completer = id == null ? null : _pending.remove(id);
       if (completer == null) return;
       if (json['ok'] == true) {

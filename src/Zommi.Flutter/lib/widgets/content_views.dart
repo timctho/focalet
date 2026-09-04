@@ -31,6 +31,24 @@ class CopyableMarkdown extends StatefulWidget {
 class _CopyableMarkdownState extends State<CopyableMarkdown> {
   bool _hovered = false;
   bool _copied = false;
+  MarkdownBody? _markdown;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _markdown = null;
+  }
+
+  @override
+  void didUpdateWidget(covariant CopyableMarkdown oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.text != oldWidget.text ||
+        widget.compact != oldWidget.compact ||
+        widget.onCopy != oldWidget.onCopy ||
+        widget.onOpenLink != oldWidget.onOpenLink) {
+      _markdown = null;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -53,7 +71,7 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
               heightFactor: 1,
               child: Padding(
                 padding: const EdgeInsets.only(right: 28),
-                child: MarkdownBody(
+                child: _markdown ??= MarkdownBody(
                   data: widget.text,
                   selectable: true,
                   fitContent: true,

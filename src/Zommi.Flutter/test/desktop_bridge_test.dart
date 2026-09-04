@@ -8,6 +8,102 @@ import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 
 void main() {
+  testWidgets(
+    'rapid shortcuts coalesce without queueing another native capture',
+    (tester) async {
+      _mockCursor(tester);
+      final captured = Completer<Map<String, Object?>>();
+      final captureClient = _FakeNativeCaptureClient(
+        onRequest: (_) => captured.future,
+      );
+      final selectorClient = _FakeNativeCaptureClient(
+        onRequest: (_) async => {},
+      );
+      final bridge = FlutterDesktopBridge(
+        captureProvider: WindowsCaptureProvider(
+          captureClient: captureClient,
+          selectorClient: selectorClient,
+        ),
+      );
+      final events = <DesktopInvocation>[];
+      final subscription = bridge.invocations.listen(events.add);
+      addTearDown(subscription.cancel);
+      final first = bridge.invokeShortcut(DesktopInvocationKind.context);
+      await tester.pump();
+      await bridge.invokeShortcut(DesktopInvocationKind.context);
+      await bridge.invokeShortcut(DesktopInvocationKind.image);
+      expect(captureClient.requests, ['capture']);
+      expect(selectorClient.requests, isEmpty);
+      expect(events.single.kind, DesktopInvocationKind.captureStarted);
+      captured.complete({
+        'snapshot': {'application': 'Source'},
+      });
+      await tester.pump();
+      await first;
+      await tester.pump();
+      expect(events.last.attachment?.snapshot?['application'], 'Source');
+    },
+  );
+
+  testWidgets(
+    'image selector starts after target latch and focuses before slow enrichment',
+    (tester) async {
+      _mockCursor(tester);
+      const channel = MethodChannel('window_manager');
+      final windowCalls = <String>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+        call,
+      ) async {
+        windowCalls.add(call.method);
+        return switch (call.method) {
+          'isVisible' => true,
+          'isMinimized' => false,
+          _ => null,
+        };
+      });
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          null,
+        ),
+      );
+      final captured = Completer<Map<String, Object?>>();
+      final captureClient = _FakeNativeCaptureClient(
+        onRequest: (_) => captured.future,
+      );
+      final selectorClient = _FakeNativeCaptureClient(
+        onRequest: (_) async => {
+          'dataUrl': 'data:image/png;base64,aGVsbG8=',
+          'bounds': {'width': 40, 'height': 30},
+        },
+      );
+      final bridge = FlutterDesktopBridge(
+        captureProvider: WindowsCaptureProvider(
+          captureClient: captureClient,
+          selectorClient: selectorClient,
+        ),
+      );
+      var completed = false;
+      final selection = bridge
+          .selectImageContext(includePointerContext: true)
+          .then((value) {
+            completed = true;
+            return value;
+          });
+      await tester.pump();
+      expect(selectorClient.requests, ['selectImage']);
+      expect(windowCalls, containsAllInOrder(['hide', 'show', 'focus']));
+      expect(completed, isFalse);
+      captured.complete({
+        'snapshot': {'application': 'Original window'},
+      });
+      await tester.pump();
+      final attachment = await selection;
+      expect(attachment?.hasImage, isTrue);
+      expect(attachment?.snapshot?['application'], 'Original window');
+    },
+  );
+
   test('Linux skips the unsupported native window shadow method', () {
     expect(supportsNativeWindowShadow('linux'), isFalse);
     expect(supportsNativeWindowShadow('windows'), isTrue);
@@ -455,6 +551,20 @@ while read -r line; do :; done
   });
 }
 
+void _mockCursor(WidgetTester tester) {
+  const channel = MethodChannel('dev.leanflutter.plugins/screen_retriever');
+  tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+    channel,
+    (_) async => {'dx': 300.0, 'dy': 200.0},
+  );
+  addTearDown(
+    () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      channel,
+      null,
+    ),
+  );
+}
+
 final class _FakeNativeCaptureClient implements NativeCaptureClient {
   _FakeNativeCaptureClient({required this.onRequest});
 
@@ -464,10 +574,12 @@ final class _FakeNativeCaptureClient implements NativeCaptureClient {
 
   @override
   Future<Map<String, Object?>> request(
-    String method, [
+    String method, {
     Map<String, Object?> parameters = const {},
-  ]) {
+    void Function()? onReady,
+  }) {
     requests.add(method);
+    onReady?.call();
     return onRequest(method);
   }
 

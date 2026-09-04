@@ -155,7 +155,7 @@ class _ZommiShellState extends State<ZommiShell> {
       core: widget.core,
       desktop: widget.desktop,
       artifactLoader: widget.artifactLoader,
-      initialLargePanel: widget.preferences.largeWindow,
+      initialWindowSize: widget.preferences.windowSize,
     );
     _composer = InlineAttachmentTextController(
       onAttachmentRemoved: (attachment) =>

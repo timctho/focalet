@@ -7,6 +7,7 @@ import 'package:zommi_flutter/desktop/artifact_loader.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/history_mapper.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
+import 'package:zommi_flutter/theme/app_preferences.dart';
 
 const int historyPageSize = 18;
 
@@ -15,9 +16,9 @@ final class ZommiController extends ChangeNotifier {
     required this.core,
     required this.desktop,
     ArtifactLoader? artifactLoader,
-    bool initialLargePanel = false,
+    WindowSizeSetting initialWindowSize = WindowSizeSetting.standard,
   }) : artifactLoader = artifactLoader ?? const LocalArtifactLoader(),
-       largePanel = initialLargePanel;
+       windowSize = initialWindowSize;
 
   final CoreBridge core;
   final DesktopBridge desktop;
@@ -61,7 +62,9 @@ final class ZommiController extends ChangeNotifier {
   bool sessionSettingsBusy = false;
   bool submitting = false;
   bool expanded = true;
-  bool largePanel;
+  WindowSizeSetting windowSize;
+  bool get largePanel => windowSize == WindowSizeSetting.wide;
+  bool get maximizedPanel => windowSize == WindowSizeSetting.maximized;
   bool surfaceTransitioning = false;
   bool surfaceTransitionAnimating = false;
   bool transitionTargetExpanded = true;
@@ -253,8 +256,13 @@ final class ZommiController extends ChangeNotifier {
   Future<void> _initializeDesktopIntegration() async {
     try {
       final readiness = await desktop.initialize();
-      if (largePanel) {
-        await desktop.setSurface(expanded: true, large: true, animate: false);
+      if (largePanel || maximizedPanel) {
+        await desktop.setSurface(
+          expanded: true,
+          large: largePanel,
+          maximized: maximizedPanel,
+          animate: false,
+        );
       }
       contextShortcutRegistered = readiness.contextShortcut;
       imageShortcutRegistered = readiness.imageShortcut;
@@ -1184,20 +1192,27 @@ final class ZommiController extends ChangeNotifier {
     await _transitionSurface(
       targetExpanded: value,
       targetLarge: largePanel,
+      targetMaximized: maximizedPanel,
       focus: focus,
       errorLabel: 'Window presentation degraded',
     );
   }
 
-  Future<void> toggleLargePanel() => _transitionSurface(
+  Future<void> toggleLargePanel() => setWindowSize(
+    largePanel ? WindowSizeSetting.standard : WindowSizeSetting.wide,
+  );
+
+  Future<void> setWindowSize(WindowSizeSetting setting) => _transitionSurface(
     targetExpanded: true,
-    targetLarge: !largePanel,
+    targetLarge: setting == WindowSizeSetting.wide,
+    targetMaximized: setting == WindowSizeSetting.maximized,
     errorLabel: 'Window resize failed',
   );
 
   Future<void> _transitionSurface({
     required bool targetExpanded,
     required bool targetLarge,
+    bool targetMaximized = false,
     required String errorLabel,
     bool focus = false,
   }) async {
@@ -1213,6 +1228,7 @@ final class ZommiController extends ChangeNotifier {
               : normalWindowSize.width * normalWindowSize.height)
         : compactWindowSize.width * compactWindowSize.height;
     final growing = toArea >= fromArea;
+    final nativeMaximizeChange = maximizedPanel || targetMaximized;
     surfaceTransitioning = true;
     surfaceTransitionAnimating = false;
     transitionTargetExpanded = targetExpanded;
@@ -1221,25 +1237,26 @@ final class ZommiController extends ChangeNotifier {
     try {
       final transitionClock = Stopwatch()..start();
       Future<void>? growingSurfaceChange;
-      if (growing) {
+      if (growing || nativeMaximizeChange) {
         growingSurfaceChange = desktop.setSurface(
           expanded: targetExpanded,
           large: targetLarge,
+          maximized: targetExpanded && targetMaximized,
           animate: false,
         );
       }
-      surfaceTransitionAnimating = true;
+      surfaceTransitionAnimating = !nativeMaximizeChange;
       _notify();
       if (growingSurfaceChange != null) {
         await growingSurfaceChange;
       }
       if (transitionEpoch != _surfaceTransitionEpoch) return;
       final remaining = surfaceTransitionDuration - transitionClock.elapsed;
-      if (remaining > Duration.zero) {
+      if (remaining > Duration.zero && !nativeMaximizeChange) {
         await Future<void>.delayed(remaining);
       }
       if (transitionEpoch != _surfaceTransitionEpoch) return;
-      if (!growing) {
+      if (!growing && !nativeMaximizeChange) {
         await desktop.setSurface(
           expanded: targetExpanded,
           large: targetLarge,
@@ -1251,7 +1268,11 @@ final class ZommiController extends ChangeNotifier {
     } finally {
       if (transitionEpoch == _surfaceTransitionEpoch) {
         expanded = targetExpanded;
-        largePanel = targetLarge;
+        windowSize = targetMaximized
+            ? WindowSizeSetting.maximized
+            : targetLarge
+            ? WindowSizeSetting.wide
+            : WindowSizeSetting.standard;
         surfaceTransitioning = false;
         surfaceTransitionAnimating = false;
         if (targetExpanded && focus) focusComposerEpoch++;
@@ -1305,6 +1326,12 @@ final class ZommiController extends ChangeNotifier {
   }
 
   Future<void> _handleDesktopInvocation(DesktopInvocation invocation) async {
+    if (invocation.kind == DesktopInvocationKind.captureStarted) {
+      _setStatus(invocation.message ?? 'Capturing context…');
+      await setExpanded(true);
+      await desktop.showPanel(focus: false);
+      return;
+    }
     if (invocation.attachment case final attachment?) {
       // The capture already happened before this event. Attach it before any
       // show/focus request so the shortcut can never capture Zommi itself.

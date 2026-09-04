@@ -400,6 +400,11 @@ List<TranscriptBlock> distinctTranscriptBlocks(
 ) {
   final result = <TranscriptBlock>[];
   for (final block in normalizeTranscriptBlocks(blocks)) {
+    if (block.kind == TranscriptKind.thinking &&
+        block.text.trim().isEmpty &&
+        block.artifacts.isEmpty) {
+      continue;
+    }
     final duplicateIndex = block.kind == TranscriptKind.assistant
         ? result.indexWhere(
             (existing) =>
@@ -446,19 +451,24 @@ class _ExpandableActivityBody extends StatelessWidget {
   final Widget child;
 
   @override
-  Widget build(BuildContext context) => ClipRect(
-    child: AnimatedSize(
-      duration: duration,
-      curve: Curves.easeOutCubic,
-      alignment: Alignment.topCenter,
-      child: expanded
-          ? child
-          : const SizedBox(
-              key: ValueKey('collapsed-activity'),
-              width: double.infinity,
+  Widget build(BuildContext context) {
+    final content = expanded
+        ? child
+        : const SizedBox(
+            key: ValueKey('collapsed-activity'),
+            width: double.infinity,
+          );
+    return ClipRect(
+      child: duration == Duration.zero
+          ? content
+          : AnimatedSize(
+              duration: duration,
+              curve: Curves.easeOutCubic,
+              alignment: Alignment.topCenter,
+              child: content,
             ),
-    ),
-  );
+    );
+  }
 }
 
 class ThinkingActivityGroup extends StatelessWidget {
@@ -560,24 +570,14 @@ class ThinkingActivityGroup extends StatelessWidget {
                 _ExpandableActivityBody(
                   key: ValueKey('thinking-fold-${turn.id}'),
                   expanded: turn.activityExpanded,
-                  duration: const Duration(milliseconds: 150),
+                  duration: completed
+                      ? const Duration(milliseconds: 150)
+                      : Duration.zero,
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        for (final activity in activities)
-                          if (activity.kind == TranscriptKind.thinking)
-                            _ThinkingActivitySubItem(
-                              block: activity,
-                              controller: controller,
-                            )
-                          else
-                            _ToolActivitySubItem(
-                              block: activity,
-                              controller: controller,
-                            ),
-                      ],
+                    child: _ActivityList(
+                      activities: activities,
+                      controller: controller,
                     ),
                   ),
                 ),
@@ -587,6 +587,79 @@ class ThinkingActivityGroup extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+class _ActivityList extends StatefulWidget {
+  const _ActivityList({required this.activities, required this.controller});
+
+  final List<TranscriptBlock> activities;
+  final ZommiController controller;
+
+  @override
+  State<_ActivityList> createState() => _ActivityListState();
+}
+
+class _ActivityListState extends State<_ActivityList> {
+  final ScrollController _scroll = ScrollController();
+
+  @override
+  void didUpdateWidget(covariant _ActivityList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_scroll.hasClients && _scroll.position.extentBefore <= 36) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _scroll.hasClients) {
+          _scroll.jumpTo(0);
+        }
+      });
+    }
+  }
+
+  Widget _item(TranscriptBlock activity) => RepaintBoundary(
+    key: ValueKey(activity.id),
+    child: activity.kind == TranscriptKind.thinking
+        ? _ThinkingActivitySubItem(
+            block: activity,
+            controller: widget.controller,
+          )
+        : _ToolActivitySubItem(block: activity, controller: widget.controller),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.activities.length <= 8) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: widget.activities.map(_item).toList(growable: false),
+      );
+    }
+    return SizedBox(
+      height: 360,
+      child: Scrollbar(
+        controller: _scroll,
+        child: ListView.builder(
+          key: const ValueKey('thinking-activity-list'),
+          controller: _scroll,
+          primary: false,
+          reverse: true,
+          itemCount: widget.activities.length,
+          findChildIndexCallback: (key) {
+            final index = widget.activities.indexWhere(
+              (activity) => ValueKey(activity.id) == key,
+            );
+            return index < 0 ? null : widget.activities.length - 1 - index;
+          },
+          itemBuilder: (_, index) =>
+              _item(widget.activities[widget.activities.length - 1 - index]),
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
   }
 }
 

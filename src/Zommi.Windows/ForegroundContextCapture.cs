@@ -55,6 +55,9 @@ internal sealed class ForegroundContextCapture : IDisposable
     };
     private readonly ITreeWalker controlViewWalker;
     private readonly ITreeWalker rawViewWalker;
+    private AutomationElement? captureRoot;
+    private AutomationElement? capturePointerElement;
+    private AutomationElement? captureFocusedElement;
 
     public ForegroundContextCapture()
     {
@@ -64,7 +67,7 @@ internal sealed class ForegroundContextCapture : IDisposable
 
     public void Dispose() => automation.Dispose();
 
-    public CaptureResult Capture(DateTimeOffset nowUtc)
+    public CaptureResult Capture(DateTimeOffset nowUtc, Action? onTargetResolved = null)
     {
         var startedAt = Stopwatch.GetTimestamp();
         if (!NativeMethods.GetCursorPos(out var pointer))
@@ -76,11 +79,14 @@ internal sealed class ForegroundContextCapture : IDisposable
                 new Dictionary<string, long>(StringComparer.Ordinal));
         }
 
-        return CaptureAt(nowUtc, pointer.X, pointer.Y);
+        return CaptureAt(nowUtc, pointer.X, pointer.Y, onTargetResolved);
     }
 
-    public CaptureResult CaptureAt(DateTimeOffset nowUtc, int pointerX, int pointerY)
+    public CaptureResult CaptureAt(DateTimeOffset nowUtc, int pointerX, int pointerY, Action? onTargetResolved = null)
     {
+        captureRoot = null;
+        capturePointerElement = null;
+        captureFocusedElement = null;
         var startedAt = Stopwatch.GetTimestamp();
         var stageStartedAt = startedAt;
         var timings = new Dictionary<string, long>(StringComparer.Ordinal);
@@ -132,6 +138,17 @@ internal sealed class ForegroundContextCapture : IDisposable
             var processName = process.ProcessName;
             var title = ReadWindowText(windowHandle);
             Mark("window");
+            try
+            {
+                captureRoot = automation.FromHandle(windowHandle);
+                capturePointerElement = automation.FromPoint(new Point(pointerX, pointerY));
+                captureFocusedElement = automation.FocusedElement();
+            }
+            catch (Exception exception) when (exception is ElementNotAvailableException or InvalidOperationException or COMException)
+            {
+            }
+            Mark("target");
+            onTargetResolved?.Invoke();
             string surfaceKind;
             LocatorInfo? locator = null;
             var browserContext = BrowserProcesses.Contains(processName)
@@ -268,7 +285,7 @@ internal sealed class ForegroundContextCapture : IDisposable
     {
         try
         {
-            var root = automation.FromHandle(windowHandle);
+            var root = captureRoot ?? automation.FromHandle(windowHandle);
             var editCondition = automation.ConditionFactory.ByControlType(ControlType.Edit);
             var edits = root.FindAll(TreeScope.Descendants, editCondition);
             LocatorInfo? locator = null;
@@ -325,9 +342,9 @@ internal sealed class ForegroundContextCapture : IDisposable
     {
         try
         {
-            var root = automation.FromHandle(windowHandle);
+            var root = captureRoot ?? automation.FromHandle(windowHandle);
             var candidates = new List<AutomationElement>();
-            var focused = automation.FocusedElement();
+            var focused = captureFocusedElement;
             if (focused is not null &&
                 IsWithinWindow(focused, root) &&
                 (browserLocator is null ||
@@ -947,8 +964,9 @@ internal sealed class ForegroundContextCapture : IDisposable
     {
         try
         {
-            var root = automation.FromHandle(windowHandle);
-            var element = automation.FromPoint(new Point(point.X, point.Y));
+            var root = captureRoot ?? automation.FromHandle(windowHandle);
+            var element = capturePointerElement;
+            if (element is null) return null;
             if (!IsWithinWindow(element, root) ||
                 element.Properties.IsPassword.ValueOrDefault ||
                 browserLocator is not null &&
@@ -996,10 +1014,10 @@ internal sealed class ForegroundContextCapture : IDisposable
                 MaximumVisibleTextItems,
                 MaximumVisibleTextCharacters,
                 MaximumVisibleTextItemCharacters);
-            var root = automation.FromHandle(windowHandle);
+            var root = captureRoot ?? automation.FromHandle(windowHandle);
 
-            var hovered = automation.FromPoint(new Point(point.X, point.Y));
-            if (IsWithinWindow(hovered, root) &&
+            var hovered = capturePointerElement;
+            if (hovered is not null && IsWithinWindow(hovered, root) &&
                 !hovered.Properties.IsPassword.ValueOrDefault &&
                 (browserLocator is null ||
                     IsWithinBrowserDocument(hovered, root, browserLocator)))
@@ -1087,7 +1105,7 @@ internal sealed class ForegroundContextCapture : IDisposable
     {
         try
         {
-            var root = automation.FromHandle(windowHandle);
+            var root = captureRoot ?? automation.FromHandle(windowHandle);
             AutomationElement? contextRoot = null;
             if (isBrowser)
             {
@@ -1110,8 +1128,8 @@ internal sealed class ForegroundContextCapture : IDisposable
             }
             else
             {
-                var hovered = automation.FromPoint(new Point(point.X, point.Y));
-                if (IsWithinWindow(hovered, root))
+                var hovered = capturePointerElement;
+                if (hovered is not null && IsWithinWindow(hovered, root))
                 {
                     contextRoot = FindNearbyContextRoot(root, hovered);
                 }
@@ -1166,7 +1184,7 @@ internal sealed class ForegroundContextCapture : IDisposable
         NativeMethods.Point point,
         LocatorInfo? locator)
     {
-        var current = automation.FromPoint(new Point(point.X, point.Y));
+        var current = capturePointerElement;
         for (var depth = 0; current is not null && depth < 48; depth++)
         {
             if (current.Properties.ControlType.ValueOrDefault == ControlType.Document &&

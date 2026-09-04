@@ -14,9 +14,11 @@ internal sealed class PointSelectionForm : Form
     private const uint ShowWindow = 0x0040;
 
     private readonly System.Windows.Forms.Timer topMostGuard;
+    private readonly uint returnProcessId;
 
-    public PointSelectionForm()
+    public PointSelectionForm(uint returnProcessId = 0)
     {
+        this.returnProcessId = returnProcessId;
         Text = "Zommi context selection";
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
@@ -42,6 +44,7 @@ internal sealed class PointSelectionForm : Form
         {
             if (eventArgs.KeyCode == Keys.Escape)
             {
+                GrantForeground();
                 DialogResult = DialogResult.Cancel;
                 Close();
             }
@@ -102,6 +105,7 @@ internal sealed class PointSelectionForm : Form
         base.OnMouseDown(eventArgs);
         if (eventArgs.Button == MouseButtons.Right)
         {
+            GrantForeground();
             DialogResult = DialogResult.Cancel;
             Close();
             return;
@@ -112,6 +116,7 @@ internal sealed class PointSelectionForm : Form
         }
 
         Result = Cursor.Position;
+        GrantForeground();
         DialogResult = DialogResult.OK;
         Close();
     }
@@ -191,6 +196,14 @@ internal sealed class PointSelectionForm : Form
             }
         }
     }
+
+    private void GrantForeground()
+    {
+        if (returnProcessId != 0) AllowSetForegroundWindow(returnProcessId);
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool AllowSetForegroundWindow(uint processId);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowPos(
