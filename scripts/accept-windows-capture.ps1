@@ -1443,6 +1443,12 @@ Assert-DesktopCaptureSurface
 $pointContext = Invoke-CaptureRequest -Executable $capture -Method 'selectContext' -Interact {
     param($process)
     $window = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi context selection'
+    $activationDeadline = [DateTime]::UtcNow.AddSeconds(5)
+    while ((-not [ZommiWindowsAcceptanceNative]::TopMost($window) -or
+            -not [ZommiWindowsAcceptanceNative]::Foreground($window)) -and
+           [DateTime]::UtcNow -lt $activationDeadline) {
+        Start-Sleep -Milliseconds 50
+    }
     if (-not [ZommiWindowsAcceptanceNative]::TopMost($window) -or
         -not [ZommiWindowsAcceptanceNative]::Foreground($window)) {
         throw 'Context point selector was not the active topmost window.'

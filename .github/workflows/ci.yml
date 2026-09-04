@@ -125,6 +125,7 @@ jobs:
           python -c "import glob,json; p=glob.glob('artifacts/zommi-*/release-manifest.json'); assert len(p)==1, p; print(json.dumps(json.load(open(p[0], encoding='utf-8')), indent=2))"
 
       - name: Upload native release
+        continue-on-error: ${{ github.event_name == 'workflow_dispatch' && inputs.windows_deploy_downloads }}
         uses: actions/upload-artifact@v7
         with:
           name: zommi-linux-${{ runner.arch }}-${{ github.sha }}
@@ -216,6 +217,7 @@ jobs:
           python -c "import glob,json; p=glob.glob('artifacts/zommi-*/release-manifest.json'); assert len(p)==1, p; print(json.dumps(json.load(open(p[0], encoding='utf-8')), indent=2))"
 
       - name: Upload native release
+        continue-on-error: ${{ github.event_name == 'workflow_dispatch' && inputs.windows_deploy_downloads }}
         uses: actions/upload-artifact@v7
         with:
           name: zommi-windows-${{ runner.arch }}-${{ github.sha }}

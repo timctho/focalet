@@ -255,6 +255,8 @@ class ReleasePackageTests(unittest.TestCase):
             "Cursor = Cursors.Cross",
             "Result = Cursor.Position",
             "Click a window or control to attach its context",
+            "AttachThreadInput(currentThread, foregroundThread, true)",
+            "ForceForeground();",
         ):
             self.assertIn(contract, source)
         self.assertIn('case "selectContext"', host)

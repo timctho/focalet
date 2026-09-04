@@ -67,6 +67,21 @@ internal sealed class PointSelectionForm : Form
         topMostGuard.Start();
     }
 
+    protected override void OnActivated(EventArgs eventArgs)
+    {
+        base.OnActivated(eventArgs);
+        KeepAboveOtherWindows(activate: false);
+    }
+
+    protected override void OnDeactivate(EventArgs eventArgs)
+    {
+        base.OnDeactivate(eventArgs);
+        if (Visible)
+        {
+            KeepAboveOtherWindows(activate: false);
+        }
+    }
+
     protected override void OnFormClosed(FormClosedEventArgs eventArgs)
     {
         topMostGuard.Stop();
@@ -147,10 +162,33 @@ internal sealed class PointSelectionForm : Form
         SetWindowPos(Handle, TopMostWindow, 0, 0, 0, 0, flags);
         if (activate)
         {
+            ForceForeground();
+        }
+    }
+
+    private void ForceForeground()
+    {
+        var foreground = GetForegroundWindow();
+        var foregroundThread = foreground == nint.Zero
+            ? 0
+            : GetWindowThreadProcessId(foreground, out _);
+        var currentThread = GetCurrentThreadId();
+        var attached = foregroundThread != 0 &&
+            foregroundThread != currentThread &&
+            AttachThreadInput(currentThread, foregroundThread, true);
+        try
+        {
             BringWindowToTop(Handle);
             Activate();
             SetForegroundWindow(Handle);
             SetFocus(Handle);
+        }
+        finally
+        {
+            if (attached)
+            {
+                AttachThreadInput(currentThread, foregroundThread, false);
+            }
         }
     }
 
@@ -166,6 +204,18 @@ internal sealed class PointSelectionForm : Form
 
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(nint window);
+
+    [DllImport("user32.dll")]
+    private static extern nint GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint attach, uint attachTo, bool value);
 
     [DllImport("user32.dll")]
     private static extern bool BringWindowToTop(nint window);

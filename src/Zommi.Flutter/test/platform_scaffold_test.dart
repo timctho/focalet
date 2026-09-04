@@ -195,6 +195,8 @@ void main() {
         contains('Cursor = Cursors.Cross'),
         contains('Click a window or control to attach its context'),
         contains('Result = Cursor.Position'),
+        contains('AttachThreadInput(currentThread, foregroundThread, true)'),
+        contains('ForceForeground();'),
       ),
     );
     final nativeHost = File(
