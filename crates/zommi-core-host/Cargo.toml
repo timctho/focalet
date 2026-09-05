@@ -11,3 +11,6 @@ tokio.workspace = true
 uuid.workspace = true
 wait-timeout.workspace = true
 zommi-core = { path = "../zommi-core" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"

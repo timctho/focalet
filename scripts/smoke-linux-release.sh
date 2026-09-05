@@ -106,6 +106,10 @@ for _ in {1..40}; do
   sleep 0.25
 done
 if is_running "$core_pid"; then
+  ps -o pid=,ppid=,stat=,comm= -p "$core_pid" >&2 || true
+  printf 'Core wait channel: ' >&2
+  cat "/proc/$core_pid/wchan" >&2 || true
+  printf '\n' >&2
   echo 'The adjacent Rust core remained after Flutter stopped.' >&2
   exit 1
 fi
