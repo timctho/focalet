@@ -1467,7 +1467,9 @@ final class ZommiController extends ChangeNotifier {
               _continuesCurrentSegment(turn.blocks, sourceMatch, lifecycle)
         ? sourceMatch
         : null;
-    if (block == null && kind == TranscriptKind.assistant) {
+    if (block == null &&
+        kind == TranscriptKind.assistant &&
+        event.payload['textMode'] != 'append') {
       block = _overlappingTrailingAssistant(turn.blocks, incomingText);
     }
     final blockId = nativeItemId.isEmpty
@@ -1855,6 +1857,7 @@ bool _continuesCurrentSegment(
   TranscriptBlock block,
   TranscriptLifecycle lifecycle,
 ) {
+  if (block.kind == TranscriptKind.assistant) return true;
   if (blocks.isNotEmpty && identical(blocks.last, block)) return true;
   return lifecycle == TranscriptLifecycle.completed && !block.completed;
 }
