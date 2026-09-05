@@ -116,13 +116,28 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
 
   // Give Flutter, including plugins, an opportunity to handle window messages.
+  std::optional<LRESULT> plugin_result;
   if (flutter_controller_) {
-    std::optional<LRESULT> result =
-        flutter_controller_->HandleTopLevelWindowProc(hwnd, message, wparam,
-                                                      lparam);
-    if (result) {
-      return *result;
+    plugin_result = flutter_controller_->HandleTopLevelWindowProc(
+        hwnd, message, wparam, lparam);
+  }
+  if (message == WM_GETMINMAXINFO) {
+    MONITORINFO monitor_info{};
+    monitor_info.cbSize = sizeof(monitor_info);
+    if (GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST),
+                        &monitor_info)) {
+      auto *limits = reinterpret_cast<MINMAXINFO *>(lparam);
+      const auto &work_area = monitor_info.rcWork;
+      const auto &monitor_area = monitor_info.rcMonitor;
+      limits->ptMaxPosition = {work_area.left - monitor_area.left,
+                               work_area.top - monitor_area.top};
+      limits->ptMaxSize = {work_area.right - work_area.left,
+                           work_area.bottom - work_area.top};
     }
+    return 0;
+  }
+  if (plugin_result) {
+    return *plugin_result;
   }
 
   switch (message) {
