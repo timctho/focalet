@@ -563,16 +563,16 @@ public static class ZommiWindowsAcceptanceNative
     public static bool ClickSelection(IntPtr window, int x, int y)
     {
         var bounds = PhysicalBounds(window);
-        if (bounds.Length != 4 || !SetPhysicalCursorPos(bounds[0] + x, bounds[1] + y))
+        if (bounds.Length != 4 || !SetPhysicalCursorPos(bounds[0] + x, bounds[1] + y) ||
+            !IsOwnedWindowAtPoint(window, bounds[0] + x, bounds[1] + y))
         {
             return false;
         }
-        const uint leftDown = 0x0201;
-        const uint leftUp = 0x0202;
-        const int leftButton = 0x0001;
-        SendMessage(window, leftDown, new IntPtr(leftButton), Point(x, y));
+        const uint leftDown = 0x0002;
+        const uint leftUp = 0x0004;
+        mouse_event(leftDown, 0, 0, 0, UIntPtr.Zero);
         System.Threading.Thread.Sleep(80);
-        SendMessage(window, leftUp, IntPtr.Zero, Point(x, y));
+        mouse_event(leftUp, 0, 0, 0, UIntPtr.Zero);
         return true;
     }
 
@@ -1550,6 +1550,13 @@ $pointContext = Invoke-CaptureRequest -Executable $capture -Method 'selectContex
         throw 'Context point selector did not expose its crosshair cursor.'
     }
     Write-Host "point-context: crosshair ready after $($cursorClock.ElapsedMilliseconds) ms"
+    foreach ($sample in 1..10) {
+        Start-Sleep -Milliseconds 100
+        if (-not [ZommiWindowsAcceptanceNative]::IsOwnedWindowAtPoint($window, $bounds[0] + 220, $bounds[1] + 220) -or
+            -not [ZommiWindowsAcceptanceNative]::CrosshairCursorActive()) {
+            throw 'Context point selector lost pointer ownership after painting.'
+        }
+    }
     if (-not [ZommiWindowsAcceptanceNative]::ClickSelection($window, 220, 220)) {
         throw 'Could not click the context point selector.'
     }

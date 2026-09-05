@@ -28,8 +28,8 @@ internal sealed class PointSelectionForm : Form
         KeyPreview = true;
         DoubleBuffered = true;
         Cursor = Cursors.Cross;
-        BackColor = Color.Magenta;
-        TransparencyKey = Color.Magenta;
+        BackColor = Color.Black;
+        Opacity = 0.28;
 
         topMostGuard = new System.Windows.Forms.Timer { Interval = 120 };
         topMostGuard.Tick += (_, _) =>
