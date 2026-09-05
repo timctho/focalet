@@ -225,6 +225,7 @@ class ReleasePackageTests(unittest.TestCase):
         for contract in (
             "-HelpersOnly",
             "Assert-DesktopCaptureSurface",
+            "[ZommiWindowsAcceptanceNative]::SendAltA($false)",
             "IsOwnedWindowAtPoint($window, $left, $top)",
             "ZommiWindowSizeAccess]::Sample($window, 3000)",
             "$distinct.Count -lt 5",
