@@ -186,6 +186,7 @@ try {
     $null = [ZommiWindowSizeAccess]::Sample($window, 1)
     [ZommiWindowsAcceptanceNative]::Restore($window)
     $view = [ZommiWindowSizeAccess]::FindWindowEx($window, [IntPtr]::Zero, [NullString]::Value, [NullString]::Value)
+    [ZommiWindowsAcceptanceNative]::SendAltA($false)
     Wait-SizeCondition -Description 'foreground' -Condition { [ZommiWindowsAcceptanceNative]::Foreground($window) }
     Click-SizeControl 'App settings'
     Measure-SizeTransition 'Wide' 'wide'
