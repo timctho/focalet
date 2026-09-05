@@ -325,12 +325,28 @@ void FlutterWindow::HandleWindowAnimationMethodCall(
     return;
   }
   if (IsZoomed(GetHandle())) {
-    ShowWindow(GetHandle(), SW_RESTORE);
-    SetWindowPos(
-        GetHandle(), nullptr, animation_from_.left, animation_from_.top,
-        animation_from_.right - animation_from_.left,
-        animation_from_.bottom - animation_from_.top,
-        SWP_NOACTIVATE | SWP_NOCOPYBITS | SWP_NOOWNERZORDER | SWP_NOZORDER);
+    auto restored = animation_restore_;
+    restored.showCmd = SW_SHOWNOACTIVATE;
+    restored.rcNormalPosition = animation_from_;
+    if ((GetWindowLongPtr(GetHandle(), GWL_EXSTYLE) & WS_EX_TOOLWINDOW) == 0) {
+      MONITORINFO monitor{};
+      monitor.cbSize = sizeof(monitor);
+      if (!GetMonitorInfo(
+              MonitorFromWindow(GetHandle(), MONITOR_DEFAULTTONEAREST),
+              &monitor)) {
+        result->Error("window_unavailable",
+                      "The Zommi monitor work area is unavailable.");
+        return;
+      }
+      OffsetRect(&restored.rcNormalPosition,
+                 monitor.rcMonitor.left - monitor.rcWork.left,
+                 monitor.rcMonitor.top - monitor.rcWork.top);
+    }
+    if (!SetWindowPlacement(GetHandle(), &restored)) {
+      result->Error("window_resize_failed",
+                    "Could not restore the Zommi window for animation.");
+      return;
+    }
   }
   animation_to_ = target;
   animation_duration_ms_ =

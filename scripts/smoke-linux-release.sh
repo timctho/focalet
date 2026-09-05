@@ -19,13 +19,23 @@ runtime_log="$temporary_directory/zommi.log"
 application_pid=
 core_pid=
 
+is_running() {
+  local process_status process_state
+  if ! { IFS= read -r process_status < "/proc/$1/stat"; } 2>/dev/null; then
+    return 1
+  fi
+  process_state=${process_status##*) }
+  process_state=${process_state%% *}
+  [[ "$process_state" != Z && "$process_state" != X && "$process_state" != x ]]
+}
+
 cleanup() {
-  if [[ -n "$application_pid" ]] && kill -0 "$application_pid" 2>/dev/null; then
+  if [[ -n "$application_pid" ]] && is_running "$application_pid"; then
     kill -TERM "$application_pid" 2>/dev/null || true
     sleep 1
     kill -KILL "$application_pid" 2>/dev/null || true
   fi
-  if [[ -n "$core_pid" ]] && kill -0 "$core_pid" 2>/dev/null; then
+  if [[ -n "$core_pid" ]] && is_running "$core_pid"; then
     kill -TERM "$core_pid" 2>/dev/null || true
     sleep 1
     kill -KILL "$core_pid" 2>/dev/null || true
@@ -39,7 +49,7 @@ application_pid=$!
 core_executable=$(readlink -f "$core_host")
 startup_deadline=$((SECONDS + 20))
 while [[ $SECONDS -lt $startup_deadline && -z "$core_pid" ]]; do
-  if ! kill -0 "$application_pid" 2>/dev/null; then
+  if ! is_running "$application_pid"; then
     sed -n '1,200p' "$runtime_log" >&2
     echo 'Flutter exited before starting the adjacent Rust core.' >&2
     exit 1
@@ -64,7 +74,7 @@ if [[ -z "$core_pid" ]]; then
 fi
 
 sleep 5
-if ! kill -0 "$application_pid" 2>/dev/null || ! kill -0 "$core_pid" 2>/dev/null; then
+if ! is_running "$application_pid" || ! is_running "$core_pid"; then
   sed -n '1,200p' "$runtime_log" >&2
   echo 'Flutter or the adjacent Rust core exited during the startup observation.' >&2
   exit 1
@@ -77,12 +87,12 @@ fi
 
 kill -TERM "$application_pid"
 for _ in {1..40}; do
-  if ! kill -0 "$application_pid" 2>/dev/null; then
+  if ! is_running "$application_pid"; then
     break
   fi
   sleep 0.25
 done
-if kill -0 "$application_pid" 2>/dev/null; then
+if is_running "$application_pid"; then
   echo 'Flutter did not stop within 10 seconds.' >&2
   exit 1
 fi
@@ -90,12 +100,12 @@ wait "$application_pid" 2>/dev/null || true
 application_pid=
 
 for _ in {1..40}; do
-  if ! kill -0 "$core_pid" 2>/dev/null; then
+  if ! is_running "$core_pid"; then
     break
   fi
   sleep 0.25
 done
-if kill -0 "$core_pid" 2>/dev/null; then
+if is_running "$core_pid"; then
   echo 'The adjacent Rust core remained after Flutter stopped.' >&2
   exit 1
 fi
