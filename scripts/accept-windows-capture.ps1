@@ -1541,10 +1541,15 @@ $pointContext = Invoke-CaptureRequest -Executable $capture -Method 'selectContex
         )) {
         throw 'Could not position the pointer inside the context selector.'
     }
-    Start-Sleep -Milliseconds 120
+    $cursorClock = [Diagnostics.Stopwatch]::StartNew()
+    while (-not [ZommiWindowsAcceptanceNative]::CrosshairCursorActive() -and
+           $cursorClock.ElapsedMilliseconds -lt 5000) {
+        Start-Sleep -Milliseconds 25
+    }
     if (-not [ZommiWindowsAcceptanceNative]::CrosshairCursorActive()) {
         throw 'Context point selector did not expose its crosshair cursor.'
     }
+    Write-Host "point-context: crosshair ready after $($cursorClock.ElapsedMilliseconds) ms"
     if (-not [ZommiWindowsAcceptanceNative]::ClickSelection($window, 220, 220)) {
         throw 'Could not click the context point selector.'
     }

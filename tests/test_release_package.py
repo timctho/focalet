@@ -306,6 +306,8 @@ class ReleasePackageTests(unittest.TestCase):
             self.assertIn(contract, source)
         self.assertIn('case "selectContext"', host)
         self.assertIn("CrosshairCursorActive", acceptance)
+        self.assertIn("$cursorClock.ElapsedMilliseconds -lt 5000", acceptance)
+        self.assertIn("Context point selector did not expose its crosshair cursor.", acceptance)
         self.assertIn("point-context: ok (crosshair and click)", acceptance)
 
     def test_manifest_component_cannot_escape_package_root(self) -> None:
