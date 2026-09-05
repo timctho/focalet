@@ -8,6 +8,54 @@ import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 
 void main() {
+  for (final pixelRatio in [1.0, 1.25, 1.5, 2.0]) {
+    for (final kind in [
+      DesktopInvocationKind.context,
+      DesktopInvocationKind.image,
+    ]) {
+      testWidgets(
+        'Windows $kind captures physical pointer coordinates at $pixelRatio DPI',
+        (tester) async {
+          tester.view.devicePixelRatio = pixelRatio;
+          addTearDown(tester.view.resetDevicePixelRatio);
+          _mockCursor(tester, point: const Offset(-320, 200));
+          const windowChannel = MethodChannel('window_manager');
+          tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            windowChannel,
+            (call) async => switch (call.method) {
+              'isVisible' => true,
+              'isMinimized' => false,
+              _ => null,
+            },
+          );
+          addTearDown(
+            () => tester.binding.defaultBinaryMessenger
+                .setMockMethodCallHandler(windowChannel, null),
+          );
+          final capture = _FakeNativeCaptureClient(
+            onRequest: (_) async => {
+              'snapshot': {'application': 'Fixture'},
+            },
+          );
+          final selector = _FakeNativeCaptureClient(
+            onRequest: (_) async => {'cancelled': true},
+          );
+          final bridge = FlutterDesktopBridge(
+            captureProvider: WindowsCaptureProvider(
+              captureClient: capture,
+              selectorClient: selector,
+            ),
+          );
+          await bridge.invokeShortcut(kind);
+          expect(capture.requestParameters.single['point'], {
+            'x': (-320 * pixelRatio).round(),
+            'y': (200 * pixelRatio).round(),
+          });
+        },
+      );
+    }
+  }
+
   for (final cancelled in [false, true]) {
     testWidgets(
       'image selection preserves restored Maximize (cancelled: $cancelled)',
@@ -603,11 +651,11 @@ while read -r line; do :; done
   });
 }
 
-void _mockCursor(WidgetTester tester) {
+void _mockCursor(WidgetTester tester, {Offset point = const Offset(300, 200)}) {
   const channel = MethodChannel('dev.leanflutter.plugins/screen_retriever');
   tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
     channel,
-    (_) async => {'dx': 300.0, 'dy': 200.0},
+    (_) async => {'dx': point.dx, 'dy': point.dy},
   );
   addTearDown(
     () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
@@ -622,6 +670,7 @@ final class _FakeNativeCaptureClient implements NativeCaptureClient {
 
   final Future<Map<String, Object?>> Function(String method) onRequest;
   final List<String> requests = [];
+  final List<Map<String, Object?>> requestParameters = [];
   bool closed = false;
 
   @override
@@ -631,6 +680,7 @@ final class _FakeNativeCaptureClient implements NativeCaptureClient {
     void Function()? onReady,
   }) {
     requests.add(method);
+    requestParameters.add(parameters);
     onReady?.call();
     return onRequest(method);
   }

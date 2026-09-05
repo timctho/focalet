@@ -425,7 +425,7 @@ Future<void> _pumpTurn(
               viewportWidth: 720,
               runtimeName: 'Agent',
               controller: controller,
-              onAttachmentEnter: (_) {},
+              onAttachmentEnter: (attachment, anchor) {},
               onAttachmentExit: (_) {},
             ),
           ),

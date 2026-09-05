@@ -9,6 +9,7 @@ import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 import 'package:zommi_flutter/theme/zommi_typography.dart';
+import 'package:zommi_flutter/widgets/context_preview_layout.dart';
 import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
 import 'package:zommi_flutter/widgets/overlay_panels.dart';
 import 'package:zommi_flutter/widgets/transcript_view.dart';
@@ -132,7 +133,7 @@ class ZommiShell extends StatefulWidget {
   State<ZommiShell> createState() => _ZommiShellState();
 }
 
-class _ZommiShellState extends State<ZommiShell> {
+class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
   late final InlineAttachmentTextController _composer;
   final FocusNode _composerFocus = FocusNode(debugLabel: 'Zommi composer');
   late final ZommiController _controller;
@@ -145,12 +146,16 @@ class _ZommiShellState extends State<ZommiShell> {
   final LayerLink _settingsPanelLink = LayerLink();
   final LayerLink _appSettingsPanelLink = LayerLink();
   Timer? _previewTimer;
+  final GlobalKey _previewViewportKey = GlobalKey();
+  BuildContext? _previewAnchor;
+  Rect _previewAnchorBounds = Rect.zero;
   Timer? _sessionTimer;
   int _lastFocusEpoch = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _controller = ZommiController(
       core: widget.core,
       desktop: widget.desktop,
@@ -169,6 +174,10 @@ class _ZommiShellState extends State<ZommiShell> {
 
   void _onControllerChanged() {
     if (!mounted) return;
+    if (_previewBlocked && _controller.previewAttachment != null) {
+      _controller.hideAttachmentPreview();
+      return;
+    }
     _composer.syncAttachments(_controller.attachments);
     if (_lastFocusEpoch != _controller.focusComposerEpoch) {
       _lastFocusEpoch = _controller.focusComposerEpoch;
@@ -177,10 +186,12 @@ class _ZommiShellState extends State<ZommiShell> {
       });
     }
     setState(() {});
+    _updatePreviewAfterLayout();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _previewTimer?.cancel();
     _sessionTimer?.cancel();
     _controller.removeListener(_onControllerChanged);
@@ -199,9 +210,62 @@ class _ZommiShellState extends State<ZommiShell> {
     _previewTimer = Timer(previewHideDelay, _controller.hideAttachmentPreview);
   }
 
-  void _showAttachmentPreview(ContextAttachment attachment) {
+  void _showAttachmentPreview(
+    ContextAttachment attachment,
+    BuildContext anchor,
+  ) {
+    if (_previewBlocked) return;
     _previewTimer?.cancel();
+    _previewAnchor = anchor;
+    _previewAnchorBounds = _previewAnchorRect();
     _controller.showAttachmentPreview(attachment);
+  }
+
+  bool get _previewBlocked =>
+      !_controller.expanded ||
+      _controller.sessionPanelOpen ||
+      _controller.runtimeSetupPanelOpen ||
+      _controller.approval != null ||
+      _controller.question != null ||
+      _controller.previewArtifact != null;
+
+  @override
+  void didChangeMetrics() => _updatePreviewAfterLayout();
+
+  void _updatePreviewAfterLayout() {
+    if (_controller.previewAttachment == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _controller.previewAttachment == null) return;
+      if (_previewAnchor?.mounted != true) {
+        _controller.hideAttachmentPreview();
+        return;
+      }
+      final bounds = _previewAnchorRect();
+      if (bounds != _previewAnchorBounds) {
+        setState(() => _previewAnchorBounds = bounds);
+      }
+    });
+  }
+
+  Rect _previewAnchorRect() {
+    final anchor = _previewAnchor;
+    final viewport = _previewViewportKey.currentContext?.findRenderObject();
+    if (anchor == null || !anchor.mounted || viewport is! RenderBox) {
+      return Rect.zero;
+    }
+    final target = anchor.findRenderObject();
+    if (target is! RenderBox || !target.hasSize) return Rect.zero;
+    return target.localToGlobal(Offset.zero, ancestor: viewport) & target.size;
+  }
+
+  bool _closePreviewOnScroll(ScrollStartNotification notification) {
+    final anchor = _previewAnchor;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && identical(_previewAnchor, anchor)) {
+        _controller.hideAttachmentPreview();
+      }
+    });
+    return false;
   }
 
   void _openSessions() {
@@ -315,6 +379,7 @@ class _ZommiShellState extends State<ZommiShell> {
           ],
         ),
         child: Stack(
+          key: _previewViewportKey,
           fit: StackFit.expand,
           children: [
             Column(
@@ -324,13 +389,16 @@ class _ZommiShellState extends State<ZommiShell> {
                   child: Stack(
                     children: [
                       Positioned.fill(
-                        child: TranscriptPane(
-                          key: ValueKey(
-                            'transcript-${_controller.activeSessionId}',
+                        child: NotificationListener<ScrollStartNotification>(
+                          onNotification: _closePreviewOnScroll,
+                          child: TranscriptPane(
+                            key: ValueKey(
+                              'transcript-${_controller.activeSessionId}',
+                            ),
+                            controller: _controller,
+                            onAttachmentEnter: _showAttachmentPreview,
+                            onAttachmentExit: (_) => _schedulePreviewClose(),
                           ),
-                          controller: _controller,
-                          onAttachmentEnter: _showAttachmentPreview,
-                          onAttachmentExit: (_) => _schedulePreviewClose(),
                         ),
                       ),
                       if (_controller.sessionPanelOpen)
@@ -362,17 +430,6 @@ class _ZommiShellState extends State<ZommiShell> {
                                 ),
                               ),
                             ),
-                          ),
-                        ),
-                      if (_controller.previewAttachment case final attachment?)
-                        Positioned(
-                          right: 22,
-                          bottom: 12,
-                          child: ContextPreviewPanel(
-                            attachment: attachment,
-                            onClose: _controller.hideAttachmentPreview,
-                            onPointerEnter: () => _previewTimer?.cancel(),
-                            onPointerExit: _schedulePreviewClose,
                           ),
                         ),
                       if (_controller.starting)
@@ -424,6 +481,21 @@ class _ZommiShellState extends State<ZommiShell> {
                 _buildFooter(),
               ],
             ),
+            if (_controller.previewAttachment case final attachment?)
+              if (_previewAnchor?.mounted == true)
+                Positioned.fill(
+                  child: CustomSingleChildLayout(
+                    delegate: ContextPreviewLayout(
+                      anchorRect: _previewAnchorBounds,
+                    ),
+                    child: ContextPreviewPanel(
+                      attachment: attachment,
+                      onClose: _controller.hideAttachmentPreview,
+                      onPointerEnter: () => _previewTimer?.cancel(),
+                      onPointerExit: _schedulePreviewClose,
+                    ),
+                  ),
+                ),
             if (_controller.runtimePanelOpen)
               Positioned(
                 left: 0,

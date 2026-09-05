@@ -6,6 +6,11 @@ import 'package:zommi_flutter/theme/zommi_typography.dart';
 
 const String inlineAttachmentMarker = '\u{fffc}';
 
+typedef AttachmentHoverCallback = void Function(
+  ContextAttachment attachment,
+  BuildContext anchor,
+);
+
 final class InlineAttachmentTextController extends TextEditingController {
   InlineAttachmentTextController({
     required this.onAttachmentRemoved,
@@ -17,7 +22,7 @@ final class InlineAttachmentTextController extends TextEditingController {
   }
 
   final ValueChanged<ContextAttachment> onAttachmentRemoved;
-  final ValueChanged<ContextAttachment>? onAttachmentEnter;
+  final AttachmentHoverCallback? onAttachmentEnter;
   final ValueChanged<ContextAttachment>? onAttachmentExit;
   final List<ContextAttachment> _attachments = [];
   late String _previousText;
@@ -160,7 +165,7 @@ final class InlineAttachmentTextController extends TextEditingController {
         onDelete: () => onAttachmentRemoved(attachment),
         onEnter: onAttachmentEnter == null
             ? null
-            : () => onAttachmentEnter!(attachment),
+            : (anchor) => onAttachmentEnter!(attachment, anchor),
         onExit: onAttachmentExit == null
             ? null
             : () => onAttachmentExit!(attachment),
@@ -186,7 +191,7 @@ class InlineAttachmentMessage extends StatelessWidget {
 
   final String text;
   final List<ContextAttachment> attachments;
-  final ValueChanged<ContextAttachment>? onAttachmentEnter;
+  final AttachmentHoverCallback? onAttachmentEnter;
   final ValueChanged<ContextAttachment>? onAttachmentExit;
 
   @override
@@ -213,7 +218,7 @@ class InlineAttachmentMessage extends StatelessWidget {
               attachment: attachment,
               onEnter: onAttachmentEnter == null
                   ? null
-                  : () => onAttachmentEnter!(attachment),
+                  : (anchor) => onAttachmentEnter!(attachment, anchor),
               onExit: onAttachmentExit == null
                   ? null
                   : () => onAttachmentExit!(attachment),
@@ -272,7 +277,7 @@ class InlineAttachmentTile extends StatefulWidget {
 
   final ContextAttachment attachment;
   final VoidCallback? onDelete;
-  final VoidCallback? onEnter;
+  final ValueChanged<BuildContext>? onEnter;
   final VoidCallback? onExit;
 
   @override
@@ -293,7 +298,7 @@ class _InlineAttachmentTileState extends State<InlineAttachmentTile> {
     return MouseRegion(
       onEnter: (_) {
         setState(() => _hovered = true);
-        widget.onEnter?.call();
+        widget.onEnter?.call(context);
       },
       onExit: (_) {
         setState(() => _hovered = false);

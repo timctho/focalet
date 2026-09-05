@@ -1621,33 +1621,46 @@ class ContextPreviewPanel extends StatelessWidget {
                     ],
                   ),
                 ),
-                if (image != null)
-                  SizedBox(
-                    key: const ValueKey('context-preview-image-frame'),
-                    width: double.infinity,
-                    height: 220,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Image.memory(
-                        image,
-                        fit: BoxFit.contain,
-                        gaplessPlayback: true,
-                        semanticLabel: 'Attached visual context preview',
-                      ),
-                    ),
-                  ),
-                if (attachment.previewText.isNotEmpty)
+                if (image != null || attachment.previewText.isNotEmpty)
                   Flexible(
                     child: SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
-                      child: SelectableText(
-                        attachment.previewText,
-                        key: const ValueKey('context-preview-text'),
-                        style: const TextStyle(
-                          fontFamily: 'monospace',
-                          fontSize: 10.5,
-                          height: 1.4,
-                        ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (image != null)
+                            SizedBox(
+                              key: const ValueKey(
+                                'context-preview-image-frame',
+                              ),
+                              width: double.infinity,
+                              height: 220,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                ),
+                                child: Image.memory(
+                                  image,
+                                  fit: BoxFit.contain,
+                                  gaplessPlayback: true,
+                                  semanticLabel:
+                                      'Attached visual context preview',
+                                ),
+                              ),
+                            ),
+                          if (attachment.previewText.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
+                              child: SelectableText(
+                                attachment.previewText,
+                                key: const ValueKey('context-preview-text'),
+                                style: const TextStyle(
+                                  fontFamily: 'monospace',
+                                  fontSize: 10.5,
+                                  height: 1.4,
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                   ),
