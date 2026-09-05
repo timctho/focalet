@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart' show WidgetsBinding;
 import 'package:file_selector/file_selector.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
 import 'package:screen_capturer/screen_capturer.dart';
@@ -526,7 +527,15 @@ final class FlutterDesktopBridge
   }) async {
     Offset? point;
     try {
-      point = await screenRetriever.getCursorScreenPoint();
+      final pixelRatio = _captureProvider is WindowsCaptureProvider
+          ? WidgetsBinding
+                .instance
+                .platformDispatcher
+                .views
+                .single
+                .devicePixelRatio
+          : 1.0;
+      point = (await screenRetriever.getCursorScreenPoint()) * pixelRatio;
     } on Object {
       point = null;
     }

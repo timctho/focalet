@@ -40,7 +40,7 @@ class TranscriptPane extends StatefulWidget {
   });
 
   final ZommiController controller;
-  final ValueChanged<ContextAttachment> onAttachmentEnter;
+  final AttachmentHoverCallback onAttachmentEnter;
   final ValueChanged<ContextAttachment> onAttachmentExit;
 
   @override
@@ -245,7 +245,7 @@ class ConversationTurnView extends StatelessWidget {
   final double viewportWidth;
   final String runtimeName;
   final ZommiController controller;
-  final ValueChanged<ContextAttachment> onAttachmentEnter;
+  final AttachmentHoverCallback onAttachmentEnter;
   final ValueChanged<ContextAttachment> onAttachmentExit;
 
   @override
