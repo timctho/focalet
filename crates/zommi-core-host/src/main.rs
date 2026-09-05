@@ -24,6 +24,9 @@ use zommi_core::{
 
 mod wsl_relay;
 
+#[cfg(target_os = "linux")]
+mod parent_lifetime;
+
 const CORE_PROTOCOL_VERSION: u64 = 1;
 const MAX_REQUEST_BYTES: usize = 64 * 1024 * 1024;
 const WSL_PROBE_BACKOFF: Duration = Duration::from_secs(45);
@@ -828,6 +831,8 @@ impl From<serde_json::Error> for HostError {
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
+    #[cfg(target_os = "linux")]
+    parent_lifetime::bind_to_parent()?;
     let arguments = env::args().skip(1).collect::<Vec<_>>();
     if arguments
         .first()

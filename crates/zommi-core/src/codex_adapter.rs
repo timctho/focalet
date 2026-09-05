@@ -981,9 +981,21 @@ impl Inner {
             .or_else_nonempty(state.active_turns.get(&thread_id).cloned())
             .unwrap_or_default();
         let operation = state.turn_client_operations.get(&thread_id).cloned();
-        let update = parse_stream_update(method, &params, &state.item_kinds, self.cwd.to_str());
+        let mut update = parse_stream_update(method, &params, &state.item_kinds, self.cwd.to_str());
         if method == "item/completed" {
             let item_id = value_string(params.pointer("/item/id"));
+            if let Some(payload) = update.as_mut().filter(|_| {
+                params.pointer("/item/type").and_then(Value::as_str) == Some("agentMessage")
+            }) {
+                let kind = value_string(payload.get("kind"));
+                if let Some(source_id) =
+                    completed_agent_source_id(&state, &thread_id, &item_id, &kind)
+                {
+                    payload["itemId"] = Value::String(source_id.clone());
+                    state.item_kinds.remove(&source_id);
+                    state.item_threads.remove(&source_id);
+                }
+            }
             state.item_kinds.remove(&item_id);
             state.item_threads.remove(&item_id);
         }
@@ -1181,6 +1193,29 @@ async fn read_stderr(inner: Weak<Inner>, stderr: tokio::process::ChildStderr) {
     }
 }
 
+fn completed_agent_source_id(
+    state: &AdapterState,
+    thread_id: &str,
+    item_id: &str,
+    kind: &str,
+) -> Option<String> {
+    if state.item_kinds.contains_key(item_id) || !matches!(kind, "assistant" | "thinking") {
+        return None;
+    }
+    let mut candidates = state.item_kinds.iter().filter(|(source_id, source_kind)| {
+        source_kind.as_str() == kind
+            && state
+                .item_threads
+                .get(*source_id)
+                .is_some_and(|thread| thread == thread_id)
+    });
+    let (source_id, _) = candidates.next()?;
+    if candidates.next().is_some() {
+        return None;
+    }
+    Some(source_id.clone())
+}
+
 fn parse_stream_update(
     method: &str,
     params: &Value,
@@ -1353,6 +1388,8 @@ fn update(
     }
     if replace {
         value["replace"] = Value::Bool(true);
+    } else if lifecycle == "delta" {
+        value["textMode"] = Value::String("append".into());
     }
     value
 }
@@ -1518,7 +1555,43 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{build_session_name, codex_runtime_version, parse_stream_update};
+    use super::{
+        AdapterState, build_session_name, codex_runtime_version, completed_agent_source_id,
+        parse_stream_update,
+    };
+
+    #[test]
+    fn rekeyed_completion_only_matches_an_unambiguous_agent_in_the_same_thread() {
+        let mut state = AdapterState::default();
+        state.item_kinds.insert("stream".into(), "assistant".into());
+        state.item_threads.insert("stream".into(), "thread".into());
+        assert_eq!(
+            completed_agent_source_id(&state, "thread", "canonical", "assistant"),
+            Some("stream".into())
+        );
+        assert_eq!(
+            completed_agent_source_id(&state, "other", "canonical", "assistant"),
+            None
+        );
+        assert_eq!(
+            completed_agent_source_id(&state, "thread", "canonical", "thinking"),
+            None
+        );
+        assert_eq!(
+            completed_agent_source_id(&state, "thread", "stream", "assistant"),
+            None
+        );
+        state
+            .item_kinds
+            .insert("concurrent".into(), "assistant".into());
+        state
+            .item_threads
+            .insert("concurrent".into(), "thread".into());
+        assert_eq!(
+            completed_agent_source_id(&state, "thread", "canonical", "assistant"),
+            None
+        );
+    }
 
     #[test]
     fn extracts_runtime_version_and_bounds_session_name() {

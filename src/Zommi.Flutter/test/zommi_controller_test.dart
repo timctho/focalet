@@ -9,6 +9,54 @@ import 'package:zommi_flutter/state/zommi_models.dart';
 import 'test_support.dart';
 
 void main() {
+  test('explicit message identity wins over shared text prefixes and late completion', () async {
+    final core = RichFakeCore()..historyCount = 0;
+    final controller = ZommiController(
+      core: core,
+      desktop: FakeDesktopBridge(),
+    );
+    addTearDown(controller.close);
+    await controller.initialize();
+    await controller.submit('two distinct messages');
+    var sequence = 0;
+    void emit(
+      String itemId,
+      String text, {
+      bool completed = false,
+      String kind = 'assistant',
+    }) {
+      core.emit(
+        _event(
+          ++sequence,
+          'item.update',
+          payload: {
+            'kind': kind,
+            'itemId': itemId,
+            'text': text,
+            'lifecycle': completed ? 'completed' : 'delta',
+            if (completed) 'replace': true else 'textMode': 'append',
+          },
+        ),
+      );
+    }
+
+    emit('first', 'Apple pie');
+    emit('first', 'Apple pie', completed: true);
+    emit('second', 'Apple');
+    emit('second', ' tart');
+    emit('second', 'Apple tart', completed: true);
+    emit('tool', 'Checked', kind: 'tool');
+    emit('second', 'Corrected apple tart', completed: true);
+    final answers = controller.turns.single.blocks
+        .where((block) => block.kind == TranscriptKind.assistant)
+        .toList();
+    expect(answers.map((block) => block.id), ['first', 'second']);
+    expect(answers.map((block) => block.text), [
+      'Apple pie',
+      'Corrected apple tart',
+    ]);
+  });
+
   test(
     'runtime capability failures are not mislabeled as core failures',
     () async {

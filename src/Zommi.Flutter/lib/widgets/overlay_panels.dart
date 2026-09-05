@@ -1007,7 +1007,7 @@ class AppSettingsPanel extends StatelessWidget {
                 ButtonSegment(
                   value: WindowSizeSetting.maximized,
                   icon: Icon(Icons.crop_square_rounded, size: 15),
-                  label: Text('Maximize'),
+                  label: Text('Max', maxLines: 1, softWrap: false),
                 ),
               ],
               selected: {controller.windowSize},

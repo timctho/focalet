@@ -8,6 +8,74 @@ import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 
 void main() {
+  testWidgets(
+    'native surface bridge animates Standard and Wide in both directions',
+    (tester) async {
+      const windowChannel = MethodChannel('window_manager');
+      const displayChannel = MethodChannel(
+        'dev.leanflutter.plugins/screen_retriever',
+      );
+      var bounds = const Rect.fromLTWH(440, 360, 720, 620);
+      final frames = <Rect>[];
+      final messenger = tester.binding.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(windowChannel, (call) async {
+        if (call.method == 'isMaximized') return false;
+        if (call.method == 'getBounds') {
+          return {
+            'x': bounds.left,
+            'y': bounds.top,
+            'width': bounds.width,
+            'height': bounds.height,
+          };
+        }
+        if (call.method == 'setBounds') {
+          final arguments = Map<String, Object?>.from(call.arguments as Map);
+          bounds = Rect.fromLTWH(
+            arguments['x']! as double,
+            arguments['y']! as double,
+            arguments['width']! as double,
+            arguments['height']! as double,
+          );
+          frames.add(bounds);
+        }
+        return null;
+      });
+      messenger.setMockMethodCallHandler(
+        displayChannel,
+        (call) async => {
+          'displays': [
+            {
+              'id': 'display',
+              'size': {'width': 1600.0, 'height': 1040.0},
+              'visibleSize': {'width': 1600.0, 'height': 1000.0},
+              'visiblePosition': {'dx': 0.0, 'dy': 0.0},
+              'scaleFactor': 1.5,
+            },
+          ],
+        },
+      );
+      addTearDown(() {
+        messenger.setMockMethodCallHandler(windowChannel, null);
+        messenger.setMockMethodCallHandler(displayChannel, null);
+      });
+      final bridge = FlutterDesktopBridge();
+      await bridge.setSurface(expanded: true, animate: false);
+      final anchor = Offset(bounds.center.dx, bounds.bottom);
+      for (final large in [true, false]) {
+        frames.clear();
+        await tester.runAsync(
+          () => bridge.setSurface(expanded: true, large: large),
+        );
+        expect(frames.toSet().length, greaterThan(4));
+        expect(frames.last.size, large ? largeWindowSize : normalWindowSize);
+        for (final frame in frames) {
+          expect(frame.center.dx, closeTo(anchor.dx, 1));
+          expect(frame.bottom, closeTo(anchor.dy, 1));
+        }
+      }
+    },
+  );
+
   for (final pixelRatio in [1.0, 1.25, 1.5, 2.0]) {
     for (final kind in [
       DesktopInvocationKind.context,

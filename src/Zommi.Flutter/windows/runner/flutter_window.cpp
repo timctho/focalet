@@ -19,6 +19,18 @@ namespace {
 constexpr UINT_PTR kWindowAnimationTimerId = 0x5A4D;
 constexpr UINT kWindowAnimationFrameMs = 15;
 
+constexpr ULONGLONG AdvanceSurfaceAnimationClock(ULONGLONG elapsed,
+                                                 ULONGLONG delta,
+                                                 DWORD duration) {
+  return std::min(static_cast<ULONGLONG>(duration),
+                  elapsed + std::min(delta, ULONGLONG{32}));
+}
+
+static_assert(AdvanceSurfaceAnimationClock(0, 15, 280) == 15);
+static_assert(AdvanceSurfaceAnimationClock(15, 250, 280) == 47);
+static_assert(AdvanceSurfaceAnimationClock(15, 1000, 280) == 47);
+static_assert(AdvanceSurfaceAnimationClock(270, 15, 280) == 280);
+
 constexpr double SymmetricSurfaceEase(double progress) {
   if (progress < 0.5) {
     return 4.0 * progress * progress * progress;
@@ -310,10 +322,49 @@ void FlutterWindow::HandleWindowAnimationMethodCall(
     result->Error("window_unavailable", "The Zommi window is unavailable.");
     return;
   }
+  const auto maximize_argument =
+      arguments->find(flutter::EncodableValue("maximized"));
+  const auto maximize_value =
+      maximize_argument == arguments->end()
+          ? nullptr
+          : std::get_if<bool>(&maximize_argument->second);
+  animation_maximized_ = maximize_value != nullptr && *maximize_value;
+  animation_restore_ = {};
+  animation_restore_.length = sizeof(animation_restore_);
+  if (!GetWindowPlacement(GetHandle(), &animation_restore_)) {
+    result->Error("window_unavailable",
+                  "The Zommi window placement is unavailable.");
+    return;
+  }
+  if (IsZoomed(GetHandle())) {
+    auto restored = animation_restore_;
+    restored.showCmd = SW_SHOWNOACTIVATE;
+    restored.rcNormalPosition = animation_from_;
+    if ((GetWindowLongPtr(GetHandle(), GWL_EXSTYLE) & WS_EX_TOOLWINDOW) == 0) {
+      MONITORINFO monitor{};
+      monitor.cbSize = sizeof(monitor);
+      if (!GetMonitorInfo(
+              MonitorFromWindow(GetHandle(), MONITOR_DEFAULTTONEAREST),
+              &monitor)) {
+        result->Error("window_unavailable",
+                      "The Zommi monitor work area is unavailable.");
+        return;
+      }
+      OffsetRect(&restored.rcNormalPosition,
+                 monitor.rcMonitor.left - monitor.rcWork.left,
+                 monitor.rcMonitor.top - monitor.rcWork.top);
+    }
+    if (!SetWindowPlacement(GetHandle(), &restored)) {
+      result->Error("window_resize_failed",
+                    "Could not restore the Zommi window for animation.");
+      return;
+    }
+  }
   animation_to_ = target;
   animation_duration_ms_ =
       static_cast<DWORD>(std::lround(std::max(1.0, *duration)));
-  animation_started_at_ = GetTickCount64();
+  animation_last_tick_ = GetTickCount64();
+  animation_elapsed_ms_ = 0;
   window_animation_active_ = true;
   window_animation_result_ = std::move(result);
   if (SetTimer(GetHandle(), kWindowAnimationTimerId, kWindowAnimationFrameMs,
@@ -322,9 +373,7 @@ void FlutterWindow::HandleWindowAnimationMethodCall(
                  animation_to_.right - animation_to_.left,
                  animation_to_.bottom - animation_to_.top,
                  SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER);
-    window_animation_active_ = false;
-    auto completed = std::move(window_animation_result_);
-    completed->Success(flutter::EncodableValue(true));
+    FinishWindowAnimation();
   }
 }
 
@@ -333,9 +382,12 @@ void FlutterWindow::AdvanceWindowAnimation() {
     KillTimer(GetHandle(), kWindowAnimationTimerId);
     return;
   }
-  const auto elapsed = GetTickCount64() - animation_started_at_;
+  const auto now = GetTickCount64();
+  animation_elapsed_ms_ = AdvanceSurfaceAnimationClock(
+      animation_elapsed_ms_, now - animation_last_tick_, animation_duration_ms_);
+  animation_last_tick_ = now;
   const double linear =
-      std::min(1.0, static_cast<double>(elapsed) / animation_duration_ms_);
+      static_cast<double>(animation_elapsed_ms_) / animation_duration_ms_;
   const double eased = SymmetricSurfaceEase(linear);
   const auto interpolate = [eased](LONG from, LONG to) {
     return static_cast<LONG>(std::lround(from + (to - from) * eased));
@@ -349,9 +401,22 @@ void FlutterWindow::AdvanceWindowAnimation() {
   if (linear < 1.0) {
     return;
   }
+  FinishWindowAnimation();
+}
+
+void FlutterWindow::FinishWindowAnimation() {
   KillTimer(GetHandle(), kWindowAnimationTimerId);
   window_animation_active_ = false;
   auto completed = std::move(window_animation_result_);
+  if (animation_maximized_) {
+    ShowWindow(GetHandle(), SW_MAXIMIZE);
+    animation_restore_.showCmd = SW_SHOWMAXIMIZED;
+    if (!SetWindowPlacement(GetHandle(), &animation_restore_)) {
+      completed->Error("window_resize_failed",
+                       "Could not maximize the Zommi window.");
+      return;
+    }
+  }
   completed->Success(flutter::EncodableValue(true));
 }
 

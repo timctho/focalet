@@ -110,7 +110,12 @@ void main() {
         contains('message == ZommiShowWindowMessage()'),
         contains('ShowWindow(hwnd, SW_RESTORE)'),
         contains('"zommi/window_animation"'),
-        contains('kWindowAnimationFrameMs'),
+        allOf(
+          contains('kWindowAnimationFrameMs'),
+          contains('AdvanceSurfaceAnimationClock('),
+          contains('AdvanceSurfaceAnimationClock(15, 250, 280) == 47'),
+          contains('AdvanceSurfaceAnimationClock(15, 1000, 280) == 47'),
+        ),
         contains('message == WM_TIMER'),
         allOf(
           contains('SymmetricSurfaceEase(linear)'),

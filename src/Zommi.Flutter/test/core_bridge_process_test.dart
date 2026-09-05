@@ -4,8 +4,93 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
+import 'package:zommi_flutter/desktop/desktop_bridge.dart';
+import 'package:zommi_flutter/state/zommi_controller.dart';
+import 'package:zommi_flutter/state/zommi_models.dart';
 
 void main() {
+  test(
+    'rekeyed Codex completion renders once through Rust and controller',
+    () async {
+      final executableName = Platform.isWindows
+          ? 'zommi-core-host.exe'
+          : 'zommi-core-host';
+      final executable = File('../../target/debug/$executableName').absolute;
+      final fixture = File(
+        '../../crates/zommi-core-host/tests/fake_codex_app_server.py',
+      ).absolute;
+      final temporary = await Directory.systemTemp.createTemp(
+        'zommi-rekeyed-response-',
+      );
+      addTearDown(() => temporary.delete(recursive: true));
+      final bridge = ProcessCoreBridge(
+        executablePath: executable.path,
+        environment: {
+          'ZOMMI_CODEX_COMMAND': await _findPython(),
+          'ZOMMI_CODEX_ARGS_JSON': jsonEncode([fixture.path]),
+          'ZOMMI_CORE_STATE_PATH': '${temporary.path}/binding.json',
+          'ZOMMI_RUNTIME_OVERRIDES_PATH': '${temporary.path}/overrides.json',
+          'ZOMMI_FAKE_REKEY_COMPLETION': '1',
+        },
+      );
+      final controller = ZommiController(
+        core: bridge,
+        desktop: const NoopDesktopBridge(),
+      );
+      addTearDown(controller.close);
+      await controller.initialize();
+      final events = <CoreEvent>[];
+      final streamedTexts = <String>[];
+      final subscription = bridge.events.listen((event) {
+        events.add(event);
+        if (event.name == 'item.update' &&
+            event.payload['lifecycle'] == 'delta') {
+          streamedTexts.add(controller.turns.single.blocks.last.text);
+        }
+      });
+      addTearDown(subscription.cancel);
+      final completed = bridge.events.firstWhere(
+        (event) => event.name == 'turn.completed',
+      );
+      await controller.submit('synthetic repeated characters');
+      await completed.timeout(const Duration(seconds: 15));
+      expect(controller.turns, hasLength(1));
+      final answers = controller.turns.single.blocks.where(
+        (block) => block.kind == TranscriptKind.assistant,
+      );
+      expect(answers, hasLength(1));
+      expect(answers.single.text, 'Bookkeeper sees 111. 世界世界.');
+      expect(streamedTexts, [
+        'Book',
+        'Bookkeeper',
+        'Bookkeeper sees ',
+        'Bookkeeper sees 1',
+        'Bookkeeper sees 11',
+        'Bookkeeper sees 111',
+        'Bookkeeper sees 111. 世界',
+        'Bookkeeper sees 111. 世界世界',
+        'Bookkeeper sees 111. 世界世界.',
+      ]);
+      final updates = events
+          .where(
+            (event) =>
+                event.name == 'item.update' &&
+                event.payload['kind'] == 'assistant',
+          )
+          .toList();
+      expect(updates.map((event) => event.payload['itemId']).toSet(), {
+        'agent-fixture',
+      });
+      expect(
+        updates
+            .where((event) => event.payload['lifecycle'] == 'delta')
+            .map((event) => event.payload['textMode']),
+        everyElement('append'),
+      );
+      expect(updates.last.payload['replace'], isTrue);
+    },
+  );
+
   test('Flutter reports a missing Rust host without pending work', () async {
     final bridge = ProcessCoreBridge(
       executablePath:

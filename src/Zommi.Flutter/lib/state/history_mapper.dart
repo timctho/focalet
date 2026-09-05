@@ -337,8 +337,10 @@ String mergeActivityText(
   TranscriptKind kind,
   TranscriptLifecycle lifecycle, {
   bool replace = false,
+  bool append = false,
 }) {
   if (replace) return incoming;
+  if (append) return '$current$incoming';
   if (incoming.isEmpty) return current;
   if (current.isEmpty) return incoming;
   if (incoming == current || current.endsWith(incoming)) return current;

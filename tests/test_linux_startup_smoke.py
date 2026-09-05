@@ -6,7 +6,9 @@ from pathlib import Path
 import shutil
 import shlex
 import subprocess
+import sys
 import tempfile
+import textwrap
 import unittest
 
 
@@ -56,6 +58,83 @@ class LinuxStartupSmokeTests(unittest.TestCase):
             env=environment,
         )
 
+    def _write_orphaning_application(self, *, terminate_core: bool) -> None:
+        application = self.package / "zommi"
+        application.write_text(
+            f"#!{sys.executable}\n"
+            + textwrap.dedent(
+                f"""\
+                import os
+                from pathlib import Path
+                import signal
+                import subprocess
+
+                package = Path(__file__).parent
+                core = subprocess.Popen([str(package / "zommi-core-host"), "60"])
+                (package / "core.pid").write_text(str(core.pid))
+
+                def stop(signum, frame):
+                    if {terminate_core!r}:
+                        core.terminate()
+                    os._exit(0)
+
+                signal.signal(signal.SIGTERM, stop)
+                signal.signal(signal.SIGINT, stop)
+                while True:
+                    signal.pause()
+                """
+            ),
+            encoding="utf-8",
+        )
+        application.chmod(0o755)
+
+    def _run_with_subreaper(self) -> subprocess.CompletedProcess[str]:
+        wrapper = textwrap.dedent(
+            """\
+            import ctypes
+            import os
+            from pathlib import Path
+            import signal
+            import subprocess
+            import sys
+
+            library = ctypes.CDLL(None, use_errno=True)
+            if library.prctl(36, 1, 0, 0, 0) != 0:
+                raise OSError(ctypes.get_errno(), "Could not become a subreaper")
+            try:
+                completed = subprocess.run(
+                    sys.argv[1:], capture_output=True, text=True, timeout=25
+                )
+                sys.stdout.write(completed.stdout)
+                sys.stderr.write(completed.stderr)
+                core_pid = (Path(sys.argv[2]) / "core.pid").read_text()
+                core_status = Path(f"/proc/{core_pid}/stat").read_text()
+                core_state = core_status.rsplit(") ", 1)[1].split()[0]
+                print(f"adoptedCoreState={core_state}", file=sys.stderr)
+                sys.exit(completed.returncode)
+            finally:
+                children = Path(f"/proc/{os.getpid()}/task/{os.getpid()}/children")
+                for child_pid in children.read_text().split():
+                    try:
+                        os.kill(int(child_pid), signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                while True:
+                    try:
+                        os.waitpid(-1, 0)
+                    except ChildProcessError:
+                        break
+            """
+        )
+        return subprocess.run(
+            [sys.executable, "-c", wrapper, str(SCRIPT), str(self.package)],
+            text=True,
+            capture_output=True,
+            timeout=30,
+            check=False,
+            env={**os.environ, "DISPLAY": ":99"},
+        )
+
     def test_flutter_and_exact_core_survive_and_stop(self) -> None:
         self._write_application()
         completed = self._run()
@@ -70,6 +149,19 @@ class LinuxStartupSmokeTests(unittest.TestCase):
         completed = self._run()
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("unhandled startup exception", completed.stderr)
+
+    def test_exited_unreaped_core_counts_as_stopped(self) -> None:
+        self._write_orphaning_application(terminate_core=True)
+        completed = self._run_with_subreaper()
+        self.assertIn("adoptedCoreState=Z", completed.stderr)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertTrue(json.loads(completed.stdout)["cleanShutdown"])
+
+    def test_live_orphan_core_fails_shutdown(self) -> None:
+        self._write_orphaning_application(terminate_core=False)
+        completed = self._run_with_subreaper()
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("Rust core remained after Flutter stopped", completed.stderr)
 
     def test_display_is_required(self) -> None:
         self._write_application()

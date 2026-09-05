@@ -615,16 +615,14 @@ final class FlutterDesktopBridge
     bool maximized = false,
     bool animate = true,
   }) async {
-    if (expanded && maximized) {
-      ++_surfaceTransitionEpoch;
+    final transitionEpoch = ++_surfaceTransitionEpoch;
+    if (expanded && maximized && !animate) {
       await windowManager.setMinimumSize(const Size(640, 500));
       await windowManager.maximize();
       await windowManager.setAlwaysOnTop(false);
       return;
     }
-    if (await windowManager.isMaximized()) {
-      await windowManager.unmaximize();
-    }
+    final wasMaximized = await windowManager.isMaximized();
     final size = expanded
         ? (large ? largeWindowSize : normalWindowSize)
         : compactWindowSize;
@@ -652,24 +650,32 @@ final class FlutterDesktopBridge
                 workAreaBounds.bottom - windowBottomInset,
               ));
     _surfaceAnchor = anchor;
-    final bounds = anchoredSurfaceBounds(
-      anchor: anchor,
-      workArea: workAreaBounds,
-      size: Size(width, height),
-    );
+    final bounds = expanded && maximized
+        ? workAreaBounds
+        : anchoredSurfaceBounds(
+            anchor: anchor,
+            workArea: workAreaBounds,
+            size: Size(width, height),
+          );
     final shouldAnimate = _surfacePositionInitialized;
     _surfacePositionInitialized = true;
-    final transitionEpoch = ++_surfaceTransitionEpoch;
     // Keeping the compact minimum during the transition prevents Win32 from
     // jumping directly to 640x500 on the first animated frame.
     await windowManager.setMinimumSize(compactWindowSize);
+    var nativeMaximized = false;
     if (animate && shouldAnimate) {
       final nativeResult = await animateNativeSurfaceBounds(
         from: current,
         to: bounds,
         scaleFactor: selected.scaleFactor?.toDouble() ?? 1,
+        maximized: expanded && maximized,
       );
-      if (nativeResult == null) {
+      nativeMaximized = nativeResult == true && expanded && maximized;
+      if (nativeResult == null && !(expanded && maximized)) {
+        if (wasMaximized) {
+          await windowManager.unmaximize();
+          await windowManager.setBounds(current, animate: false);
+        }
         await animateSurfaceBounds(
           from: current,
           to: bounds,
@@ -678,6 +684,7 @@ final class FlutterDesktopBridge
         );
       }
     } else {
+      if (wasMaximized) await windowManager.unmaximize();
       final nativeResult = shouldAnimate
           ? await setNativeSurfaceBoundsWithoutCopy(
               bounds: bounds,
@@ -692,6 +699,9 @@ final class FlutterDesktopBridge
     await windowManager.setMinimumSize(
       expanded ? const Size(640, 500) : compactWindowSize,
     );
+    if (expanded && maximized && !nativeMaximized) {
+      await windowManager.maximize();
+    }
     await windowManager.setAlwaysOnTop(false);
   }
 
@@ -978,6 +988,7 @@ Future<bool?> animateNativeSurfaceBounds({
   required Rect from,
   required Rect to,
   required double scaleFactor,
+  bool maximized = false,
   Duration duration = surfaceTransitionDuration,
 }) async {
   if (!Platform.isWindows) return null;
@@ -993,6 +1004,7 @@ Future<bool?> animateNativeSurfaceBounds({
       'toHeight': to.height,
       'scaleFactor': scaleFactor,
       'durationMs': duration.inMilliseconds,
+      'maximized': maximized,
     });
   } on MissingPluginException {
     return null;
