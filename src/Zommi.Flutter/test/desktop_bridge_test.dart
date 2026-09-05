@@ -8,6 +8,58 @@ import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 
 void main() {
+  for (final cancelled in [false, true]) {
+    testWidgets(
+      'image selection preserves restored Maximize (cancelled: $cancelled)',
+      (tester) async {
+        const channel = MethodChannel('window_manager');
+        var minimized = true;
+        var maximized = true;
+        var restores = 0;
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          (call) async {
+            switch (call.method) {
+              case 'isVisible':
+                return true;
+              case 'isMinimized':
+                return minimized;
+              case 'restore':
+                restores++;
+                if (!minimized) maximized = false;
+                minimized = false;
+            }
+            return null;
+          },
+        );
+        addTearDown(
+          () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            channel,
+            null,
+          ),
+        );
+        final bridge = FlutterDesktopBridge(
+          captureProvider: WindowsCaptureProvider(
+            captureClient: _FakeNativeCaptureClient(onRequest: (_) async => {}),
+            selectorClient: _FakeNativeCaptureClient(
+              onRequest: (_) async => cancelled
+                  ? {'cancelled': true}
+                  : {
+                      'dataUrl': 'data:image/png;base64,aGVsbG8=',
+                      'bounds': {'width': 40, 'height': 30},
+                    },
+            ),
+          ),
+        );
+        final attachment = await bridge.selectImageContext();
+        expect(attachment == null, cancelled);
+        expect(minimized, isFalse);
+        expect(maximized, isTrue);
+        expect(restores, 1);
+      },
+    );
+  }
+
   testWidgets(
     'rapid shortcuts coalesce without queueing another native capture',
     (tester) async {

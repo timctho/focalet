@@ -548,7 +548,7 @@ final class FlutterDesktopBridge
     required bool wasMinimized,
   }) async {
     if (!wasVisible && !wasMinimized) return;
-    if (wasMinimized || await windowManager.isMinimized()) {
+    if (await windowManager.isMinimized()) {
       await windowManager.restore();
     }
     await showPanel();
