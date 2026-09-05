@@ -50,7 +50,8 @@ private:
       pending_surface_frame_result_;
   RECT animation_from_{};
   RECT animation_to_{};
-  ULONGLONG animation_started_at_ = 0;
+  ULONGLONG animation_last_tick_ = 0;
+  ULONGLONG animation_elapsed_ms_ = 0;
   DWORD animation_duration_ms_ = 0;
   bool window_animation_active_ = false;
   bool animation_maximized_ = false;

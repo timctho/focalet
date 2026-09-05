@@ -5,6 +5,8 @@ param(
 
     [switch] $NonVisualOnly,
 
+    [switch] $HelpersOnly,
+
     [string] $ResultPath
 )
 
@@ -1478,6 +1480,8 @@ function Write-AcceptanceResult {
     }
     Write-Output $json
 }
+
+if ($HelpersOnly) { return }
 
 $package = [IO.Path]::GetFullPath($PackageDirectory)
 $capture = Join-Path $package 'native/Zommi.Capture.exe'

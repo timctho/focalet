@@ -19,6 +19,18 @@ namespace {
 constexpr UINT_PTR kWindowAnimationTimerId = 0x5A4D;
 constexpr UINT kWindowAnimationFrameMs = 15;
 
+constexpr ULONGLONG AdvanceSurfaceAnimationClock(ULONGLONG elapsed,
+                                                 ULONGLONG delta,
+                                                 DWORD duration) {
+  return std::min(static_cast<ULONGLONG>(duration),
+                  elapsed + std::min(delta, ULONGLONG{32}));
+}
+
+static_assert(AdvanceSurfaceAnimationClock(0, 15, 280) == 15);
+static_assert(AdvanceSurfaceAnimationClock(15, 250, 280) == 47);
+static_assert(AdvanceSurfaceAnimationClock(15, 1000, 280) == 47);
+static_assert(AdvanceSurfaceAnimationClock(270, 15, 280) == 280);
+
 constexpr double SymmetricSurfaceEase(double progress) {
   if (progress < 0.5) {
     return 4.0 * progress * progress * progress;
@@ -351,7 +363,8 @@ void FlutterWindow::HandleWindowAnimationMethodCall(
   animation_to_ = target;
   animation_duration_ms_ =
       static_cast<DWORD>(std::lround(std::max(1.0, *duration)));
-  animation_started_at_ = GetTickCount64();
+  animation_last_tick_ = GetTickCount64();
+  animation_elapsed_ms_ = 0;
   window_animation_active_ = true;
   window_animation_result_ = std::move(result);
   if (SetTimer(GetHandle(), kWindowAnimationTimerId, kWindowAnimationFrameMs,
@@ -369,9 +382,12 @@ void FlutterWindow::AdvanceWindowAnimation() {
     KillTimer(GetHandle(), kWindowAnimationTimerId);
     return;
   }
-  const auto elapsed = GetTickCount64() - animation_started_at_;
+  const auto now = GetTickCount64();
+  animation_elapsed_ms_ = AdvanceSurfaceAnimationClock(
+      animation_elapsed_ms_, now - animation_last_tick_, animation_duration_ms_);
+  animation_last_tick_ = now;
   const double linear =
-      std::min(1.0, static_cast<double>(elapsed) / animation_duration_ms_);
+      static_cast<double>(animation_elapsed_ms_) / animation_duration_ms_;
   const double eased = SymmetricSurfaceEase(linear);
   const auto interpolate = [eased](LONG from, LONG to) {
     return static_cast<LONG>(std::lround(from + (to - from) * eased));

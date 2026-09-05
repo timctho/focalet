@@ -220,6 +220,24 @@ class ReleasePackageTests(unittest.TestCase):
         ):
             self.assertIn(contract, script)
 
+    def test_windows_size_acceptance_uses_native_intermediate_bounds(self) -> None:
+        script = (SCRIPTS / "accept-windows-window-size.ps1").read_text(encoding="utf-8")
+        for contract in (
+            "-HelpersOnly",
+            "Assert-DesktopCaptureSurface",
+            "IsOwnedWindowAtPoint($window, $left, $top)",
+            "ZommiWindowSizeAccess]::Sample($window, 1500)",
+            "$distinct.Count -lt 5",
+            "jumped outside its endpoints",
+            "reversed direction",
+            "native Restore retains pre-Max placement",
+            "Restore-SuspendedZommiApplications",
+        ):
+            self.assertIn(contract, script)
+        workflow = (SCRIPTS.parent / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        self.assertIn("shell: powershell", workflow)
+        self.assertIn("accept-windows-window-size.ps1", workflow)
+
     def test_windows_desktop_preflight_reports_runner_session_without_blame(self) -> None:
         script = (SCRIPTS / "accept-windows-capture.ps1").read_text(encoding="utf-8")
         for contract in (
