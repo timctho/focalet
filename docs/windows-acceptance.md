@@ -112,3 +112,9 @@ Do not call Windows accepted until the exact packaged revision passes the
 physical walkthrough above. Package assembly, JSONL process smoke, widget
 goldens, and cross-compilation are supporting evidence only. Locked-RDP gestures
 and hardware-composited capture require their own direct evidence.
+# Message and window-size regressions
+
+- Message paragraphs, lists, and code use regular weight. Explicit Markdown emphasis and headings retain their formatting. The compact maximize choice is `Max` and must remain on one line.
+- Exercise Standard -> Wide -> Standard -> Max -> Wide -> Max -> Standard. Observe intermediate native window bounds, not only a renderer animation or a delayed final resize. Max must respect the monitor work area, and native Restore after an animated Max must return to the previous normal bounds.
+- The Codex completion item ID may differ from the started/delta item ID. Correlate only the unique unfinished agent item in the same thread and phase; do not guess when multiple candidates exist. Explicit delta text must be appended literally, including repeated characters. Completed snapshots remain authoritative.
+- `core_bridge_process_test.dart` replays rekeyed completion and repeated ASCII/CJK fragments through the actual Rust host into the Flutter controller. `history_mapper_test.dart` protects literal delta assembly and snapshot replacement. `desktop_bridge_test.dart` verifies intermediate resize bounds in both directions; `thinking_capture_regressions_test.dart` checks the Max label, native animation request, and settings persistence. These tests do not replace the packaged Windows gesture checks.

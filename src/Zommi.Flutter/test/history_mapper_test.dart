@@ -113,6 +113,33 @@ void main() {
     );
   });
 
+  test(
+    'explicit deltas preserve repeated characters and snapshots replace',
+    () {
+      var text = '';
+      for (final fragment in ['Book', 'keeper', ' ', '1', '1', ' 世界', '世界']) {
+        text = mergeActivityText(
+          text,
+          fragment,
+          TranscriptKind.assistant,
+          TranscriptLifecycle.delta,
+          append: true,
+        );
+      }
+      expect(text, 'Bookkeeper 11 世界世界');
+      expect(
+        mergeActivityText(
+          text,
+          'Corrected final answer',
+          TranscriptKind.assistant,
+          TranscriptLifecycle.completed,
+          replace: true,
+        ),
+        'Corrected final answer',
+      );
+    },
+  );
+
   test('thinking and tools preserve their chronological timeline', () {
     final blocks = normalizeTranscriptBlocks([
       TranscriptBlock(

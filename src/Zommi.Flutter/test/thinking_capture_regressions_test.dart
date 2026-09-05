@@ -246,9 +246,14 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('app-settings')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Maximize'));
+    expect(find.text('Maximize'), findsNothing);
+    final maxLabel = tester.widget<Text>(find.text('Max'));
+    expect(maxLabel.maxLines, 1);
+    expect(maxLabel.softWrap, isFalse);
+    await tester.tap(find.text('Max'));
     await tester.pumpAndSettle();
     expect(desktop.calls, contains('maximize'));
+    expect(desktop.surfaceAnimations.last, isTrue);
     final selector = tester.widget<SegmentedButton<WindowSizeSetting>>(
       find.byKey(const ValueKey('window-size-control')),
     );
@@ -256,9 +261,11 @@ void main() {
     await tester.tap(find.text('Wide'));
     await tester.pumpAndSettle();
     expect(desktop.calls.last, 'surface:true:true');
+    expect(desktop.surfaceAnimations.last, isTrue);
     await tester.tap(find.text('Standard'));
     await tester.pumpAndSettle();
     expect(desktop.calls.last, 'surface:true:false');
+    expect(desktop.surfaceAnimations.last, isTrue);
     expect(tester.takeException(), isNull);
   });
 
@@ -281,7 +288,7 @@ void main() {
     await tester.pumpAndSettle();
     final nativeResize = Completer<void>();
     desktop.surfaceGate = nativeResize.future;
-    await tester.tap(find.text('Maximize'));
+    await tester.tap(find.text('Max'));
     await tester.pump();
     nativeResize.completeError(StateError('native resize rejected'));
     await tester.pumpAndSettle();

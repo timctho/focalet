@@ -30,6 +30,7 @@ private:
       const flutter::MethodCall<flutter::EncodableValue> &call,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
   void AdvanceWindowAnimation();
+  void FinishWindowAnimation();
   void CancelWindowAnimation();
   void CancelPendingSurfaceFrame();
   bool BeginSurfaceFrameTransition(const RECT &current_bounds);
@@ -52,6 +53,8 @@ private:
   ULONGLONG animation_started_at_ = 0;
   DWORD animation_duration_ms_ = 0;
   bool window_animation_active_ = false;
+  bool animation_maximized_ = false;
+  WINDOWPLACEMENT animation_restore_{};
   HWND surface_transition_overlay_ = nullptr;
   HBITMAP surface_transition_bitmap_ = nullptr;
   bool surface_window_cloaked_ = false;

@@ -932,7 +932,7 @@ void main() {
       expect(bodySizes, <double>{13});
       expect(
         markdown.map((body) => body.styleSheet?.p?.fontWeight),
-        everyElement(FontWeight.w500),
+        everyElement(FontWeight.w400),
       );
       expect(
         markdown.map((body) => body.styleSheet?.p?.fontWeight),

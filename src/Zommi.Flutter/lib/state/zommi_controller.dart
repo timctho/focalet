@@ -1217,53 +1217,19 @@ final class ZommiController extends ChangeNotifier {
     bool focus = false,
   }) async {
     final transitionEpoch = ++_surfaceTransitionEpoch;
-    final fromArea = expanded
-        ? (largePanel
-              ? largeWindowSize.width * largeWindowSize.height
-              : normalWindowSize.width * normalWindowSize.height)
-        : compactWindowSize.width * compactWindowSize.height;
-    final toArea = targetExpanded
-        ? (targetLarge
-              ? largeWindowSize.width * largeWindowSize.height
-              : normalWindowSize.width * normalWindowSize.height)
-        : compactWindowSize.width * compactWindowSize.height;
-    final growing = toArea >= fromArea;
-    final nativeMaximizeChange = maximizedPanel || targetMaximized;
     surfaceTransitioning = true;
-    surfaceTransitionAnimating = false;
+    surfaceTransitionAnimating = true;
     transitionTargetExpanded = targetExpanded;
     transitionTargetLarge = targetLarge;
     _notify();
     var applied = false;
     try {
-      final transitionClock = Stopwatch()..start();
-      Future<void>? growingSurfaceChange;
-      if (growing || nativeMaximizeChange) {
-        growingSurfaceChange = desktop.setSurface(
-          expanded: targetExpanded,
-          large: targetLarge,
-          maximized: targetExpanded && targetMaximized,
-          animate: false,
-        );
-      }
-      surfaceTransitionAnimating = !nativeMaximizeChange;
-      _notify();
-      if (growingSurfaceChange != null) {
-        await growingSurfaceChange;
-      }
-      if (transitionEpoch != _surfaceTransitionEpoch) return;
-      final remaining = surfaceTransitionDuration - transitionClock.elapsed;
-      if (remaining > Duration.zero && !nativeMaximizeChange) {
-        await Future<void>.delayed(remaining);
-      }
-      if (transitionEpoch != _surfaceTransitionEpoch) return;
-      if (!growing && !nativeMaximizeChange) {
-        await desktop.setSurface(
-          expanded: targetExpanded,
-          large: targetLarge,
-          animate: false,
-        );
-      }
+      await desktop.setSurface(
+        expanded: targetExpanded,
+        large: targetLarge,
+        maximized: targetExpanded && targetMaximized,
+        animate: true,
+      );
       applied = true;
     } on Object catch (error) {
       _setStatus('$errorLabel · $error', warning: true);
@@ -1527,6 +1493,7 @@ final class ZommiController extends ChangeNotifier {
       kind,
       lifecycle,
       replace: event.payload['replace'] == true,
+      append: event.payload['textMode'] == 'append',
     );
     block.lifecycle = lifecycle;
     block.status = event.payload['status']?.toString() ?? block.status;

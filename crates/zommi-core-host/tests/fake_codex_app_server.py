@@ -11,6 +11,9 @@ thread_id = os.environ.get("ZOMMI_FAKE_THREAD_ID", "thread-rust-flutter")
 fresh_thread_id = os.environ.get("ZOMMI_FAKE_FRESH_THREAD_ID", thread_id)
 turn_id = os.environ.get("ZOMMI_FAKE_TURN_ID", "turn-rust-flutter")
 request_log = os.environ.get("ZOMMI_FAKE_REQUEST_LOG")
+rekey_completion = os.environ.get("ZOMMI_FAKE_REKEY_COMPLETION") == "1"
+fragments = ["Book", "keeper", " sees ", "1", "1", "1", ". 世界", "世界", "."] if rekey_completion else ["Rust-owned Codex reply"]
+completed_text = "".join(fragments)
 
 
 def send(message):
@@ -102,17 +105,18 @@ for line in sys.stdin:
                 },
             }
         )
-        send(
-            {
-                "method": "item/agentMessage/delta",
-                "params": {
-                    "threadId": request["params"]["threadId"],
-                    "turnId": turn_id,
-                    "itemId": "agent-fixture",
-                    "delta": "Rust-owned Codex reply",
-                },
-            }
-        )
+        for fragment in fragments:
+            send(
+                {
+                    "method": "item/agentMessage/delta",
+                    "params": {
+                        "threadId": request["params"]["threadId"],
+                        "turnId": turn_id,
+                        "itemId": "agent-fixture",
+                        "delta": fragment,
+                    },
+                }
+            )
         send(
             {
                 "method": "item/completed",
@@ -120,11 +124,11 @@ for line in sys.stdin:
                     "threadId": request["params"]["threadId"],
                     "turnId": turn_id,
                     "item": {
-                        "id": "agent-fixture",
+                        "id": "canonical-agent-fixture" if rekey_completion else "agent-fixture",
                         "type": "agentMessage",
                         "phase": "final",
                         "status": "completed",
-                        "text": "Rust-owned Codex reply",
+                        "text": completed_text,
                     },
                 },
             }

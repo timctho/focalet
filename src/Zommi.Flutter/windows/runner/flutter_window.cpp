@@ -310,6 +310,28 @@ void FlutterWindow::HandleWindowAnimationMethodCall(
     result->Error("window_unavailable", "The Zommi window is unavailable.");
     return;
   }
+  const auto maximize_argument =
+      arguments->find(flutter::EncodableValue("maximized"));
+  const auto maximize_value =
+      maximize_argument == arguments->end()
+          ? nullptr
+          : std::get_if<bool>(&maximize_argument->second);
+  animation_maximized_ = maximize_value != nullptr && *maximize_value;
+  animation_restore_ = {};
+  animation_restore_.length = sizeof(animation_restore_);
+  if (!GetWindowPlacement(GetHandle(), &animation_restore_)) {
+    result->Error("window_unavailable",
+                  "The Zommi window placement is unavailable.");
+    return;
+  }
+  if (IsZoomed(GetHandle())) {
+    ShowWindow(GetHandle(), SW_RESTORE);
+    SetWindowPos(
+        GetHandle(), nullptr, animation_from_.left, animation_from_.top,
+        animation_from_.right - animation_from_.left,
+        animation_from_.bottom - animation_from_.top,
+        SWP_NOACTIVATE | SWP_NOCOPYBITS | SWP_NOOWNERZORDER | SWP_NOZORDER);
+  }
   animation_to_ = target;
   animation_duration_ms_ =
       static_cast<DWORD>(std::lround(std::max(1.0, *duration)));
@@ -322,9 +344,7 @@ void FlutterWindow::HandleWindowAnimationMethodCall(
                  animation_to_.right - animation_to_.left,
                  animation_to_.bottom - animation_to_.top,
                  SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER);
-    window_animation_active_ = false;
-    auto completed = std::move(window_animation_result_);
-    completed->Success(flutter::EncodableValue(true));
+    FinishWindowAnimation();
   }
 }
 
@@ -349,9 +369,21 @@ void FlutterWindow::AdvanceWindowAnimation() {
   if (linear < 1.0) {
     return;
   }
+  FinishWindowAnimation();
+}
+
+void FlutterWindow::FinishWindowAnimation() {
   KillTimer(GetHandle(), kWindowAnimationTimerId);
   window_animation_active_ = false;
   auto completed = std::move(window_animation_result_);
+  if (animation_maximized_) {
+    animation_restore_.showCmd = SW_SHOWMAXIMIZED;
+    if (!SetWindowPlacement(GetHandle(), &animation_restore_)) {
+      completed->Error("window_resize_failed",
+                       "Could not maximize the Zommi window.");
+      return;
+    }
+  }
   completed->Success(flutter::EncodableValue(true));
 }
 

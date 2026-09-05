@@ -31,5 +31,5 @@ double chatFontSizeOf(BuildContext context) =>
     Theme.of(context).extension<ZommiVisualSettings>()?.chatFontSize ??
     topBarAndChatFontSize;
 
-TextStyle chatTextStyleOf(BuildContext context) =>
-    topBarAndChatTextStyle.copyWith(fontSize: chatFontSizeOf(context));
+TextStyle chatTextStyleOf(BuildContext context) => topBarAndChatTextStyle
+    .copyWith(fontSize: chatFontSizeOf(context), fontWeight: FontWeight.w400);
