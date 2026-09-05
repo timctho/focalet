@@ -913,12 +913,14 @@ class AppSettingsPanel extends StatelessWidget {
     required this.controller,
     required this.preferences,
     required this.onChanged,
+    required this.onWindowSizeChanged,
     super.key,
   });
 
   final ZommiController controller;
   final AppPreferences preferences;
   final ValueChanged<AppPreferences> onChanged;
+  final ValueChanged<WindowSizeSetting> onWindowSizeChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -988,30 +990,34 @@ class AppSettingsPanel extends StatelessWidget {
               style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 7),
-            SegmentedButton<bool>(
+            SegmentedButton<WindowSizeSetting>(
               key: const ValueKey('window-size-control'),
               showSelectedIcon: false,
               segments: const [
                 ButtonSegment(
-                  value: false,
+                  value: WindowSizeSetting.standard,
                   icon: Icon(Icons.crop_portrait_rounded, size: 15),
                   label: Text('Standard'),
                 ),
                 ButtonSegment(
-                  value: true,
+                  value: WindowSizeSetting.wide,
                   icon: Icon(Icons.open_in_full_rounded, size: 15),
                   label: Text('Wide'),
                 ),
+                ButtonSegment(
+                  value: WindowSizeSetting.maximized,
+                  icon: Icon(Icons.crop_square_rounded, size: 15),
+                  label: Text('Maximize'),
+                ),
               ],
-              selected: {controller.largePanel},
-              onSelectionChanged: (selection) {
-                if (selection.single != controller.largePanel) {
-                  onChanged(
-                    preferences.copyWith(largeWindow: selection.single),
-                  );
-                  unawaited(controller.toggleLargePanel());
-                }
-              },
+              selected: {controller.windowSize},
+              onSelectionChanged: controller.surfaceTransitioning
+                  ? null
+                  : (selection) {
+                      if (selection.single != controller.windowSize) {
+                        onWindowSizeChanged(selection.single);
+                      }
+                    },
               style: const ButtonStyle(
                 visualDensity: VisualDensity.compact,
                 textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 10.5)),

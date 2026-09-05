@@ -194,6 +194,32 @@ class ReleasePackageTests(unittest.TestCase):
         ):
             self.assertIn(contract, script)
 
+    def test_windows_maximize_respects_the_active_monitor_work_area(self) -> None:
+        source = (
+            SCRIPTS.parent
+            / "src/Zommi.Flutter/windows/runner/flutter_window.cpp"
+        ).read_text(encoding="utf-8")
+        for contract in (
+            "WM_GETMINMAXINFO",
+            "MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)",
+            "monitor_info.rcWork",
+            "work_area.left - monitor_area.left",
+            "work_area.top - monitor_area.top",
+            "limits->ptMaxSize",
+        ):
+            self.assertIn(contract, source)
+        self.assertLess(
+            source.index("HandleTopLevelWindowProc("),
+            source.index("message == WM_GETMINMAXINFO"),
+        )
+        script = (SCRIPTS / "accept-windows-capture.ps1").read_text(encoding="utf-8")
+        for contract in (
+            "Maximize did not respect the active monitor work area",
+            "Restoring Maximize did not retain the previous normal window size",
+            "maximizedToWorkArea = $true",
+        ):
+            self.assertIn(contract, script)
+
     def test_windows_desktop_preflight_reports_runner_session_without_blame(self) -> None:
         script = (SCRIPTS / "accept-windows-capture.ps1").read_text(encoding="utf-8")
         for contract in (

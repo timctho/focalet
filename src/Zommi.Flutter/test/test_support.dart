@@ -496,9 +496,11 @@ final class FakeDesktopBridge implements DesktopBridge {
   Future<void> setSurface({
     required bool expanded,
     bool large = false,
+    bool maximized = false,
     bool animate = true,
   }) async {
     calls.add('surface:$expanded:$large');
+    if (maximized) calls.add('maximize');
     surfaceAnimations.add(animate);
     if (surfaceGate case final gate?) await gate;
   }
@@ -510,8 +512,8 @@ final class FakeDesktopBridge implements DesktopBridge {
   }
 
   @override
-  Future<void> showPanel() async {
-    calls.add('showPanel');
+  Future<void> showPanel({bool focus = true}) async {
+    calls.add(focus ? 'showPanel' : 'showPanelInactive');
   }
 
   @override

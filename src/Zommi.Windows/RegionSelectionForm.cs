@@ -17,12 +17,14 @@ internal sealed class RegionSelectionForm : Form
     private const uint ShowWindow = 0x0040;
 
     private readonly Func<Rectangle, byte[]> captureRegion;
+    private readonly uint returnProcessId;
     private readonly System.Windows.Forms.Timer topMostGuard;
     private Point? anchor;
     private Rectangle selectedArea;
 
-    public RegionSelectionForm(Func<Rectangle, byte[]>? captureRegion = null)
+    public RegionSelectionForm(Func<Rectangle, byte[]>? captureRegion = null, uint returnProcessId = 0)
     {
+        this.returnProcessId = returnProcessId;
         this.captureRegion = captureRegion ?? (area => ScreenCapture.CapturePng(area));
         Text = "Zommi image selection";
         FormBorderStyle = FormBorderStyle.None;
@@ -53,6 +55,7 @@ internal sealed class RegionSelectionForm : Form
         {
             if (eventArgs.KeyCode == Keys.Escape)
             {
+                GrantForeground();
                 DialogResult = DialogResult.Cancel;
                 Close();
             }
@@ -159,6 +162,7 @@ internal sealed class RegionSelectionForm : Form
             Top + selectedArea.Top,
             selectedArea.Width,
             selectedArea.Height);
+        GrantForeground();
         Hide();
         Application.DoEvents();
         Thread.Sleep(80);
@@ -258,6 +262,14 @@ internal sealed class RegionSelectionForm : Form
             }
         }
     }
+
+    private void GrantForeground()
+    {
+        if (returnProcessId != 0) AllowSetForegroundWindow(returnProcessId);
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool AllowSetForegroundWindow(uint processId);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowPos(

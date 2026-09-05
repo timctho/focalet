@@ -155,7 +155,7 @@ class _ZommiShellState extends State<ZommiShell> {
       core: widget.core,
       desktop: widget.desktop,
       artifactLoader: widget.artifactLoader,
-      initialLargePanel: widget.preferences.largeWindow,
+      initialWindowSize: widget.preferences.windowSize,
     );
     _composer = InlineAttachmentTextController(
       onAttachmentRemoved: (attachment) =>
@@ -235,6 +235,15 @@ class _ZommiShellState extends State<ZommiShell> {
     );
     _composer.clearAfterSubmit();
     unawaited(submission);
+  }
+
+  Future<void> _selectWindowSize(WindowSizeSetting setting) async {
+    await _controller.setWindowSize(setting);
+    if (mounted && _controller.windowSize == setting) {
+      widget.onPreferencesChanged(
+        widget.preferences.copyWith(windowSize: setting),
+      );
+    }
   }
 
   KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
@@ -463,6 +472,7 @@ class _ZommiShellState extends State<ZommiShell> {
                       controller: _controller,
                       preferences: widget.preferences,
                       onChanged: widget.onPreferencesChanged,
+                      onWindowSizeChanged: _selectWindowSize,
                     ),
                   ),
                 ),

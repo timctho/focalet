@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+enum WindowSizeSetting { standard, wide, maximized }
+
 enum ZommiThemeColor {
   violet('violet', 'Violet', Color(0xff8178c9)),
   ocean('ocean', 'Ocean', Color(0xff387da8)),
@@ -26,27 +28,27 @@ final class AppPreferences {
   const AppPreferences({
     this.chatFontSize = 13,
     this.themeColor = ZommiThemeColor.violet,
-    this.largeWindow = false,
+    this.windowSize = WindowSizeSetting.standard,
   });
 
   final double chatFontSize;
   final ZommiThemeColor themeColor;
-  final bool largeWindow;
+  final WindowSizeSetting windowSize;
 
   AppPreferences copyWith({
     double? chatFontSize,
     ZommiThemeColor? themeColor,
-    bool? largeWindow,
+    WindowSizeSetting? windowSize,
   }) => AppPreferences(
     chatFontSize: chatFontSize ?? this.chatFontSize,
     themeColor: themeColor ?? this.themeColor,
-    largeWindow: largeWindow ?? this.largeWindow,
+    windowSize: windowSize ?? this.windowSize,
   );
 
   Map<String, Object?> toJson() => {
     'chatFontSize': chatFontSize,
     'themeColor': themeColor.id,
-    'largeWindow': largeWindow,
+    'windowSize': windowSize.name,
   };
 
   static AppPreferences fromJson(Map<String, Object?> value) {
@@ -55,7 +57,12 @@ final class AppPreferences {
     return AppPreferences(
       chatFontSize: fontSize.clamp(12, 15).toDouble(),
       themeColor: ZommiThemeColor.fromId(value['themeColor']?.toString()),
-      largeWindow: value['largeWindow'] == true,
+      windowSize: WindowSizeSetting.values.firstWhere(
+        (setting) => setting.name == value['windowSize'],
+        orElse: () => value['largeWindow'] == true
+            ? WindowSizeSetting.wide
+            : WindowSizeSetting.standard,
+      ),
     );
   }
 
@@ -64,10 +71,10 @@ final class AppPreferences {
       other is AppPreferences &&
       other.chatFontSize == chatFontSize &&
       other.themeColor == themeColor &&
-      other.largeWindow == largeWindow;
+      other.windowSize == windowSize;
 
   @override
-  int get hashCode => Object.hash(chatFontSize, themeColor, largeWindow);
+  int get hashCode => Object.hash(chatFontSize, themeColor, windowSize);
 }
 
 abstract interface class AppPreferencesStore {

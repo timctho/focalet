@@ -53,6 +53,15 @@ public static class ZommiWindowsAcceptanceNative
     private static extern bool IsIconic(IntPtr window);
 
     [DllImport("user32.dll")]
+    public static extern bool IsZoomed(IntPtr window);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
+
+    [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr window, int command);
 
     [DllImport("user32.dll")]
@@ -163,6 +172,15 @@ public static class ZommiWindowsAcceptanceNative
     {
         public int X;
         public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MonitorInfo
+    {
+        public int Size;
+        public NativeRect Monitor;
+        public NativeRect Work;
+        public uint Flags;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -319,6 +337,35 @@ public static class ZommiWindowsAcceptanceNative
     public static bool Minimized(IntPtr window)
     {
         return IsIconic(window);
+    }
+
+    public static void Maximize(IntPtr window)
+    {
+        SendMessage(window, 0x0112, new IntPtr(0xF030), IntPtr.Zero);
+    }
+
+    public static int[] WorkArea(IntPtr window)
+    {
+        var previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
+        try
+        {
+            var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+            if (!GetMonitorInfo(MonitorFromWindow(window, 2), ref info))
+            {
+                throw new InvalidOperationException("Could not read the active monitor work area.");
+            }
+            return new[]
+            {
+                info.Work.Left,
+                info.Work.Top,
+                info.Work.Right - info.Work.Left,
+                info.Work.Bottom - info.Work.Top,
+            };
+        }
+        finally
+        {
+            SetThreadDpiAwarenessContext(previous);
+        }
     }
 
     public static void Minimize(IntPtr window)
@@ -1108,6 +1155,32 @@ function Invoke-PackagedApplicationAcceptance {
             throw 'Packaged taskbar window unexpectedly remained always-on-top.'
         }
 
+        [ZommiWindowsAcceptanceNative]::Maximize($window)
+        $maximizeDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        do {
+            $maximizedBounds = [ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
+            $monitorWorkArea = [ZommiWindowsAcceptanceNative]::WorkArea($window)
+            $maximizedToWorkArea = [ZommiWindowsAcceptanceNative]::IsZoomed($window) -and
+                ($maximizedBounds -join ',') -eq ($monitorWorkArea -join ',')
+            if ($maximizedToWorkArea) { break }
+            Start-Sleep -Milliseconds 50
+        } while ([DateTime]::UtcNow -lt $maximizeDeadline)
+        if (-not $maximizedToWorkArea) {
+            throw "Maximize did not respect the active monitor work area: bounds=$($maximizedBounds -join ',') workArea=$($monitorWorkArea -join ',')."
+        }
+        [ZommiWindowsAcceptanceNative]::Restore($window)
+        $normalDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        do {
+            $normalBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
+            $normalRestored = -not [ZommiWindowsAcceptanceNative]::IsZoomed($window) -and
+                ($normalBounds[2..3] -join ',') -eq ($taskbarBounds[2..3] -join ',')
+            if ($normalRestored) { break }
+            Start-Sleep -Milliseconds 50
+        } while ([DateTime]::UtcNow -lt $normalDeadline)
+        if (-not $normalRestored) {
+            throw 'Restoring Maximize did not retain the previous normal window size.'
+        }
+
         $physicalBounds = [ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
         if ($physicalBounds.Count -ne 4) {
             throw 'Could not read the packaged taskbar window physical bounds.'
@@ -1338,6 +1411,9 @@ function Invoke-PackagedApplicationAcceptance {
             leaveBounds = @($leaveBounds)
             shortcutBounds = @($shortcutBounds)
             minimizedAndRestored = $true
+            maximizedToWorkArea = $true
+            maximizedBounds = @($maximizedBounds)
+            monitorWorkArea = @($monitorWorkArea)
             minimizedImageShortcutRestored = $true
             nativeTaskbarToggle = $true
             shortcutsRestoreFocus = $true

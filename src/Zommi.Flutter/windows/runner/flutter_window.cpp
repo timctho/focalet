@@ -116,13 +116,28 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
 
   // Give Flutter, including plugins, an opportunity to handle window messages.
+  std::optional<LRESULT> plugin_result;
   if (flutter_controller_) {
-    std::optional<LRESULT> result =
-        flutter_controller_->HandleTopLevelWindowProc(hwnd, message, wparam,
-                                                      lparam);
-    if (result) {
-      return *result;
+    plugin_result = flutter_controller_->HandleTopLevelWindowProc(
+        hwnd, message, wparam, lparam);
+  }
+  if (message == WM_GETMINMAXINFO) {
+    MONITORINFO monitor_info{};
+    monitor_info.cbSize = sizeof(monitor_info);
+    if (GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST),
+                        &monitor_info)) {
+      auto *limits = reinterpret_cast<MINMAXINFO *>(lparam);
+      const auto &work_area = monitor_info.rcWork;
+      const auto &monitor_area = monitor_info.rcMonitor;
+      limits->ptMaxPosition = {work_area.left - monitor_area.left,
+                               work_area.top - monitor_area.top};
+      limits->ptMaxSize = {work_area.right - work_area.left,
+                           work_area.bottom - work_area.top};
     }
+    return 0;
+  }
+  if (plugin_result) {
+    return *plugin_result;
   }
 
   switch (message) {
@@ -137,6 +152,36 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
 void FlutterWindow::HandleWindowAnimationMethodCall(
     const flutter::MethodCall<flutter::EncodableValue> &call,
     std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+  if (call.method_name() == "presentPanel") {
+    const auto arguments = std::get_if<flutter::EncodableMap>(call.arguments());
+    bool focus = true;
+    if (arguments != nullptr) {
+      const auto entry = arguments->find(flutter::EncodableValue("focus"));
+      if (entry != arguments->end()) {
+        if (const auto value = std::get_if<bool>(&entry->second)) focus = *value;
+      }
+    }
+    const auto window = GetHandle();
+    if (!focus) {
+      ShowWindow(window, IsIconic(window) ? SW_SHOWNOACTIVATE : SW_SHOWNA);
+      result->Success(flutter::EncodableValue(true));
+      return;
+    }
+    ShowWindow(window, IsIconic(window) ? SW_RESTORE : SW_SHOW);
+    const auto foreground = GetForegroundWindow();
+    const auto foreground_thread = GetWindowThreadProcessId(foreground, nullptr);
+    const auto current_thread = GetCurrentThreadId();
+    const bool attached = !SetForegroundWindow(window) &&
+                          foreground_thread != 0 &&
+                          foreground_thread != current_thread &&
+                          AttachThreadInput(current_thread, foreground_thread, TRUE);
+    BringWindowToTop(window);
+    SetForegroundWindow(window);
+    SetFocus(flutter_controller_->view()->GetNativeWindow());
+    if (attached) AttachThreadInput(current_thread, foreground_thread, FALSE);
+    result->Success(flutter::EncodableValue(GetForegroundWindow() == window));
+    return;
+  }
   if (call.method_name() == "isPointerWithinWindow") {
     POINT cursor{};
     if (!GetCursorPos(&cursor)) {
@@ -164,8 +209,8 @@ void FlutterWindow::HandleWindowAnimationMethodCall(
     // custom drawn. Windows uses these styles for taskbar click toggling, and
     // window_manager uses SC_MOVE to drag a frameless surface.
     const LONG_PTR surface_style =
-        (style & ~(WS_CAPTION | WS_THICKFRAME | WS_MAXIMIZEBOX)) |
-        WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPCHILDREN |
+        (style & ~(WS_CAPTION | WS_THICKFRAME)) |
+        WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CLIPCHILDREN |
         WS_CLIPSIBLINGS;
     SetLastError(ERROR_SUCCESS);
     if (SetWindowLongPtr(window, GWL_STYLE, surface_style) == 0 &&
