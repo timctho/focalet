@@ -306,6 +306,18 @@ class ReleasePackageTests(unittest.TestCase):
             self.assertIn(contract, source)
         self.assertIn('case "selectContext"', host)
         self.assertIn("CrosshairCursorActive", acceptance)
+        self.assertIn("Opacity = 0.28", source)
+        self.assertNotIn("TransparencyKey", source)
+        self.assertIn(
+            "Context point selector lost pointer ownership after painting.",
+            acceptance,
+        )
+        click = acceptance.split("public static bool ClickSelection(", 1)[1].split(
+            "public static uint WindowDpi", 1
+        )[0]
+        self.assertIn("IsOwnedWindowAtPoint", click)
+        self.assertIn("mouse_event(leftDown", click)
+        self.assertNotIn("SendMessage", click)
         self.assertIn("$cursorClock.ElapsedMilliseconds -lt 5000", acceptance)
         self.assertIn("Context point selector did not expose its crosshair cursor.", acceptance)
         self.assertIn("point-context: ok (crosshair and click)", acceptance)
