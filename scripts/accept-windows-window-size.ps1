@@ -141,12 +141,15 @@ function Measure-SizeTransition {
     param([string] $Name, [string] $Mode)
     $before = [ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
     Click-SizeControl $Name
-    $frames = @([ZommiWindowSizeAccess]::Sample($window, 1500))
+    $frames = @([ZommiWindowSizeAccess]::Sample($window, 3000))
     Wait-SizeCondition -Description "persisted $Mode" -Condition { (Test-Path $settings) -and (Get-Content -Raw $settings | ConvertFrom-Json).windowSize -eq $Mode }
     $after = [ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
     $distinct = @($frames | ForEach-Object { $_.bounds -join ',' } | Select-Object -Unique)
     $result.lastMeasurement = @{ name = $Name; before = $before; after = $after; frames = $frames; distinctBounds = $distinct.Count }
     if ($distinct.Count -lt 5) { throw "No smooth native resize for $Name ($($distinct.Count) bounds)." }
+    foreach ($axis in 0..3) {
+        if ([Math]::Abs($frames[-1].bounds[$axis] - $after[$axis]) -gt 3) { throw "Resize $Name did not settle within the sampled interval." }
+    }
     $previous = $before
     foreach ($frame in $frames) {
         foreach ($axis in 0..3) {

@@ -409,6 +409,7 @@ void FlutterWindow::FinishWindowAnimation() {
   window_animation_active_ = false;
   auto completed = std::move(window_animation_result_);
   if (animation_maximized_) {
+    ShowWindow(GetHandle(), SW_MAXIMIZE);
     animation_restore_.showCmd = SW_SHOWMAXIMIZED;
     if (!SetWindowPlacement(GetHandle(), &animation_restore_)) {
       completed->Error("window_resize_failed",
