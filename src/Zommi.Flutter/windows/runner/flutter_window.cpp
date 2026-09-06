@@ -2,7 +2,6 @@
 
 #include <dwmapi.h>
 
-#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <optional>
@@ -15,34 +14,6 @@
 #include <flutter/standard_method_codec.h>
 
 namespace {
-
-constexpr UINT_PTR kWindowAnimationTimerId = 0x5A4D;
-constexpr UINT kWindowAnimationFrameMs = 15;
-
-constexpr ULONGLONG AdvanceSurfaceAnimationClock(ULONGLONG elapsed,
-                                                 ULONGLONG delta,
-                                                 DWORD duration) {
-  return std::min(static_cast<ULONGLONG>(duration),
-                  elapsed + std::min(delta, ULONGLONG{32}));
-}
-
-static_assert(AdvanceSurfaceAnimationClock(0, 15, 280) == 15);
-static_assert(AdvanceSurfaceAnimationClock(15, 250, 280) == 47);
-static_assert(AdvanceSurfaceAnimationClock(15, 1000, 280) == 47);
-static_assert(AdvanceSurfaceAnimationClock(270, 15, 280) == 280);
-
-constexpr double SymmetricSurfaceEase(double progress) {
-  if (progress < 0.5) {
-    return 4.0 * progress * progress * progress;
-  }
-  const double tail = -2.0 * progress + 2.0;
-  return 1.0 - tail * tail * tail / 2.0;
-}
-
-static_assert(SymmetricSurfaceEase(0.0) == 0.0);
-static_assert(SymmetricSurfaceEase(0.5) == 0.5);
-static_assert(SymmetricSurfaceEase(1.0) == 1.0);
-static_assert(SymmetricSurfaceEase(0.25) == 1.0 - SymmetricSurfaceEase(0.75));
 
 std::optional<double> NumberArgument(const flutter::EncodableMap &arguments,
                                      const char *name) {
@@ -103,7 +74,6 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
-  CancelWindowAnimation();
   CancelPendingSurfaceFrame();
   window_animation_channel_.reset();
   if (flutter_controller_) {
@@ -122,11 +92,6 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     SetForegroundWindow(hwnd);
     return 0;
   }
-  if (message == WM_TIMER && wparam == kWindowAnimationTimerId) {
-    AdvanceWindowAnimation();
-    return 0;
-  }
-
   // Give Flutter, including plugins, an opportunity to handle window messages.
   std::optional<LRESULT> plugin_result;
   if (flutter_controller_) {
@@ -207,8 +172,37 @@ void FlutterWindow::HandleWindowAnimationMethodCall(
     result->Success(flutter::EncodableValue(root_window == GetHandle()));
     return;
   }
+  if (call.method_name() == "freezeSurface") {
+    CancelPendingSurfaceFrame();
+    const auto *arguments =
+        std::get_if<flutter::EncodableMap>(call.arguments());
+    if (arguments != nullptr) {
+      const auto entry = arguments->find(
+          flutter::EncodableValue("rememberPlacement"));
+      if (entry != arguments->end()) {
+        const auto *remember = std::get_if<bool>(&entry->second);
+        if (remember != nullptr && *remember) {
+          surface_restore_ = {};
+          surface_restore_.length = sizeof(surface_restore_);
+          if (!GetWindowPlacement(GetHandle(), &surface_restore_)) {
+            result->Error("window_unavailable", "Window placement is unavailable.");
+            return;
+          }
+        }
+      }
+    }
+    DwmFlush();
+    RECT current{};
+    if (!GetWindowRect(GetHandle(), &current) ||
+        !BeginSurfaceFrameTransition(current)) {
+      result->Error("surface_capture_failed",
+                    "Could not preserve the current surface frame.");
+      return;
+    }
+    result->Success(flutter::EncodableValue(true));
+    return;
+  }
   if (call.method_name() == "configureSurfaceWindow") {
-    CancelWindowAnimation();
     const auto window = GetHandle();
     SetLastError(ERROR_SUCCESS);
     const LONG_PTR style = GetWindowLongPtr(window, GWL_STYLE);
@@ -241,7 +235,7 @@ void FlutterWindow::HandleWindowAnimationMethodCall(
     result->Success();
     return;
   }
-  if (call.method_name() != "animateBounds" &&
+  if (call.method_name() != "resizeSurfaceCanvas" &&
       call.method_name() != "setBoundsWithoutCopy") {
     result->NotImplemented();
     return;
@@ -258,22 +252,77 @@ void FlutterWindow::HandleWindowAnimationMethodCall(
   const auto width = NumberArgument(*arguments, "toWidth");
   const auto height = NumberArgument(*arguments, "toHeight");
   const auto scale = NumberArgument(*arguments, "scaleFactor");
-  const auto duration = NumberArgument(*arguments, "durationMs");
   const bool instant_without_copy =
       call.method_name() == "setBoundsWithoutCopy";
+  const bool resize_canvas = call.method_name() == "resizeSurfaceCanvas";
   if (!x || !y || !width || !height || !scale || *scale <= 0 || *width <= 0 ||
-      *height <= 0 || (!instant_without_copy && (!duration || *duration < 0))) {
+      *height <= 0) {
     result->Error("invalid_arguments", "Window bounds are incomplete.");
     return;
   }
 
-  CancelWindowAnimation();
-  CancelPendingSurfaceFrame();
+  if (!resize_canvas) CancelPendingSurfaceFrame();
   RECT target{};
   target.left = static_cast<LONG>(std::lround(*x * *scale));
   target.top = static_cast<LONG>(std::lround(*y * *scale));
   target.right = target.left + static_cast<LONG>(std::lround(*width * *scale));
   target.bottom = target.top + static_cast<LONG>(std::lround(*height * *scale));
+  if (resize_canvas) {
+    if (IsZoomed(GetHandle())) {
+      auto restored = surface_restore_;
+      restored.showCmd = SW_SHOWNOACTIVATE;
+      restored.rcNormalPosition = target;
+      if ((GetWindowLongPtr(GetHandle(), GWL_EXSTYLE) & WS_EX_TOOLWINDOW) == 0) {
+        MONITORINFO monitor{};
+        monitor.cbSize = sizeof(monitor);
+        if (!GetMonitorInfo(MonitorFromWindow(GetHandle(), MONITOR_DEFAULTTONEAREST),
+                            &monitor)) {
+          FinishSurfaceFrameTransition();
+          result->Error("window_unavailable", "Monitor work area is unavailable.");
+          return;
+        }
+        OffsetRect(&restored.rcNormalPosition,
+                   monitor.rcMonitor.left - monitor.rcWork.left,
+                   monitor.rcMonitor.top - monitor.rcWork.top);
+      }
+      if (!SetWindowPlacement(GetHandle(), &restored)) {
+        FinishSurfaceFrameTransition();
+        result->Error("window_resize_failed", "Could not restore the surface canvas.");
+        return;
+      }
+    }
+    if (!SetWindowPos(GetHandle(), nullptr, target.left, target.top,
+                      target.right - target.left, target.bottom - target.top,
+                      SWP_NOACTIVATE | SWP_NOCOPYBITS | SWP_NOOWNERZORDER |
+                          SWP_NOZORDER)) {
+      FinishSurfaceFrameTransition();
+      result->Error("window_resize_failed", "Could not resize the surface canvas.");
+      return;
+    }
+    const auto entry = arguments->find(flutter::EncodableValue("maximized"));
+    const auto *maximized = entry == arguments->end()
+                                ? nullptr
+                                : std::get_if<bool>(&entry->second);
+    if (maximized != nullptr && *maximized) {
+      ShowWindow(GetHandle(), SW_MAXIMIZE);
+      surface_restore_.showCmd = SW_SHOWMAXIMIZED;
+      if (!SetWindowPlacement(GetHandle(), &surface_restore_)) {
+        FinishSurfaceFrameTransition();
+        result->Error("window_resize_failed", "Could not maximize the surface canvas.");
+        return;
+      }
+    }
+    pending_surface_frame_result_ = std::move(result);
+    flutter_controller_->engine()->SetNextFrameCallback([this]() {
+      if (pending_surface_frame_result_ == nullptr) return;
+      DwmFlush();
+      FinishSurfaceFrameTransition();
+      auto completed = std::move(pending_surface_frame_result_);
+      completed->Success(flutter::EncodableValue(true));
+    });
+    flutter_controller_->ForceRedraw();
+    return;
+  }
   if (instant_without_copy) {
     RECT current{};
     if (!GetWindowRect(GetHandle(), &current)) {
@@ -317,118 +366,6 @@ void FlutterWindow::HandleWindowAnimationMethodCall(
     });
     flutter_controller_->ForceRedraw();
     return;
-  }
-  if (!GetWindowRect(GetHandle(), &animation_from_)) {
-    result->Error("window_unavailable", "The Zommi window is unavailable.");
-    return;
-  }
-  const auto maximize_argument =
-      arguments->find(flutter::EncodableValue("maximized"));
-  const auto maximize_value =
-      maximize_argument == arguments->end()
-          ? nullptr
-          : std::get_if<bool>(&maximize_argument->second);
-  animation_maximized_ = maximize_value != nullptr && *maximize_value;
-  animation_restore_ = {};
-  animation_restore_.length = sizeof(animation_restore_);
-  if (!GetWindowPlacement(GetHandle(), &animation_restore_)) {
-    result->Error("window_unavailable",
-                  "The Zommi window placement is unavailable.");
-    return;
-  }
-  if (IsZoomed(GetHandle())) {
-    auto restored = animation_restore_;
-    restored.showCmd = SW_SHOWNOACTIVATE;
-    restored.rcNormalPosition = animation_from_;
-    if ((GetWindowLongPtr(GetHandle(), GWL_EXSTYLE) & WS_EX_TOOLWINDOW) == 0) {
-      MONITORINFO monitor{};
-      monitor.cbSize = sizeof(monitor);
-      if (!GetMonitorInfo(
-              MonitorFromWindow(GetHandle(), MONITOR_DEFAULTTONEAREST),
-              &monitor)) {
-        result->Error("window_unavailable",
-                      "The Zommi monitor work area is unavailable.");
-        return;
-      }
-      OffsetRect(&restored.rcNormalPosition,
-                 monitor.rcMonitor.left - monitor.rcWork.left,
-                 monitor.rcMonitor.top - monitor.rcWork.top);
-    }
-    if (!SetWindowPlacement(GetHandle(), &restored)) {
-      result->Error("window_resize_failed",
-                    "Could not restore the Zommi window for animation.");
-      return;
-    }
-  }
-  animation_to_ = target;
-  animation_duration_ms_ =
-      static_cast<DWORD>(std::lround(std::max(1.0, *duration)));
-  animation_last_tick_ = GetTickCount64();
-  animation_elapsed_ms_ = 0;
-  window_animation_active_ = true;
-  window_animation_result_ = std::move(result);
-  if (SetTimer(GetHandle(), kWindowAnimationTimerId, kWindowAnimationFrameMs,
-               nullptr) == 0) {
-    SetWindowPos(GetHandle(), nullptr, animation_to_.left, animation_to_.top,
-                 animation_to_.right - animation_to_.left,
-                 animation_to_.bottom - animation_to_.top,
-                 SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER);
-    FinishWindowAnimation();
-  }
-}
-
-void FlutterWindow::AdvanceWindowAnimation() {
-  if (!window_animation_active_) {
-    KillTimer(GetHandle(), kWindowAnimationTimerId);
-    return;
-  }
-  const auto now = GetTickCount64();
-  animation_elapsed_ms_ = AdvanceSurfaceAnimationClock(
-      animation_elapsed_ms_, now - animation_last_tick_, animation_duration_ms_);
-  animation_last_tick_ = now;
-  const double linear =
-      static_cast<double>(animation_elapsed_ms_) / animation_duration_ms_;
-  const double eased = SymmetricSurfaceEase(linear);
-  const auto interpolate = [eased](LONG from, LONG to) {
-    return static_cast<LONG>(std::lround(from + (to - from) * eased));
-  };
-  const LONG left = interpolate(animation_from_.left, animation_to_.left);
-  const LONG top = interpolate(animation_from_.top, animation_to_.top);
-  const LONG right = interpolate(animation_from_.right, animation_to_.right);
-  const LONG bottom = interpolate(animation_from_.bottom, animation_to_.bottom);
-  SetWindowPos(GetHandle(), nullptr, left, top, right - left, bottom - top,
-               SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER);
-  if (linear < 1.0) {
-    return;
-  }
-  FinishWindowAnimation();
-}
-
-void FlutterWindow::FinishWindowAnimation() {
-  KillTimer(GetHandle(), kWindowAnimationTimerId);
-  window_animation_active_ = false;
-  auto completed = std::move(window_animation_result_);
-  if (animation_maximized_) {
-    ShowWindow(GetHandle(), SW_MAXIMIZE);
-    animation_restore_.showCmd = SW_SHOWMAXIMIZED;
-    if (!SetWindowPlacement(GetHandle(), &animation_restore_)) {
-      completed->Error("window_resize_failed",
-                       "Could not maximize the Zommi window.");
-      return;
-    }
-  }
-  completed->Success(flutter::EncodableValue(true));
-}
-
-void FlutterWindow::CancelWindowAnimation() {
-  if (!window_animation_active_ && window_animation_result_ == nullptr) {
-    return;
-  }
-  KillTimer(GetHandle(), kWindowAnimationTimerId);
-  window_animation_active_ = false;
-  if (window_animation_result_ != nullptr) {
-    auto cancelled = std::move(window_animation_result_);
-    cancelled->Success(flutter::EncodableValue(false));
   }
 }
 
@@ -490,6 +427,8 @@ bool FlutterWindow::BeginSurfaceFrameTransition(const RECT &current_bounds) {
     return false;
   }
 
+  UpdateWindow(overlay);
+  DwmFlush();
   BOOL cloak = TRUE;
   if (FAILED(DwmSetWindowAttribute(GetHandle(), DWMWA_CLOAK, &cloak,
                                    sizeof(cloak)))) {
@@ -508,6 +447,7 @@ void FlutterWindow::FinishSurfaceFrameTransition() {
     BOOL cloak = FALSE;
     DwmSetWindowAttribute(GetHandle(), DWMWA_CLOAK, &cloak, sizeof(cloak));
     surface_window_cloaked_ = false;
+    DwmFlush();
   }
   DestroySurfaceTransitionOverlay();
 }

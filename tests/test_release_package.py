@@ -220,7 +220,7 @@ class ReleasePackageTests(unittest.TestCase):
         ):
             self.assertIn(contract, script)
 
-    def test_windows_size_acceptance_uses_native_intermediate_bounds(self) -> None:
+    def test_windows_size_acceptance_tracks_rendered_control_pixels(self) -> None:
         script = (SCRIPTS / "accept-windows-window-size.ps1").read_text(encoding="utf-8")
         for contract in (
             "-HelpersOnly",
@@ -228,7 +228,11 @@ class ReleasePackageTests(unittest.TestCase):
             "[ZommiWindowsAcceptanceNative]::SendAltA($false)",
             "IsOwnedWindowAtPoint($window, $left, $top)",
             "ZommiWindowSizeAccess]::Sample($window, 3000)",
-            "$distinct.Count -lt 5",
+            "$visualDistinct.Count -lt 5",
+            "ZommiRenderedSizeProbe.Capture(clock.ElapsedMilliseconds, true)",
+            "Rendered control disappeared",
+            "Rendered control jumped outside its endpoints",
+            "Rendered control reversed direction",
             "did not settle within the sampled interval",
             "jumped outside its endpoints",
             "reversed direction",
@@ -236,6 +240,9 @@ class ReleasePackageTests(unittest.TestCase):
             "Restore-SuspendedZommiApplications",
         ):
             self.assertIn(contract, script)
+        visual_probe = (SCRIPTS / "windows-size-visual-probe.cs").read_text(encoding="utf-8")
+        for contract in ("BitBlt", "LockBits", "FindMarker", "bitmap.Dispose()"):
+            self.assertIn(contract, visual_probe)
         workflow = (SCRIPTS.parent / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         self.assertIn("shell: powershell", workflow)
         self.assertIn("accept-windows-window-size.ps1", workflow)
