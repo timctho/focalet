@@ -36,7 +36,9 @@ Before the physical walkthrough, run the packaged helper gate:
 It verifies an exact selected-text UIA fixture, selector cancellation, a
 DPI-aware region within one physical pixel of 40 by 30, and exact agreement
 between the reported bounds and returned PNG dimensions. It then launches the
-exact packaged Flutter application and checks stable normal/expanded taskbar
+exact packaged Flutter application with an isolated temporary `APPDATA` profile,
+so saved user size preferences cannot change the normal-window test baseline.
+It checks stable normal/expanded taskbar
 window bounds, taskbar minimize/restore behavior, real operating-system shortcut
 registration, injected
 `Alt+A`/`Alt+Shift+A` activation, context attachment, image cancellation,

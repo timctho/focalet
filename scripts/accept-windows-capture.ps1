@@ -1109,16 +1109,21 @@ function Invoke-PackagedApplicationAcceptance {
     $acceptanceLog = Join-Path $env:TEMP (
         "zommi-windows-acceptance-$([Guid]::NewGuid().ToString('N')).jsonl"
     )
+    $acceptanceProfile = Join-Path $env:TEMP (
+        "zommi-windows-acceptance-profile-$([Guid]::NewGuid().ToString('N'))"
+    )
     $start = [System.Diagnostics.ProcessStartInfo]::new()
     $start.FileName = $entrypoint
     $start.WorkingDirectory = $Package
     $start.UseShellExecute = $false
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
+    $start.EnvironmentVariables['APPDATA'] = $acceptanceProfile
     $start.EnvironmentVariables['ZOMMI_ACCEPTANCE_LOG'] = $acceptanceLog
     $application = [System.Diagnostics.Process]::new()
     $application.StartInfo = $start
     try {
+        $null = [IO.Directory]::CreateDirectory($acceptanceProfile)
         if (-not $application.Start()) {
             throw "Could not start packaged Flutter application $entrypoint."
         }
@@ -1146,6 +1151,9 @@ function Invoke-PackagedApplicationAcceptance {
         }
 
         $taskbarBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
+        if ([ZommiWindowsAcceptanceNative]::IsZoomed($window)) {
+            throw 'Packaged application did not start in the isolated normal window mode.'
+        }
         if (-not [ZommiWindowsAcceptanceNative]::Visible($window) -or
             -not [ZommiWindowsAcceptanceNative]::TaskbarEligible($window)) {
             throw 'Packaged Flutter window is not visible and taskbar eligible.'
@@ -1180,7 +1188,7 @@ function Invoke-PackagedApplicationAcceptance {
             Start-Sleep -Milliseconds 50
         } while ([DateTime]::UtcNow -lt $normalDeadline)
         if (-not $normalRestored) {
-            throw 'Restoring Maximize did not retain the previous normal window size.'
+            throw "Restoring Maximize did not retain the previous normal window size: before=$($taskbarBounds -join ',') after=$($normalBounds -join ',')."
         }
 
         $physicalBounds = [ZommiWindowsAcceptanceNative]::PhysicalBounds($window)

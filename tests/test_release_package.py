@@ -194,6 +194,23 @@ class ReleasePackageTests(unittest.TestCase):
         ):
             self.assertIn(contract, script)
 
+    def test_windows_capture_acceptance_isolates_saved_window_preferences(self) -> None:
+        script = (SCRIPTS / "accept-windows-capture.ps1").read_text(encoding="utf-8")
+        application_gate = script.split(
+            "function Invoke-PackagedApplicationAcceptance {", 1
+        )[1].split("function Read-PngDimension {", 1)[0]
+        for contract in (
+            "$acceptanceProfile = Join-Path $env:TEMP",
+            "[IO.Directory]::CreateDirectory($acceptanceProfile)",
+            "$start.EnvironmentVariables['APPDATA'] = $acceptanceProfile",
+            "Packaged application did not start in the isolated normal window mode",
+        ):
+            self.assertIn(contract, application_gate)
+        self.assertLess(
+            application_gate.index("$start.EnvironmentVariables['APPDATA']"),
+            application_gate.index("$application.Start()"),
+        )
+
     def test_windows_maximize_respects_the_active_monitor_work_area(self) -> None:
         source = (
             SCRIPTS.parent
