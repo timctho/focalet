@@ -110,12 +110,16 @@ void main() {
         contains('message == ZommiShowWindowMessage()'),
         contains('ShowWindow(hwnd, SW_RESTORE)'),
         contains('"zommi/window_animation"'),
-        allOf(
+        allOf([
           contains('"freezeSurface"'),
           contains('"resizeSurfaceCanvas"'),
+          contains('"frameRgba"'),
+          contains('BeginRenderedSurfaceFrameTransition'),
+          contains('UpdateLayeredWindow'),
+          contains('InvokeMethod("renderSurfaceFrame", nullptr)'),
           contains('UpdateWindow(overlay)'),
           contains('DwmFlush()'),
-        ),
+        ]),
         isNot(contains('message == WM_TIMER')),
         allOf(contains('WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX')),
         allOf(

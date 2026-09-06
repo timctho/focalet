@@ -8,6 +8,7 @@
 #include <flutter/method_result.h>
 
 #include <memory>
+#include <vector>
 
 #include "win32_window.h"
 
@@ -31,6 +32,9 @@ private:
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
   void CancelPendingSurfaceFrame();
   bool BeginSurfaceFrameTransition(const RECT &current_bounds);
+  bool BeginRenderedSurfaceFrameTransition(const RECT &current_bounds,
+                                          const std::vector<uint8_t> &rgba,
+                                          int width, int height);
   void FinishSurfaceFrameTransition();
   void DestroySurfaceTransitionOverlay();
 

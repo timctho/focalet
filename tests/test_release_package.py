@@ -233,16 +233,24 @@ class ReleasePackageTests(unittest.TestCase):
             "Rendered control disappeared",
             "Rendered control jumped outside its endpoints",
             "Rendered control reversed direction",
+            "windows-desktop-frame.cs",
+            "dxgi-desktop-duplication",
+            "[ZommiRenderedSizeProbe]::Dispose()",
             "did not settle within the sampled interval",
             "jumped outside its endpoints",
             "reversed direction",
             "native Restore retains pre-Max placement",
+            "native Restore redraws the previous panel",
             "Restore-SuspendedZommiApplications",
         ):
             self.assertIn(contract, script)
         visual_probe = (SCRIPTS / "windows-size-visual-probe.cs").read_text(encoding="utf-8")
-        for contract in ("BitBlt", "LockBits", "FindMarker", "bitmap.Dispose()"):
+        for contract in ("desktop.Capture()", "LockBits", "FindMarker", "bitmap.Dispose()"):
             self.assertIn(contract, visual_probe)
+        self.assertNotIn("BitBlt", visual_probe)
+        desktop_capture = (SCRIPTS / "windows-desktop-frame.cs").read_text(encoding="utf-8")
+        for contract in ("DuplicateOutput", "AcquireFrame", "CopyRegion", "MapTexture", "ReleaseFrame", "SetThreadDpiAwarenessContext", "Dispose()"):
+            self.assertIn(contract, desktop_capture)
         workflow = (SCRIPTS.parent / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         self.assertIn("shell: powershell", workflow)
         self.assertIn("accept-windows-window-size.ps1", workflow)

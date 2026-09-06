@@ -95,7 +95,7 @@ public static class ZommiWindowSizeAccess {
         } catch (COMException) { }
     }
 }
-'@ + (Get-Content -Raw (Join-Path $PSScriptRoot 'windows-size-visual-probe.cs')))
+'@ + (Get-Content -Raw (Join-Path $PSScriptRoot 'windows-size-visual-probe.cs')) + (Get-Content -Raw (Join-Path $PSScriptRoot 'windows-desktop-frame.cs')))
 
 $PackageDirectory = [IO.Path]::GetFullPath($PackageDirectory)
 $manifest = Get-Content -Raw (Join-Path $PackageDirectory 'release-manifest.json') | ConvertFrom-Json
@@ -108,7 +108,7 @@ if (-not $ResultPath) { $ResultPath = Join-Path $probeRoot 'result.json' }
 $log = Join-Path $probeRoot 'events.jsonl'
 $settings = Join-Path $probeRoot 'Zommi\settings.json'
 $entrypoint = Join-Path $PackageDirectory 'Zommi.exe'
-$result = @{ gitCommit = $ExpectedCommit; package = $PackageDirectory; transitions = @() }
+$result = @{ gitCommit = $ExpectedCommit; package = $PackageDirectory; captureApi = 'dxgi-desktop-duplication'; transitions = @() }
 
 function Wait-SizeCondition {
     param([scriptblock] $Condition, [string] $Description)
@@ -149,10 +149,10 @@ function Measure-SizeTransition {
     if ($null -eq $markerBefore) { throw 'Rendered send control was not visible before resize.' }
     Click-SizeControl $Name
     $frames = @([ZommiWindowSizeAccess]::Sample($window, 3000))
-    Wait-SizeCondition -Description "persisted $Mode" -Condition { (Test-Path $settings) -and (Get-Content -Raw $settings | ConvertFrom-Json).windowSize -eq $Mode }
     $after = [ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
     $distinct = @($frames | ForEach-Object { $_.bounds -join ',' } | Select-Object -Unique)
     $result.lastMeasurement = @{ name = $Name; before = $before; after = $after; frames = $frames; distinctBounds = $distinct.Count }
+    Wait-SizeCondition -Description "persisted $Mode" -Condition { (Test-Path $settings) -and (Get-Content -Raw $settings | ConvertFrom-Json).windowSize -eq $Mode }
     $markerAfter = [ZommiRenderedSizeProbe]::Capture(0, $false)
     if ($null -eq $markerAfter) { throw 'Rendered send control was not visible after resize.' }
     $visualDistinct = @($frames | ForEach-Object { $_.marker -join ',' } | Select-Object -Unique)
@@ -217,9 +217,16 @@ try {
     $null = Get-SizeControl 'Max'
     if (@([ZommiWindowSizeAccess]::Read($view) | Where-Object Name -eq 'Maximize').Count) { throw 'Old Maximize label remains.' }
     $normal = [ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
+    $normalMarker = [ZommiRenderedSizeProbe]::Capture(0, $false)
     Measure-SizeTransition 'Max' 'maximized'
     [ZommiWindowsAcceptanceNative]::Restore($window)
     Wait-SizeCondition -Description 'native Restore retains pre-Max placement' -Condition { ([ZommiWindowsAcceptanceNative]::PhysicalBounds($window) -join ',') -eq ($normal -join ',') }
+    Wait-SizeCondition -Description 'native Restore redraws the previous panel' -Condition {
+        $marker = [ZommiRenderedSizeProbe]::Capture(0, $false)
+        if ($null -eq $marker -or $null -eq $normalMarker) { return $false }
+        foreach ($axis in 0..3) { if ([Math]::Abs($marker[$axis] - $normalMarker[$axis]) -gt 3) { return $false } }
+        return $true
+    }
     $result.restorePlacementVerified = $true
     Measure-SizeTransition 'Wide' 'wide'
     Measure-SizeTransition 'Max' 'maximized'
@@ -230,12 +237,16 @@ try {
 } catch {
     $result.passed = $false
     $result.error = $_.Exception.Message
+    if ($view) {
+        try { $result.surfaceStatus = @([ZommiWindowSizeAccess]::Read($view) | Where-Object { $_.Name -like 'Agent status:*' } | ForEach-Object Name) } catch { }
+    }
     throw
 } finally {
     try {
         $result | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ResultPath
         Write-Host "Native size evidence: $ResultPath"
     } finally {
+        [ZommiRenderedSizeProbe]::Dispose()
         if ($application) {
             Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($PackageDirectory + '\', [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
         }

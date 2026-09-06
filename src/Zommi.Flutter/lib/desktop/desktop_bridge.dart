@@ -296,6 +296,9 @@ final class FlutterDesktopBridge
       return _readiness;
     }
     _initialized = true;
+    _windowAnimationChannel.setMethodCallHandler(
+      surfaceAnimation.handleNativeFrameRequest,
+    );
     windowManager.addListener(this);
     await windowManager.setPreventClose(false);
     await windowManager.setAlwaysOnTop(false);
@@ -700,8 +703,12 @@ final class FlutterDesktopBridge
         duration: surfaceTransitionDuration,
         ease: symmetricSurfaceEase,
         freeze: (rememberPlacement) async {
+          final frame = await surfaceAnimation.captureFrame(pixelRatio: scale);
           await _windowAnimationChannel.invokeMethod<bool>('freezeSurface', {
             'rememberPlacement': rememberPlacement,
+            'frameWidth': frame.width,
+            'frameHeight': frame.height,
+            'frameRgba': frame.rgba,
           });
         },
         resize: (canvas, targetMaximized) async {
@@ -972,6 +979,7 @@ final class FlutterDesktopBridge
 
   @override
   Future<void> close() async {
+    _windowAnimationChannel.setMethodCallHandler(null);
     windowManager.removeListener(this);
     trayManager.removeListener(this);
     await _portalShortcutSubscription?.cancel();

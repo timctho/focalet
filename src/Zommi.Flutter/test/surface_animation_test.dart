@@ -1,4 +1,5 @@
 import 'package:flutter/widgets.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/desktop/surface_animation.dart';
@@ -7,6 +8,51 @@ import 'package:zommi_flutter/zommi_app.dart';
 import 'test_support.dart';
 
 void main() {
+  testWidgets('native canvas requests a frame even without new layout damage', (
+    tester,
+  ) async {
+    final animation = SurfaceAnimationController();
+    addTearDown(animation.dispose);
+    await tester.pumpWidget(const SizedBox());
+    expect(tester.binding.hasScheduledFrame, isFalse);
+    await animation.handleNativeFrameRequest(
+      const MethodCall('renderSurfaceFrame'),
+    );
+    expect(tester.binding.hasScheduledFrame, isTrue);
+    await tester.pump();
+    expect(tester.binding.hasScheduledFrame, isFalse);
+  });
+
+  testWidgets('handoff pixels contain the final panel without desktop lag', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(120, 100));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final animation = SurfaceAnimationController();
+    addTearDown(animation.dispose);
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: SurfaceAnimationHost(
+          animation: animation,
+          builder: (context, size) =>
+              const ColoredBox(color: Color(0xff6655aa)),
+        ),
+      ),
+    );
+    animation.value = const Rect.fromLTWH(20, 30, 40, 50);
+    final capturing = animation.captureFrame(pixelRatio: 2);
+    await tester.pump();
+    final frame = await tester.runAsync(() => capturing);
+    expect(frame, isNotNull);
+    expect((frame!.width, frame.height), (240, 200));
+    expect(frame.rgba.sublist(0, 4), [0, 0, 0, 0]);
+    final inside = (70 * frame.width + 50) * 4;
+    expect(frame.rgba.sublist(inside, inside + 4), [0x66, 0x55, 0xaa, 0xff]);
+    final outside = (170 * frame.width + 50) * 4;
+    expect(frame.rgba.sublist(outside, outside + 4), [0, 0, 0, 0]);
+  });
+
   testWidgets(
     'real chat retains its editor and unscaled controls on the canvas',
     (tester) async {

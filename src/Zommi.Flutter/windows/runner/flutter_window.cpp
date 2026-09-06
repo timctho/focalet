@@ -191,10 +191,24 @@ void FlutterWindow::HandleWindowAnimationMethodCall(
         }
       }
     }
-    DwmFlush();
+    const auto width = arguments == nullptr ? std::nullopt : NumberArgument(*arguments, "frameWidth");
+    const auto height = arguments == nullptr ? std::nullopt : NumberArgument(*arguments, "frameHeight");
+    const auto frame = arguments == nullptr ? nullptr : [&]() -> const std::vector<uint8_t> * {
+      const auto entry = arguments->find(flutter::EncodableValue("frameRgba"));
+      return entry == arguments->end() ? nullptr : std::get_if<std::vector<uint8_t>>(&entry->second);
+    }();
+    if (!width || !height || !frame || !std::isfinite(*width) ||
+        !std::isfinite(*height) || *width < 1 || *height < 1 ||
+        *width > 32768 || *height > 32768 ||
+        frame->size() != static_cast<size_t>(*width) * static_cast<size_t>(*height) * 4) {
+      result->Error("invalid_arguments", "A rendered surface frame is required.");
+      return;
+    }
     RECT current{};
     if (!GetWindowRect(GetHandle(), &current) ||
-        !BeginSurfaceFrameTransition(current)) {
+        !BeginRenderedSurfaceFrameTransition(current, *frame,
+                                              static_cast<int>(*width),
+                                              static_cast<int>(*height))) {
       result->Error("surface_capture_failed",
                     "Could not preserve the current surface frame.");
       return;
@@ -320,7 +334,7 @@ void FlutterWindow::HandleWindowAnimationMethodCall(
       auto completed = std::move(pending_surface_frame_result_);
       completed->Success(flutter::EncodableValue(true));
     });
-    flutter_controller_->ForceRedraw();
+    window_animation_channel_->InvokeMethod("renderSurfaceFrame", nullptr);
     return;
   }
   if (instant_without_copy) {
@@ -375,6 +389,70 @@ void FlutterWindow::CancelPendingSurfaceFrame() {
     auto cancelled = std::move(pending_surface_frame_result_);
     cancelled->Success(flutter::EncodableValue(false));
   }
+}
+
+bool FlutterWindow::BeginRenderedSurfaceFrameTransition(
+    const RECT &current_bounds, const std::vector<uint8_t> &rgba,
+    int width, int height) {
+  DestroySurfaceTransitionOverlay();
+  HDC desktop = GetDC(nullptr);
+  if (desktop == nullptr) return false;
+  BITMAPINFO description{};
+  description.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  description.bmiHeader.biWidth = width;
+  description.bmiHeader.biHeight = -height;
+  description.bmiHeader.biPlanes = 1;
+  description.bmiHeader.biBitCount = 32;
+  description.bmiHeader.biCompression = BI_RGB;
+  void *storage = nullptr;
+  HBITMAP bitmap = CreateDIBSection(desktop, &description, DIB_RGB_COLORS,
+                                    &storage, nullptr, 0);
+  HDC memory = bitmap == nullptr ? nullptr : CreateCompatibleDC(desktop);
+  HWND overlay = nullptr;
+  bool presented = false;
+  if (memory != nullptr) {
+    auto *pixels = static_cast<uint8_t *>(storage);
+    for (size_t index = 0; index < rgba.size(); index += 4) {
+      pixels[index] = rgba[index + 2];
+      pixels[index + 1] = rgba[index + 1];
+      pixels[index + 2] = rgba[index];
+      pixels[index + 3] = rgba[index + 3];
+    }
+    const auto previous = SelectObject(memory, bitmap);
+    overlay = CreateWindowExW(
+        WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST |
+            WS_EX_TRANSPARENT | WS_EX_LAYERED,
+        L"STATIC", nullptr, WS_POPUP, current_bounds.left, current_bounds.top,
+        width, height, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (overlay != nullptr) {
+      POINT position{current_bounds.left, current_bounds.top};
+      POINT source{};
+      SIZE size{width, height};
+      BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+      presented = UpdateLayeredWindow(overlay, desktop, &position, &size,
+                                      memory, &source, 0, &blend, ULW_ALPHA) &&
+                  SetWindowPos(overlay, HWND_TOPMOST, position.x, position.y,
+                               width, height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    }
+    SelectObject(memory, previous);
+    DeleteDC(memory);
+  }
+  ReleaseDC(nullptr, desktop);
+  if (presented) {
+    DwmFlush();
+    BOOL cloak = TRUE;
+    presented = SUCCEEDED(DwmSetWindowAttribute(GetHandle(), DWMWA_CLOAK,
+                                                &cloak, sizeof(cloak)));
+  }
+  if (!presented) {
+    if (overlay != nullptr) DestroyWindow(overlay);
+    if (bitmap != nullptr) DeleteObject(bitmap);
+    return false;
+  }
+  surface_transition_overlay_ = overlay;
+  surface_transition_bitmap_ = bitmap;
+  surface_window_cloaked_ = true;
+  return true;
 }
 
 bool FlutterWindow::BeginSurfaceFrameTransition(const RECT &current_bounds) {

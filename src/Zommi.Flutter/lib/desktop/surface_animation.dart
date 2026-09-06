@@ -1,6 +1,9 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
+import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 abstract interface class DesktopSurfaceAnimator {
@@ -9,6 +12,35 @@ abstract interface class DesktopSurfaceAnimator {
 
 final class SurfaceAnimationController extends ValueNotifier<Rect?> {
   SurfaceAnimationController() : super(null);
+
+  final frameKey = GlobalKey();
+
+  Future<void> handleNativeFrameRequest(MethodCall call) async {
+    if (call.method != 'renderSurfaceFrame') throw MissingPluginException();
+    WidgetsBinding.instance.scheduleForcedFrame();
+  }
+
+  Future<({int width, int height, Uint8List rgba})> captureFrame({
+    required double pixelRatio,
+  }) async {
+    await WidgetsBinding.instance.endOfFrame;
+    final boundary = frameKey.currentContext?.findRenderObject();
+    if (boundary is! RenderRepaintBoundary) {
+      throw StateError('The surface frame is not attached.');
+    }
+    final image = await boundary.toImage(pixelRatio: pixelRatio);
+    try {
+      final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      if (data == null) throw StateError('The surface frame is unavailable.');
+      return (
+        width: image.width,
+        height: image.height,
+        rgba: data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
+      );
+    } finally {
+      image.dispose();
+    }
+  }
 
   Future<void> animate({
     required Rect from,
@@ -45,8 +77,6 @@ final class SurfaceAnimationController extends ValueNotifier<Rect?> {
       try {
         ticker.start();
         await completed.future;
-        await WidgetsBinding.instance.endOfFrame;
-        await WidgetsBinding.instance.endOfFrame;
       } finally {
         ticker.dispose();
       }
@@ -72,21 +102,24 @@ class SurfaceAnimationHost extends StatelessWidget {
   final Widget Function(BuildContext context, Size size) builder;
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) => ValueListenableBuilder<Rect?>(
-      valueListenable: animation,
-      builder: (context, bounds, _) {
-        final panel = bounds ?? Offset.zero & constraints.biggest;
-        return Stack(
-          fit: StackFit.expand,
-          children: [
-            Positioned.fromRect(
-              rect: panel,
-              child: builder(context, panel.size),
-            ),
-          ],
-        );
-      },
+  Widget build(BuildContext context) => RepaintBoundary(
+    key: animation.frameKey,
+    child: LayoutBuilder(
+      builder: (context, constraints) => ValueListenableBuilder<Rect?>(
+        valueListenable: animation,
+        builder: (context, bounds, _) {
+          final panel = bounds ?? Offset.zero & constraints.biggest;
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              Positioned.fromRect(
+                rect: panel,
+                child: builder(context, panel.size),
+              ),
+            ],
+          );
+        },
+      ),
     ),
   );
 }
