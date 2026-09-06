@@ -14,6 +14,7 @@ import 'package:tray_manager/tray_manager.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
+import 'package:zommi_flutter/desktop/surface_animation.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 
 const Size compactWindowSize = Size(56, 56);
@@ -212,7 +213,7 @@ final class NoopDesktopBridge implements DesktopBridge {
 
 final class FlutterDesktopBridge
     with WindowListener, TrayListener
-    implements DesktopBridge {
+    implements DesktopBridge, DesktopSurfaceAnimator {
   FlutterDesktopBridge({
     CaptureProvider? captureProvider,
     DesktopAcceptanceRecorder? acceptanceRecorder,
@@ -275,6 +276,10 @@ final class FlutterDesktopBridge
   bool _initialized = false;
   bool _surfacePositionInitialized = false;
   int _surfaceTransitionEpoch = 0;
+  Future<void> _surfaceResizeQueue = Future<void>.value();
+  @override
+  final SurfaceAnimationController surfaceAnimation =
+      SurfaceAnimationController();
   Offset? _surfaceAnchor;
   bool _nativeContextRegistered = false;
   bool _nativeImageRegistered = false;
@@ -291,6 +296,9 @@ final class FlutterDesktopBridge
       return _readiness;
     }
     _initialized = true;
+    _windowAnimationChannel.setMethodCallHandler(
+      surfaceAnimation.handleNativeFrameRequest,
+    );
     windowManager.addListener(this);
     await windowManager.setPreventClose(false);
     await windowManager.setAlwaysOnTop(false);
@@ -614,8 +622,31 @@ final class FlutterDesktopBridge
     bool large = false,
     bool maximized = false,
     bool animate = true,
-  }) async {
+  }) {
     final transitionEpoch = ++_surfaceTransitionEpoch;
+    final operation = _surfaceResizeQueue.catchError((Object _) {}).then<void>((
+      _,
+    ) async {
+      if (transitionEpoch != _surfaceTransitionEpoch) return;
+      return _setSurface(
+        expanded: expanded,
+        large: large,
+        maximized: maximized,
+        animate: animate,
+        transitionEpoch: transitionEpoch,
+      );
+    });
+    _surfaceResizeQueue = operation;
+    return operation;
+  }
+
+  Future<void> _setSurface({
+    required bool expanded,
+    required bool large,
+    required bool maximized,
+    required bool animate,
+    required int transitionEpoch,
+  }) async {
     if (expanded && maximized && !animate) {
       await windowManager.setMinimumSize(const Size(640, 500));
       await windowManager.maximize();
@@ -663,15 +694,40 @@ final class FlutterDesktopBridge
     // jumping directly to 640x500 on the first animated frame.
     await windowManager.setMinimumSize(compactWindowSize);
     var nativeMaximized = false;
-    if (animate && shouldAnimate) {
-      final nativeResult = await animateNativeSurfaceBounds(
+    if (animate && shouldAnimate && Platform.isWindows) {
+      final scale = selected.scaleFactor?.toDouble() ?? 1;
+      await surfaceAnimation.animate(
         from: current,
         to: bounds,
-        scaleFactor: selected.scaleFactor?.toDouble() ?? 1,
         maximized: expanded && maximized,
+        duration: surfaceTransitionDuration,
+        ease: symmetricSurfaceEase,
+        freeze: (rememberPlacement) async {
+          final frame = await surfaceAnimation.captureFrame(pixelRatio: scale);
+          await _windowAnimationChannel.invokeMethod<bool>('freezeSurface', {
+            'rememberPlacement': rememberPlacement,
+            'frameWidth': frame.width,
+            'frameHeight': frame.height,
+            'frameRgba': frame.rgba,
+          });
+        },
+        resize: (canvas, targetMaximized) async {
+          await _windowAnimationChannel.invokeMethod<bool>(
+            'resizeSurfaceCanvas',
+            {
+              'toX': canvas.left,
+              'toY': canvas.top,
+              'toWidth': canvas.width,
+              'toHeight': canvas.height,
+              'scaleFactor': scale,
+              'maximized': targetMaximized,
+            },
+          );
+        },
       );
-      nativeMaximized = nativeResult == true && expanded && maximized;
-      if (nativeResult == null && !(expanded && maximized)) {
+      nativeMaximized = expanded && maximized;
+    } else if (animate && shouldAnimate) {
+      if (!(expanded && maximized)) {
         if (wasMaximized) {
           await windowManager.unmaximize();
           await windowManager.setBounds(current, animate: false);
@@ -923,6 +979,7 @@ final class FlutterDesktopBridge
 
   @override
   Future<void> close() async {
+    _windowAnimationChannel.setMethodCallHandler(null);
     windowManager.removeListener(this);
     trayManager.removeListener(this);
     await _portalShortcutSubscription?.cancel();
@@ -982,35 +1039,6 @@ Rect anchoredSurfaceBounds({
   final left = (anchor.dx - size.width / 2).clamp(workArea.left, maxLeft);
   final top = (anchor.dy - size.height).clamp(workArea.top, maxTop);
   return Rect.fromLTWH(left, top, size.width, size.height);
-}
-
-Future<bool?> animateNativeSurfaceBounds({
-  required Rect from,
-  required Rect to,
-  required double scaleFactor,
-  bool maximized = false,
-  Duration duration = surfaceTransitionDuration,
-}) async {
-  if (!Platform.isWindows) return null;
-  try {
-    return await _windowAnimationChannel.invokeMethod<bool>('animateBounds', {
-      'fromX': from.left,
-      'fromY': from.top,
-      'fromWidth': from.width,
-      'fromHeight': from.height,
-      'toX': to.left,
-      'toY': to.top,
-      'toWidth': to.width,
-      'toHeight': to.height,
-      'scaleFactor': scaleFactor,
-      'durationMs': duration.inMilliseconds,
-      'maximized': maximized,
-    });
-  } on MissingPluginException {
-    return null;
-  } on PlatformException {
-    return null;
-  }
 }
 
 Future<bool?> setNativeSurfaceBoundsWithoutCopy({

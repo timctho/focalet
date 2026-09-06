@@ -9,7 +9,7 @@ import 'package:zommi_flutter/state/zommi_models.dart';
 
 void main() {
   testWidgets(
-    'native surface bridge animates Standard and Wide in both directions',
+    'non-Windows surface fallback animates Standard and Wide in both directions',
     (tester) async {
       const windowChannel = MethodChannel('window_manager');
       const displayChannel = MethodChannel(

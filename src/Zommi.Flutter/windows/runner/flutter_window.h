@@ -8,6 +8,7 @@
 #include <flutter/method_result.h>
 
 #include <memory>
+#include <vector>
 
 #include "win32_window.h"
 
@@ -29,11 +30,11 @@ private:
   void HandleWindowAnimationMethodCall(
       const flutter::MethodCall<flutter::EncodableValue> &call,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
-  void AdvanceWindowAnimation();
-  void FinishWindowAnimation();
-  void CancelWindowAnimation();
   void CancelPendingSurfaceFrame();
   bool BeginSurfaceFrameTransition(const RECT &current_bounds);
+  bool BeginRenderedSurfaceFrameTransition(const RECT &current_bounds,
+                                          const std::vector<uint8_t> &rgba,
+                                          int width, int height);
   void FinishSurfaceFrameTransition();
   void DestroySurfaceTransitionOverlay();
 
@@ -45,17 +46,8 @@ private:
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       window_animation_channel_;
   std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
-      window_animation_result_;
-  std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
       pending_surface_frame_result_;
-  RECT animation_from_{};
-  RECT animation_to_{};
-  ULONGLONG animation_last_tick_ = 0;
-  ULONGLONG animation_elapsed_ms_ = 0;
-  DWORD animation_duration_ms_ = 0;
-  bool window_animation_active_ = false;
-  bool animation_maximized_ = false;
-  WINDOWPLACEMENT animation_restore_{};
+  WINDOWPLACEMENT surface_restore_{};
   HWND surface_transition_overlay_ = nullptr;
   HBITMAP surface_transition_bitmap_ = nullptr;
   bool surface_window_cloaked_ = false;

@@ -110,17 +110,18 @@ void main() {
         contains('message == ZommiShowWindowMessage()'),
         contains('ShowWindow(hwnd, SW_RESTORE)'),
         contains('"zommi/window_animation"'),
-        allOf(
-          contains('kWindowAnimationFrameMs'),
-          contains('AdvanceSurfaceAnimationClock('),
-          contains('AdvanceSurfaceAnimationClock(15, 250, 280) == 47'),
-          contains('AdvanceSurfaceAnimationClock(15, 1000, 280) == 47'),
-        ),
-        contains('message == WM_TIMER'),
-        allOf(
-          contains('SymmetricSurfaceEase(linear)'),
-          contains('WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX'),
-        ),
+        allOf([
+          contains('"freezeSurface"'),
+          contains('"resizeSurfaceCanvas"'),
+          contains('"frameRgba"'),
+          contains('BeginRenderedSurfaceFrameTransition'),
+          contains('UpdateLayeredWindow'),
+          contains('InvokeMethod("renderSurfaceFrame", nullptr)'),
+          contains('UpdateWindow(overlay)'),
+          contains('DwmFlush()'),
+        ]),
+        isNot(contains('message == WM_TIMER')),
+        allOf(contains('WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX')),
         allOf(
           allOf(
             contains('"isPointerWithinWindow"'),
@@ -137,7 +138,7 @@ void main() {
               contains('BeginSurfaceFrameTransition(current)'),
               contains('DWMWA_CLOAK'),
               contains('STM_SETIMAGE'),
-              contains('SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER'),
+              contains('SWP_NOACTIVATE | SWP_NOCOPYBITS | SWP_NOOWNERZORDER'),
             ),
           ),
         ),

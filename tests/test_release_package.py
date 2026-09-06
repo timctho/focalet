@@ -194,6 +194,23 @@ class ReleasePackageTests(unittest.TestCase):
         ):
             self.assertIn(contract, script)
 
+    def test_windows_capture_acceptance_isolates_saved_window_preferences(self) -> None:
+        script = (SCRIPTS / "accept-windows-capture.ps1").read_text(encoding="utf-8")
+        application_gate = script.split(
+            "function Invoke-PackagedApplicationAcceptance {", 1
+        )[1].split("function Read-PngDimension {", 1)[0]
+        for contract in (
+            "$acceptanceProfile = Join-Path $env:TEMP",
+            "[IO.Directory]::CreateDirectory($acceptanceProfile)",
+            "$start.EnvironmentVariables['APPDATA'] = $acceptanceProfile",
+            "Packaged application did not start in the isolated normal window mode",
+        ):
+            self.assertIn(contract, application_gate)
+        self.assertLess(
+            application_gate.index("$start.EnvironmentVariables['APPDATA']"),
+            application_gate.index("$application.Start()"),
+        )
+
     def test_windows_maximize_respects_the_active_monitor_work_area(self) -> None:
         source = (
             SCRIPTS.parent
@@ -220,7 +237,7 @@ class ReleasePackageTests(unittest.TestCase):
         ):
             self.assertIn(contract, script)
 
-    def test_windows_size_acceptance_uses_native_intermediate_bounds(self) -> None:
+    def test_windows_size_acceptance_tracks_rendered_control_pixels(self) -> None:
         script = (SCRIPTS / "accept-windows-window-size.ps1").read_text(encoding="utf-8")
         for contract in (
             "-HelpersOnly",
@@ -228,14 +245,29 @@ class ReleasePackageTests(unittest.TestCase):
             "[ZommiWindowsAcceptanceNative]::SendAltA($false)",
             "IsOwnedWindowAtPoint($window, $left, $top)",
             "ZommiWindowSizeAccess]::Sample($window, 3000)",
-            "$distinct.Count -lt 5",
+            "$visualDistinct.Count -lt 5",
+            "ZommiRenderedSizeProbe.Capture(clock.ElapsedMilliseconds, true)",
+            "Rendered control disappeared",
+            "Rendered control jumped outside its endpoints",
+            "Rendered control reversed direction",
+            "windows-desktop-frame.cs",
+            "dxgi-desktop-duplication",
+            "[ZommiRenderedSizeProbe]::Dispose()",
             "did not settle within the sampled interval",
             "jumped outside its endpoints",
             "reversed direction",
             "native Restore retains pre-Max placement",
+            "native Restore redraws the previous panel",
             "Restore-SuspendedZommiApplications",
         ):
             self.assertIn(contract, script)
+        visual_probe = (SCRIPTS / "windows-size-visual-probe.cs").read_text(encoding="utf-8")
+        for contract in ("desktop.Capture()", "LockBits", "FindMarker", "bitmap.Dispose()"):
+            self.assertIn(contract, visual_probe)
+        self.assertNotIn("BitBlt", visual_probe)
+        desktop_capture = (SCRIPTS / "windows-desktop-frame.cs").read_text(encoding="utf-8")
+        for contract in ("DuplicateOutput", "AcquireFrame", "CopyRegion", "MapTexture", "ReleaseFrame", "SetThreadDpiAwarenessContext", "Dispose()"):
+            self.assertIn(contract, desktop_capture)
         workflow = (SCRIPTS.parent / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         self.assertIn("shell: powershell", workflow)
         self.assertIn("accept-windows-window-size.ps1", workflow)
