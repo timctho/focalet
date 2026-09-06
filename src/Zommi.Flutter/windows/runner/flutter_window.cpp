@@ -1,7 +1,5 @@
 #include "flutter_window.h"
 
-#include <dwmapi.h>
-
 #include <cmath>
 #include <cstdint>
 #include <optional>
@@ -74,7 +72,6 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
-  CancelPendingSurfaceFrame();
   window_animation_channel_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
@@ -129,6 +126,32 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
 void FlutterWindow::HandleWindowAnimationMethodCall(
     const flutter::MethodCall<flutter::EncodableValue> &call,
     std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+  if (call.method_name() == "getSurfaceGeometry") {
+    RECT bounds{};
+    MONITORINFO monitor{};
+    monitor.cbSize = sizeof(monitor);
+    if (!GetWindowRect(GetHandle(), &bounds) ||
+        !GetMonitorInfo(MonitorFromWindow(GetHandle(), MONITOR_DEFAULTTONEAREST),
+                        &monitor)) {
+      result->Error("window_unavailable", "Window geometry is unavailable.");
+      return;
+    }
+    const double scale = GetDpiForWindow(GetHandle()) / 96.0;
+    const auto rectangle = [scale](const RECT& value) {
+      return flutter::EncodableValue(flutter::EncodableList{
+          flutter::EncodableValue(value.left / scale),
+          flutter::EncodableValue(value.top / scale),
+          flutter::EncodableValue((value.right - value.left) / scale),
+          flutter::EncodableValue((value.bottom - value.top) / scale)});
+    };
+    result->Success(flutter::EncodableValue(flutter::EncodableMap{
+        {flutter::EncodableValue("bounds"), rectangle(bounds)},
+        {flutter::EncodableValue("workArea"), rectangle(monitor.rcWork)},
+        {flutter::EncodableValue("scale"), flutter::EncodableValue(scale)},
+        {flutter::EncodableValue("maximized"),
+         flutter::EncodableValue(IsZoomed(GetHandle()) != FALSE)}}));
+    return;
+  }
   if (call.method_name() == "presentPanel") {
     const auto arguments = std::get_if<flutter::EncodableMap>(call.arguments());
     bool focus = true;
@@ -172,50 +195,6 @@ void FlutterWindow::HandleWindowAnimationMethodCall(
     result->Success(flutter::EncodableValue(root_window == GetHandle()));
     return;
   }
-  if (call.method_name() == "freezeSurface") {
-    CancelPendingSurfaceFrame();
-    const auto *arguments =
-        std::get_if<flutter::EncodableMap>(call.arguments());
-    if (arguments != nullptr) {
-      const auto entry = arguments->find(
-          flutter::EncodableValue("rememberPlacement"));
-      if (entry != arguments->end()) {
-        const auto *remember = std::get_if<bool>(&entry->second);
-        if (remember != nullptr && *remember) {
-          surface_restore_ = {};
-          surface_restore_.length = sizeof(surface_restore_);
-          if (!GetWindowPlacement(GetHandle(), &surface_restore_)) {
-            result->Error("window_unavailable", "Window placement is unavailable.");
-            return;
-          }
-        }
-      }
-    }
-    const auto width = arguments == nullptr ? std::nullopt : NumberArgument(*arguments, "frameWidth");
-    const auto height = arguments == nullptr ? std::nullopt : NumberArgument(*arguments, "frameHeight");
-    const auto frame = arguments == nullptr ? nullptr : [&]() -> const std::vector<uint8_t> * {
-      const auto entry = arguments->find(flutter::EncodableValue("frameRgba"));
-      return entry == arguments->end() ? nullptr : std::get_if<std::vector<uint8_t>>(&entry->second);
-    }();
-    if (!width || !height || !frame || !std::isfinite(*width) ||
-        !std::isfinite(*height) || *width < 1 || *height < 1 ||
-        *width > 32768 || *height > 32768 ||
-        frame->size() != static_cast<size_t>(*width) * static_cast<size_t>(*height) * 4) {
-      result->Error("invalid_arguments", "A rendered surface frame is required.");
-      return;
-    }
-    RECT current{};
-    if (!GetWindowRect(GetHandle(), &current) ||
-        !BeginRenderedSurfaceFrameTransition(current, *frame,
-                                              static_cast<int>(*width),
-                                              static_cast<int>(*height))) {
-      result->Error("surface_capture_failed",
-                    "Could not preserve the current surface frame.");
-      return;
-    }
-    result->Success(flutter::EncodableValue(true));
-    return;
-  }
   if (call.method_name() == "configureSurfaceWindow") {
     const auto window = GetHandle();
     SetLastError(ERROR_SUCCESS);
@@ -229,8 +208,7 @@ void FlutterWindow::HandleWindowAnimationMethodCall(
     // custom drawn. Windows uses these styles for taskbar click toggling, and
     // window_manager uses SC_MOVE to drag a frameless surface.
     const LONG_PTR surface_style =
-        (style & ~(WS_CAPTION | WS_THICKFRAME)) |
-        WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CLIPCHILDREN |
+        (style & ~WS_POPUP) | WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN |
         WS_CLIPSIBLINGS;
     SetLastError(ERROR_SUCCESS);
     if (SetWindowLongPtr(window, GWL_STYLE, surface_style) == 0 &&
@@ -249,294 +227,67 @@ void FlutterWindow::HandleWindowAnimationMethodCall(
     result->Success();
     return;
   }
-  if (call.method_name() != "resizeSurfaceCanvas" &&
-      call.method_name() != "setBoundsWithoutCopy") {
+  if (call.method_name() != "setSurfaceBounds") {
     result->NotImplemented();
     return;
   }
-  const auto *value = call.arguments();
-  const auto *arguments =
-      value == nullptr ? nullptr : std::get_if<flutter::EncodableMap>(value);
+  const auto *arguments = call.arguments() == nullptr
+      ? nullptr : std::get_if<flutter::EncodableMap>(call.arguments());
   if (arguments == nullptr) {
     result->Error("invalid_arguments", "Window bounds are required.");
     return;
   }
-  const auto x = NumberArgument(*arguments, "toX");
-  const auto y = NumberArgument(*arguments, "toY");
+  const auto left = NumberArgument(*arguments, "toX");
+  const auto top = NumberArgument(*arguments, "toY");
   const auto width = NumberArgument(*arguments, "toWidth");
   const auto height = NumberArgument(*arguments, "toHeight");
   const auto scale = NumberArgument(*arguments, "scaleFactor");
-  const bool instant_without_copy =
-      call.method_name() == "setBoundsWithoutCopy";
-  const bool resize_canvas = call.method_name() == "resizeSurfaceCanvas";
-  if (!x || !y || !width || !height || !scale || *scale <= 0 || *width <= 0 ||
-      *height <= 0) {
+  if (!left || !top || !width || !height || !scale || *scale <= 0 ||
+      *width <= 0 || *height <= 0) {
     result->Error("invalid_arguments", "Window bounds are incomplete.");
     return;
   }
-
-  if (!resize_canvas) CancelPendingSurfaceFrame();
   RECT target{};
-  target.left = static_cast<LONG>(std::lround(*x * *scale));
-  target.top = static_cast<LONG>(std::lround(*y * *scale));
+  target.left = static_cast<LONG>(std::lround(*left * *scale));
+  target.top = static_cast<LONG>(std::lround(*top * *scale));
   target.right = target.left + static_cast<LONG>(std::lround(*width * *scale));
   target.bottom = target.top + static_cast<LONG>(std::lround(*height * *scale));
-  if (resize_canvas) {
-    if (IsZoomed(GetHandle())) {
-      auto restored = surface_restore_;
-      restored.showCmd = SW_SHOWNOACTIVATE;
-      restored.rcNormalPosition = target;
-      if ((GetWindowLongPtr(GetHandle(), GWL_EXSTYLE) & WS_EX_TOOLWINDOW) == 0) {
-        MONITORINFO monitor{};
-        monitor.cbSize = sizeof(monitor);
-        if (!GetMonitorInfo(MonitorFromWindow(GetHandle(), MONITOR_DEFAULTTONEAREST),
-                            &monitor)) {
-          FinishSurfaceFrameTransition();
-          result->Error("window_unavailable", "Monitor work area is unavailable.");
-          return;
-        }
-        OffsetRect(&restored.rcNormalPosition,
-                   monitor.rcMonitor.left - monitor.rcWork.left,
-                   monitor.rcMonitor.top - monitor.rcWork.top);
-      }
-      if (!SetWindowPlacement(GetHandle(), &restored)) {
-        FinishSurfaceFrameTransition();
-        result->Error("window_resize_failed", "Could not restore the surface canvas.");
-        return;
-      }
-    }
-    if (!SetWindowPos(GetHandle(), nullptr, target.left, target.top,
-                      target.right - target.left, target.bottom - target.top,
-                      SWP_NOACTIVATE | SWP_NOCOPYBITS | SWP_NOOWNERZORDER |
-                          SWP_NOZORDER)) {
-      FinishSurfaceFrameTransition();
-      result->Error("window_resize_failed", "Could not resize the surface canvas.");
+  const auto entry = arguments->find(flutter::EncodableValue("maximized"));
+  const auto *maximized = entry == arguments->end()
+      ? nullptr : std::get_if<bool>(&entry->second);
+  if (maximized != nullptr && *maximized) {
+    if (!IsZoomed(GetHandle()) &&
+        !PostMessage(GetHandle(), WM_SYSCOMMAND, SC_MAXIMIZE, 0)) {
+      result->Error("window_resize_failed", "Could not maximize the window.");
       return;
     }
-    const auto entry = arguments->find(flutter::EncodableValue("maximized"));
-    const auto *maximized = entry == arguments->end()
-                                ? nullptr
-                                : std::get_if<bool>(&entry->second);
-    if (maximized != nullptr && *maximized) {
-      ShowWindow(GetHandle(), SW_MAXIMIZE);
-      surface_restore_.showCmd = SW_SHOWMAXIMIZED;
-      if (!SetWindowPlacement(GetHandle(), &surface_restore_)) {
-        FinishSurfaceFrameTransition();
-        result->Error("window_resize_failed", "Could not maximize the surface canvas.");
-        return;
-      }
+  } else if (IsZoomed(GetHandle())) {
+    WINDOWPLACEMENT placement{};
+    placement.length = sizeof(placement);
+    MONITORINFO monitor{};
+    monitor.cbSize = sizeof(monitor);
+    if (!GetWindowPlacement(GetHandle(), &placement) ||
+        !GetMonitorInfo(MonitorFromWindow(GetHandle(), MONITOR_DEFAULTTONEAREST), &monitor)) {
+      result->Error("window_unavailable", "Window placement is unavailable.");
+      return;
     }
-    pending_surface_frame_result_ = std::move(result);
-    flutter_controller_->engine()->SetNextFrameCallback([this]() {
-      if (pending_surface_frame_result_ == nullptr) return;
-      DwmFlush();
-      FinishSurfaceFrameTransition();
-      auto completed = std::move(pending_surface_frame_result_);
-      completed->Success(flutter::EncodableValue(true));
-    });
-    window_animation_channel_->InvokeMethod("renderSurfaceFrame", nullptr);
+    placement.showCmd = SW_SHOWNOACTIVATE;
+    placement.flags = 0;
+    placement.rcNormalPosition = target;
+    if ((GetWindowLongPtr(GetHandle(), GWL_EXSTYLE) & WS_EX_TOOLWINDOW) == 0) {
+      OffsetRect(&placement.rcNormalPosition,
+                 monitor.rcMonitor.left - monitor.rcWork.left,
+                 monitor.rcMonitor.top - monitor.rcWork.top);
+    }
+    if (!SetWindowPlacement(GetHandle(), &placement)) {
+      result->Error("window_resize_failed", "Could not restore the window.");
+      return;
+    }
+  } else if (!SetWindowPos(GetHandle(), nullptr, target.left, target.top,
+                           target.right - target.left, target.bottom - target.top,
+                           SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER)) {
+    result->Error("window_resize_failed", "Could not resize the window.");
     return;
   }
-  if (instant_without_copy) {
-    RECT current{};
-    if (!GetWindowRect(GetHandle(), &current)) {
-      result->Error("window_unavailable", "The Zommi window is unavailable.");
-      return;
-    }
-    const LONG current_width = current.right - current.left;
-    const LONG current_height = current.bottom - current.top;
-    const LONG target_width = target.right - target.left;
-    const LONG target_height = target.bottom - target.top;
-    RECT anchored_target{};
-    anchored_target.left = current.left + (current_width - target_width) / 2;
-    anchored_target.top = current.bottom - target_height;
-    anchored_target.right = anchored_target.left + target_width;
-    anchored_target.bottom = anchored_target.top + target_height;
-    if (std::abs(anchored_target.left - target.left) <= 1 &&
-        std::abs(anchored_target.top - target.top) <= 1) {
-      target = anchored_target;
-    }
-    const bool growing =
-        target_width * target_height > current_width * current_height;
-    const bool staged = growing && BeginSurfaceFrameTransition(current);
-    if (!SetWindowPos(GetHandle(), nullptr, target.left, target.top,
-                      target.right - target.left, target.bottom - target.top,
-                      SWP_NOACTIVATE | SWP_NOCOPYBITS | SWP_NOOWNERZORDER |
-                          SWP_NOZORDER)) {
-      if (staged) {
-        FinishSurfaceFrameTransition();
-      }
-      result->Error("window_resize_failed",
-                    "Could not resize the Zommi surface window.");
-      return;
-    }
-    pending_surface_frame_result_ = std::move(result);
-    flutter_controller_->engine()->SetNextFrameCallback([this]() {
-      if (pending_surface_frame_result_ != nullptr) {
-        FinishSurfaceFrameTransition();
-        auto completed = std::move(pending_surface_frame_result_);
-        completed->Success(flutter::EncodableValue(true));
-      }
-    });
-    flutter_controller_->ForceRedraw();
-    return;
-  }
-}
-
-void FlutterWindow::CancelPendingSurfaceFrame() {
-  FinishSurfaceFrameTransition();
-  if (pending_surface_frame_result_ != nullptr) {
-    auto cancelled = std::move(pending_surface_frame_result_);
-    cancelled->Success(flutter::EncodableValue(false));
-  }
-}
-
-bool FlutterWindow::BeginRenderedSurfaceFrameTransition(
-    const RECT &current_bounds, const std::vector<uint8_t> &rgba,
-    int width, int height) {
-  DestroySurfaceTransitionOverlay();
-  HDC desktop = GetDC(nullptr);
-  if (desktop == nullptr) return false;
-  BITMAPINFO description{};
-  description.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-  description.bmiHeader.biWidth = width;
-  description.bmiHeader.biHeight = -height;
-  description.bmiHeader.biPlanes = 1;
-  description.bmiHeader.biBitCount = 32;
-  description.bmiHeader.biCompression = BI_RGB;
-  void *storage = nullptr;
-  HBITMAP bitmap = CreateDIBSection(desktop, &description, DIB_RGB_COLORS,
-                                    &storage, nullptr, 0);
-  HDC memory = bitmap == nullptr ? nullptr : CreateCompatibleDC(desktop);
-  HWND overlay = nullptr;
-  bool presented = false;
-  if (memory != nullptr) {
-    auto *pixels = static_cast<uint8_t *>(storage);
-    for (size_t index = 0; index < rgba.size(); index += 4) {
-      pixels[index] = rgba[index + 2];
-      pixels[index + 1] = rgba[index + 1];
-      pixels[index + 2] = rgba[index];
-      pixels[index + 3] = rgba[index + 3];
-    }
-    const auto previous = SelectObject(memory, bitmap);
-    overlay = CreateWindowExW(
-        WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST |
-            WS_EX_TRANSPARENT | WS_EX_LAYERED,
-        L"STATIC", nullptr, WS_POPUP, current_bounds.left, current_bounds.top,
-        width, height, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
-    if (overlay != nullptr) {
-      POINT position{current_bounds.left, current_bounds.top};
-      POINT source{};
-      SIZE size{width, height};
-      BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
-      presented = UpdateLayeredWindow(overlay, desktop, &position, &size,
-                                      memory, &source, 0, &blend, ULW_ALPHA) &&
-                  SetWindowPos(overlay, HWND_TOPMOST, position.x, position.y,
-                               width, height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
-    }
-    SelectObject(memory, previous);
-    DeleteDC(memory);
-  }
-  ReleaseDC(nullptr, desktop);
-  if (presented) {
-    DwmFlush();
-    BOOL cloak = TRUE;
-    presented = SUCCEEDED(DwmSetWindowAttribute(GetHandle(), DWMWA_CLOAK,
-                                                &cloak, sizeof(cloak)));
-  }
-  if (!presented) {
-    if (overlay != nullptr) DestroyWindow(overlay);
-    if (bitmap != nullptr) DeleteObject(bitmap);
-    return false;
-  }
-  surface_transition_overlay_ = overlay;
-  surface_transition_bitmap_ = bitmap;
-  surface_window_cloaked_ = true;
-  return true;
-}
-
-bool FlutterWindow::BeginSurfaceFrameTransition(const RECT &current_bounds) {
-  DestroySurfaceTransitionOverlay();
-  const int width = current_bounds.right - current_bounds.left;
-  const int height = current_bounds.bottom - current_bounds.top;
-  HDC desktop = GetDC(nullptr);
-  if (desktop == nullptr) {
-    return false;
-  }
-  HDC memory = CreateCompatibleDC(desktop);
-  HBITMAP bitmap = memory == nullptr
-                       ? nullptr
-                       : CreateCompatibleBitmap(desktop, width, height);
-  HGDIOBJ previous = bitmap == nullptr ? nullptr : SelectObject(memory, bitmap);
-  const bool copied = previous != nullptr &&
-                      BitBlt(memory, 0, 0, width, height, desktop,
-                             current_bounds.left, current_bounds.top, SRCCOPY);
-  if (previous != nullptr) {
-    SelectObject(memory, previous);
-  }
-  if (memory != nullptr) {
-    DeleteDC(memory);
-  }
-  ReleaseDC(nullptr, desktop);
-  if (!copied) {
-    if (bitmap != nullptr) {
-      DeleteObject(bitmap);
-    }
-    return false;
-  }
-
-  HWND overlay = CreateWindowExW(
-      WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_TRANSPARENT,
-      L"STATIC", nullptr,
-      WS_POPUP | WS_VISIBLE | SS_BITMAP | SS_REALSIZECONTROL,
-      current_bounds.left, current_bounds.top, width, height, nullptr, nullptr,
-      GetModuleHandleW(nullptr), nullptr);
-  if (overlay == nullptr) {
-    DeleteObject(bitmap);
-    return false;
-  }
-  SendMessageW(overlay, STM_SETIMAGE, IMAGE_BITMAP,
-               reinterpret_cast<LPARAM>(bitmap));
-  if (!SetWindowPos(overlay, HWND_TOPMOST, current_bounds.left,
-                    current_bounds.top, width, height,
-                    SWP_NOACTIVATE | SWP_SHOWWINDOW)) {
-    DestroyWindow(overlay);
-    DeleteObject(bitmap);
-    return false;
-  }
-
-  UpdateWindow(overlay);
-  DwmFlush();
-  BOOL cloak = TRUE;
-  if (FAILED(DwmSetWindowAttribute(GetHandle(), DWMWA_CLOAK, &cloak,
-                                   sizeof(cloak)))) {
-    DestroyWindow(overlay);
-    DeleteObject(bitmap);
-    return false;
-  }
-  surface_transition_overlay_ = overlay;
-  surface_transition_bitmap_ = bitmap;
-  surface_window_cloaked_ = true;
-  return true;
-}
-
-void FlutterWindow::FinishSurfaceFrameTransition() {
-  if (surface_window_cloaked_) {
-    BOOL cloak = FALSE;
-    DwmSetWindowAttribute(GetHandle(), DWMWA_CLOAK, &cloak, sizeof(cloak));
-    surface_window_cloaked_ = false;
-    DwmFlush();
-  }
-  DestroySurfaceTransitionOverlay();
-}
-
-void FlutterWindow::DestroySurfaceTransitionOverlay() {
-  if (surface_transition_overlay_ != nullptr) {
-    DestroyWindow(surface_transition_overlay_);
-    surface_transition_overlay_ = nullptr;
-  }
-  if (surface_transition_bitmap_ != nullptr) {
-    DeleteObject(surface_transition_bitmap_);
-    surface_transition_bitmap_ = nullptr;
-  }
+  result->Success(flutter::EncodableValue(true));
 }

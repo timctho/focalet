@@ -27,12 +27,25 @@ public sealed class ZommiDesktopFrameCapture : System.IDisposable {
     [System.Runtime.InteropServices.UnmanagedFunctionPointer(System.Runtime.InteropServices.CallingConvention.StdCall)] private delegate void CopyRegion(System.IntPtr self, System.IntPtr destination, uint subresource, uint left, uint top, uint front, System.IntPtr source, uint sourceSubresource, ref TextureBox region);
     [System.Runtime.InteropServices.UnmanagedFunctionPointer(System.Runtime.InteropServices.CallingConvention.StdCall)] private delegate int MapTexture(System.IntPtr self, System.IntPtr resource, uint subresource, uint mapType, uint flags, out MappedTexture mapped);
     [System.Runtime.InteropServices.UnmanagedFunctionPointer(System.Runtime.InteropServices.CallingConvention.StdCall)] private delegate void UnmapTexture(System.IntPtr self, System.IntPtr resource, uint subresource);
+    [System.Runtime.InteropServices.UnmanagedFunctionPointer(System.Runtime.InteropServices.CallingConvention.StdCall)] private delegate void CopyTexture(System.IntPtr self, System.IntPtr destination, System.IntPtr source);
+    [System.Runtime.InteropServices.UnmanagedFunctionPointer(System.Runtime.InteropServices.CallingConvention.StdCall)] private delegate void FlushContext(System.IntPtr self);
 
-    private System.IntPtr device, context, duplication, staging;
+    private System.IntPtr device, context, duplication, lastTexture, readbackTexture;
     private readonly int[] area;
     private TextureBox region;
-    private System.Drawing.Bitmap lastFrame;
+    private TextureDescription frameDescription;
     public long LastPresentTime { get; private set; }
+
+    public sealed class DeferredFrame : System.IDisposable {
+        internal System.IntPtr Texture;
+        public long PresentationTimestamp;
+        public void Dispose() { Release(ref Texture); }
+    }
+
+    private DeferredFrame RetainFrame() {
+        System.Runtime.InteropServices.Marshal.AddRef(lastTexture);
+        return new DeferredFrame { Texture = lastTexture, PresentationTimestamp = LastPresentTime };
+    }
 
     private static T Method<T>(System.IntPtr instance, int slot) where T : class {
         var table = System.Runtime.InteropServices.Marshal.ReadIntPtr(instance);
@@ -86,8 +99,7 @@ public sealed class ZommiDesktopFrameCapture : System.IDisposable {
                             Check(System.Runtime.InteropServices.Marshal.QueryInterface(output, ref outputIdentity, out output1));
                             try { Check(Method<DuplicateOutput>(output1, 22)(output1, device, out duplication)); }
                             finally { Release(ref output1); }
-                            var texture = new TextureDescription { Width = (uint)area[2], Height = (uint)area[3], MipLevels = 1, ArraySize = 1, Format = 87, SampleCount = 1, Usage = 3, CpuAccessFlags = 0x20000 };
-                            Check(Method<CreateTexture>(device, 5)(device, ref texture, System.IntPtr.Zero, out staging));
+                            frameDescription = new TextureDescription { Width = (uint)area[2], Height = (uint)area[3], MipLevels = 1, ArraySize = 1, Format = 87, SampleCount = 1, Usage = 0, CpuAccessFlags = 0 };
                             region = new TextureBox { Left = (uint)(area[0] - description.Left), Top = (uint)(area[1] - description.Top), Right = (uint)(area[0] + area[2] - description.Left), Bottom = (uint)(area[1] + area[3] - description.Top), Back = 1 };
                             return;
                         } finally { Release(ref output); }
@@ -99,6 +111,10 @@ public sealed class ZommiDesktopFrameCapture : System.IDisposable {
     }
 
     public System.Drawing.Bitmap Capture() {
+        using (var frame = CaptureDeferred()) { return ReadFrame(frame); }
+    }
+
+    public DeferredFrame CaptureDeferred() {
         var waiting = System.Diagnostics.Stopwatch.StartNew();
         System.IntPtr resource;
         while (true) {
@@ -113,9 +129,10 @@ public sealed class ZommiDesktopFrameCapture : System.IDisposable {
                 Release(ref resource);
                 Check(Method<ReleaseFrame>(duplication, 14)(duplication));
             }
-            if (lastFrame != null) return (System.Drawing.Bitmap)lastFrame.Clone();
+            if (lastTexture != System.IntPtr.Zero) return RetainFrame();
             if (waiting.ElapsedMilliseconds >= 2000) throw new System.TimeoutException("Desktop Duplication did not produce its first presented image.");
         }
+        System.IntPtr staging = System.IntPtr.Zero;
         try {
             var identity = new System.Guid("6f15aaf2-d208-4e89-9ab4-489535d34f9c");
             System.IntPtr texture;
@@ -124,11 +141,34 @@ public sealed class ZommiDesktopFrameCapture : System.IDisposable {
                 TextureDescription description;
                 Method<DescribeTexture>(texture, 10)(texture, out description);
                 if (region.Right > description.Width || region.Bottom > description.Height || description.Format != 87) throw new System.InvalidOperationException(string.Format("Desktop texture {0}x{1} format {2} does not contain capture region {3},{4}-{5},{6}.", description.Width, description.Height, description.Format, region.Left, region.Top, region.Right, region.Bottom));
+                Check(Method<CreateTexture>(device, 5)(device, ref frameDescription, System.IntPtr.Zero, out staging));
                 Method<CopyRegion>(context, 46)(context, staging, 0, 0, 0, 0, texture, 0, ref region);
+                Method<FlushContext>(context, 111)(context);
             }
             finally { Release(ref texture); }
-            MappedTexture mapped;
-            Check(Method<MapTexture>(context, 14)(context, staging, 0, 1, 0, out mapped));
+            Release(ref lastTexture);
+            lastTexture = staging;
+            staging = System.IntPtr.Zero;
+            return RetainFrame();
+        } finally {
+            Release(ref staging);
+            Release(ref resource);
+            Check(Method<ReleaseFrame>(duplication, 14)(duplication));
+        }
+    }
+
+    public System.Drawing.Bitmap ReadFrame(DeferredFrame frame) {
+        if (frame.Texture == System.IntPtr.Zero) throw new System.ObjectDisposedException("DeferredFrame");
+        if (readbackTexture == System.IntPtr.Zero) {
+            var description = frameDescription;
+            description.Usage = 3;
+            description.CpuAccessFlags = 0x20000;
+            Check(Method<CreateTexture>(device, 5)(device, ref description, System.IntPtr.Zero, out readbackTexture));
+        }
+        Method<CopyTexture>(context, 47)(context, readbackTexture, frame.Texture);
+        MappedTexture mapped;
+        Check(Method<MapTexture>(context, 14)(context, readbackTexture, 0, 1, 0, out mapped));
+        try {
             var bitmap = new System.Drawing.Bitmap(area[2], area[3], System.Drawing.Imaging.PixelFormat.Format32bppArgb);
             try {
                 var rectangle = new System.Drawing.Rectangle(0, 0, bitmap.Width, bitmap.Height);
@@ -140,21 +180,14 @@ public sealed class ZommiDesktopFrameCapture : System.IDisposable {
                         System.Runtime.InteropServices.Marshal.Copy(row, 0, System.IntPtr.Add(data.Scan0, index * data.Stride), row.Length);
                     }
                 } finally { bitmap.UnlockBits(data); }
-                if (lastFrame != null) lastFrame.Dispose();
-                lastFrame = (System.Drawing.Bitmap)bitmap.Clone();
                 return bitmap;
             } catch { bitmap.Dispose(); throw; }
-            finally { Method<UnmapTexture>(context, 15)(context, staging, 0); }
-        } finally {
-            Release(ref resource);
-            Check(Method<ReleaseFrame>(duplication, 14)(duplication));
-        }
+        } finally { Method<UnmapTexture>(context, 15)(context, readbackTexture, 0); }
     }
 
     public void Dispose() {
-        if (lastFrame != null) lastFrame.Dispose();
-        lastFrame = null;
-        Release(ref staging);
+        Release(ref lastTexture);
+        Release(ref readbackTexture);
         Release(ref duplication);
         Release(ref context);
         Release(ref device);

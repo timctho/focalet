@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/desktop/artifact_loader.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
-import 'package:zommi_flutter/desktop/surface_animation.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 
 final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
@@ -444,10 +443,7 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
   }
 }
 
-final class FakeDesktopBridge implements DesktopBridge, DesktopSurfaceAnimator {
-  @override
-  final SurfaceAnimationController surfaceAnimation =
-      SurfaceAnimationController();
+final class FakeDesktopBridge implements DesktopBridge {
   final StreamController<DesktopInvocation> _invocations =
       StreamController<DesktopInvocation>.broadcast(sync: true);
   final List<String> calls = [];

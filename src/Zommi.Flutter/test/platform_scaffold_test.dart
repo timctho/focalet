@@ -106,47 +106,48 @@ void main() {
     );
     expect(
       windowsFlutterWindow,
-      allOf(
+      allOf([
         contains('message == ZommiShowWindowMessage()'),
         contains('ShowWindow(hwnd, SW_RESTORE)'),
         contains('"zommi/window_animation"'),
-        allOf([
-          contains('"freezeSurface"'),
-          contains('"resizeSurfaceCanvas"'),
-          contains('"frameRgba"'),
-          contains('BeginRenderedSurfaceFrameTransition'),
-          contains('UpdateLayeredWindow'),
-          contains('InvokeMethod("renderSurfaceFrame", nullptr)'),
-          contains('UpdateWindow(overlay)'),
-          contains('DwmFlush()'),
-        ]),
-        isNot(contains('message == WM_TIMER')),
-        allOf(contains('WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX')),
-        allOf(
-          allOf(
-            contains('"isPointerWithinWindow"'),
-            contains('GetCursorPos(&cursor)'),
-            contains('WindowFromPoint(cursor)'),
-            contains('GetAncestor(hit_window, GA_ROOT)'),
-          ),
-          allOf(
-            contains('"setBoundsWithoutCopy"'),
-            contains('SetNextFrameCallback([this]()'),
-            contains('flutter_controller_->ForceRedraw()'),
-            contains('SWP_NOCOPYBITS'),
-            allOf(
-              contains('BeginSurfaceFrameTransition(current)'),
-              contains('DWMWA_CLOAK'),
-              contains('STM_SETIMAGE'),
-              contains('SWP_NOACTIVATE | SWP_NOCOPYBITS | SWP_NOOWNERZORDER'),
-            ),
-          ),
-        ),
-      ),
+        contains('"getSurfaceGeometry"'),
+        contains('"setSurfaceBounds"'),
+        contains('PostMessage(GetHandle(), WM_SYSCOMMAND, SC_MAXIMIZE, 0)'),
+        contains('SetWindowPlacement(GetHandle(), &placement)'),
+        contains('placement.rcNormalPosition = target'),
+        isNot(contains('NativeResizeMessage')),
+        contains('(style & ~WS_POPUP) | WS_OVERLAPPEDWINDOW'),
+        contains('"isPointerWithinWindow"'),
+        contains('WindowFromPoint(cursor)'),
+        contains('GetAncestor(hit_window, GA_ROOT)'),
+        isNot(contains('freezeSurface')),
+        isNot(contains('SetNextFrameCallback')),
+        isNot(contains('DwmFlush')),
+        isNot(contains('TRANSITIONS_FORCEDISABLED')),
+        isNot(contains('SWP_NOCOPYBITS')),
+        isNot(contains('surface_snapshot')),
+        isNot(contains('SetChildCanvasSize')),
+      ]),
     );
+    final nativeWindow = File('${root.path}/windows/runner/win32_window.cpp')
+        .readAsStringSync();
+    expect(nativeWindow, contains('case WM_SIZE:'));
     expect(
-      File('${root.path}/windows/runner/win32_window.cpp').readAsStringSync(),
-      contains('SWP_NOACTIVATE | SWP_NOCOPYBITS | SWP_NOZORDER'),
+      nativeWindow,
+      contains('MoveWindow(child_content_, rect.left, rect.top'),
+    );
+    expect(nativeWindow, isNot(contains('child_canvas_size_')));
+    expect(nativeWindow, isNot(contains('SWP_NOCOPYBITS')));
+    expect(
+      File('${root.path}/windows/runner/surface_snapshot.cpp').existsSync(),
+      isFalse,
+    );
+    expect(desktopBridge, isNot(contains('animateNativeSurfaceBounds(')));
+    expect(desktopBridge, isNot(contains('frameRgba')));
+    expect(desktopBridge, isNot(contains('fixedCanvas')));
+    expect(
+      File('${root.path}/lib/zommi_app.dart').readAsStringSync(),
+      isNot(contains('SurfaceAnimationHost')),
     );
     expect(
       File('${root.path}/windows/flutter/generated_plugins.cmake')

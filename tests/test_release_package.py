@@ -246,7 +246,13 @@ class ReleasePackageTests(unittest.TestCase):
             "IsOwnedWindowAtPoint($window, $left, $top)",
             "ZommiWindowSizeAccess]::Sample($window, 3000)",
             "$visualDistinct.Count -lt 5",
-            "ZommiRenderedSizeProbe.Capture(clock.ElapsedMilliseconds, true)",
+            "$nativeTransition -and $result.nativeAnimationsEnabled",
+            "NativeAnimationsEnabled()",
+            "[ZommiRenderedSizeProbe]::Area = $workArea",
+            "PhysicalClientBounds($window)",
+            "ZommiRenderedSizeProbe.CaptureDeferred()",
+            "ZommiRenderedSizeProbe.AnalyzeDeferred(pending[index], frames[index].elapsedMs)",
+            "foreach (var captured in pending) captured.Dispose()",
             "Rendered control disappeared",
             "Rendered control jumped outside its endpoints",
             "Rendered control reversed direction",
@@ -272,6 +278,52 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertIn("shell: powershell", workflow)
         self.assertIn("accept-windows-window-size.ps1", workflow)
 
+    def test_windows_size_acceptance_checks_background_and_response_latency(self) -> None:
+        script = (SCRIPTS / "accept-windows-window-size.ps1").read_text(encoding="utf-8")
+        for contract in (
+            "windows-size-background.cs",
+            "[ZommiSizeBackground]::new",
+            "background = ZommiRenderedSizeProbe.LastBackground",
+            "$maximumBackgroundChange -gt 3",
+            "$firstMotionMs -gt 250",
+            "$settledMs -gt 800",
+            "interactionClock = Stopwatch.StartNew()",
+            "interactionStarted = Stopwatch.GetTimestamp()",
+            "$firstMotionMs = $frame.presentedMs",
+            "$firstObservedMotionMs = $frame.elapsedMs",
+            "$firstMotionMs -lt 0",
+            "Panel background flashed",
+            "$background.Dispose()",
+        ):
+            self.assertIn(contract, script)
+        visual_probe = (SCRIPTS / "windows-size-visual-probe.cs").read_text(encoding="utf-8")
+        self.assertIn("Background(bitmap, marker)", visual_probe)
+        self.assertNotIn("elapsed < 1200", visual_probe)
+
+    def test_windows_acceptance_allows_only_already_exited_processes(self) -> None:
+        script = (SCRIPTS / "accept-windows-capture.ps1").read_text(encoding="utf-8")
+        self.assertIn("Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop", script)
+        self.assertIn(
+            "if (Get-Process -Id $process.ProcessId -ErrorAction SilentlyContinue) { throw }",
+            script,
+        )
+
+    def test_windows_size_capture_defers_readback_without_dropping_frames(self) -> None:
+        script = (SCRIPTS / "accept-windows-window-size.ps1").read_text(encoding="utf-8")
+        self.assertLess(script.index("while (clock.ElapsedMilliseconds < duration)"), script.index("ZommiRenderedSizeProbe.AnalyzeDeferred"))
+        self.assertIn("for (var index = 0; index < pending.Count; index++)", script)
+        self.assertIn("frames[index].processedMs = clock.ElapsedMilliseconds", script)
+        capture = (SCRIPTS / "windows-desktop-frame.cs").read_text(encoding="utf-8")
+        deferred = capture.split("public DeferredFrame CaptureDeferred()", 1)[1].split("public System.Drawing.Bitmap ReadFrame", 1)[0]
+        self.assertIn("CopyRegion", deferred)
+        self.assertIn("FlushContext", deferred)
+        self.assertNotIn("MapTexture", deferred)
+        self.assertNotIn("readbackTexture", deferred)
+        self.assertIn("Usage = 0, CpuAccessFlags = 0", capture)
+        self.assertIn("Method<CopyTexture>(context, 47)(context, readbackTexture, frame.Texture)", capture)
+        self.assertIn("Release(ref readbackTexture)", capture)
+        self.assertIn("Marshal.AddRef(lastTexture)", capture)
+
     def test_windows_desktop_preflight_reports_runner_session_without_blame(self) -> None:
         script = (SCRIPTS / "accept-windows-capture.ps1").read_text(encoding="utf-8")
         for contract in (
@@ -289,6 +341,18 @@ class ReleasePackageTests(unittest.TestCase):
         ):
             self.assertIn(contract, script)
         self.assertNotIn("Keep the RDP client visible and the session unlocked", script)
+
+    def test_windows_size_background_pumps_messages_on_its_own_thread(self) -> None:
+        background = (SCRIPTS / "windows-size-background.cs").read_text(encoding="utf-8")
+        for contract in (
+            "new System.Threading.Thread",
+            "GetMessage(out message",
+            "DispatchMessage(ref message)",
+            "ready.WaitOne(10000)",
+            "PostThreadMessage(threadId",
+            "thread.Join(5000)",
+        ):
+            self.assertIn(contract, background)
 
     def test_windows_pixel_capture_uses_the_verified_direct_gdi_path(self) -> None:
         source = (SCRIPTS.parent / "src/Zommi.Windows/ScreenCapture.cs").read_text(

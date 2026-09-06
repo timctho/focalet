@@ -24,6 +24,8 @@ using Accessibility;
 public static class ZommiWindowSizeAccess {
     [StructLayout(LayoutKind.Sequential)] private struct Rectangle { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] private struct Point { public int Left, Top; }
+    [StructLayout(LayoutKind.Sequential)] private struct Animation { public uint Size; public int Enabled; }
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool SystemParametersInfo(uint action, uint parameter, ref Animation value, uint flags);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr window, out Rectangle rectangle);
     [DllImport("user32.dll")] private static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] private static extern bool SetPhysicalCursorPos(int left, int top);
@@ -33,22 +35,39 @@ public static class ZommiWindowSizeAccess {
     [DllImport("oleacc.dll")] private static extern int AccessibleObjectFromWindow(IntPtr window, uint objectId, ref Guid interfaceId, [MarshalAs(UnmanagedType.Interface)] out IAccessible accessible);
     [DllImport("oleacc.dll")] private static extern int AccessibleChildren(IAccessible accessible, int start, int count, [Out, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 2)] object[] children, out int obtained);
 
-    public sealed class Frame { public long elapsedMs; public int[] bounds; public int[] marker; }
+    public sealed class Frame { public long elapsedMs; public long presentedMs; public long processedMs; public int[] bounds; public int[] marker; public int[] background; }
     public sealed class Entry { public string Name; public int[] Bounds; }
+    private static Stopwatch interactionClock;
+    private static long interactionStarted;
+    public static long InputTimestamp { get { return interactionStarted; } }
+
+    public static bool NativeAnimationsEnabled() {
+        var animation = new Animation { Size = 8 };
+        if (!SystemParametersInfo(0x48, 8, ref animation, 0)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        return animation.Enabled != 0;
+    }
 
     public static Frame[] Sample(IntPtr window, int duration) {
         var previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
         var frames = new List<Frame>();
-        var clock = Stopwatch.StartNew();
+        var pending = new List<ZommiDesktopFrameCapture.DeferredFrame>();
+        var clock = duration >= 1000 && interactionClock != null ? interactionClock : Stopwatch.StartNew();
         try {
             do {
                 Rectangle rectangle;
                 if (!GetWindowRect(window, out rectangle)) throw new InvalidOperationException("No window bounds");
-                frames.Add(new Frame { elapsedMs = clock.ElapsedMilliseconds, bounds = new [] { rectangle.Left, rectangle.Top, rectangle.Right - rectangle.Left, rectangle.Bottom - rectangle.Top }, marker = duration >= 1000 ? ZommiRenderedSizeProbe.Capture(clock.ElapsedMilliseconds, true) : null });
+                var captured = duration >= 1000 ? ZommiRenderedSizeProbe.CaptureDeferred() : null;
+                if (captured != null) pending.Add(captured);
+                frames.Add(new Frame { elapsedMs = clock.ElapsedMilliseconds, presentedMs = captured != null ? 1000 * (captured.PresentationTimestamp - interactionStarted) / Stopwatch.Frequency : 0, bounds = new [] { rectangle.Left, rectangle.Top, rectangle.Right - rectangle.Left, rectangle.Bottom - rectangle.Top } });
                 Thread.Sleep(15);
             } while (clock.ElapsedMilliseconds < duration);
+            for (var index = 0; index < pending.Count; index++) {
+                frames[index].marker = ZommiRenderedSizeProbe.AnalyzeDeferred(pending[index], frames[index].elapsedMs);
+                frames[index].background = ZommiRenderedSizeProbe.LastBackground;
+                frames[index].processedMs = clock.ElapsedMilliseconds;
+            }
             return frames.ToArray();
-        } finally { SetThreadDpiAwarenessContext(previous); if (duration >= 1000) ZommiRenderedSizeProbe.Save(); }
+        } finally { foreach (var captured in pending) captured.Dispose(); SetThreadDpiAwarenessContext(previous); if (duration >= 1000) ZommiRenderedSizeProbe.Save(); }
     }
 
     public static void Click(int left, int top) {
@@ -60,6 +79,8 @@ public static class ZommiWindowSizeAccess {
             Thread.Sleep(200);
             mouse_event(2, 0, 0, 0, UIntPtr.Zero);
             Thread.Sleep(50);
+            interactionStarted = Stopwatch.GetTimestamp();
+            interactionClock = Stopwatch.StartNew();
             mouse_event(4, 0, 0, 0, UIntPtr.Zero);
         } finally { SetThreadDpiAwarenessContext(previous); }
     }
@@ -95,7 +116,7 @@ public static class ZommiWindowSizeAccess {
         } catch (COMException) { }
     }
 }
-'@ + (Get-Content -Raw (Join-Path $PSScriptRoot 'windows-size-visual-probe.cs')) + (Get-Content -Raw (Join-Path $PSScriptRoot 'windows-desktop-frame.cs')))
+'@ + (Get-Content -Raw (Join-Path $PSScriptRoot 'windows-size-visual-probe.cs')) + (Get-Content -Raw (Join-Path $PSScriptRoot 'windows-desktop-frame.cs')) + (Get-Content -Raw (Join-Path $PSScriptRoot 'windows-size-background.cs')))
 
 $PackageDirectory = [IO.Path]::GetFullPath($PackageDirectory)
 $manifest = Get-Content -Raw (Join-Path $PackageDirectory 'release-manifest.json') | ConvertFrom-Json
@@ -108,7 +129,7 @@ if (-not $ResultPath) { $ResultPath = Join-Path $probeRoot 'result.json' }
 $log = Join-Path $probeRoot 'events.jsonl'
 $settings = Join-Path $probeRoot 'Zommi\settings.json'
 $entrypoint = Join-Path $PackageDirectory 'Zommi.exe'
-$result = @{ gitCommit = $ExpectedCommit; package = $PackageDirectory; captureApi = 'dxgi-desktop-duplication'; transitions = @() }
+$result = @{ gitCommit = $ExpectedCommit; package = $PackageDirectory; captureApi = 'dxgi-desktop-duplication'; latencyClock = 'dxgi-present-qpc-from-input-release'; nativeAnimationsEnabled = [ZommiWindowSizeAccess]::NativeAnimationsEnabled(); transitions = @() }
 
 function Wait-SizeCondition {
     param([scriptblock] $Condition, [string] $Description)
@@ -142,24 +163,50 @@ function Click-SizeControl {
 function Measure-SizeTransition {
     param([string] $Name, [string] $Mode)
     $before = [ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
+    $nativeTransition = $Mode -eq 'maximized' -or [ZommiWindowsAcceptanceNative]::IsZoomed($window)
     $workArea = [ZommiWindowsAcceptanceNative]::WorkArea($window)
-    $stripHeight = [int]([ZommiWindowsAcceptanceNative]::WindowDpi($window) * 170 / 96)
-    [ZommiRenderedSizeProbe]::Area = @(($workArea[0] + [int]($workArea[2] / 2)), ($workArea[1] + $workArea[3] - $stripHeight), [int]($workArea[2] / 2), $stripHeight)
+    [ZommiRenderedSizeProbe]::Area = $workArea
     $markerBefore = [ZommiRenderedSizeProbe]::Capture(0, $false)
+    $backgroundBefore = [ZommiRenderedSizeProbe]::LastBackground
     if ($null -eq $markerBefore) { throw 'Rendered send control was not visible before resize.' }
     Click-SizeControl $Name
     $frames = @([ZommiWindowSizeAccess]::Sample($window, 3000))
     $after = [ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
     $distinct = @($frames | ForEach-Object { $_.bounds -join ',' } | Select-Object -Unique)
-    $result.lastMeasurement = @{ name = $Name; before = $before; after = $after; frames = $frames; distinctBounds = $distinct.Count }
+    $result.lastMeasurement = @{ name = $Name; before = $before; after = $after; frames = $frames; distinctBounds = $distinct.Count; inputQpc = [ZommiWindowSizeAccess]::InputTimestamp; qpcFrequency = [Diagnostics.Stopwatch]::Frequency }
     Wait-SizeCondition -Description "persisted $Mode" -Condition { (Test-Path $settings) -and (Get-Content -Raw $settings | ConvertFrom-Json).windowSize -eq $Mode }
     $markerAfter = [ZommiRenderedSizeProbe]::Capture(0, $false)
     if ($null -eq $markerAfter) { throw 'Rendered send control was not visible after resize.' }
     $visualDistinct = @($frames | ForEach-Object { $_.marker -join ',' } | Select-Object -Unique)
     $result.lastMeasurement.markerBefore = $markerBefore
     $result.lastMeasurement.markerAfter = $markerAfter
+    $result.lastMeasurement.backgroundBefore = $backgroundBefore
+    $maximumBackgroundChange = 0
+    $firstMotionMs = $null
+    $firstObservedMotionMs = $null
+    $settledMs = $null
+    foreach ($frame in $frames) {
+        if ($null -eq $frame.marker -or $null -eq $frame.background) { throw "Rendered control disappeared during $Name." }
+        foreach ($channel in 0..2) {
+            $maximumBackgroundChange = [Math]::Max($maximumBackgroundChange, [Math]::Abs($frame.background[$channel] - $backgroundBefore[$channel]))
+        }
+        if ($null -eq $firstMotionMs -and ([Math]::Abs($frame.marker[0] - $markerBefore[0]) -gt 3 -or [Math]::Abs($frame.marker[1] - $markerBefore[1]) -gt 3)) { $firstMotionMs = $frame.presentedMs; $firstObservedMotionMs = $frame.elapsedMs }
+        $atEndpoint = $true
+        foreach ($axis in 0..3) {
+            if ([Math]::Abs($frame.marker[$axis] - $markerAfter[$axis]) -gt 3 -or [Math]::Abs($frame.bounds[$axis] - $after[$axis]) -gt 3) { $atEndpoint = $false }
+        }
+        if (-not $atEndpoint) { $settledMs = $null }
+        elseif ($null -eq $settledMs) { $settledMs = $frame.elapsedMs }
+    }
+    $result.lastMeasurement.maximumBackgroundChange = $maximumBackgroundChange
+    $result.lastMeasurement.firstMotionMs = $firstMotionMs
+    $result.lastMeasurement.firstObservedMotionMs = $firstObservedMotionMs
+    $result.lastMeasurement.settledMs = $settledMs
+    if ($maximumBackgroundChange -gt 3) { throw "Panel background flashed during $Name (RGB change $maximumBackgroundChange)." }
+    if ($null -eq $firstMotionMs -or $firstMotionMs -lt 0 -or $firstMotionMs -gt 250) { throw "Resize $Name did not visibly respond within 250 ms ($firstMotionMs ms)." }
+    if ($null -eq $settledMs -or $settledMs -gt 800) { throw "Resize $Name did not finish within 800 ms ($settledMs ms)." }
     $result.lastMeasurement.renderedPositions = $visualDistinct.Count
-    if ($visualDistinct.Count -lt 5) { throw "No smooth rendered resize for $Name ($($visualDistinct.Count) positions)." }
+    if ($nativeTransition -and $result.nativeAnimationsEnabled -and $visualDistinct.Count -lt 5) { throw "No smooth rendered resize for $Name ($($visualDistinct.Count) positions)." }
     $previousMarker = $markerBefore
     foreach ($frame in $frames) {
         if ($null -eq $frame.marker) { throw "Rendered control disappeared during $Name." }
@@ -185,15 +232,17 @@ function Measure-SizeTransition {
     if ($Mode -eq 'maximized') {
         if (-not [ZommiWindowsAcceptanceNative]::IsZoomed($window)) { throw 'Max did not retain native maximized state.' }
         $workArea = [ZommiWindowsAcceptanceNative]::WorkArea($window)
+        $clientBounds = [ZommiWindowsAcceptanceNative]::PhysicalClientBounds($window)
         foreach ($axis in 0..3) {
-            if ([Math]::Abs($after[$axis] - $workArea[$axis]) -gt 3) { throw 'Max escaped the monitor work area.' }
+            if ([Math]::Abs($clientBounds[$axis] - $workArea[$axis]) -gt 3) { throw 'Max escaped the monitor work area.' }
         }
     } elseif ([ZommiWindowsAcceptanceNative]::IsZoomed($window)) { throw 'Normal size retained native maximized state.' }
-    $result.transitions += @{ mode = $Mode; before = $before; after = $after; distinctBounds = $distinct.Count; renderedPositions = $visualDistinct.Count; markerBefore = $markerBefore; markerAfter = $markerAfter; frames = $frames }
-    Write-Host "Rendered $Name transition: $($visualDistinct.Count) positions, stable control pixels"
+    $result.transitions += @{ mode = $Mode; before = $before; after = $after; distinctBounds = $distinct.Count; renderedPositions = $visualDistinct.Count; markerBefore = $markerBefore; markerAfter = $markerAfter; backgroundBefore = $backgroundBefore; maximumBackgroundChange = $maximumBackgroundChange; firstMotionMs = $firstMotionMs; firstObservedMotionMs = $firstObservedMotionMs; settledMs = $settledMs; frames = $frames }
+    Write-Host "Rendered $Name transition: $($visualDistinct.Count) positions, RGB change $maximumBackgroundChange, response $firstMotionMs ms, settled $settledMs ms"
 }
 
 $application = $null
+$background = $null
 $suspended = @(Suspend-ConflictingZommiApplications -EntryPoint (Join-Path $probeRoot 'not-running.exe'))
 try {
     $startInfo = New-Object Diagnostics.ProcessStartInfo
@@ -211,6 +260,7 @@ try {
     $view = [ZommiWindowSizeAccess]::FindWindowEx($window, [IntPtr]::Zero, [NullString]::Value, [NullString]::Value)
     [ZommiWindowsAcceptanceNative]::SendAltA($false)
     Wait-SizeCondition -Description 'foreground' -Condition { [ZommiWindowsAcceptanceNative]::Foreground($window) }
+    $background = [ZommiSizeBackground]::new($window, [ZommiWindowsAcceptanceNative]::WorkArea($window))
     Click-SizeControl 'App settings'
     Measure-SizeTransition 'Wide' 'wide'
     Measure-SizeTransition 'Standard' 'standard'
@@ -247,6 +297,7 @@ try {
         Write-Host "Native size evidence: $ResultPath"
     } finally {
         [ZommiRenderedSizeProbe]::Dispose()
+        if ($background) { $background.Dispose() }
         if ($application) {
             Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($PackageDirectory + '\', [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
         }
