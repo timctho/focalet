@@ -73,6 +73,12 @@ public static class ZommiWindowsAcceptanceNative
     private static extern bool GetWindowRect(IntPtr window, out NativeRect bounds);
 
     [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetClientRect(IntPtr window, out NativeRect bounds);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool ClientToScreen(IntPtr window, ref NativePoint point);
+
+    [DllImport("user32.dll", SetLastError = true)]
     private static extern int GetWindowLong(IntPtr window, int index);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -275,6 +281,25 @@ public static class ZommiWindowsAcceptanceNative
             {
                 SetThreadDpiAwarenessContext(previous);
             }
+        }
+    }
+
+    public static int[] PhysicalClientBounds(IntPtr window)
+    {
+        var previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
+        try
+        {
+            NativeRect bounds;
+            var origin = new NativePoint();
+            if (!GetClientRect(window, out bounds) || !ClientToScreen(window, ref origin))
+            {
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            }
+            return new[] { origin.X, origin.Y, bounds.Right - bounds.Left, bounds.Bottom - bounds.Top };
+        }
+        finally
+        {
+            if (previous != IntPtr.Zero) SetThreadDpiAwarenessContext(previous);
         }
     }
 
@@ -1007,7 +1032,11 @@ function Suspend-ConflictingZommiApplications {
         return $false
     })
     foreach ($process in ($relatedProcesses | Sort-Object ProcessId -Descending)) {
-        Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop
+        try {
+            Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop
+        } catch {
+            if (Get-Process -Id $process.ProcessId -ErrorAction SilentlyContinue) { throw }
+        }
     }
 
     $deadline = [DateTime]::UtcNow.AddSeconds(5)
@@ -1168,7 +1197,7 @@ function Invoke-PackagedApplicationAcceptance {
         [ZommiWindowsAcceptanceNative]::Maximize($window)
         $maximizeDeadline = [DateTime]::UtcNow.AddSeconds(5)
         do {
-            $maximizedBounds = [ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
+            $maximizedBounds = [ZommiWindowsAcceptanceNative]::PhysicalClientBounds($window)
             $monitorWorkArea = [ZommiWindowsAcceptanceNative]::WorkArea($window)
             $maximizedToWorkArea = [ZommiWindowsAcceptanceNative]::IsZoomed($window) -and
                 ($maximizedBounds -join ',') -eq ($monitorWorkArea -join ',')

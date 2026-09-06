@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/desktop/artifact_loader.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
-import 'package:zommi_flutter/desktop/surface_animation.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
@@ -348,16 +347,7 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
             final height = constraints.maxHeight;
             return SizedBox.expand(
               key: const ValueKey('zommi-surface'),
-              child: RepaintBoundary(
-                child: widget.desktop is DesktopSurfaceAnimator
-                    ? SurfaceAnimationHost(
-                        animation: (widget.desktop as DesktopSurfaceAnimator)
-                            .surfaceAnimation,
-                        builder: (context, size) =>
-                            _buildPanel(size.width, size.height),
-                      )
-                    : _buildPanel(width, height),
-              ),
+              child: RepaintBoundary(child: _buildPanel(width, height)),
             );
           },
         ),

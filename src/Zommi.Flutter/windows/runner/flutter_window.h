@@ -8,8 +8,6 @@
 #include <flutter/method_result.h>
 
 #include <memory>
-#include <vector>
-
 #include "win32_window.h"
 
 // A window that does nothing but host a Flutter view.
@@ -30,13 +28,6 @@ private:
   void HandleWindowAnimationMethodCall(
       const flutter::MethodCall<flutter::EncodableValue> &call,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
-  void CancelPendingSurfaceFrame();
-  bool BeginSurfaceFrameTransition(const RECT &current_bounds);
-  bool BeginRenderedSurfaceFrameTransition(const RECT &current_bounds,
-                                          const std::vector<uint8_t> &rgba,
-                                          int width, int height);
-  void FinishSurfaceFrameTransition();
-  void DestroySurfaceTransitionOverlay();
 
   // The project to run.
   flutter::DartProject project_;
@@ -45,12 +36,6 @@ private:
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       window_animation_channel_;
-  std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
-      pending_surface_frame_result_;
-  WINDOWPLACEMENT surface_restore_{};
-  HWND surface_transition_overlay_ = nullptr;
-  HBITMAP surface_transition_bitmap_ = nullptr;
-  bool surface_window_cloaked_ = false;
 };
 
 #endif // RUNNER_FLUTTER_WINDOW_H_

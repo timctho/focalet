@@ -2,6 +2,37 @@ $ErrorActionPreference = 'Stop'
 
 Import-Module (Join-Path $PSScriptRoot 'windows-deployment-helpers.psm1') -Force
 
+$acceptanceSource = Get-Content -Raw (Join-Path $PSScriptRoot 'accept-windows-capture.ps1')
+$acceptanceSyntax = [Management.Automation.Language.Parser]::ParseInput($acceptanceSource, [ref]$null, [ref]$null)
+$suspendFunction = $acceptanceSyntax.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Suspend-ConflictingZommiApplications' }, $true).Extent.Text
+foreach ($stillRunning in @($false, $true)) {
+    & {
+        param([bool] $StillRunning, [string] $Definition)
+        Invoke-Expression $Definition
+        $script:cleanupQueries = 0
+        function Get-CimInstance {
+            param([string] $ClassName)
+            $script:cleanupQueries++
+            if ($script:cleanupQueries -le 2) {
+                [pscustomobject]@{ Name = 'Zommi.exe'; ProcessId = 100001; ExecutablePath = 'C:\zommi-cleanup-fixture\Zommi.exe' }
+            }
+        }
+        function Stop-Process {
+            param([int] $Id, [switch] $Force, [string] $ErrorAction)
+            throw 'Simulated stop failure'
+        }
+        function Get-Process {
+            param([int] $Id, [string] $ErrorAction)
+            if ($StillRunning) { [pscustomobject]@{ Id = $Id } }
+        }
+        $failure = $null
+        try { $paths = @(Suspend-ConflictingZommiApplications -EntryPoint 'C:\zommi-probe\Zommi.exe') }
+        catch { $failure = $_.Exception.Message }
+        if ($StillRunning -and $failure -ne 'Simulated stop failure') { throw 'A live process failure was suppressed.' }
+        if (-not $StillRunning -and ($failure -or $paths.Count -ne 1)) { throw 'An already exited process blocked acceptance cleanup.' }
+    } $stillRunning $suspendFunction
+}
+
 $processes = @(
     [pscustomobject]@{ ProcessId = 50; ParentProcessId = 1; Name = 'runner' }
     [pscustomobject]@{ ProcessId = 100; ParentProcessId = 50; Name = 'Zommi' }

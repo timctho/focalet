@@ -1,24 +1,46 @@
 public static class ZommiRenderedSizeProbe {
     public static int[] Area;
     public static string EvidenceDirectory;
+    public static int[] LastBackground;
+    public static long LastPresentationTimestamp;
     private static int sequence;
     private static ZommiDesktopFrameCapture desktop;
     private static readonly System.Collections.Generic.List<System.Drawing.Bitmap> images = new System.Collections.Generic.List<System.Drawing.Bitmap>();
     private static readonly System.Collections.Generic.List<long> timestamps = new System.Collections.Generic.List<long>();
 
-    public static int[] Capture(long elapsed, bool retain) {
+    private static void EnsureCapture() {
         if (desktop == null || !desktop.Matches(Area)) {
             if (desktop != null) desktop.Dispose();
             desktop = new ZommiDesktopFrameCapture(Area);
         }
+    }
+
+    public static ZommiDesktopFrameCapture.DeferredFrame CaptureDeferred() {
+        EnsureCapture();
+        return desktop.CaptureDeferred();
+    }
+
+    public static int[] AnalyzeDeferred(ZommiDesktopFrameCapture.DeferredFrame frame, long elapsed) {
+        LastPresentationTimestamp = frame.PresentationTimestamp;
+        return Analyze(desktop.ReadFrame(frame), elapsed, true);
+    }
+
+    public static int[] Capture(long elapsed, bool retain) {
+        EnsureCapture();
         var bitmap = desktop.Capture();
+        LastPresentationTimestamp = desktop.LastPresentTime;
+        return Analyze(bitmap, elapsed, retain);
+    }
+
+    private static int[] Analyze(System.Drawing.Bitmap bitmap, long elapsed, bool retain) {
         try {
             var marker = FindMarker(bitmap);
+            LastBackground = marker == null ? null : Background(bitmap, marker);
             if (marker == null) {
                 System.IO.Directory.CreateDirectory(EvidenceDirectory);
                 bitmap.Save(System.IO.Path.Combine(EvidenceDirectory, string.Format("missing-{0:D2}-{1:D4}.png", sequence, elapsed)), System.Drawing.Imaging.ImageFormat.Png);
             }
-            if (retain && elapsed < 1200) {
+            if (retain) {
                 images.Add(bitmap);
                 timestamps.Add(elapsed);
                 bitmap = null;
@@ -27,6 +49,23 @@ public static class ZommiRenderedSizeProbe {
         } finally {
             if (bitmap != null) bitmap.Dispose();
         }
+    }
+
+    private static int[] Background(System.Drawing.Bitmap bitmap, int[] marker) {
+        var left = marker[0] - Area[0] + marker[2] + (int)System.Math.Round(marker[2] * 0.55);
+        var top = marker[1] - Area[1] + marker[3] / 2;
+        if (left < 1 || top < 1 || left + 1 >= bitmap.Width || top + 1 >= bitmap.Height) throw new System.InvalidOperationException("The panel background sample is outside the captured frame.");
+        var color = new int[3];
+        for (var row = top - 1; row <= top + 1; row++) {
+            for (var column = left - 1; column <= left + 1; column++) {
+                var pixel = bitmap.GetPixel(column, row);
+                color[0] += pixel.R;
+                color[1] += pixel.G;
+                color[2] += pixel.B;
+            }
+        }
+        for (var channel = 0; channel < color.Length; channel++) color[channel] /= 9;
+        return color;
     }
 
     private static int[] FindMarker(System.Drawing.Bitmap bitmap) {

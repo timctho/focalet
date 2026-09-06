@@ -6,8 +6,201 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
+import 'package:zommi_flutter/theme/app_preferences.dart';
 
 void main() {
+  testWidgets('a newer native size choice supersedes a pending geometry read', (
+    tester,
+  ) async {
+    const nativeChannel = MethodChannel('zommi/window_animation');
+    const windowChannel = MethodChannel('window_manager');
+    final pending = Completer<Map<String, Object?>>();
+    final geometry = <String, Object?>{
+      'bounds': [440, 360, 720, 620],
+      'workArea': [0, 0, 1600, 1000],
+      'scale': 1.5,
+      'maximized': false,
+    };
+    var reads = 0;
+    final operations = <MethodCall>[];
+    final messenger = tester.binding.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(nativeChannel, (call) async {
+      if (call.method == 'getSurfaceGeometry') {
+        return ++reads == 1 ? pending.future : geometry;
+      }
+      operations.add(call);
+      return true;
+    });
+    messenger.setMockMethodCallHandler(windowChannel, (_) async => null);
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(nativeChannel, null);
+      messenger.setMockMethodCallHandler(windowChannel, null);
+    });
+    final bridge = FlutterDesktopBridge(useNativeSurface: true);
+    final wide = bridge.setSurface(expanded: true, large: true);
+    await tester.idle();
+    expect(reads, 1);
+    final standard = bridge.setSurface(expanded: true);
+    final max = bridge.setSurface(expanded: true, maximized: true);
+    pending.complete(geometry);
+    await Future.wait([wide, standard, max]);
+    expect(reads, 2);
+    expect(operations, hasLength(1));
+    expect(operations.single.method, 'setSurfaceBounds');
+    expect(operations.single.arguments['maximized'], isTrue);
+  });
+
+  testWidgets('Windows size choices send one native endpoint without a tween', (
+    tester,
+  ) async {
+    const nativeChannel = MethodChannel('zommi/window_animation');
+    const windowChannel = MethodChannel('window_manager');
+    var bounds = const Rect.fromLTWH(440, 360, 720, 620);
+    var maximized = false;
+    final operations = <Map<String, Object?>>[];
+    final messenger = tester.binding.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(nativeChannel, (call) async {
+      if (call.method == 'getSurfaceGeometry') {
+        return {
+          'bounds': [bounds.left, bounds.top, bounds.width, bounds.height],
+          'workArea': [0, 0, 1600, 1000],
+          'scale': 1.5,
+          'maximized': maximized,
+        };
+      }
+      expect(call.method, 'setSurfaceBounds');
+      final arguments = Map<String, Object?>.from(call.arguments as Map);
+      operations.add(arguments);
+      bounds = Rect.fromLTWH(
+        arguments['toX']! as double,
+        arguments['toY']! as double,
+        arguments['toWidth']! as double,
+        arguments['toHeight']! as double,
+      );
+      maximized = arguments['maximized'] == true;
+      return true;
+    });
+    messenger.setMockMethodCallHandler(windowChannel, (call) async {
+      expect(call.method, isIn(['setMinimumSize', 'setAlwaysOnTop']));
+      return null;
+    });
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(nativeChannel, null);
+      messenger.setMockMethodCallHandler(windowChannel, null);
+    });
+    final bridge = FlutterDesktopBridge(useNativeSurface: true);
+    for (final setting in [
+      WindowSizeSetting.standard,
+      WindowSizeSetting.wide,
+      WindowSizeSetting.standard,
+      WindowSizeSetting.maximized,
+      WindowSizeSetting.wide,
+      WindowSizeSetting.maximized,
+      WindowSizeSetting.standard,
+    ]) {
+      operations.clear();
+      await bridge.setSurface(
+        expanded: true,
+        large: setting == WindowSizeSetting.wide,
+        maximized: setting == WindowSizeSetting.maximized,
+      );
+      await tester.pump(const Duration(seconds: 1));
+      expect(operations, hasLength(1));
+      expect(maximized, setting == WindowSizeSetting.maximized);
+      expect(bounds.size, switch (setting) {
+        WindowSizeSetting.standard => normalWindowSize,
+        WindowSizeSetting.wide => largeWindowSize,
+        WindowSizeSetting.maximized => const Size(1600, 1000),
+      });
+      if (!maximized) {
+        expect(bounds.center.dx, 800);
+        expect(bounds.bottom, 982);
+      }
+    }
+  });
+
+  testWidgets('native resize sends one bounds operation with Max state', (
+    tester,
+  ) async {
+    const channel = MethodChannel('zommi/window_animation');
+    final calls = <MethodCall>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+      call,
+    ) async {
+      calls.add(call);
+      return true;
+    });
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        null,
+      );
+    });
+    await setNativeSurfaceBounds(
+      bounds: const Rect.fromLTWH(-1200, 0, 1200, 800),
+      scaleFactor: 1.5,
+      maximized: true,
+    );
+    expect(calls, hasLength(1));
+    expect(calls.single.method, 'setSurfaceBounds');
+    expect(calls.single.arguments, {
+      'toX': -1200.0,
+      'toY': 0.0,
+      'toWidth': 1200.0,
+      'toHeight': 800.0,
+      'scaleFactor': 1.5,
+      'maximized': true,
+    });
+  });
+
+  test('native window bounds align to physical pixels at fractional DPI', () {
+    final from = pixelAlignedSurfaceBounds(
+      Rect.fromLTWH(660 / 1.5, 571 / 1.5, 1080 / 1.5, 930 / 1.5),
+      1.5,
+    );
+    final to = pixelAlignedSurfaceBounds(
+      Rect.fromLTWH(510 / 1.5, 1501 / 1.5 - 760, 920, 760),
+      1.5,
+    );
+    expect(from.expandToInclude(to), to);
+    expect(to.expandToInclude(from), to);
+    expect(
+      pixelAlignedSurfaceBounds(const Rect.fromLTWH(-5.1, 0.1, 3.2, 4), 1.5),
+      Rect.fromLTRB(-8 / 1.5, 0, -3 / 1.5, 6 / 1.5),
+    );
+  });
+
+  testWidgets('native geometry arrives in one consistent monitor snapshot', (
+    tester,
+  ) async {
+    const channel = MethodChannel('test/surface-geometry');
+    var requests = 0;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+      call,
+    ) async {
+      requests++;
+      expect(call.method, 'getSurfaceGeometry');
+      return {
+        'bounds': [-1200, 120, 720, 620],
+        'workArea': [-1600, 0, 1600, 1000],
+        'scale': 1.5,
+        'maximized': true,
+      };
+    });
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        null,
+      );
+    });
+    final geometry = await readNativeSurfaceGeometry(channel);
+    expect(geometry.bounds, const Rect.fromLTWH(-1200, 120, 720, 620));
+    expect(geometry.workArea, const Rect.fromLTWH(-1600, 0, 1600, 1000));
+    expect(geometry.scale, 1.5);
+    expect(geometry.maximized, isTrue);
+    expect(requests, 1);
+  });
+
   testWidgets(
     'non-Windows surface fallback animates Standard and Wide in both directions',
     (tester) async {

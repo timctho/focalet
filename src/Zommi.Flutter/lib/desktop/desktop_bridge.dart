@@ -14,7 +14,6 @@ import 'package:tray_manager/tray_manager.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
-import 'package:zommi_flutter/desktop/surface_animation.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 
 const Size compactWindowSize = Size(56, 56);
@@ -33,6 +32,13 @@ double symmetricSurfaceEase(double progress) {
       ? 4 * value * value * value
       : 1 - math.pow(-2 * value + 2, 3).toDouble() / 2;
 }
+
+Rect pixelAlignedSurfaceBounds(Rect bounds, double scale) => Rect.fromLTRB(
+  (bounds.left * scale).round() / scale,
+  (bounds.top * scale).round() / scale,
+  (bounds.right * scale).round() / scale,
+  (bounds.bottom * scale).round() / scale,
+);
 
 enum DesktopInvocationKind { open, captureStarted, context, image, status }
 
@@ -213,13 +219,15 @@ final class NoopDesktopBridge implements DesktopBridge {
 
 final class FlutterDesktopBridge
     with WindowListener, TrayListener
-    implements DesktopBridge, DesktopSurfaceAnimator {
+    implements DesktopBridge {
   FlutterDesktopBridge({
     CaptureProvider? captureProvider,
     DesktopAcceptanceRecorder? acceptanceRecorder,
     WaylandPortalShortcutClient? waylandPortalShortcutClient,
     bool? useWaylandPortals,
+    bool? useNativeSurface,
   }) : _captureProvider = captureProvider ?? platformCaptureProvider(),
+       _useNativeSurface = useNativeSurface ?? Platform.isWindows,
        _waylandPortalShortcutClient =
            waylandPortalShortcutClient ??
            ProcessWaylandPortalShortcutClient(resolveLinuxCaptureExecutable()),
@@ -229,6 +237,8 @@ final class FlutterDesktopBridge
        _acceptanceRecorder =
            acceptanceRecorder ??
            FileDesktopAcceptanceRecorder.fromEnvironment();
+
+  final bool _useNativeSurface;
 
   static Future<FlutterDesktopBridge> bootstrap() async {
     await windowManager.ensureInitialized();
@@ -277,9 +287,6 @@ final class FlutterDesktopBridge
   bool _surfacePositionInitialized = false;
   int _surfaceTransitionEpoch = 0;
   Future<void> _surfaceResizeQueue = Future<void>.value();
-  @override
-  final SurfaceAnimationController surfaceAnimation =
-      SurfaceAnimationController();
   Offset? _surfaceAnchor;
   bool _nativeContextRegistered = false;
   bool _nativeImageRegistered = false;
@@ -296,9 +303,6 @@ final class FlutterDesktopBridge
       return _readiness;
     }
     _initialized = true;
-    _windowAnimationChannel.setMethodCallHandler(
-      surfaceAnimation.handleNativeFrameRequest,
-    );
     windowManager.addListener(this);
     await windowManager.setPreventClose(false);
     await windowManager.setAlwaysOnTop(false);
@@ -647,18 +651,24 @@ final class FlutterDesktopBridge
     required bool animate,
     required int transitionEpoch,
   }) async {
-    if (expanded && maximized && !animate) {
+    if (expanded && maximized && !animate && !_useNativeSurface) {
       await windowManager.setMinimumSize(const Size(640, 500));
       await windowManager.maximize();
       await windowManager.setAlwaysOnTop(false);
       return;
     }
-    final wasMaximized = await windowManager.isMaximized();
+    final nativeGeometry = _useNativeSurface
+        ? await readNativeSurfaceGeometry(_windowAnimationChannel)
+        : null;
+    final wasMaximized =
+        nativeGeometry?.maximized ?? await windowManager.isMaximized();
     final size = expanded
         ? (large ? largeWindowSize : normalWindowSize)
         : compactWindowSize;
-    final displays = await screenRetriever.getAllDisplays();
-    final current = await windowManager.getBounds();
+    final displays = nativeGeometry == null
+        ? await screenRetriever.getAllDisplays()
+        : const <Display>[];
+    final current = nativeGeometry?.bounds ?? await windowManager.getBounds();
     final center = current.center;
     final display = displays.cast<Display?>().firstWhere((candidate) {
       if (candidate == null) return false;
@@ -666,9 +676,17 @@ final class FlutterDesktopBridge
       final visibleSize = candidate.visibleSize ?? candidate.size;
       return (origin & visibleSize).contains(center);
     }, orElse: () => null);
-    final selected = display ?? await screenRetriever.getPrimaryDisplay();
-    final origin = selected.visiblePosition ?? Offset.zero;
-    final workArea = selected.visibleSize ?? selected.size;
+    final selected = nativeGeometry == null
+        ? display ?? await screenRetriever.getPrimaryDisplay()
+        : null;
+    final origin =
+        nativeGeometry?.workArea.topLeft ??
+        selected?.visiblePosition ??
+        Offset.zero;
+    final workArea =
+        nativeGeometry?.workArea.size ??
+        selected!.visibleSize ??
+        selected!.size;
     final width = size.width.clamp(compactWindowSize.width, workArea.width);
     final height = size.height.clamp(compactWindowSize.height, workArea.height);
     final workAreaBounds = origin & workArea;
@@ -688,44 +706,24 @@ final class FlutterDesktopBridge
             workArea: workAreaBounds,
             size: Size(width, height),
           );
+    if (transitionEpoch != _surfaceTransitionEpoch) return;
     final shouldAnimate = _surfacePositionInitialized;
     _surfacePositionInitialized = true;
     // Keeping the compact minimum during the transition prevents Win32 from
     // jumping directly to 640x500 on the first animated frame.
-    await windowManager.setMinimumSize(compactWindowSize);
+    if (!expanded || !_useNativeSurface) {
+      await windowManager.setMinimumSize(compactWindowSize);
+    }
     var nativeMaximized = false;
-    if (animate && shouldAnimate && Platform.isWindows) {
-      final scale = selected.scaleFactor?.toDouble() ?? 1;
-      await surfaceAnimation.animate(
-        from: current,
-        to: bounds,
-        maximized: expanded && maximized,
-        duration: surfaceTransitionDuration,
-        ease: symmetricSurfaceEase,
-        freeze: (rememberPlacement) async {
-          final frame = await surfaceAnimation.captureFrame(pixelRatio: scale);
-          await _windowAnimationChannel.invokeMethod<bool>('freezeSurface', {
-            'rememberPlacement': rememberPlacement,
-            'frameWidth': frame.width,
-            'frameHeight': frame.height,
-            'frameRgba': frame.rgba,
-          });
-        },
-        resize: (canvas, targetMaximized) async {
-          await _windowAnimationChannel.invokeMethod<bool>(
-            'resizeSurfaceCanvas',
-            {
-              'toX': canvas.left,
-              'toY': canvas.top,
-              'toWidth': canvas.width,
-              'toHeight': canvas.height,
-              'scaleFactor': scale,
-              'maximized': targetMaximized,
-            },
-          );
-        },
+    if (_useNativeSurface) {
+      final scale = nativeGeometry!.scale;
+      final targetMaximized = expanded && maximized;
+      await setNativeSurfaceBounds(
+        bounds: pixelAlignedSurfaceBounds(bounds, scale),
+        scaleFactor: scale,
+        maximized: targetMaximized,
       );
-      nativeMaximized = expanded && maximized;
+      nativeMaximized = targetMaximized;
     } else if (animate && shouldAnimate) {
       if (!(expanded && maximized)) {
         if (wasMaximized) {
@@ -741,15 +739,7 @@ final class FlutterDesktopBridge
       }
     } else {
       if (wasMaximized) await windowManager.unmaximize();
-      final nativeResult = shouldAnimate
-          ? await setNativeSurfaceBoundsWithoutCopy(
-              bounds: bounds,
-              scaleFactor: selected.scaleFactor?.toDouble() ?? 1,
-            )
-          : null;
-      if (nativeResult != true) {
-        await windowManager.setBounds(bounds, animate: false);
-      }
+      await windowManager.setBounds(bounds, animate: false);
     }
     if (transitionEpoch != _surfaceTransitionEpoch) return;
     await windowManager.setMinimumSize(
@@ -1013,6 +1003,32 @@ Future<void> presentPanelWithoutResizing({
   await keepOnTop();
 }
 
+Future<({Rect bounds, Rect workArea, double scale, bool maximized})>
+readNativeSurfaceGeometry(MethodChannel channel) async {
+  final values = await channel.invokeMapMethod<String, Object?>(
+    'getSurfaceGeometry',
+  );
+  if (values == null) {
+    throw StateError('Native window geometry is unavailable.');
+  }
+  Rect rectangle(String name) {
+    final parts = (values[name] as List<Object?>).cast<num>();
+    return Rect.fromLTWH(
+      parts[0].toDouble(),
+      parts[1].toDouble(),
+      parts[2].toDouble(),
+      parts[3].toDouble(),
+    );
+  }
+
+  return (
+    bounds: rectangle('bounds'),
+    workArea: rectangle('workArea'),
+    scale: (values['scale'] as num).toDouble(),
+    maximized: values['maximized'] == true,
+  );
+}
+
 Future<bool?> presentNativePanel({
   bool focus = true,
   bool? platformIsWindows,
@@ -1041,27 +1057,19 @@ Rect anchoredSurfaceBounds({
   return Rect.fromLTWH(left, top, size.width, size.height);
 }
 
-Future<bool?> setNativeSurfaceBoundsWithoutCopy({
+Future<void> setNativeSurfaceBounds({
   required Rect bounds,
   required double scaleFactor,
+  bool maximized = false,
 }) async {
-  if (!Platform.isWindows) return null;
-  try {
-    return await _windowAnimationChannel.invokeMethod<bool>(
-      'setBoundsWithoutCopy',
-      {
-        'toX': bounds.left,
-        'toY': bounds.top,
-        'toWidth': bounds.width,
-        'toHeight': bounds.height,
-        'scaleFactor': scaleFactor,
-      },
-    );
-  } on MissingPluginException {
-    return null;
-  } on PlatformException {
-    return null;
-  }
+  await _windowAnimationChannel.invokeMethod<bool>('setSurfaceBounds', {
+    'toX': bounds.left,
+    'toY': bounds.top,
+    'toWidth': bounds.width,
+    'toHeight': bounds.height,
+    'scaleFactor': scaleFactor,
+    'maximized': maximized,
+  });
 }
 
 Future<bool?> isPointerWithinNativeSurface({bool? platformIsWindows}) async {
