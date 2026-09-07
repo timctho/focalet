@@ -422,7 +422,8 @@ class ReleasePackageTests(unittest.TestCase):
         for contract in (
             "Cursor = Cursors.Cross",
             "Result = Cursor.Position",
-            "Click a window or control to attach its context",
+            "Click the content to select",
+            "Zommi context scope",
             "AttachThreadInput(currentThread, foregroundThread, true)",
             "ForceForeground();",
         ):

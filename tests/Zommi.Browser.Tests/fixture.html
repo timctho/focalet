@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Zommi DOM capture acceptance</title>
+<style>
+  body {font:18px/1.5 system-ui;margin:32px;background:#f3f5f8;color:#162330}
+  article {width:600px;border:1px solid #789;padding:20px;background:white;border-radius:12px}
+  header {color:#456} p {margin:12px 0} textarea {width:550px;height:100px;font:16px monospace}
+  aside {margin-top:20px} table {border-collapse:collapse;margin-top:16px} td,th {border:1px solid #abc;padding:8px}
+</style>
+<article id="comment">
+  <header>Review from Mei</header>
+  <p id="line"><span id="target">Keep the original spacing.</span></p>
+  <p>Include the whole comment when expanding to its parent.</p>
+</article>
+<aside id="outside">UNRELATED OUTSIDE THE SELECTED REGION</aside>
+<textarea aria-label="Exact selection" id="selection">first  line
+  第二行	value
+last line</textarea>
+<table id="table"><tr><th>Item</th><th>Count</th></tr><tr><td>Apples</td><td>42</td></tr></table>
+<input type="password" value="DO_NOT_CAPTURE_PASSWORD">
+<div hidden>DO_NOT_CAPTURE_HIDDEN</div>
+<div style="height:27px;overflow:hidden"><p style="margin:0">Visible clipped-container line</p><p style="margin:0">DO_NOT_CAPTURE_CLIPPED</p></div>
+<canvas id="canvas" width="180" height="80"></canvas>
+<button id="disabled" disabled aria-label="Publish"><svg width="24" height="24"><path id="icon" d="M2 2h20v20H2z"/></svg></button>
+<script>
+  window.pageClicks = 0;
+  document.getElementById('comment').addEventListener('click', () => window.pageClicks++);
+  const ctx = document.getElementById('canvas').getContext('2d');
+  ctx.fillStyle = '#123c56'; ctx.fillRect(0, 0, 180, 80);
+  ctx.fillStyle = 'white'; ctx.font = '18px sans-serif'; ctx.fillText('Visual only chart', 12, 44);
+</script>

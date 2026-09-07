@@ -198,9 +198,10 @@ void main() {
     expect(
       pointSelector,
       allOf(
-        contains('Text = "Zommi context selection"'),
+        contains('"Zommi context selection"'),
+        contains('"Zommi context scope"'),
         contains('Cursor = Cursors.Cross'),
-        contains('Click a window or control to attach its context'),
+        contains('Click the content to select'),
         contains('Result = Cursor.Position'),
         contains('AttachThreadInput(currentThread, foregroundThread, true)'),
         contains('ForceForeground();'),
@@ -441,7 +442,7 @@ void main() {
         contains('XTestFakeKeyEvent'),
         contains('shortcut.image.cancelled'),
         contains('ZOMMI_X11_CONTEXT_FIXTURE'),
-        contains('pointerContextPaired'),
+        contains('alignmentStatus'),
       ),
     );
   });

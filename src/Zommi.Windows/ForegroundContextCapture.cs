@@ -67,6 +67,60 @@ internal sealed class ForegroundContextCapture : IDisposable
 
     public void Dispose() => automation.Dispose();
 
+    public IReadOnlyList<ContextScopeChoice> ScopeChoices(Point point)
+    {
+        var choices = new List<ContextScopeChoice>();
+        try
+        {
+            var window = NativeCaptureWindow.At(point);
+            if (window == 0) return choices;
+            var root = automation.FromHandle(window);
+            var element = automation.FromPoint(point);
+            var title = NativeCaptureWindow.Title(window);
+            for (var depth = 0; element is not null && depth < 10 && IsWithinWindow(element, root); depth++)
+            {
+                if (element.Properties.IsPassword.ValueOrDefault) break;
+                var target = element;
+                var bounds = target.Properties.BoundingRectangle.ValueOrDefault;
+                if (bounds.Width > 0 && bounds.Height > 0 && !choices.Any(choice => choice.Bounds == bounds))
+                {
+                    var role = FormatControlType(target.Properties.ControlType.ValueOrDefault);
+                    var name = target.Properties.Name.ValueOrDefault;
+                    choices.Add(new ContextScopeChoice(bounds, $"{role}: {Limit(name, 90)}", () =>
+                    {
+                        if (!IsWithinWindow(target, root) || target.Properties.BoundingRectangle.ValueOrDefault != bounds ||
+                            NativeCaptureWindow.Title(window) != title) return null;
+                        var budget = new AccessibilityCaptureBudget(MaximumAccessibilityNodes, MaximumAccessibilityCharacters,
+                            MaximumAccessibilityDepth, TimeSpan.FromMilliseconds(MaximumAccessibilityMilliseconds));
+                        var node = CaptureAccessibilityNode(target, budget, 0);
+                        if (node is null || target.Properties.BoundingRectangle.ValueOrDefault != bounds) return null;
+                        var now = DateTimeOffset.UtcNow;
+                        return new ContextSnapshot
+                        {
+                            SnapshotId = Guid.NewGuid().ToString("D"), ObservedAtUtc = now, ExpiresAtUtc = now.AddSeconds(30),
+                            SurfaceKind = "Selected element", Application = "Window", ProcessName = "window", WindowTitle = title,
+                            SelectionElements = [new SelectedElementInfo { ControlType = node.Role, Name = node.Name, Value = node.Value, Bounds = node.Bounds }],
+                            SelectionElementCount = 1,
+                            AccessibilityTree = new AccessibilityTreeInfo
+                            {
+                                Source = "windows-uia-selected-element", Roots = [node], NodeCount = budget.NodeCount, Truncated = budget.Truncated,
+                            },
+                            Source = new ObservationSource
+                            {
+                                Provider = "windows-uia", NativeWindowId = window.ToString(CultureInfo.InvariantCulture), ProcessId = NativeCaptureWindow.ProcessId(window),
+                            },
+                            Confidence = "high", Limitation = budget.Truncated ? "Some accessible content was omitted. Select a smaller element for more detail." : null,
+                        };
+                    }));
+                }
+                if (element.Equals(root)) break;
+                element = controlViewWalker.GetParent(element);
+            }
+        }
+        catch (Exception exception) when (BrowserObservationBridge.IsUnavailable(exception)) { }
+        return choices;
+    }
+
     public CaptureResult Capture(DateTimeOffset nowUtc, Action? onTargetResolved = null)
     {
         var startedAt = Stopwatch.GetTimestamp();
@@ -149,6 +203,11 @@ internal sealed class ForegroundContextCapture : IDisposable
             }
             Mark("target");
             onTargetResolved?.Invoke();
+            // Pin the browser tab and loader before collecting native selection.
+            // Later DOM validation rejects tab/document changes across both reads.
+            using var browser = BrowserProcesses.Contains(processName)
+                ? BrowserObservationBridge.TryOpen(windowHandle) : null;
+            Mark("browserBinding");
             string surfaceKind;
             LocatorInfo? locator = null;
             var browserContext = BrowserProcesses.Contains(processName)
@@ -276,7 +335,30 @@ internal sealed class ForegroundContextCapture : IDisposable
                         ? "medium"
                         : "limited",
                 Limitation = limitation,
+                Source = new ObservationSource
+                {
+                    Provider = "windows-uia", NativeWindowId = windowHandle.ToString(CultureInfo.InvariantCulture),
+                    ProcessId = checked((int)processId),
+                },
             };
+            if (surfaceKind == "Browser")
+            {
+                try
+                {
+                    if (browser is not null) snapshot = browser.Snapshot(browser.Read(new Point(pointerX, pointerY)), snapshot);
+                }
+                catch (Exception exception) when (BrowserObservationBridge.IsUnavailable(exception))
+                {
+                    snapshot = snapshot with
+                    {
+                        Selection = [], SelectionElements = [], SelectionElementCount = null,
+                        AccessibilityTree = null, VisibleText = [], IndicatedTarget = null, Locator = null,
+                        Confidence = "limited",
+                        Limitation = "The page changed or became unavailable during capture. Capture it again.",
+                    };
+                }
+                Mark("browserDom");
+            }
             return Complete(snapshot, preservePrevious: false);
         }
     }

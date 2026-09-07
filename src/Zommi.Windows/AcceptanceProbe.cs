@@ -4,6 +4,36 @@ namespace Zommi.Windows;
 
 internal static class AcceptanceProbe
 {
+    public static int BrowserBinding(string value)
+    {
+        ApplicationConfiguration.Initialize();
+        if (!long.TryParse(value, out var handle)) return 2;
+        var diagnostics = new List<string>();
+        try
+        {
+            using var browser = BrowserObservationBridge.TryOpen((nint)handle, diagnostics.Add);
+            if (browser is null)
+            {
+                Console.WriteLine(JsonSerializer.Serialize(new { matched = false, diagnostics }));
+                return 3;
+            }
+            var viewport = browser.Viewport;
+            var observation = browser.Read(new Point((int)(viewport.X + viewport.Width / 2), (int)(viewport.Y + viewport.Height / 2)));
+            var snapshot = browser.Snapshot(observation);
+            Console.WriteLine(JsonSerializer.Serialize(new
+            {
+                matched = true, source = snapshot.Source, viewport, elementCount = snapshot.Dom?.Elements.Count,
+                selectionCount = snapshot.Selection.Count, diagnostics,
+            }));
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine(exception.Message);
+            return 1;
+        }
+    }
+
     public static int CaptureOnce()
     {
         try

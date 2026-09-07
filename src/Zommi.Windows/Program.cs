@@ -10,6 +10,11 @@ internal static class Program
             return CaptureNativeHost.Run();
         }
 
+        if (args.Length == 2 && args[0] == "--acceptance-browser-binding")
+        {
+            return AcceptanceProbe.BrowserBinding(args[1]);
+        }
+
         if (args.Contains("--acceptance-capture-once", StringComparer.OrdinalIgnoreCase))
         {
             return AcceptanceProbe.CaptureOnce();

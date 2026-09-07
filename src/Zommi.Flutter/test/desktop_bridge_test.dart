@@ -413,10 +413,19 @@ void main() {
             ),
           );
           await bridge.invokeShortcut(kind);
-          expect(capture.requestParameters.single['point'], {
-            'x': (-320 * pixelRatio).round(),
-            'y': (200 * pixelRatio).round(),
-          });
+          if (kind == DesktopInvocationKind.context) {
+            expect(capture.requestParameters.single['point'], {
+              'x': (-320 * pixelRatio).round(),
+              'y': (200 * pixelRatio).round(),
+            });
+          } else {
+            expect(capture.requests, isEmpty);
+            expect(selector.requests, ['selectImage']);
+            expect(
+              selector.requestParameters.single.containsKey('point'),
+              isFalse,
+            );
+          }
         },
       );
     }
@@ -512,7 +521,7 @@ void main() {
   );
 
   testWidgets(
-    'image selector starts after target latch and focuses before slow enrichment',
+    'image selector never waits for or attaches unrelated pointer context',
     (tester) async {
       _mockCursor(tester);
       const channel = MethodChannel('window_manager');
@@ -559,14 +568,20 @@ void main() {
       await tester.pump();
       expect(selectorClient.requests, ['selectImage']);
       expect(windowCalls, containsAllInOrder(['hide', 'show', 'focus']));
-      expect(completed, isFalse);
+      expect(completed, isTrue);
+      expect(captureClient.requests, isEmpty);
       captured.complete({
         'snapshot': {'application': 'Original window'},
       });
       await tester.pump();
       final attachment = await selection;
       expect(attachment?.hasImage, isTrue);
-      expect(attachment?.snapshot?['application'], 'Original window');
+      expect(attachment?.snapshot?['application'], 'Screen');
+      expect(
+        attachment?.snapshot?['region'],
+        containsPair('status', 'image-only'),
+      );
+      expect(attachment?.previewText, startsWith('Image only'));
     },
   );
 

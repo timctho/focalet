@@ -1,10 +1,12 @@
 using System.ComponentModel;
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
+using Zommi.Capture;
 
 namespace Zommi.Windows;
 
-internal sealed record RegionSelectionResult(Rectangle Bounds, byte[] Png);
+internal sealed record RegionSelectionResult(Rectangle Bounds, byte[] Png,
+    ContextSnapshot? Snapshot = null, RegionAlignment? Alignment = null);
 
 internal sealed class RegionSelectionForm : Form
 {
@@ -17,15 +19,18 @@ internal sealed class RegionSelectionForm : Form
     private const uint ShowWindow = 0x0040;
 
     private readonly Func<Rectangle, byte[]> captureRegion;
+    private readonly Func<Rectangle, RegionSelectionResult>? captureAlignedRegion;
     private readonly uint returnProcessId;
     private readonly System.Windows.Forms.Timer topMostGuard;
     private Point? anchor;
     private Rectangle selectedArea;
 
-    public RegionSelectionForm(Func<Rectangle, byte[]>? captureRegion = null, uint returnProcessId = 0)
+    public RegionSelectionForm(Func<Rectangle, byte[]>? captureRegion = null, uint returnProcessId = 0,
+        Func<Rectangle, RegionSelectionResult>? captureAlignedRegion = null)
     {
         this.returnProcessId = returnProcessId;
         this.captureRegion = captureRegion ?? (area => ScreenCapture.CapturePng(area));
+        this.captureAlignedRegion = captureAlignedRegion;
         Text = "Zommi image selection";
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
@@ -169,7 +174,7 @@ internal sealed class RegionSelectionForm : Form
 
         try
         {
-            Result = new RegionSelectionResult(screenArea, captureRegion(screenArea));
+            Result = captureAlignedRegion?.Invoke(screenArea) ?? new RegionSelectionResult(screenArea, captureRegion(screenArea));
             DialogResult = DialogResult.OK;
         }
         catch (Exception exception) when (exception is ExternalException or ArgumentException or Win32Exception)

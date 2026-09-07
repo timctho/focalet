@@ -9,6 +9,102 @@ import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 
 void main() {
+  test('selected DOM and its image reach the agent protocol together after composer edits', () async {
+    final executableName = Platform.isWindows
+        ? 'zommi-core-host.exe'
+        : 'zommi-core-host';
+    final temporary = await Directory.systemTemp.createTemp(
+      'zommi-dom-handoff-',
+    );
+    addTearDown(() => temporary.delete(recursive: true));
+    final requestLog = File('${temporary.path}/requests.jsonl');
+    final bridge = ProcessCoreBridge(
+      executablePath: File('../../target/debug/$executableName').absolute.path,
+      environment: {
+        'ZOMMI_CODEX_COMMAND': await _findPython(),
+        'ZOMMI_CODEX_ARGS_JSON': jsonEncode([
+          File('../../crates/zommi-core-host/tests/fake_codex_app_server.py')
+              .absolute
+              .path,
+        ]),
+        'ZOMMI_CORE_STATE_PATH': '${temporary.path}/binding.json',
+        'ZOMMI_RUNTIME_OVERRIDES_PATH': '${temporary.path}/overrides.json',
+        'ZOMMI_FAKE_REQUEST_LOG': requestLog.path,
+      },
+    );
+    final controller = ZommiController(
+      core: bridge,
+      desktop: const NoopDesktopBridge(),
+    );
+    addTearDown(controller.close);
+    await controller.initialize();
+    const original = 'first  line\n  第二行\tvalue';
+    const png =
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=';
+    controller.addAttachment(
+      ContextAttachment(
+        id: 'removed',
+        token: '',
+        snapshot: const {
+          'selection': ['REMOVED_CONTEXT_MUST_NOT_SEND'],
+        },
+      ),
+    );
+    controller.addAttachment(
+      ContextAttachment(
+        id: 'chosen',
+        token: '',
+        imageDataUrl: png,
+        snapshot: const {
+          'surfaceKind': 'Browser',
+          'application': 'Chrome',
+          'selection': [original],
+          'source': {
+            'provider': 'browser-dom',
+            'nativeWindowId': 'window-1',
+            'tabId': 'tab-1',
+            'documentId': 'document-1',
+          },
+          'dom': {
+            'mode': 'capture',
+            'selectedText': [original],
+          },
+          'region': {
+            'status': 'aligned',
+            'mapping': {'coordinateSpace': 'browser-viewport-css-pixels'},
+          },
+        },
+      ),
+    );
+    controller.removeAttachment('removed');
+    final completed = bridge.events.firstWhere(
+      (event) => event.name == 'turn.completed',
+    );
+    await controller.submit('Explain this selection.');
+    await completed.timeout(const Duration(seconds: 15));
+    final requests = (await requestLog.readAsLines()).map(
+      (line) => jsonDecode(line) as Map<String, dynamic>,
+    );
+    final request = requests.singleWhere(
+      (item) => item['method'] == 'turn/start',
+    );
+    final input = request['params']['input'] as List;
+    expect(input, hasLength(2));
+    final text = input[0]['text'] as String;
+    expect(text, contains(jsonEncode(original)));
+    expect(text, contains('"documentId":"document-1"'));
+    expect(text, contains('browser-viewport-css-pixels'));
+    expect(text, contains('Attached image 1 corresponds to this context.'));
+    expect(text, isNot(contains('REMOVED_CONTEXT_MUST_NOT_SEND')));
+    expect(input[1], {'type': 'image', 'url': png});
+    expect(
+      controller.turns.single.blocks
+          .where((block) => block.kind == TranscriptKind.assistant)
+          .single
+          .text,
+      'Rust-owned Codex reply',
+    );
+  });
   test(
     'rekeyed Codex completion renders once through Rust and controller',
     () async {

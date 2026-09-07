@@ -6,6 +6,8 @@ var tests = new (string Name, Action Body)[]
     ("Internal capture metadata stays hidden", InternalMetadataStaysHidden),
     ("Accessibility preview stays compact", AccessibilityPreviewStaysCompact),
     ("Visible text stays bounded", VisibleTextStaysBounded),
+    ("Browser enrichment preserves native object selections", BrowserEnrichmentPreservesObjectSelections),
+    ("DOM text remains exact and explicit picks discard ambient selection", DomSelectionPriority),
 };
 
 var failures = new List<string>();
@@ -142,6 +144,45 @@ static void VisibleTextStaysBounded()
     Contains(preview, "Paragraph 1:");
     True(preview.Length < 31_500, "Visible-text preview exceeded its output budget.");
     NotContains(preview, "Paragraph 150:");
+}
+
+static void BrowserEnrichmentPreservesObjectSelections()
+{
+    var native = Snapshot() with
+    {
+        Selection = ["B2:E5"],
+        SelectionElements = [new SelectedElementInfo { ControlType = "GoogleSheetsRange", Name = "B2:E5" }],
+        SelectionElementCount = 1,
+    };
+    var selection = ContextSelection.ForBrowser(new DomContext { Mode = "capture" }, native);
+    True(selection.Text.Single() == "B2:E5", "DOM without a text selection discarded the user's native range.");
+    True(selection.Elements.Single().Name == "B2:E5" && selection.IncludesNativeSelection,
+        "The explicit native object selection lost its provenance.");
+}
+
+static void DomSelectionPriority()
+{
+    const string original = " first  line\n  第二行\tvalue ";
+    var native = Snapshot() with { Selection = ["normalized other text"] };
+    var selection = ContextSelection.ForBrowser(new DomContext { Mode = "capture", SelectedText = [original] }, native);
+    True(selection.Text.Single() == original, "The exact DOM selection was replaced by normalized accessibility text.");
+    var preview = ContextPreviewFormatter.Format(native with
+    {
+        Selection = [original], Dom = new DomContext
+        {
+            Mode = "capture", SelectedText = [original],
+            Nearby = new DomElementContext { Role = "article", Text = "Nearby background", Bounds = new CaptureRectangle(0, 0, 10, 10) },
+        },
+    });
+    Contains(preview, original);
+    True(preview.IndexOf(original, StringComparison.Ordinal) < preview.IndexOf("Nearby background", StringComparison.Ordinal),
+        "Nearby DOM content displaced the user's original selection in the preview.");
+    foreach (var mode in new[] { "element", "region" })
+    {
+        var picked = ContextSelection.ForBrowser(new DomContext { Mode = mode }, native);
+        True(picked.Text.Count == 0 && picked.Elements.Count == 0,
+            "A newly picked element/image inherited an unrelated prior selection.");
+    }
 }
 
 static ContextSnapshot Snapshot()
