@@ -52,8 +52,11 @@ The gate checks the selected parent and both of its text children; merely
 opening and confirming an unspecified scope is not a pass.
 
 Every local Windows release job runs the same script with `-NonVisualOnly`,
-which requires selected-text UIA capture and selector cancellation without
-claiming desktop pixels or shortcuts. Run the full gate explicitly from an
+which compiles the native context fixture and requires selected-text UIA
+capture and selector cancellation without claiming desktop pixels or shortcuts.
+Fixture compilation is supported by Windows PowerShell 5.1 and PowerShell 7;
+the non-visual PR gate checks it before interactive deployment is requested.
+Run the full gate explicitly from an
 unlocked, visible user session with:
 
 ```sh

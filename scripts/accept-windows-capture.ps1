@@ -1544,6 +1544,23 @@ if (-not (Test-Path -LiteralPath $capture -PathType Leaf)) {
     throw "Packaged capture helper is missing: $capture"
 }
 
+# Compile in the non-visual gate too, so PR validation checks fixture
+# dependencies without opening an interactive window. Explicit references replace
+# PowerShell 7's defaults; preserve its runtime reference assemblies for Thread,
+# ManualResetEvent and the WinForms base types.
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$fixtureReferences = @(
+    [System.Windows.Forms.Form].Assembly.Location,
+    [System.Drawing.Bitmap].Assembly.Location
+)
+if ($PSVersionTable.PSEdition -eq 'Core') {
+    $fixtureReferences += Get-ChildItem -LiteralPath (Join-Path $PSHOME 'ref') -Filter '*.dll' |
+        ForEach-Object { $_.FullName }
+}
+Add-Type -ReferencedAssemblies $fixtureReferences -Path (Join-Path $PSScriptRoot 'windows-context-fixture.cs')
+Write-Host "context-fixture: compiled ($($PSVersionTable.PSEdition))"
+
 $selectedText = Invoke-CaptureSelectedTextProbe -Executable $capture
 Write-Host "selected-text: ok ($($selectedText.marker))"
 
@@ -1568,6 +1585,7 @@ if ($NonVisualOnly) {
         selectedText = $true
         windowOwnership = $true
         cancellation = $true
+        contextFixtureCompiled = $true
         regionPixels = 'not-requested'
     }
     exit 0
@@ -1575,8 +1593,6 @@ if ($NonVisualOnly) {
 
 Assert-DesktopCaptureSurface
 
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -ReferencedAssemblies @([System.Windows.Forms.Form].Assembly.Location, [System.Drawing.Bitmap].Assembly.Location) -Path (Join-Path $PSScriptRoot 'windows-context-fixture.cs')
 $scopeFixture = [ZommiContextFixture]::new()
 try {
 $pointContext = Invoke-CaptureRequest -Executable $capture -Method 'selectContext' -Interact {
