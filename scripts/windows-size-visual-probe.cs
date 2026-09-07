@@ -2,6 +2,7 @@ public static class ZommiRenderedSizeProbe {
     public static int[] Area;
     public static string EvidenceDirectory;
     public static int[] LastBackground;
+    public static int[][] LastMarkers;
     public static long LastPresentationTimestamp;
     private static int sequence;
     private static ZommiDesktopFrameCapture desktop;
@@ -68,6 +69,11 @@ public static class ZommiRenderedSizeProbe {
         return color;
     }
 
+    public static int[][] FindMarkers(System.Drawing.Bitmap bitmap) {
+        FindMarker(bitmap);
+        return LastMarkers;
+    }
+
     private static int[] FindMarker(System.Drawing.Bitmap bitmap) {
         var rectangle = new System.Drawing.Rectangle(0, 0, bitmap.Width, bitmap.Height);
         var data = bitmap.LockBits(rectangle, System.Drawing.Imaging.ImageLockMode.ReadOnly, bitmap.PixelFormat);
@@ -89,6 +95,7 @@ public static class ZommiRenderedSizeProbe {
         }
         var queue = new int[mask.Length];
         var largest = 400;
+        var markers = new System.Collections.Generic.List<int[]>();
         int[] selected = null;
         for (var start = 0; start < mask.Length; start++) {
             if (!mask[start]) continue;
@@ -115,11 +122,16 @@ public static class ZommiRenderedSizeProbe {
                     queue[count++] = neighbor;
                 }
             }
-            if (count > largest && right - left > 20 && bottom - top > 20) {
-                largest = count;
-                selected = new [] { Area[0] + left, Area[1] + top, right - left + 1, bottom - top + 1 };
+            if (count > 400 && right - left > 20 && bottom - top > 20) {
+                var marker = new [] { Area[0] + left, Area[1] + top, right - left + 1, bottom - top + 1 };
+                markers.Add(marker);
+                if (count > largest) {
+                    largest = count;
+                    selected = marker;
+                }
             }
         }
+        LastMarkers = markers.ToArray();
         return selected;
     }
 

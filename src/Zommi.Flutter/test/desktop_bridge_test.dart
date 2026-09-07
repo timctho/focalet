@@ -9,6 +9,37 @@ import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 
 void main() {
+  testWidgets('native resize feedback reports the actual physical viewport', (
+    tester,
+  ) async {
+    const channel = MethodChannel('zommi/window_animation');
+    final calls = <MethodCall>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+      call,
+    ) async {
+      calls.add(call);
+      return null;
+    });
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        null,
+      );
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    tester.view.physicalSize = const Size(1380, 1140);
+    tester.view.devicePixelRatio = 1.5;
+    FlutterDesktopBridge(useNativeSurface: true).didChangeMetrics();
+    await tester.idle();
+    expect(calls, hasLength(1));
+    expect(calls.single.method, 'surfaceMetricsChanged');
+    expect(calls.single.arguments, {'width': 1380.0, 'height': 1140.0});
+    FlutterDesktopBridge(useNativeSurface: false).didChangeMetrics();
+    await tester.idle();
+    expect(calls, hasLength(1));
+  });
+
   testWidgets('a newer native size choice supersedes a pending geometry read', (
     tester,
   ) async {
@@ -117,6 +148,80 @@ void main() {
         expect(bounds.bottom, 982);
       }
     }
+  });
+
+  testWidgets('native handoff completes before the latest size is applied', (
+    tester,
+  ) async {
+    const nativeChannel = MethodChannel('zommi/window_animation');
+    const windowChannel = MethodChannel('window_manager');
+    final pending = Completer<bool>();
+    final operations = <MethodCall>[];
+    final messenger = tester.binding.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(nativeChannel, (call) async {
+      if (call.method == 'getSurfaceGeometry') {
+        return {
+          'bounds': [440, 360, 720, 620],
+          'workArea': [0, 0, 1600, 1000],
+          'scale': 1.5,
+          'maximized': false,
+        };
+      }
+      operations.add(call);
+      return operations.length == 1 ? pending.future : true;
+    });
+    messenger.setMockMethodCallHandler(windowChannel, (_) async => null);
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(nativeChannel, null);
+      messenger.setMockMethodCallHandler(windowChannel, null);
+      nativeChannel.setMethodCallHandler(null);
+    });
+    final bridge = FlutterDesktopBridge(useNativeSurface: true);
+    final wide = bridge.setSurface(expanded: true, large: true);
+    await tester.idle();
+    final standard = bridge.setSurface(expanded: true);
+    final max = bridge.setSurface(expanded: true, maximized: true);
+    await tester.idle();
+    expect(operations, hasLength(1));
+    pending.complete(true);
+    await Future.wait([wide, standard, max]);
+    expect(operations, hasLength(2));
+    expect(operations.last.arguments['maximized'], isTrue);
+  });
+
+  testWidgets('a failed native handoff releases the queue for Max and Restore', (
+    tester,
+  ) async {
+    const nativeChannel = MethodChannel('zommi/window_animation');
+    const windowChannel = MethodChannel('window_manager');
+    final pending = Completer<bool>();
+    final operations = <String>[];
+    final messenger = tester.binding.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(nativeChannel, (call) async {
+      operations.add(call.method);
+      return operations.length == 1 ? pending.future : true;
+    });
+    messenger.setMockMethodCallHandler(windowChannel, (call) async {
+      fail(
+        'Native Max/Restore must not bypass the protected path: ${call.method}',
+      );
+    });
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(nativeChannel, null);
+      messenger.setMockMethodCallHandler(windowChannel, null);
+      nativeChannel.setMethodCallHandler(null);
+    });
+    final bridge = FlutterDesktopBridge(useNativeSurface: true);
+    final first = bridge.toggleMaximized();
+    final failure = expectLater(first, throwsA(isA<PlatformException>()));
+    await tester.idle();
+    final second = bridge.toggleMaximized();
+    await tester.idle();
+    expect(operations, ['toggleSurfaceMaximized']);
+    pending.completeError(PlatformException(code: 'surface_handoff_failed'));
+    await failure;
+    await second;
+    expect(operations, ['toggleSurfaceMaximized', 'toggleSurfaceMaximized']);
   });
 
   testWidgets('native resize sends one bounds operation with Max state', (

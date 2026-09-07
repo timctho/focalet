@@ -4,7 +4,8 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart' show WidgetsBinding;
+import 'package:flutter/widgets.dart'
+    show WidgetsBinding, WidgetsBindingObserver;
 import 'package:file_selector/file_selector.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
 import 'package:screen_capturer/screen_capturer.dart';
@@ -218,7 +219,7 @@ final class NoopDesktopBridge implements DesktopBridge {
 }
 
 final class FlutterDesktopBridge
-    with WindowListener, TrayListener
+    with WindowListener, TrayListener, WidgetsBindingObserver
     implements DesktopBridge {
   FlutterDesktopBridge({
     CaptureProvider? captureProvider,
@@ -303,6 +304,7 @@ final class FlutterDesktopBridge
       return _readiness;
     }
     _initialized = true;
+    if (_useNativeSurface) WidgetsBinding.instance.addObserver(this);
     windowManager.addListener(this);
     await windowManager.setPreventClose(false);
     await windowManager.setAlwaysOnTop(false);
@@ -773,6 +775,19 @@ final class FlutterDesktopBridge
 
   @override
   Future<void> toggleMaximized() async {
+    if (_useNativeSurface) {
+      ++_surfaceTransitionEpoch;
+      final operation = _surfaceResizeQueue
+          .catchError((Object _) {})
+          .then<void>(
+            (_) => _windowAnimationChannel.invokeMethod<void>(
+              'toggleSurfaceMaximized',
+            ),
+          );
+      _surfaceResizeQueue = operation;
+      await operation;
+      return;
+    }
     if (await windowManager.isMaximized()) {
       await windowManager.unmaximize();
       await setSurface(expanded: true);
@@ -968,7 +983,25 @@ final class FlutterDesktopBridge
   void onWindowFocus() {}
 
   @override
+  void didChangeMetrics() {
+    if (!_useNativeSurface) return;
+    final size =
+        WidgetsBinding.instance.platformDispatcher.views.single.physicalSize;
+    unawaited(
+      _windowAnimationChannel
+          .invokeMethod<void>('surfaceMetricsChanged', {
+            'width': size.width,
+            'height': size.height,
+          })
+          .catchError((Object error) {
+            _emitWarning('Window resize feedback failed: $error');
+          }),
+    );
+  }
+
+  @override
   Future<void> close() async {
+    WidgetsBinding.instance.removeObserver(this);
     _windowAnimationChannel.setMethodCallHandler(null);
     windowManager.removeListener(this);
     trayManager.removeListener(this);

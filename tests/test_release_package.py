@@ -185,6 +185,8 @@ class ReleasePackageTests(unittest.TestCase):
             "Packaged application did not start as a complete taskbar chat window",
             "Taskbar window resized on hover",
             "Taskbar window resized after pointer exit",
+            "Rapid Max/Restore lost the last requested normal placement",
+            "native-max-restore: ok (rapid commands retain the last requested placement)",
             "Packaged taskbar window did not minimize",
             "Packaged taskbar window did not restore",
             "Could not minimize Zommi before the Alt+Shift+A restore gate",
@@ -245,8 +247,9 @@ class ReleasePackageTests(unittest.TestCase):
             "[ZommiWindowsAcceptanceNative]::SendAltA($false)",
             "IsOwnedWindowAtPoint($window, $left, $top)",
             "ZommiWindowSizeAccess]::Sample($window, 3000)",
-            "$visualDistinct.Count -lt 5",
-            "$nativeTransition -and $result.nativeAnimationsEnabled",
+            "retained-frame-without-animation",
+            "Partial resized frame appeared",
+            "$atOldFrame -and -not $atNewFrame",
             "NativeAnimationsEnabled()",
             "[ZommiRenderedSizeProbe]::Area = $workArea",
             "PhysicalClientBounds($window)",
@@ -254,6 +257,8 @@ class ReleasePackageTests(unittest.TestCase):
             "ZommiRenderedSizeProbe.AnalyzeDeferred(pending[index], frames[index].elapsedMs)",
             "foreach (var captured in pending) captured.Dispose()",
             "Rendered control disappeared",
+            "Rendered control duplicated",
+            "duplicate-frame fixture",
             "Rendered control jumped outside its endpoints",
             "Rendered control reversed direction",
             "windows-desktop-frame.cs",
@@ -264,6 +269,8 @@ class ReleasePackageTests(unittest.TestCase):
             "reversed direction",
             "native Restore retains pre-Max placement",
             "native Restore redraws the previous panel",
+            "Measure-SizeTransition 'Restore' 'standard' -NativeRestore",
+            "lost foreground ownership",
             "Restore-SuspendedZommiApplications",
         ):
             self.assertIn(contract, script)
@@ -277,6 +284,25 @@ class ReleasePackageTests(unittest.TestCase):
         workflow = (SCRIPTS.parent / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         self.assertIn("shell: powershell", workflow)
         self.assertIn("accept-windows-window-size.ps1", workflow)
+        self.assertIn("-CaptureBackend Gdi", workflow)
+
+    def test_windows_size_cpu_observer_does_not_claim_presentation_time(self) -> None:
+        script = (SCRIPTS / "accept-windows-window-size.ps1").read_text(encoding="utf-8")
+        for contract in (
+            "windows-desktop-frame-gdi.cs",
+            "gdi-copy-completion-qpc-from-input-release",
+            "$firstMotionMs = $frame.captureCompletedMs",
+            "captureStartedMs",
+            "captureCompletedMs",
+        ):
+            self.assertIn(contract, script)
+        capture = (SCRIPTS / "windows-desktop-frame-gdi.cs").read_text(encoding="utf-8")
+        self.assertIn("PresentationTimestamp { get { return 0; } }", capture)
+        self.assertIn("graphics.CopyFromScreen", capture)
+        self.assertIn("SetThreadDpiAwarenessContext", capture)
+        self.assertIn("frame.Bitmap = null", capture)
+        self.assertNotIn("D3D11", capture)
+        self.assertNotIn("dxgi", capture)
 
     def test_windows_size_acceptance_checks_background_and_response_latency(self) -> None:
         script = (SCRIPTS / "accept-windows-window-size.ps1").read_text(encoding="utf-8")
