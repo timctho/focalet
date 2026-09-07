@@ -633,7 +633,8 @@ def run_acceptance(package: Path) -> int:
             expected_image = {
                 "attached": True,
                 "hasImage": True,
-                "hasPointerContext": True,
+                "hasAlignedContext": False,
+                "alignmentStatus": "image-only",
                 "width": 40,
                 "height": 30,
             }
@@ -650,7 +651,7 @@ def run_acceptance(package: Path) -> int:
                         "imageCancelRestoredFocusedTaskbar": bool(cancelled),
                         "imageShortcut": True,
                         "imageDimensions": [image["width"], image["height"]],
-                        "pointerContextPaired": image["hasPointerContext"],
+                        "alignmentStatus": image["alignmentStatus"],
                     },
                     separators=(",", ":"),
                 )

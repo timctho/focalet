@@ -1,0 +1,138 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:zommi_flutter/desktop/desktop_bridge.dart';
+import 'package:zommi_flutter/state/zommi_models.dart';
+
+void main() {
+  const bounds = <String, Object?>{
+    'x': -600,
+    'y': 200,
+    'width': 300,
+    'height': 160,
+  };
+  final alignment = <String, Object?>{
+    'status': 'aligned',
+    'screenBounds': bounds,
+    'mapping': {
+      'coordinateSpace': 'browser-viewport-css-pixels',
+      'screenBounds': {'x': -800, 'y': 100, 'width': 1200, 'height': 800},
+      'viewportBounds': {'x': 0, 'y': 0, 'width': 800, 'height': 533.33},
+      'imageBounds': {'x': 0, 'y': 0, 'width': 300, 'height': 160},
+    },
+  };
+  final snapshot = <String, Object?>{
+    'source': {
+      'provider': 'browser-dom',
+      'nativeWindowId': '42',
+      'tabId': 'tab-a',
+      'documentId': 'doc-a',
+    },
+    'region': alignment,
+    'dom': {
+      'mode': 'region',
+      'elements': [
+        {'text': 'Only the chosen comment'},
+      ],
+    },
+  };
+  test(
+    'an aligned image retains its exact region, source and coordinate mapping',
+    () {
+      final attachment = imageAttachmentFromSelection(
+        ImageSelection(
+          dataUrl: 'data:image/png;base64,YQ==',
+          bounds: bounds,
+          snapshot: snapshot,
+          alignment: alignment,
+          previewText: 'Only the chosen comment',
+        ),
+        'region-a',
+      );
+      expect(attachment.snapshot, snapshot);
+      expect(attachment.previewText, 'Only the chosen comment');
+      expect(attachment.bounds?['x'], -600);
+    },
+  );
+  test('a mismatching region discards structured content and explains image-only capture', () {
+    final attachment = imageAttachmentFromSelection(
+      ImageSelection(
+        dataUrl: 'data:image/png;base64,YQ==',
+        bounds: {...bounds, 'x': 100},
+        snapshot: snapshot,
+        alignment: alignment,
+      ),
+      'region-b',
+    );
+    expect(attachment.snapshot?['dom'], isNull);
+    expect(attachment.snapshot?['source'], isNull);
+    expect(attachment.previewText, startsWith('Image only'));
+    expect(
+      attachment.snapshot?['region'],
+      containsPair('status', 'image-only'),
+    );
+  });
+  test('an image-only canvas retains verified source geometry but no inferred text', () {
+    final imageOnly = {
+      ...alignment,
+      'status': 'image-only',
+      'reason': 'Canvas pixels',
+    };
+    final attachment = imageAttachmentFromSelection(
+      ImageSelection(
+        dataUrl: 'data:image/png;base64,YQ==',
+        bounds: bounds,
+        alignment: imageOnly,
+        snapshot: {
+          ...snapshot,
+          'region': imageOnly,
+          'selection': ['Unrelated selection'],
+        },
+      ),
+      'canvas',
+    );
+    expect(attachment.snapshot?['source'], snapshot['source']);
+    expect(attachment.snapshot?['region'], imageOnly);
+    expect(attachment.snapshot?['dom'], isNull);
+    expect(attachment.snapshot?['selection'], isNull);
+    expect(attachment.previewText, startsWith('Image only'));
+  });
+  test('legacy pointer snapshots are never presented as image-region text', () {
+    final attachment = imageAttachmentFromSelection(
+      const ImageSelection(
+        dataUrl: 'data:image/png;base64,YQ==',
+        bounds: bounds,
+        snapshot: {
+          'selection': ['Unrelated pointer content'],
+        },
+      ),
+      'legacy',
+    );
+    expect(attachment.snapshot?['selection'], isNull);
+    expect(attachment.previewText, contains('No aligned text'));
+  });
+  test(
+    'each image keeps its index when text contexts are interleaved or removed',
+    () {
+      final image = imageAttachmentFromSelection(
+        ImageSelection(
+          dataUrl: 'data:image/png;base64,YQ==',
+          bounds: bounds,
+          snapshot: snapshot,
+          alignment: alignment,
+        ),
+        'image',
+      );
+      final plain = ContextAttachment(
+        id: 'plain',
+        token: '',
+        snapshot: {
+          'selection': ['Text'],
+        },
+      );
+      final snapshots = contextHandoffSnapshots([plain, image, plain, image]);
+      expect(snapshots[1]['imageIndex'], 1);
+      expect(snapshots[3]['imageIndex'], 2);
+      expect(contextHandoffSnapshots([plain, image]).last['imageIndex'], 1);
+      expect(snapshot.containsKey('imageIndex'), isFalse);
+    },
+  );
+}

@@ -66,23 +66,43 @@ fn format_snapshot(snapshot: &Value, index: usize, total: usize) -> String {
 
     let surface_kind = non_empty_field(snapshot, "surfaceKind").unwrap_or_else(|| "Window".into());
     let application = non_empty_field(snapshot, "application").unwrap_or_else(|| "Unknown".into());
+    if let Some(index) = integer_field(snapshot, "imageIndex") {
+        lines.push(format!(
+            "Attached image {index} corresponds to this context."
+        ));
+    }
+    for (field, label) in [
+        ("source", "Observation source"),
+        ("region", "Image region alignment and coordinate mapping"),
+    ] {
+        if let Some(value) = snapshot.get(field).filter(|value| value.is_object()) {
+            lines.push(format!(
+                "{label}: {}",
+                serde_json::to_string(value).unwrap_or_default()
+            ));
+        }
+    }
     lines.push(format!("Surface: {surface_kind} in {application}"));
 
     let selections = array_field(snapshot, "selection");
     let selection_elements = array_field(snapshot, "selectionElements");
     if !selections.is_empty() || !selection_elements.is_empty() {
         lines.push(
-            "PRIMARY SURFACE SELECTION (the user deliberately selected this before invoking Zommi):"
-                .into(),
+            "PRIMARY SURFACE SELECTION (the user deliberately selected this content):".into(),
         );
         if !selections.is_empty() {
             lines.push("Selected text or items:".into());
-            lines.extend(
-                selections
-                    .iter()
-                    .take(8)
-                    .map(|item| format!("- {}", clean_value(item, 1_000))),
-            );
+            lines.extend(selections.iter().take(8).map(|item| {
+                let value = if snapshot
+                    .get("dom")
+                    .is_some_and(|dom| array_field(dom, "selectedText").contains(item))
+                {
+                    serde_json::to_string(item).unwrap_or_default()
+                } else {
+                    clean_value(item, 1_000)
+                };
+                format!("- {value}")
+            }));
         }
         if !selection_elements.is_empty() {
             let total_count = integer_field(snapshot, "selectionElementCount")
@@ -120,6 +140,12 @@ fn format_snapshot(snapshot: &Value, index: usize, total: usize) -> String {
         lines.push(format!("{kind}: {value}"));
     }
 
+    if let Some(dom) = snapshot.get("dom").filter(|value| value.is_object()) {
+        lines.push(format!(
+            "Browser content (original selected text, target and nearby content): {}",
+            serde_json::to_string(dom).unwrap_or_default()
+        ));
+    }
     let accessibility_tree = snapshot.get("accessibilityTree");
     let tree_roots = accessibility_tree.map(|tree| array_field(tree, "roots"));
     let tree_present = tree_roots.is_some_and(|roots| !roots.is_empty());
@@ -425,6 +451,46 @@ mod tests {
     use serde_json::json;
 
     use super::{build_context_handoff, compact_accessibility_tree};
+
+    #[test]
+    fn browser_handoff_preserves_selection_identity_and_image_mapping() {
+        let original = "first  line\n  第二行\tvalue";
+        let dom = json!({"mode": "capture", "selectedText": [original]});
+        let source = json!({"provider": "browser-dom", "nativeWindowId": "42", "tabId": "tab-a", "documentId": "loader-a:document-a"});
+        let region = json!({"status": "aligned", "screenBounds": {"x": -600, "y": 200, "width": 300, "height": 160}, "mapping": {"coordinateSpace": "browser-viewport-css-pixels"}});
+        let handoff = build_context_handoff(
+            "explain this",
+            &[json!({
+            "surfaceKind": "Browser", "application": "Chrome", "dom": dom, "selection": [original],
+                "source": source, "region": region, "imageIndex": 2,
+            })],
+            2,
+        );
+        assert!(handoff.contains(&serde_json::to_string(&dom).unwrap()));
+        assert!(handoff.contains(&serde_json::to_string(&source).unwrap()));
+        assert!(handoff.contains(&serde_json::to_string(&region).unwrap()));
+        assert!(handoff.contains("Attached image 2 corresponds to this context."));
+        assert!(
+            handoff.find("PRIMARY SURFACE SELECTION").unwrap()
+                < handoff.find("Browser content (").unwrap()
+        );
+    }
+
+    #[test]
+    fn image_only_handoff_exposes_the_alignment_limit_without_a_pointer_target() {
+        let handoff = build_context_handoff(
+            "read this",
+            &[json!({
+                "surfaceKind": "Image region", "application": "Screen", "imageIndex": 1,
+                "region": {"status": "image-only", "reason": "The page changed during capture"},
+            })],
+            1,
+        );
+        assert!(handoff.contains("image-only"));
+        assert!(handoff.contains("The page changed during capture"));
+        assert!(!handoff.contains("Mouse pointer:"));
+        assert!(!handoff.contains("PRIMARY SURFACE SELECTION"));
+    }
 
     #[test]
     fn returns_trimmed_user_message_without_context() {

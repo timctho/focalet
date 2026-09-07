@@ -655,10 +655,7 @@ final class ZommiController extends ChangeNotifier {
         runtimeTargetId: runtimeTargetId,
         sessionId: sessionId,
         message: text,
-        snapshots: sendingAttachments
-            .map((item) => item.snapshot)
-            .whereType<Map<String, Object?>>()
-            .toList(growable: false),
+        snapshots: contextHandoffSnapshots(sendingAttachments),
         images: sendingAttachments
             .map((item) => item.imageDataUrl)
             .whereType<String>()

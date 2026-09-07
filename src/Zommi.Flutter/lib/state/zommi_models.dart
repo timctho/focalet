@@ -35,6 +35,23 @@ final class ContextAttachment {
   );
 }
 
+List<Map<String, Object?>> contextHandoffSnapshots(
+  List<ContextAttachment> attachments,
+) {
+  var imageIndex = 0;
+  final snapshots = <Map<String, Object?>>[];
+  for (final attachment in attachments) {
+    if (attachment.hasImage) imageIndex++;
+    if (attachment.snapshot case final snapshot?) {
+      snapshots.add({
+        ...snapshot,
+        if (attachment.hasImage) 'imageIndex': imageIndex,
+      });
+    }
+  }
+  return snapshots;
+}
+
 final class SessionSummary {
   const SessionSummary({
     required this.id,

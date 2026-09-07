@@ -128,4 +128,10 @@ public sealed record ContextSnapshot
     public required string Confidence { get; init; }
 
     public string? Limitation { get; init; }
+
+    public ObservationSource? Source { get; init; }
+
+    public DomContext? Dom { get; init; }
+
+    public RegionAlignment? Region { get; init; }
 }

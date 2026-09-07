@@ -4,4 +4,7 @@
     <RootNamespace>Zommi.Capture</RootNamespace>
     <AssemblyName>Zommi.Capture.Core</AssemblyName>
   </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="BrowserObservation.js" />
+  </ItemGroup>
 </Project>

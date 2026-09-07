@@ -33,8 +33,9 @@ Before the physical walkthrough, run the packaged helper gate:
   -PackageDirectory .\artifacts\zommi-windows-x64
 ```
 
-It verifies an exact selected-text UIA fixture, selector cancellation, a
-DPI-aware region within one physical pixel of 40 by 30, and exact agreement
+It verifies an exact selected-text UIA fixture, selector cancellation, native
+element selection with parent expansion and shrinking, a DPI-aware region
+within one physical pixel of 40 by 30, and exact agreement
 between the reported bounds and returned PNG dimensions. It then launches the
 exact packaged Flutter application with an isolated temporary `APPDATA` profile,
 so saved user size preferences cannot change the normal-window test baseline.
@@ -45,6 +46,10 @@ registration, injected
 image-plus-pointer pairing, and the adjacent Flutter/Rust/two-helper process
 topology. Run it from an interactive desktop PowerShell; a process launched
 through WSL interop does not inherit an authoritative screen device context.
+The native context fixture runs its own message loop and sets its thread DPI
+mode so waiting for the capture helper cannot stall UIA or move the test target.
+The gate checks the selected parent and both of its text children; merely
+opening and confirming an unspecified scope is not a pass.
 
 Every local Windows release job runs the same script with `-NonVisualOnly`,
 which requires selected-text UIA capture and selector cancellation without

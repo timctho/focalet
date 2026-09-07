@@ -15,11 +15,14 @@ internal sealed class PointSelectionForm : Form
 
     private readonly System.Windows.Forms.Timer topMostGuard;
     private readonly uint returnProcessId;
+    private readonly IReadOnlyList<ContextScopeChoice>? choices;
+    private int choiceIndex;
 
-    public PointSelectionForm(uint returnProcessId = 0)
+    public PointSelectionForm(uint returnProcessId = 0, IReadOnlyList<ContextScopeChoice>? choices = null)
     {
         this.returnProcessId = returnProcessId;
-        Text = "Zommi context selection";
+        this.choices = choices;
+        Text = choices is null ? "Zommi context selection" : "Zommi context scope";
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
         Bounds = SystemInformation.VirtualScreen;
@@ -42,6 +45,12 @@ internal sealed class PointSelectionForm : Form
 
         KeyDown += (_, eventArgs) =>
         {
+            if (choices is { Count: > 0 })
+            {
+                if (eventArgs.KeyCode == Keys.Up) { choiceIndex = Math.Min(choices.Count - 1, choiceIndex + 1); Invalidate(); }
+                if (eventArgs.KeyCode == Keys.Down) { choiceIndex = Math.Max(0, choiceIndex - 1); Invalidate(); }
+                if (eventArgs.KeyCode == Keys.Enter) { Confirm(); return; }
+            }
             if (eventArgs.KeyCode == Keys.Escape)
             {
                 GrantForeground();
@@ -52,6 +61,15 @@ internal sealed class PointSelectionForm : Form
     }
 
     public Point? Result { get; private set; }
+    public ContextScopeChoice? SelectedScope => choices is { Count: > 0 } ? choices[choiceIndex] : null;
+
+    private void Confirm()
+    {
+        Result = Cursor.Position;
+        GrantForeground();
+        DialogResult = DialogResult.OK;
+        Close();
+    }
 
     protected override CreateParams CreateParams
     {
@@ -115,17 +133,24 @@ internal sealed class PointSelectionForm : Form
             return;
         }
 
-        Result = Cursor.Position;
-        GrantForeground();
-        DialogResult = DialogResult.OK;
-        Close();
+        Confirm();
     }
 
     protected override void OnPaint(PaintEventArgs eventArgs)
     {
         base.OnPaint(eventArgs);
         eventArgs.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        const string instruction = "Click a window or control to attach its context · Esc to cancel";
+        var instruction = SelectedScope is null
+            ? "Click the content to select · Esc to cancel"
+            : "↑ Larger · ↓ Smaller · Enter or click to attach · Esc to cancel";
+        if (SelectedScope is { } selected)
+        {
+            var rectangle = selected.Bounds;
+            rectangle.Offset(-Left, -Top);
+            using var border = new Pen(Color.White, 6f);
+            eventArgs.Graphics.DrawRectangle(border, rectangle);
+            instruction += $"\n{selected.Label}";
+        }
         using var font = new Font("Segoe UI Semibold", 11f);
         var textSize = eventArgs.Graphics.MeasureString(instruction, font);
         var pill = new RectangleF(

@@ -86,6 +86,9 @@ jobs:
           dotnet run --project tests/Zommi.Capture.Tests/Zommi.Capture.Tests.csproj --configuration Release
           dotnet build src/Zommi.Windows/Zommi.Windows.csproj --configuration Release
 
+      - name: Exercise browser DOM capture and element selection
+        run: bash scripts/test-browser-capture.sh
+
   release_linux:
     name: Native release (linux)
     needs: test
@@ -206,6 +209,10 @@ jobs:
       - name: Accept Windows non-visual capture contracts
         shell: pwsh
         run: ./scripts/accept-windows-capture.ps1 -PackageDirectory ./artifacts/zommi-windows-x64 -NonVisualOnly
+
+      - name: Accept Windows browser DOM and compositor capture
+        shell: pwsh
+        run: ./scripts/accept-windows-browser.ps1 -PackageDirectory ./artifacts/zommi-windows-x64
 
       - name: Accept Windows shortcuts and capture UX
         if: github.event_name == 'workflow_dispatch' && inputs.windows_interactive

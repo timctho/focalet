@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Zommi.Capture.Core/Zommi.Capture.Core.csproj" />
+    <None Include="fixture.html" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

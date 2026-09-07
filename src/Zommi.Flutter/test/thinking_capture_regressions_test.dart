@@ -375,6 +375,51 @@ void main() {
     },
   );
 
+  test('interactive selection has its own time budget and timed-out workers recover', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'zommi-selector-timeout-',
+    );
+    final executable = File('${directory.path}/capture');
+    await executable.writeAsString('''#!/usr/bin/env python3
+import json, os, sys, time
+for line in sys.stdin:
+    request = json.loads(line)
+    if request['method'] in ('selectContext', 'capture'):
+        time.sleep(0.15)
+    print(json.dumps({'type': 'response', 'id': request['id'], 'ok': True, 'result': {'pid': os.getpid()}}), flush=True)
+    if request['method'] == 'shutdown':
+        break
+''');
+    await Process.run('chmod', ['+x', executable.path]);
+    final client = ProcessNativeCaptureClient(
+      executable.path,
+      captureTimeout: const Duration(milliseconds: 80),
+      selectionTimeout: const Duration(seconds: 2),
+    );
+    addTearDown(() async {
+      await client.close();
+      await directory.delete(recursive: true);
+    });
+    final selected = await client.request('selectContext');
+    expect(selected['pid'], isA<int>());
+    await expectLater(
+      client.request('capture'),
+      throwsA(isA<TimeoutException>()),
+    );
+    Map<String, Object?>? restarted;
+    final deadline = DateTime.now().add(const Duration(seconds: 2));
+    while (DateTime.now().isBefore(deadline) && restarted == null) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      try {
+        restarted = await client.request('ping');
+      } on Object {
+        // The old helper may still be exiting; wait for a fresh worker.
+      }
+    }
+    expect(restarted?['pid'], isA<int>());
+    expect(restarted?['pid'], isNot(selected['pid']));
+  }, skip: Platform.isWindows);
+
   test(
     'native host startup is single-flight and ready does not finish capture',
     () async {

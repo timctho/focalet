@@ -26,15 +26,20 @@ public static class ContextPreviewFormatter
 
     private static void AppendSnapshotDetails(StringBuilder builder, ContextSnapshot snapshot)
     {
+        if (snapshot.Region is { } region)
+        {
+            builder.AppendLine(region.Status == "aligned" ? "Image with text from the selected region" : $"Image only — {region.Reason}");
+        }
         if (snapshot.Selection.Count > 0 || snapshot.SelectionElements.Count > 0)
         {
-            builder.AppendLine("PRIMARY SURFACE SELECTION (the user deliberately selected this before invoking Zommi):");
+            builder.AppendLine("PRIMARY SURFACE SELECTION (the user deliberately selected this content):");
             if (snapshot.Selection.Count > 0)
             {
                 builder.AppendLine("Selected text or items:");
                 foreach (var item in snapshot.Selection.Take(8))
                 {
-                    builder.AppendLine($"- {Clean(item, 1_000)}");
+                    builder.AppendLine(snapshot.Dom?.SelectedText.Contains(item) == true
+                        ? $"- {item}" : $"- {Clean(item, 1_000)}");
                 }
             }
 
@@ -59,6 +64,19 @@ public static class ContextPreviewFormatter
         if (snapshot.Locator is { } locator)
         {
             builder.AppendLine($"{Clean(locator.Kind, 40)}: {Clean(locator.Value, 1_000)}");
+        }
+
+        if (snapshot.Dom is { } dom)
+        {
+            builder.AppendLine(dom.Mode == "region" ? "Inside the image region:" : "Selected browser content:");
+            foreach (var element in dom.Elements)
+            {
+                builder.AppendLine($"{element.Role}: {element.Text}");
+                if (!string.IsNullOrEmpty(element.Value)) builder.AppendLine(element.Value);
+                if (!string.IsNullOrEmpty(element.Label)) builder.AppendLine($"Label: {element.Label}");
+            }
+            if (dom.Nearby is { } nearby) builder.AppendLine($"Nearby content:\n{nearby.Text}");
+            if (dom.Truncated) builder.AppendLine("Some content was omitted; choose a smaller range for complete text.");
         }
 
         var accessibilityTree = snapshot.AccessibilityTree;

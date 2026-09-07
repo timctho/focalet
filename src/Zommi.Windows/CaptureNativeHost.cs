@@ -147,7 +147,8 @@ internal static class CaptureNativeHost
 
     private static object SelectImage(uint returnProcessId)
     {
-        using var selector = new RegionSelectionForm(returnProcessId: returnProcessId);
+        using var selector = new RegionSelectionForm(returnProcessId: returnProcessId,
+            captureAlignedRegion: RegionContextCapture.Capture);
         var dialogResult = selector.ShowDialog();
         if (dialogResult != DialogResult.OK || selector.Result is not { } selected)
         {
@@ -162,6 +163,11 @@ internal static class CaptureNativeHost
         {
             Cancelled = false,
             DataUrl = $"data:image/png;base64,{Convert.ToBase64String(selected.Png)}",
+            selected.Snapshot,
+            selected.Alignment,
+            PreviewText = selected.Snapshot is null
+                ? $"Image only — {selected.Alignment?.Reason ?? "No aligned text was exposed for this region."}"
+                : ContextPreviewFormatter.Format(selected.Snapshot),
             Bounds = new
             {
                 selected.Bounds.X,
@@ -185,6 +191,39 @@ internal static class CaptureNativeHost
         // resolves the user's target rather than Zommi's own overlay.
         Application.DoEvents();
         Thread.Sleep(80);
+        var targetWindow = NativeCaptureWindow.At(point);
+        using var browser = BrowserObservationBridge.TryOpen(targetWindow);
+        if (browser is not null)
+        {
+            try
+            {
+                var observation = browser.Pick(point);
+                if (observation is null) return new { Cancelled = true };
+                var snapshot = browser.Snapshot(observation);
+                return new { Cancelled = false, Snapshot = snapshot, PreviewText = ContextPreviewFormatter.Format(snapshot) };
+            }
+            catch (Exception exception) when (BrowserObservationBridge.IsUnavailable(exception))
+            {
+                return new { Cancelled = true, ErrorMessage = "The page changed while selecting. Select the content again." };
+            }
+        }
+        var choices = capture.ScopeChoices(point);
+        if (choices.Count > 0)
+        {
+            using var scopeSelector = new PointSelectionForm(returnProcessId, choices);
+            if (scopeSelector.ShowDialog() != DialogResult.OK) return new { Cancelled = true };
+            Application.DoEvents();
+            try
+            {
+                var selected = scopeSelector.SelectedScope?.Capture();
+                if (selected is null) return new { Cancelled = true, ErrorMessage = "The element changed. Select it again." };
+                return new { Cancelled = false, Snapshot = selected, PreviewText = ContextPreviewFormatter.Format(selected) };
+            }
+            catch (Exception exception) when (BrowserObservationBridge.IsUnavailable(exception))
+            {
+                return new { Cancelled = true, ErrorMessage = "The element is no longer available. Select it again." };
+            }
+        }
         var captured = capture.CaptureAt(DateTimeOffset.UtcNow, point.X, point.Y);
         var previewText = captured.Snapshot is null
             ? null

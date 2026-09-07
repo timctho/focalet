@@ -447,7 +447,12 @@ final class FlutterDesktopBridge
         'elapsedMilliseconds': clock.elapsedMilliseconds,
         'attached': true,
         'hasImage': attachment.imageDataUrl?.isNotEmpty == true,
-        'hasPointerContext': attachment.snapshot != null,
+        'hasAlignedContext':
+            _nullableMap(attachment.snapshot?['region'])?['status'] ==
+            'aligned',
+        'alignmentStatus': _nullableMap(
+          attachment.snapshot?['region'],
+        )?['status'],
         'width': attachment.bounds?['width'],
         'height': attachment.bounds?['height'],
       });
@@ -585,35 +590,13 @@ final class FlutterDesktopBridge
     final wasMinimized = await windowManager.isMinimized();
     await windowManager.hide();
     try {
-      final targetReady = Completer<void>();
-      final contextFuture = includePointerContext
-          ? _capturePointerContext(
-                  onReady: () {
-                    if (!targetReady.isCompleted) targetReady.complete();
-                  },
-                )
-                .timeout(const Duration(seconds: 4), onTimeout: () => null)
-                .catchError((Object error) {
-                  _emitWarning('Pointer context unavailable: $error');
-                  return null;
-                })
-          : Future<ContextAttachment?>.value();
-      if (includePointerContext && _captureProvider is WindowsCaptureProvider) {
-        await Future.any<Object?>([targetReady.future, contextFuture]);
-      }
+      // Structural context belongs to the final image region. The pointer at
+      // shortcut time may be in a different window entirely.
       final selected = await _captureProvider.selectImage();
       if (selected == null) return null;
       await showPanel();
       await _recordAcceptance('capture.image.presented', const {});
-      final context = await contextFuture;
-      return ContextAttachment(
-        id: _nextAttachmentId(),
-        token: '',
-        snapshot: context?.snapshot,
-        previewText: context?.previewText ?? 'User-selected screen region',
-        imageDataUrl: selected.dataUrl,
-        bounds: selected.bounds,
-      );
+      return imageAttachmentFromSelection(selected, _nextAttachmentId());
     } finally {
       await _restorePanelAfterCapture(
         wasVisible: wasVisible,
@@ -1339,10 +1322,89 @@ final class CaptureResult {
 }
 
 final class ImageSelection {
-  const ImageSelection({required this.dataUrl, this.bounds});
+  const ImageSelection({
+    required this.dataUrl,
+    this.bounds,
+    this.snapshot,
+    this.alignment,
+    this.previewText,
+  });
 
   final String dataUrl;
   final Map<String, Object?>? bounds;
+  final Map<String, Object?>? snapshot;
+  final Map<String, Object?>? alignment;
+  final String? previewText;
+}
+
+ContextAttachment imageAttachmentFromSelection(
+  ImageSelection selected,
+  String id,
+) {
+  final capturedRegion = _nullableMap(selected.snapshot?['region']);
+  bool sameBounds(Object? value) {
+    final bounds = _nullableMap(value);
+    return bounds != null &&
+        selected.bounds != null &&
+        ['x', 'y', 'width', 'height'].every(
+          (key) => bounds[key] is num && bounds[key] == selected.bounds![key],
+        );
+  }
+
+  final hasMapping =
+      selected.snapshot?['source'] is Map &&
+      sameBounds(capturedRegion?['screenBounds']) &&
+      sameBounds(selected.alignment?['screenBounds']) &&
+      selected.alignment?['mapping'] is Map;
+  final aligned =
+      hasMapping &&
+      selected.alignment?['status'] == 'aligned' &&
+      capturedRegion?['status'] == 'aligned';
+  final knownImageSource =
+      hasMapping &&
+      selected.alignment?['status'] == 'image-only' &&
+      capturedRegion?['status'] == 'image-only';
+  final reason =
+      selected.alignment?['reason']?.toString() ??
+      'No aligned text was exposed for this region.';
+  final region = aligned || knownImageSource
+      ? selected.alignment!
+      : <String, Object?>{
+          'status': 'image-only',
+          'reason': reason,
+          if (selected.bounds != null) 'screenBounds': selected.bounds,
+        };
+  final now = DateTime.now().toUtc();
+  final snapshot = aligned
+      ? selected.snapshot!
+      : <String, Object?>{
+          'snapshotId': id,
+          'observedAtUtc': now.toIso8601String(),
+          'expiresAtUtc': now
+              .add(const Duration(seconds: 30))
+              .toIso8601String(),
+          'surfaceKind': 'Image region',
+          'application': 'Screen',
+          'region': region,
+          'limitation': reason,
+          if (knownImageSource)
+            for (final field in ['source', 'locator', 'windowTitle'])
+              if (selected.snapshot!.containsKey(field))
+                field: selected.snapshot![field],
+        };
+  return ContextAttachment(
+    id: id,
+    token: '',
+    snapshot: snapshot,
+    previewText: aligned || knownImageSource
+        ? selected.previewText ??
+              (aligned
+                  ? 'Image with text from the selected region'
+                  : 'Image only — $reason')
+        : 'Image only — $reason',
+    imageDataUrl: selected.dataUrl,
+    bounds: selected.bounds,
+  );
 }
 
 CaptureProvider platformCaptureProvider() => Platform.isWindows
@@ -1404,6 +1466,10 @@ final class WindowsCaptureProvider implements CaptureProvider {
       'selectContext',
       parameters: {'returnProcessId': pid},
     );
+    if (response['errorMessage'] case final String message
+        when message.isNotEmpty) {
+      throw StateError(message);
+    }
     if (response['cancelled'] == true) return null;
     return CaptureResult(
       snapshot: _nullableMap(response['snapshot']),
@@ -1423,6 +1489,9 @@ final class WindowsCaptureProvider implements CaptureProvider {
     return ImageSelection(
       dataUrl: dataUrl,
       bounds: _nullableMap(response['bounds']),
+      snapshot: _nullableMap(response['snapshot']),
+      alignment: _nullableMap(response['alignment']),
+      previewText: response['previewText']?.toString(),
     );
   }
 
@@ -1708,9 +1777,15 @@ abstract interface class NativeCaptureClient {
 }
 
 final class ProcessNativeCaptureClient implements NativeCaptureClient {
-  ProcessNativeCaptureClient(this.executablePath);
+  ProcessNativeCaptureClient(
+    this.executablePath, {
+    this.captureTimeout = const Duration(seconds: 30),
+    this.selectionTimeout = const Duration(minutes: 5),
+  });
 
   final String executablePath;
+  final Duration captureTimeout;
+  final Duration selectionTimeout;
   final Map<String, Completer<Map<String, Object?>>> _pending = {};
   final Map<String, void Function()> _ready = {};
   Future<void>? _starting;
@@ -1737,10 +1812,14 @@ final class ProcessNativeCaptureClient implements NativeCaptureClient {
     _pending[id] = completer;
     if (onReady != null) _ready[id] = onReady;
     final response = completer.future.timeout(
-      const Duration(seconds: 30),
+      method == 'selectContext' || method == 'selectImage'
+          ? selectionTimeout
+          : captureTimeout,
       onTimeout: () {
         _pending.remove(id);
         _ready.remove(id);
+        // A timed-out modal selector must not remain above the user's apps.
+        if (identical(_process, process)) process.kill();
         throw TimeoutException(
           'Windows capture host timed out during $method.',
         );

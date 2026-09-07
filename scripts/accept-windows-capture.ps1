@@ -1416,7 +1416,8 @@ function Invoke-PackagedApplicationAcceptance {
             -Source 'Packaged image shortcut'
         if ($image.attached -ne $true -or
             $image.hasImage -ne $true -or
-            $image.hasPointerContext -ne $true) {
+            $image.alignmentStatus -notin @('aligned', 'image-only') -or
+            $image.hasAlignedContext -ne ($image.alignmentStatus -eq 'aligned')) {
             throw "Packaged image shortcut contract failed: $($image | ConvertTo-Json -Compress)"
         }
         $imageFocusDeadline = [DateTime]::UtcNow.AddSeconds(5)
@@ -1537,7 +1538,7 @@ function Write-AcceptanceResult {
 
 if ($HelpersOnly) { return }
 
-$package = [IO.Path]::GetFullPath($PackageDirectory)
+$package = (Resolve-Path -LiteralPath $PackageDirectory).ProviderPath
 $capture = Join-Path $package 'native/Zommi.Capture.exe'
 if (-not (Test-Path -LiteralPath $capture -PathType Leaf)) {
     throw "Packaged capture helper is missing: $capture"
@@ -1574,6 +1575,10 @@ if ($NonVisualOnly) {
 
 Assert-DesktopCaptureSurface
 
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -ReferencedAssemblies @([System.Windows.Forms.Form].Assembly.Location, [System.Drawing.Bitmap].Assembly.Location) -Path (Join-Path $PSScriptRoot 'windows-context-fixture.cs')
+$scopeFixture = [ZommiContextFixture]::new()
+try {
 $pointContext = Invoke-CaptureRequest -Executable $capture -Method 'selectContext' -Interact {
     param($process)
     $window = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi context selection'
@@ -1614,11 +1619,26 @@ $pointContext = Invoke-CaptureRequest -Executable $capture -Method 'selectContex
     if (-not [ZommiWindowsAcceptanceNative]::ClickSelection($window, 220, 220)) {
         throw 'Could not click the context point selector.'
     }
+    $scope = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi context scope'
+    if (-not [ZommiWindowsAcceptanceNative]::Foreground($scope)) {
+        throw 'The selected element scope was not visible and focused.'
+    }
+    Add-Type -AssemblyName System.Windows.Forms
+    [System.Windows.Forms.SendKeys]::SendWait('{UP}{DOWN}{UP}{ENTER}')
+}
+} finally {
+    $scopeFixture.Dispose()
 }
 if ($pointContext.cancelled -eq $true -or $null -eq $pointContext.snapshot) {
     throw 'Context point selector did not capture the clicked desktop target.'
 }
-Write-Host 'point-context: ok (crosshair and click)'
+$scopeJson = $pointContext.snapshot.accessibilityTree | ConvertTo-Json -Depth 20 -Compress
+if ($pointContext.snapshot.selectionElements[0].name -ne 'Native comment' -or
+    $scopeJson -notmatch 'Selected native line' -or
+    $scopeJson -notmatch 'Parent includes this second line') {
+    throw 'Context scope did not expand, shrink and confirm the intended native parent.'
+}
+Write-Host 'point-context: ok (crosshair, click, parent and smaller scope)'
 
 $selected = Invoke-CaptureRequest -Executable $capture -Method 'selectImage' -Interact {
     param($process)
