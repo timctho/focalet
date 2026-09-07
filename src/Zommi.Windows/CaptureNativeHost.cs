@@ -65,6 +65,7 @@ internal static class CaptureNativeHost
             Console.Error.Write(exception);
             return 1;
         }
+        finally { BrowserObservationBridge.CloseConnections(); }
     }
 
     private static bool ProcessRequest(

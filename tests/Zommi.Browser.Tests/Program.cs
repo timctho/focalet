@@ -62,13 +62,14 @@ try
     if (OperatingSystem.IsWindows() && Environment.GetEnvironmentVariable("ZOMMI_TEST_CAPTURE_HOST") is { Length: > 0 } nativeHost)
     {
         while (browser.MainWindowHandle == 0) { await Task.Delay(50, token); browser.Refresh(); }
+        await using var nativeProxy = new CountingBrowserProxy(endpoint);
         var nativeStart = new ProcessStartInfo(nativeHost)
         {
             UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true,
         };
         nativeStart.ArgumentList.Add("--acceptance-browser-binding");
         nativeStart.ArgumentList.Add(browser.MainWindowHandle.ToString());
-        nativeStart.Environment["ZOMMI_BROWSER_CDP_ENDPOINT"] = endpoint.AbsoluteUri;
+        nativeStart.Environment["ZOMMI_BROWSER_CDP_ENDPOINT"] = nativeProxy.Endpoint.AbsoluteUri;
         using var native = Process.Start(nativeStart)!;
         try
         {
@@ -82,6 +83,8 @@ try
                 binding.RootElement.GetProperty("source").GetProperty("TabId").GetString() == tab &&
                 binding.RootElement.GetProperty("source").GetProperty("NativeWindowId").GetString() == browser.MainWindowHandle.ToString(),
                 "Windows HWND and native viewport bind to the exact CDP tab and document");
+            Check(binding.RootElement.GetProperty("captures").GetArrayLength() == 3 && nativeProxy.AcceptedConnections == 1,
+                "The packaged native helper reuses one browser WebSocket across three fresh captures");
             await File.WriteAllTextAsync(Path.Combine(output, "native-binding.json"), result, token);
         }
         finally { if (!native.HasExited) native.Kill(entireProcessTree: true); }
@@ -187,6 +190,71 @@ try
         try { await switched.ValidateAsync(token); } catch (InvalidOperationException) { switchRejected = true; }
         Check(switchRejected, "Switching away and back to the same-URL tab invalidates an in-flight capture");
         await driver.CallAsync("Target.closeTarget", new { targetId = otherTab.GetProperty("targetId").GetString() }, null, token);
+    }
+    await driver.CallAsync("Browser.setWindowBounds", new { windowId = capture.WindowId, bounds = new { width = 1000, height = 900 } }, null, token);
+    await Evaluate("window.scrollTo(0, 0); true");
+    await Task.Delay(100, token);
+    await using (var proxy = new CountingBrowserProxy(endpoint))
+    {
+        using var connections = new BrowserConnectionPool();
+        async Task<BrowserDomSession> Reopen() => await connections.OpenAsync(proxy.Endpoint, browser.Id,
+            title => title == "Zommi DOM capture acceptance", token) ?? throw new InvalidOperationException("Could not bind a reused browser connection.");
+        string firstDocument;
+        using (var first = await Reopen())
+        {
+            firstDocument = (await first.StampAsync(token)).DocumentId;
+            Check(await connections.OpenAsync(proxy.Endpoint, browser.Id + 100000, _ => true, token) is null,
+                "A retained connection still rejects a different native browser process");
+            Check(await connections.OpenAsync(proxy.Endpoint, browser.Id, title => title == "Zommi DOM capture acceptance", token) is null,
+                "A second lease on the retained connection cannot replace an active capture");
+            await first.ValidateAsync(token);
+            await first.BeginPickerAsync(x, y, token);
+        }
+        var pooledWorld = await Command("Page.createIsolatedWorld", new { frameId = currentFrame, worldName = "zommi-context-observation" });
+        var pooledReleased = await Command("Runtime.evaluate", new { expression = "typeof globalThis.__zommiCapture", contextId = pooledWorld.GetProperty("executionContextId").GetInt32(), returnByValue = true });
+        Check(pooledReleased.GetProperty("result").GetProperty("value").GetString() == "undefined" &&
+            (await Evaluate("document.querySelectorAll('[data-zommi-picker]').length")).GetInt32() == 0,
+            "Releasing a retained connection's capture removes its observers and selection overlay");
+        using (var second = await Reopen())
+        {
+            var fresh = await second.ReadAsync("capture", x, y, null, token);
+            Check(fresh.Stamp.DocumentId != firstDocument, "Reusing a connection creates a fresh document observation");
+            var imageRegion = await Bounds("#comment");
+            var aligned = await second.ReadAsync("region", x, y, imageRegion, token);
+            var image = await second.CaptureImageAsync(imageRegion, token);
+            Check(image.Stamp == aligned.Stamp && aligned.Elements.Count > 0, "A reused connection captures aligned region text and pixels");
+            Check(proxy.AcceptedConnections == 1, "Repeated text, picker and image captures use one browser WebSocket");
+            await Command("Page.reload");
+            await Task.Delay(150, token);
+            var staleRejected = false;
+            try { await second.ValidateAsync(token); } catch (InvalidOperationException) { staleRejected = true; }
+            Check(staleRejected, "Keeping a connection does not keep an invalid binding after page reload");
+        }
+        using (var reloaded = await Reopen())
+        {
+            await reloaded.ReadAsync("capture", x, y, null, token);
+            Check(proxy.AcceptedConnections == 1, "Page reload rebinds without another browser WebSocket");
+        }
+        var newTab = await driver.CallAsync("Target.createTarget", new { url = fixture }, null, token);
+        await Task.Delay(150, token);
+        using (var switchedCapture = await Reopen())
+            Check(switchedCapture.TabId == newTab.GetProperty("targetId").GetString() && proxy.AcceptedConnections == 1,
+                "A retained connection binds the newly active tab without reconnecting");
+        await driver.CallAsync("Target.closeTarget", new { targetId = newTab.GetProperty("targetId").GetString() }, null, token);
+        await Task.Delay(100, token);
+        proxy.DisconnectClients();
+        using (var recovered = await Reopen())
+        {
+            await recovered.ReadAsync("capture", x, y, null, token);
+            Check(proxy.AcceptedConnections == 2, "An idle browser disconnect triggers one fresh connection and binding");
+        }
+        connections.Dispose();
+        var closeDeadline = Stopwatch.StartNew();
+        while (proxy.ActiveConnections != 0 && closeDeadline.Elapsed < TimeSpan.FromSeconds(2)) await Task.Delay(20, token);
+        Check(proxy.ActiveConnections == 0, "Closing the capture host releases its browser WebSocket");
+        var closedPoolRejected = false;
+        try { await Reopen(); } catch (ObjectDisposedException) { closedPoolRejected = true; }
+        Check(closedPoolRejected, "Closing the capture host's connection pool prevents further browser access");
     }
     await File.WriteAllTextAsync(Path.Combine(output, "result.json"), JsonSerializer.Serialize(new { passed, count = passed.Count }, new JsonSerializerOptions { WriteIndented = true }), token);
     Console.WriteLine($"{passed.Count} live browser checks passed. Evidence: {output}");

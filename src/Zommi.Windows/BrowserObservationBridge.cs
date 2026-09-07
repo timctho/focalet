@@ -11,6 +11,9 @@ namespace Zommi.Windows;
 
 internal sealed class BrowserObservationBridge : IDisposable
 {
+    private static readonly BrowserConnectionPool Connections = new();
+    internal static void CloseConnections() => Connections.Dispose();
+
     private readonly nint window;
     private readonly int processId;
     private readonly BrowserDomSession session;
@@ -38,13 +41,14 @@ internal sealed class BrowserObservationBridge : IDisposable
             if (process.ProcessName.ToLowerInvariant() is not ("chrome" or "msedge" or "brave" or "opera")) return null;
         }
         catch (ArgumentException) { return null; }
+        // Leave time for the first Chrome authorization; subsequent captures reuse the socket.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         foreach (var endpoint in Endpoints())
         {
             BrowserDomSession? session = null;
             try
             {
-                using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(1400));
-                session = BrowserDomSession.ConnectAsync(endpoint, processId,
+                session = Connections.OpenAsync(endpoint, processId,
                     title => NativeCaptureWindow.IsUniqueBrowserWindow(window, processId, title), timeout.Token).GetAwaiter().GetResult();
                 if (session is null) { diagnostic?.Invoke("No unique visible tab matched the native browser process and window."); continue; }
                 var stamp = session.StampAsync(timeout.Token).GetAwaiter().GetResult();

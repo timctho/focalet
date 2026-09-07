@@ -27,6 +27,19 @@ port, launch Zommi with `ZOMMI_BROWSER_CDP_ENDPOINT=http://127.0.0.1:9222`
 endpoint is also accepted. Remote endpoints and credentials in URLs are
 rejected.
 
+Each native capture helper keeps its browser connection open for later captures.
+Closing a capture removes its page observers, selection outline and tab session;
+the next capture binds the current native window, tab and document again over the
+same browser connection. Reloading or switching tabs does not require a new
+browser connection. An interrupted connection is discarded and reconnected once.
+The first connection allows up to 20 seconds for Chrome's authorization dialog.
+
+Chrome controls authorization for a new connection. The text-capture and selector
+helpers are separate processes, so each may request authorization on first use.
+Restarting Chrome or Zommi, or revoking/disconnecting browser access, may require
+another confirmation. This does not change connections owned by an agent's
+separate Chrome MCP server.
+
 Without an available connection, Windows accessibility capture remains usable.
 The DOM implementation currently runs in the Windows native capture helper;
 Linux and macOS keep their existing platform capture providers.
@@ -92,5 +105,6 @@ For the packaged Windows browser gate, run
 `./scripts/accept-windows-browser.ps1 -PackageDirectory ./artifacts/zommi-windows-x64`.
 It uses a temporary Chromium profile, verifies the native window/viewport binding
 with the packaged helper, and records the helper's SHA-256 beside the test
-results. The browser observer is released after capture; a disconnected client
+results. The packaged gate also counts browser WebSocket handshakes across three fresh
+captures. The browser observer is released after capture; a disconnected client
 also loses its browser observation lease after 30 seconds.
