@@ -45,7 +45,7 @@ public record DomObservationData
 
 public sealed record BrowserRegionImage(byte[] Png, int Width, int Height, BrowserDocumentStamp Stamp);
 
-/// <summary>A bounded connection to one native-verified browser window, tab and loader.</summary>
+/// <summary>A bounded observation of one native-verified browser window, tab and loader.</summary>
 public sealed class BrowserDomSession : IDisposable
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -56,12 +56,15 @@ public sealed class BrowserDomSession : IDisposable
     private readonly int contextId;
     private readonly string leaseId = Guid.NewGuid().ToString("N");
     private bool disposed;
+    private bool acquired;
+    private bool ownsConnection;
     private long? visibilityRevision;
 
     private BrowserDomSession(CdpConnection connection, Func<string, bool> matchesNativeWindow,
-        string sessionId, int contextId, string tabId, string frameId, string loaderId, int windowId)
+        string sessionId, int contextId, string tabId, string frameId, string loaderId, int windowId, bool ownsConnection)
     {
         this.connection = connection;
+        this.ownsConnection = ownsConnection;
         this.matchesNativeWindow = matchesNativeWindow;
         this.sessionId = sessionId;
         this.contextId = contextId;
@@ -80,13 +83,25 @@ public sealed class BrowserDomSession : IDisposable
         Func<string, bool> matchesNativeWindow, CancellationToken cancellationToken)
     {
         var connection = await CdpConnection.ConnectAsync(endpoint, cancellationToken).ConfigureAwait(false);
+        return await BindAsync(connection, processId, matchesNativeWindow, ownsConnection: true, cancellationToken).ConfigureAwait(false);
+    }
+
+    internal static async Task<BrowserDomSession?> BindAsync(CdpConnection connection, int processId,
+        Func<string, bool> matchesNativeWindow, bool ownsConnection, CancellationToken cancellationToken)
+    {
         BrowserDomSession? selected = null;
+        var sessions = new List<BrowserDomSession>();
+        var attachedSessions = new HashSet<string>();
+        var success = false;
         try
         {
             var processes = await connection.CallAsync("SystemInfo.getProcessInfo", null, null, cancellationToken).ConfigureAwait(false);
-            if (!processes.GetProperty("processInfo").EnumerateArray().Any(process =>
-                process.GetProperty("type").GetString() == "browser" && process.GetProperty("id").GetInt32() == processId))
-                return null;
+            var browserProcesses = processes.GetProperty("processInfo").EnumerateArray()
+                .Where(process => process.GetProperty("type").GetString() == "browser")
+                .Select(process => process.GetProperty("id").GetInt32()).ToArray();
+            if (browserProcesses.Length != 1) return null;
+            connection.BrowserProcessId = browserProcesses[0];
+            if (connection.BrowserProcessId != processId) return null;
 
             var targets = await connection.CallAsync("Target.getTargets", null, null, cancellationToken).ConfigureAwait(false);
             foreach (var target in targets.GetProperty("targetInfos").EnumerateArray())
@@ -96,6 +111,7 @@ public sealed class BrowserDomSession : IDisposable
                 var tabId = target.GetProperty("targetId").GetString()!;
                 var attached = await connection.CallAsync("Target.attachToTarget", new { targetId = tabId, flatten = true }, null, cancellationToken).ConfigureAwait(false);
                 var session = attached.GetProperty("sessionId").GetString()!;
+                attachedSessions.Add(session);
                 var frameTree = await connection.CallAsync("Page.getFrameTree", null, session, cancellationToken).ConfigureAwait(false);
                 var frame = frameTree.GetProperty("frameTree").GetProperty("frame");
                 var frameId = frame.GetProperty("id").GetString()!;
@@ -103,38 +119,34 @@ public sealed class BrowserDomSession : IDisposable
                 var world = await connection.CallAsync("Page.createIsolatedWorld", new { frameId, worldName = "zommi-context-observation" }, session, cancellationToken).ConfigureAwait(false);
                 var context = world.GetProperty("executionContextId").GetInt32();
                 var window = await connection.CallAsync("Browser.getWindowForTarget", new { targetId = tabId }, null, cancellationToken).ConfigureAwait(false);
-                var candidate = new BrowserDomSession(connection, matchesNativeWindow, session, context, tabId, frameId, loaderId, window.GetProperty("windowId").GetInt32());
+                var candidate = new BrowserDomSession(connection, matchesNativeWindow, session, context, tabId, frameId, loaderId,
+                    window.GetProperty("windowId").GetInt32(), ownsConnection: false);
+                sessions.Add(candidate);
+                attachedSessions.Remove(session);
                 var metadata = await candidate.EvaluateAsync("({ visible: document.visibilityState === 'visible', title: document.title })", cancellationToken).ConfigureAwait(false);
-                if (!metadata.GetProperty("visible").GetBoolean() || !matchesNativeWindow(metadata.GetProperty("title").GetString() ?? ""))
-                {
-                    await connection.CallAsync("Target.detachFromTarget", new { sessionId = session }, null, cancellationToken).ConfigureAwait(false);
-                    continue;
-                }
-                // Two visible matching tabs are ambiguous even if both have the same URL/title.
-                if (selected is not null)
-                {
-                    await selected.InvokeAsync(new { mode = "release" }, cancellationToken).ConfigureAwait(false);
-                    selected = null;
-                    return null;
-                }
+                if (!metadata.GetProperty("visible").GetBoolean() || !matchesNativeWindow(metadata.GetProperty("title").GetString() ?? "")) continue;
+                // A second visible matching tab is ambiguous, even with the same URL/title.
+                if (selected is not null) return null;
                 await candidate.EvaluateAsync(Script, cancellationToken).ConfigureAwait(false);
-                var acquired = await candidate.InvokeAsync(new { mode = "acquire" }, cancellationToken).ConfigureAwait(false);
-                if (!acquired.GetBoolean()) return null;
+                candidate.acquired = (await candidate.InvokeAsync(new { mode = "acquire" }, cancellationToken).ConfigureAwait(false)).GetBoolean();
+                if (!candidate.acquired) return null;
                 candidate.visibilityRevision = (await candidate.StampAsync(cancellationToken).ConfigureAwait(false)).VisibilityRevision;
                 selected = candidate;
             }
-            if (selected is not null) await selected.ValidateAsync(cancellationToken).ConfigureAwait(false);
+            if (selected is not null)
+            {
+                await selected.ValidateAsync(cancellationToken).ConfigureAwait(false);
+                selected.ownsConnection = ownsConnection;
+                success = true;
+            }
             return selected;
-        }
-        catch
-        {
-            selected?.Dispose();
-            connection.Dispose();
-            throw;
         }
         finally
         {
-            if (selected is null) connection.Dispose();
+            foreach (var candidate in sessions)
+                if (!success || !ReferenceEquals(candidate, selected)) candidate.Dispose();
+            foreach (var session in attachedSessions) Detach(connection, session);
+            if (!success && ownsConnection) connection.Dispose();
         }
     }
 
@@ -240,10 +252,21 @@ public sealed class BrowserDomSession : IDisposable
         try
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(400));
-            InvokeAsync(new { mode = "release" }, timeout.Token).GetAwaiter().GetResult();
+            if (acquired) InvokeAsync(new { mode = "release" }, timeout.Token).GetAwaiter().GetResult();
         }
         catch (Exception exception) when (exception is OperationCanceledException or WebSocketException or InvalidOperationException or IOException) { }
-        connection.Dispose();
+        Detach(connection, sessionId);
+        if (ownsConnection) connection.Dispose();
+    }
+
+    private static void Detach(CdpConnection connection, string session)
+    {
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(400));
+            connection.CallAsync("Target.detachFromTarget", new { sessionId = session }, null, timeout.Token).GetAwaiter().GetResult();
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or WebSocketException or InvalidOperationException or IOException) { }
     }
 
     private static string LoadScript()
@@ -259,6 +282,9 @@ internal sealed class CdpConnection : IDisposable
 {
     private readonly ClientWebSocket socket = new();
     private int sequence;
+    private readonly SemaphoreSlim calls = new(1, 1);
+    public bool IsOpen => socket.State == WebSocketState.Open;
+    public int? BrowserProcessId { get; set; }
 
     public static async Task<CdpConnection> ConnectAsync(Uri endpoint, CancellationToken cancellationToken)
     {
@@ -294,6 +320,19 @@ internal sealed class CdpConnection : IDisposable
     }
 
     public async Task<JsonElement> CallAsync(string method, object? parameters, string? sessionId, CancellationToken cancellationToken)
+    {
+        await calls.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { return await SendCallAsync(method, parameters, sessionId, cancellationToken).ConfigureAwait(false); }
+        catch (Exception exception) when (exception is OperationCanceledException or WebSocketException or IOException)
+        {
+            // An interrupted receive may leave a partial reply. Never reuse it.
+            Dispose();
+            throw;
+        }
+        finally { calls.Release(); }
+    }
+
+    private async Task<JsonElement> SendCallAsync(string method, object? parameters, string? sessionId, CancellationToken cancellationToken)
     {
         var id = ++sequence;
         var request = new Dictionary<string, object?> { ["id"] = id, ["method"] = method, ["params"] = parameters ?? new { } };

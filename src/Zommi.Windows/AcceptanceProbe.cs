@@ -11,19 +11,28 @@ internal static class AcceptanceProbe
         var diagnostics = new List<string>();
         try
         {
-            using var browser = BrowserObservationBridge.TryOpen((nint)handle, diagnostics.Add);
-            if (browser is null)
+            var captures = new List<object>();
+            var documentIds = new HashSet<string>();
+            Zommi.Capture.ContextSnapshot? snapshot = null;
+            Zommi.Capture.CaptureRectangle? viewport = null;
+            for (var index = 0; index < 3; index++)
             {
-                Console.WriteLine(JsonSerializer.Serialize(new { matched = false, diagnostics }));
-                return 3;
+                using var browser = BrowserObservationBridge.TryOpen((nint)handle, diagnostics.Add);
+                if (browser is null)
+                {
+                    Console.WriteLine(JsonSerializer.Serialize(new { matched = false, diagnostics }));
+                    return 3;
+                }
+                viewport = browser.Viewport;
+                var observation = browser.Read(new Point((int)(viewport.X + viewport.Width / 2), (int)(viewport.Y + viewport.Height / 2)));
+                snapshot = browser.Snapshot(observation);
+                if (!documentIds.Add(observation.Stamp.DocumentId)) throw new InvalidOperationException("The capture reused an old observation.");
+                captures.Add(new { source = snapshot.Source, elementCount = snapshot.Dom?.Elements.Count });
             }
-            var viewport = browser.Viewport;
-            var observation = browser.Read(new Point((int)(viewport.X + viewport.Width / 2), (int)(viewport.Y + viewport.Height / 2)));
-            var snapshot = browser.Snapshot(observation);
             Console.WriteLine(JsonSerializer.Serialize(new
             {
-                matched = true, source = snapshot.Source, viewport, elementCount = snapshot.Dom?.Elements.Count,
-                selectionCount = snapshot.Selection.Count, diagnostics,
+                matched = true, source = snapshot!.Source, viewport, elementCount = snapshot.Dom?.Elements.Count,
+                selectionCount = snapshot.Selection.Count, captures, diagnostics,
             }));
             return 0;
         }
