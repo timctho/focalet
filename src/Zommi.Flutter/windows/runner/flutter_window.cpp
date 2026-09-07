@@ -1,5 +1,6 @@
 #include "flutter_window.h"
 
+#include <dwmapi.h>
 #include <cmath>
 #include <cstdint>
 #include <optional>
@@ -9,9 +10,18 @@
 
 #include "flutter/generated_plugin_registrant.h"
 #include "zommi_instance.h"
+#include <flutter/method_result_functions.h>
 #include <flutter/standard_method_codec.h>
 
 namespace {
+
+constexpr UINT_PTR kSurfaceHandoffTimer = 0x5a41;
+
+UINT SurfaceFrameReadyMessage() {
+  static const UINT message =
+      RegisterWindowMessageW(L"Zommi.SurfaceFrameReady");
+  return message;
+}
 
 std::optional<double> NumberArgument(const flutter::EncodableMap &arguments,
                                      const char *name) {
@@ -72,6 +82,11 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  if (surface_handoff_result_) {
+    surface_handoff_result_->Error("window_closed", "The window was closed.");
+    surface_handoff_result_.reset();
+  }
+  DestroySurfaceHandoff();
   window_animation_channel_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
@@ -84,6 +99,24 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  if (message == SurfaceFrameReadyMessage()) {
+    if (wparam == surface_handoff_epoch_ && surface_handoff_result_) {
+      if (surface_handoff_applying_) surface_handoff_frame_ready_ = true;
+      else CompleteSurfaceHandoff(false);
+    }
+    return 0;
+  }
+  if (message == WM_TIMER && surface_handoff_timer_ != 0 &&
+      wparam == surface_handoff_timer_) {
+    CompleteSurfaceHandoff(true);
+    return 0;
+  }
+  if (surface_handoff_result_ &&
+      ((message == WM_SHOWWINDOW && wparam == FALSE) ||
+       (message == WM_SIZE && wparam == SIZE_MINIMIZED))) {
+    pending_surface_command_ = 0;
+    CompleteSurfaceHandoff(true);
+  }
   if (message == ZommiShowWindowMessage()) {
     ShowWindow(hwnd, SW_RESTORE);
     SetForegroundWindow(hwnd);
@@ -113,6 +146,25 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   if (plugin_result) {
     return *plugin_result;
   }
+  if (message == WM_SYSCOMMAND && IsWindowVisible(hwnd) && !IsIconic(hwnd)) {
+    const auto command = wparam & 0xfff0;
+    const bool maximize = command == SC_MAXIMIZE;
+    if (surface_handoff_result_ &&
+        (maximize || command == SC_RESTORE)) {
+      pending_surface_command_ = command;
+      return 0;
+    }
+    if ((maximize && !IsZoomed(hwnd)) ||
+        (command == SC_RESTORE && IsZoomed(hwnd))) {
+      RECT target{};
+      if (GetSystemSurfaceBounds(maximize, target)) {
+        ResizeSurface(target, maximize,
+            std::make_unique<flutter::MethodResultFunctions<flutter::EncodableValue>>(
+                nullptr, nullptr, nullptr));
+        return 0;
+      }
+    }
+  }
 
   switch (message) {
   case WM_FONTCHANGE:
@@ -126,6 +178,21 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
 void FlutterWindow::HandleWindowAnimationMethodCall(
     const flutter::MethodCall<flutter::EncodableValue> &call,
     std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+  if (call.method_name() == "surfaceMetricsChanged") {
+    const auto* arguments = call.arguments() == nullptr
+        ? nullptr : std::get_if<flutter::EncodableMap>(call.arguments());
+    const auto width = arguments == nullptr ? std::nullopt : NumberArgument(*arguments, "width");
+    const auto height = arguments == nullptr ? std::nullopt : NumberArgument(*arguments, "height");
+    RECT client{};
+    if (surface_handoff_result_ && width && height &&
+        *width == surface_handoff_size_.cx && *height == surface_handoff_size_.cy &&
+        GetClientRect(GetHandle(), &client) &&
+        client.right == surface_handoff_size_.cx && client.bottom == surface_handoff_size_.cy) {
+      AwaitSurfaceFrame();
+    }
+    result->Success();
+    return;
+  }
   if (call.method_name() == "getSurfaceGeometry") {
     RECT bounds{};
     MONITORINFO monitor{};
@@ -192,7 +259,9 @@ void FlutterWindow::HandleWindowAnimationMethodCall(
     const HWND hit_window = WindowFromPoint(cursor);
     const HWND root_window =
         hit_window == nullptr ? nullptr : GetAncestor(hit_window, GA_ROOT);
-    result->Success(flutter::EncodableValue(root_window == GetHandle()));
+    result->Success(flutter::EncodableValue(
+        root_window == GetHandle() ||
+        (surface_handoff_window_ != nullptr && root_window == surface_handoff_window_)));
     return;
   }
   if (call.method_name() == "configureSurfaceWindow") {
@@ -224,7 +293,24 @@ void FlutterWindow::HandleWindowAnimationMethodCall(
                     "Could not refresh the frameless Zommi window style.");
       return;
     }
+    const BOOL transitions_disabled = TRUE;
+    if (FAILED(DwmSetWindowAttribute(window, DWMWA_TRANSITIONS_FORCEDISABLED,
+                                     &transitions_disabled,
+                                     sizeof(transitions_disabled)))) {
+      result->Error("window_style_failed", "Could not disable window transitions.");
+      return;
+    }
     result->Success();
+    return;
+  }
+  if (call.method_name() == "toggleSurfaceMaximized") {
+    RECT target{};
+    const bool maximize = !IsZoomed(GetHandle());
+    if (!GetSystemSurfaceBounds(maximize, target)) {
+      result->Error("window_unavailable", "Window placement is unavailable.");
+      return;
+    }
+    ResizeSurface(target, maximize, std::move(result));
     return;
   }
   if (call.method_name() != "setSurfaceBounds") {
@@ -255,10 +341,75 @@ void FlutterWindow::HandleWindowAnimationMethodCall(
   const auto entry = arguments->find(flutter::EncodableValue("maximized"));
   const auto *maximized = entry == arguments->end()
       ? nullptr : std::get_if<bool>(&entry->second);
-  if (maximized != nullptr && *maximized) {
-    if (!IsZoomed(GetHandle()) &&
-        !PostMessage(GetHandle(), WM_SYSCOMMAND, SC_MAXIMIZE, 0)) {
-      result->Error("window_resize_failed", "Could not maximize the window.");
+  ResizeSurface(target, maximized != nullptr && *maximized, std::move(result));
+}
+
+bool FlutterWindow::GetSystemSurfaceBounds(bool maximized, RECT& bounds) {
+  MONITORINFO monitor{};
+  monitor.cbSize = sizeof(monitor);
+  if (!GetMonitorInfo(MonitorFromWindow(GetHandle(), MONITOR_DEFAULTTONEAREST),
+                      &monitor)) return false;
+  if (maximized) {
+    bounds = monitor.rcWork;
+    return true;
+  }
+  WINDOWPLACEMENT placement{};
+  placement.length = sizeof(placement);
+  if (!GetWindowPlacement(GetHandle(), &placement)) return false;
+  bounds = placement.rcNormalPosition;
+  if ((GetWindowLongPtr(GetHandle(), GWL_EXSTYLE) & WS_EX_TOOLWINDOW) == 0) {
+    OffsetRect(&bounds, monitor.rcWork.left - monitor.rcMonitor.left,
+                monitor.rcWork.top - monitor.rcMonitor.top);
+  }
+  return true;
+}
+
+void FlutterWindow::ResizeSurface(
+    const RECT& target, bool target_maximized,
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+  if (surface_handoff_result_ || surface_handoff_window_ != nullptr) {
+    result->Error("window_resize_busy", "A window frame is still pending.");
+    return;
+  }
+  RECT current{};
+  if (!GetWindowRect(GetHandle(), &current)) {
+    result->Error("window_unavailable", "The current window is unavailable.");
+    return;
+  }
+  if ((target_maximized && IsZoomed(GetHandle())) ||
+      (!target_maximized && !IsZoomed(GetHandle()) && EqualRect(&current, &target))) {
+    result->Success(flutter::EncodableValue(true));
+    return;
+  }
+  const bool protect_frame =
+      IsWindowVisible(GetHandle()) && !IsIconic(GetHandle());
+  if (protect_frame && !BeginSurfaceHandoff(target)) {
+    result->Error("surface_capture_failed", "Could not preserve the visible window.");
+    return;
+  }
+  if (protect_frame) {
+    surface_handoff_result_ = std::move(result);
+    surface_handoff_size_ = {target.right - target.left, target.bottom - target.top};
+    surface_handoff_applying_ = true;
+    surface_handoff_armed_ = false;
+    surface_handoff_frame_ready_ = false;
+    const auto epoch = ++surface_handoff_epoch_;
+    surface_handoff_timer_ = SetTimer(
+        GetHandle(), kSurfaceHandoffTimer + static_cast<UINT_PTR>(epoch), 2000, nullptr);
+    if (surface_handoff_timer_ == 0) {
+      CompleteSurfaceHandoff(true);
+      return;
+    }
+  }
+  const auto fail_resize = [&](const char* code, const char* message) {
+    auto response = surface_handoff_result_ ? std::move(surface_handoff_result_) : std::move(result);
+    DestroySurfaceHandoff();
+    if (response) response->Error(code, message);
+  };
+  if (target_maximized) {
+    ShowWindow(GetHandle(), SW_MAXIMIZE);
+    if (!IsZoomed(GetHandle())) {
+      fail_resize("window_resize_failed", "Could not maximize the window.");
       return;
     }
   } else if (IsZoomed(GetHandle())) {
@@ -268,7 +419,7 @@ void FlutterWindow::HandleWindowAnimationMethodCall(
     monitor.cbSize = sizeof(monitor);
     if (!GetWindowPlacement(GetHandle(), &placement) ||
         !GetMonitorInfo(MonitorFromWindow(GetHandle(), MONITOR_DEFAULTTONEAREST), &monitor)) {
-      result->Error("window_unavailable", "Window placement is unavailable.");
+      fail_resize("window_unavailable", "Window placement is unavailable.");
       return;
     }
     placement.showCmd = SW_SHOWNOACTIVATE;
@@ -280,14 +431,149 @@ void FlutterWindow::HandleWindowAnimationMethodCall(
                  monitor.rcMonitor.top - monitor.rcWork.top);
     }
     if (!SetWindowPlacement(GetHandle(), &placement)) {
-      result->Error("window_resize_failed", "Could not restore the window.");
+      fail_resize("window_resize_failed", "Could not restore the window.");
       return;
     }
   } else if (!SetWindowPos(GetHandle(), nullptr, target.left, target.top,
                            target.right - target.left, target.bottom - target.top,
                            SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER)) {
-    result->Error("window_resize_failed", "Could not resize the window.");
+    fail_resize("window_resize_failed", "Could not resize the window.");
     return;
   }
-  result->Success(flutter::EncodableValue(true));
+  if (!protect_frame) {
+    result->Success(flutter::EncodableValue(true));
+    return;
+  }
+  surface_handoff_applying_ = false;
+  if (surface_handoff_frame_ready_) CompleteSurfaceHandoff(false);
+  else if (!surface_handoff_armed_) AwaitSurfaceFrame();
+}
+
+void FlutterWindow::AwaitSurfaceFrame() {
+  if (!surface_handoff_result_ || surface_handoff_armed_) return;
+  surface_handoff_armed_ = true;
+  const auto window = GetHandle();
+  const auto epoch = surface_handoff_epoch_;
+  flutter_controller_->engine()->SetNextFrameCallback([window, epoch]() {
+    PostMessage(window, SurfaceFrameReadyMessage(),
+                static_cast<WPARAM>(epoch), 0);
+  });
+  flutter_controller_->ForceRedraw();
+}
+
+bool FlutterWindow::BeginSurfaceHandoff(const RECT& target) {
+  RECT bounds{};
+  RECT combined{};
+  RECT visible{};
+  const RECT desktop_bounds{
+      GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN),
+      GetSystemMetrics(SM_XVIRTUALSCREEN) + GetSystemMetrics(SM_CXVIRTUALSCREEN),
+      GetSystemMetrics(SM_YVIRTUALSCREEN) + GetSystemMetrics(SM_CYVIRTUALSCREEN)};
+  if (!GetWindowRect(GetHandle(), &bounds) ||
+      !UnionRect(&combined, &bounds, &target) ||
+      !IntersectRect(&visible, &combined, &desktop_bounds)) return false;
+  const int width = visible.right - visible.left;
+  const int height = visible.bottom - visible.top;
+  if (static_cast<std::int64_t>(width) * height > 64 * 1024 * 1024) return false;
+  HDC desktop = GetDC(nullptr);
+  if (desktop == nullptr) return false;
+  BITMAPINFO description{};
+  description.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  description.bmiHeader.biWidth = width;
+  description.bmiHeader.biHeight = -height;
+  description.bmiHeader.biPlanes = 1;
+  description.bmiHeader.biBitCount = 32;
+  description.bmiHeader.biCompression = BI_RGB;
+  void* pixels = nullptr;
+  surface_handoff_bitmap_ = CreateDIBSection(
+      desktop, &description, DIB_RGB_COLORS, &pixels, nullptr, 0);
+  HDC memory = surface_handoff_bitmap_ == nullptr
+      ? nullptr : CreateCompatibleDC(desktop);
+  bool copied = false;
+  if (memory != nullptr) {
+    const auto previous = SelectObject(memory, surface_handoff_bitmap_);
+    if (previous != nullptr && previous != HGDI_ERROR) {
+      copied = BitBlt(memory, 0, 0, width, height, desktop,
+                      visible.left, visible.top, SRCCOPY) != FALSE;
+      SelectObject(memory, previous);
+    }
+    DeleteDC(memory);
+  }
+  ReleaseDC(nullptr, desktop);
+  if (!copied || !GdiFlush()) {
+    DestroySurfaceHandoff();
+    return false;
+  }
+  surface_handoff_window_ = CreateWindowExW(
+      WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_LAYERED,
+      L"STATIC", L"Zommi resize handoff",
+      WS_POPUP | SS_NOTIFY,
+      visible.left, visible.top, width, height, GetHandle(), nullptr,
+      GetModuleHandleW(nullptr), nullptr);
+  if (surface_handoff_window_ == nullptr) {
+    DestroySurfaceHandoff();
+    return false;
+  }
+  HDC bitmap_dc = CreateCompatibleDC(nullptr);
+  if (bitmap_dc == nullptr) {
+    DestroySurfaceHandoff();
+    return false;
+  }
+  const auto previous_bitmap = SelectObject(bitmap_dc, surface_handoff_bitmap_);
+  POINT destination{visible.left, visible.top};
+  POINT source{};
+  SIZE dimensions{width, height};
+  const bool updated = previous_bitmap != nullptr && previous_bitmap != HGDI_ERROR &&
+      UpdateLayeredWindow(surface_handoff_window_, nullptr, &destination, &dimensions,
+                           bitmap_dc, &source, 0, nullptr, ULW_OPAQUE) != FALSE;
+  if (previous_bitmap != nullptr && previous_bitmap != HGDI_ERROR) {
+    SelectObject(bitmap_dc, previous_bitmap);
+  }
+  DeleteDC(bitmap_dc);
+  if (!updated) {
+    DestroySurfaceHandoff();
+    return false;
+  }
+  if (!SetWindowPos(surface_handoff_window_, HWND_TOPMOST,
+                    visible.left, visible.top, width, height,
+                    SWP_NOACTIVATE | SWP_SHOWWINDOW)) {
+    DestroySurfaceHandoff();
+    return false;
+  }
+  return true;
+}
+
+void FlutterWindow::CompleteSurfaceHandoff(bool timed_out) {
+  if (!surface_handoff_result_) return;
+  auto result = std::move(surface_handoff_result_);
+  const auto pending_command = pending_surface_command_;
+  DestroySurfaceHandoff();
+  if (timed_out) {
+    result->Error("surface_handoff_failed", "The resized frame was not presented.");
+  } else {
+    result->Success(flutter::EncodableValue(true));
+  }
+  if (pending_command != 0 && IsWindowVisible(GetHandle()) &&
+      !IsIconic(GetHandle())) {
+    PostMessage(GetHandle(), WM_SYSCOMMAND, pending_command, 0);
+  }
+}
+
+void FlutterWindow::DestroySurfaceHandoff() {
+  pending_surface_command_ = 0;
+  surface_handoff_applying_ = false;
+  surface_handoff_armed_ = false;
+  surface_handoff_frame_ready_ = false;
+  if (surface_handoff_timer_ != 0) {
+    KillTimer(GetHandle(), surface_handoff_timer_);
+    surface_handoff_timer_ = 0;
+  }
+  if (surface_handoff_window_ != nullptr) {
+    DestroyWindow(surface_handoff_window_);
+    surface_handoff_window_ = nullptr;
+  }
+  if (surface_handoff_bitmap_ != nullptr) {
+    DeleteObject(surface_handoff_bitmap_);
+    surface_handoff_bitmap_ = nullptr;
+  }
 }

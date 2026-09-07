@@ -6,13 +6,17 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $ExpectedCommit,
 
-    [string] $ResultPath
+    [string] $ResultPath,
+
+    [ValidateSet('DesktopDuplication', 'Gdi')]
+    [string] $CaptureBackend = 'DesktopDuplication'
 )
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'accept-windows-capture.ps1') -PackageDirectory $PackageDirectory -ResultPath $ResultPath -HelpersOnly
 Add-Type -AssemblyName Accessibility
 Add-Type -AssemblyName System.Drawing
+$desktopCaptureSource = if ($CaptureBackend -eq 'Gdi') { 'windows-desktop-frame-gdi.cs' } else { 'windows-desktop-frame.cs' }
 Add-Type -ReferencedAssemblies @([Accessibility.IAccessible].Assembly.Location, [Drawing.Bitmap].Assembly.Location) -TypeDefinition (@'
 using System;
 using System.Collections.Generic;
@@ -27,15 +31,17 @@ public static class ZommiWindowSizeAccess {
     [StructLayout(LayoutKind.Sequential)] private struct Animation { public uint Size; public int Enabled; }
     [DllImport("user32.dll", SetLastError = true)] private static extern bool SystemParametersInfo(uint action, uint parameter, ref Animation value, uint flags);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr window, out Rectangle rectangle);
+    [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr window);
     [DllImport("user32.dll")] private static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] private static extern bool SetPhysicalCursorPos(int left, int top);
     [DllImport("user32.dll")] private static extern bool GetPhysicalCursorPos(out Point point);
     [DllImport("user32.dll")] private static extern void mouse_event(uint flags, uint left, uint top, uint data, UIntPtr extra);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool PostMessage(IntPtr window, uint message, IntPtr word, IntPtr data);
     [DllImport("user32.dll")] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string className, string title);
     [DllImport("oleacc.dll")] private static extern int AccessibleObjectFromWindow(IntPtr window, uint objectId, ref Guid interfaceId, [MarshalAs(UnmanagedType.Interface)] out IAccessible accessible);
     [DllImport("oleacc.dll")] private static extern int AccessibleChildren(IAccessible accessible, int start, int count, [Out, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 2)] object[] children, out int obtained);
 
-    public sealed class Frame { public long elapsedMs; public long presentedMs; public long processedMs; public int[] bounds; public int[] marker; public int[] background; }
+    public sealed class Frame { public long elapsedMs; public long presentedMs; public long captureStartedMs; public long captureCompletedMs; public long processedMs; public int[] bounds; public int[] marker; public int[][] markers; public int[] background; }
     public sealed class Entry { public string Name; public int[] Bounds; }
     private static Stopwatch interactionClock;
     private static long interactionStarted;
@@ -56,13 +62,16 @@ public static class ZommiWindowSizeAccess {
             do {
                 Rectangle rectangle;
                 if (!GetWindowRect(window, out rectangle)) throw new InvalidOperationException("No window bounds");
+                var captureStarted = Stopwatch.GetTimestamp();
                 var captured = duration >= 1000 ? ZommiRenderedSizeProbe.CaptureDeferred() : null;
+                var captureCompleted = Stopwatch.GetTimestamp();
                 if (captured != null) pending.Add(captured);
-                frames.Add(new Frame { elapsedMs = clock.ElapsedMilliseconds, presentedMs = captured != null ? 1000 * (captured.PresentationTimestamp - interactionStarted) / Stopwatch.Frequency : 0, bounds = new [] { rectangle.Left, rectangle.Top, rectangle.Right - rectangle.Left, rectangle.Bottom - rectangle.Top } });
+                frames.Add(new Frame { elapsedMs = clock.ElapsedMilliseconds, presentedMs = captured != null && captured.PresentationTimestamp > 0 ? 1000 * (captured.PresentationTimestamp - interactionStarted) / Stopwatch.Frequency : 0, captureStartedMs = 1000 * (captureStarted - interactionStarted) / Stopwatch.Frequency, captureCompletedMs = 1000 * (captureCompleted - interactionStarted) / Stopwatch.Frequency, bounds = new [] { rectangle.Left, rectangle.Top, rectangle.Right - rectangle.Left, rectangle.Bottom - rectangle.Top } });
                 Thread.Sleep(15);
             } while (clock.ElapsedMilliseconds < duration);
             for (var index = 0; index < pending.Count; index++) {
                 frames[index].marker = ZommiRenderedSizeProbe.AnalyzeDeferred(pending[index], frames[index].elapsedMs);
+                frames[index].markers = ZommiRenderedSizeProbe.LastMarkers;
                 frames[index].background = ZommiRenderedSizeProbe.LastBackground;
                 frames[index].processedMs = clock.ElapsedMilliseconds;
             }
@@ -83,6 +92,12 @@ public static class ZommiWindowSizeAccess {
             interactionClock = Stopwatch.StartNew();
             mouse_event(4, 0, 0, 0, UIntPtr.Zero);
         } finally { SetThreadDpiAwarenessContext(previous); }
+    }
+
+    public static void Restore(IntPtr window) {
+        interactionStarted = Stopwatch.GetTimestamp();
+        interactionClock = Stopwatch.StartNew();
+        if (!PostMessage(window, 0x0112, new IntPtr(0xF120), IntPtr.Zero)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
     }
 
     public static Entry[] Read(IntPtr window) {
@@ -116,7 +131,22 @@ public static class ZommiWindowSizeAccess {
         } catch (COMException) { }
     }
 }
-'@ + (Get-Content -Raw (Join-Path $PSScriptRoot 'windows-size-visual-probe.cs')) + (Get-Content -Raw (Join-Path $PSScriptRoot 'windows-desktop-frame.cs')) + (Get-Content -Raw (Join-Path $PSScriptRoot 'windows-size-background.cs')))
+'@ + (Get-Content -Raw (Join-Path $PSScriptRoot 'windows-size-visual-probe.cs')) + (Get-Content -Raw (Join-Path $PSScriptRoot $desktopCaptureSource)) + (Get-Content -Raw (Join-Path $PSScriptRoot 'windows-size-background.cs')))
+
+foreach ($markerCount in 1..2) {
+    $bitmap = [Drawing.Bitmap]::new(240, 100)
+    try {
+        $graphics = [Drawing.Graphics]::FromImage($bitmap)
+        $brush = [Drawing.SolidBrush]::new([Drawing.Color]::FromArgb(95, 78, 159))
+        try {
+            $graphics.Clear([Drawing.Color]::White)
+            foreach ($index in 0..($markerCount - 1)) { $graphics.FillEllipse($brush, (10 + 110 * $index), 10, 60, 60) }
+        } finally { $brush.Dispose(); $graphics.Dispose() }
+        [ZommiRenderedSizeProbe]::Area = @(0, 0, 240, 100)
+        $markers = @([ZommiRenderedSizeProbe]::FindMarkers($bitmap))
+        if ($markers.Count -ne $markerCount) { throw 'Rendered marker detector failed its duplicate-frame fixture.' }
+    } finally { $bitmap.Dispose() }
+}
 
 $PackageDirectory = [IO.Path]::GetFullPath($PackageDirectory)
 $manifest = Get-Content -Raw (Join-Path $PackageDirectory 'release-manifest.json') | ConvertFrom-Json
@@ -130,6 +160,11 @@ $log = Join-Path $probeRoot 'events.jsonl'
 $settings = Join-Path $probeRoot 'Zommi\settings.json'
 $entrypoint = Join-Path $PackageDirectory 'Zommi.exe'
 $result = @{ gitCommit = $ExpectedCommit; package = $PackageDirectory; captureApi = 'dxgi-desktop-duplication'; latencyClock = 'dxgi-present-qpc-from-input-release'; nativeAnimationsEnabled = [ZommiWindowSizeAccess]::NativeAnimationsEnabled(); transitions = @() }
+$result.resizePolicy = 'retained-frame-without-animation'
+if ($CaptureBackend -eq 'Gdi') {
+    $result.captureApi = 'gdi-desktop-region'
+    $result.latencyClock = 'gdi-copy-completion-qpc-from-input-release'
+}
 
 function Wait-SizeCondition {
     param([scriptblock] $Condition, [string] $Description)
@@ -161,20 +196,38 @@ function Click-SizeControl {
 }
 
 function Measure-SizeTransition {
-    param([string] $Name, [string] $Mode)
+    param([string] $Name, [string] $Mode, [switch] $NativeRestore)
     $before = [ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
-    $nativeTransition = $Mode -eq 'maximized' -or [ZommiWindowsAcceptanceNative]::IsZoomed($window)
     $workArea = [ZommiWindowsAcceptanceNative]::WorkArea($window)
     [ZommiRenderedSizeProbe]::Area = $workArea
     $markerBefore = [ZommiRenderedSizeProbe]::Capture(0, $false)
     $backgroundBefore = [ZommiRenderedSizeProbe]::LastBackground
     if ($null -eq $markerBefore) { throw 'Rendered send control was not visible before resize.' }
-    Click-SizeControl $Name
+    if ($CaptureBackend -eq 'Gdi') {
+        $scale = [ZommiWindowSizeAccess]::GetDpiForWindow($window) / 96.0
+        $clientBefore = [ZommiWindowsAcceptanceNative]::PhysicalClientBounds($window)
+        $targetWidth = if ($Mode -eq 'wide') { 920 * $scale } else { 720 * $scale }
+        $targetRight = $workArea[0] + $workArea[2] / 2 + [Math]::Min($targetWidth, $workArea[2]) / 2
+        $targetBottom = $workArea[1] + $workArea[3] - 18 * $scale
+        if ($Mode -eq 'maximized') { $targetRight = $workArea[0] + $workArea[2]; $targetBottom = $workArea[1] + $workArea[3] }
+        $targetMarkerLeft = $targetRight - ($clientBefore[0] + $clientBefore[2] - $markerBefore[0])
+        $targetMarkerTop = $targetBottom - ($clientBefore[1] + $clientBefore[3] - $markerBefore[1])
+        $captureLeft = [Math]::Max($workArea[0], [Math]::Min($markerBefore[0], $targetMarkerLeft) - $markerBefore[2])
+        $captureTop = [Math]::Max($workArea[1], [Math]::Min($markerBefore[1], $targetMarkerTop) - $markerBefore[3])
+        $captureRight = [Math]::Min($workArea[0] + $workArea[2], [Math]::Max($markerBefore[0], $targetMarkerLeft) + 3 * $markerBefore[2])
+        $captureBottom = [Math]::Min($workArea[1] + $workArea[3], [Math]::Max($markerBefore[1], $targetMarkerTop) + 2 * $markerBefore[3])
+        [ZommiRenderedSizeProbe]::Area = @($captureLeft, $captureTop, ($captureRight - $captureLeft), ($captureBottom - $captureTop))
+        $null = [ZommiRenderedSizeProbe]::Capture(0, $false)
+    }
+    if ($NativeRestore) { [ZommiWindowSizeAccess]::Restore($window) }
+    else { Click-SizeControl $Name }
     $frames = @([ZommiWindowSizeAccess]::Sample($window, 3000))
     $after = [ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
     $distinct = @($frames | ForEach-Object { $_.bounds -join ',' } | Select-Object -Unique)
-    $result.lastMeasurement = @{ name = $Name; before = $before; after = $after; frames = $frames; distinctBounds = $distinct.Count; inputQpc = [ZommiWindowSizeAccess]::InputTimestamp; qpcFrequency = [Diagnostics.Stopwatch]::Frequency }
-    Wait-SizeCondition -Description "persisted $Mode" -Condition { (Test-Path $settings) -and (Get-Content -Raw $settings | ConvertFrom-Json).windowSize -eq $Mode }
+    $result.lastMeasurement = @{ name = $Name; before = $before; after = $after; frames = $frames; captureArea = [ZommiRenderedSizeProbe]::Area; distinctBounds = $distinct.Count; inputQpc = [ZommiWindowSizeAccess]::InputTimestamp; qpcFrequency = [Diagnostics.Stopwatch]::Frequency }
+    if (-not $NativeRestore) {
+        Wait-SizeCondition -Description "persisted $Mode" -Condition { (Test-Path $settings) -and (Get-Content -Raw $settings | ConvertFrom-Json).windowSize -eq $Mode }
+    }
     $markerAfter = [ZommiRenderedSizeProbe]::Capture(0, $false)
     if ($null -eq $markerAfter) { throw 'Rendered send control was not visible after resize.' }
     $visualDistinct = @($frames | ForEach-Object { $_.marker -join ',' } | Select-Object -Unique)
@@ -190,7 +243,11 @@ function Measure-SizeTransition {
         foreach ($channel in 0..2) {
             $maximumBackgroundChange = [Math]::Max($maximumBackgroundChange, [Math]::Abs($frame.background[$channel] - $backgroundBefore[$channel]))
         }
-        if ($null -eq $firstMotionMs -and ([Math]::Abs($frame.marker[0] - $markerBefore[0]) -gt 3 -or [Math]::Abs($frame.marker[1] - $markerBefore[1]) -gt 3)) { $firstMotionMs = $frame.presentedMs; $firstObservedMotionMs = $frame.elapsedMs }
+        if ($null -eq $firstMotionMs -and ([Math]::Abs($frame.marker[0] - $markerBefore[0]) -gt 3 -or [Math]::Abs($frame.marker[1] - $markerBefore[1]) -gt 3)) {
+            $firstMotionMs = $frame.presentedMs
+            if ($CaptureBackend -eq 'Gdi') { $firstMotionMs = $frame.captureCompletedMs }
+            $firstObservedMotionMs = $frame.elapsedMs
+        }
         $atEndpoint = $true
         foreach ($axis in 0..3) {
             if ([Math]::Abs($frame.marker[$axis] - $markerAfter[$axis]) -gt 3 -or [Math]::Abs($frame.bounds[$axis] - $after[$axis]) -gt 3) { $atEndpoint = $false }
@@ -206,15 +263,26 @@ function Measure-SizeTransition {
     if ($null -eq $firstMotionMs -or $firstMotionMs -lt 0 -or $firstMotionMs -gt 250) { throw "Resize $Name did not visibly respond within 250 ms ($firstMotionMs ms)." }
     if ($null -eq $settledMs -or $settledMs -gt 800) { throw "Resize $Name did not finish within 800 ms ($settledMs ms)." }
     $result.lastMeasurement.renderedPositions = $visualDistinct.Count
-    if ($nativeTransition -and $result.nativeAnimationsEnabled -and $visualDistinct.Count -lt 5) { throw "No smooth rendered resize for $Name ($($visualDistinct.Count) positions)." }
     $previousMarker = $markerBefore
     foreach ($frame in $frames) {
         if ($null -eq $frame.marker) { throw "Rendered control disappeared during $Name." }
+        $visibleMarkers = @($frame.markers | Where-Object {
+            $_[0] -lt [Math]::Max($markerBefore[0] + $markerBefore[2], $markerAfter[0] + $markerAfter[2]) + 3 -and
+            $_[0] + $_[2] -gt [Math]::Min($markerBefore[0], $markerAfter[0]) - 3 -and
+            $_[1] -lt [Math]::Max($markerBefore[1] + $markerBefore[3], $markerAfter[1] + $markerAfter[3]) + 3 -and
+            $_[1] + $_[3] -gt [Math]::Min($markerBefore[1], $markerAfter[1]) - 3
+        })
+        if ($visibleMarkers.Count -gt 1) { throw "Rendered control duplicated during $Name." }
+        $atOldFrame = $true
+        $atNewFrame = $true
         foreach ($axis in 0..3) {
             if ($frame.marker[$axis] -lt [Math]::Min($markerBefore[$axis], $markerAfter[$axis]) - 3 -or $frame.marker[$axis] -gt [Math]::Max($markerBefore[$axis], $markerAfter[$axis]) + 3) { throw "Rendered control jumped outside its endpoints during $Name." }
             $direction = [Math]::Sign($markerAfter[$axis] - $markerBefore[$axis])
             if (($frame.marker[$axis] - $previousMarker[$axis]) * $direction -lt -3) { throw "Rendered control reversed direction during $Name." }
+            if ([Math]::Abs($frame.marker[$axis] - $markerBefore[$axis]) -gt 3) { $atOldFrame = $false }
+            if ([Math]::Abs($frame.marker[$axis] - $markerAfter[$axis]) -gt 3) { $atNewFrame = $false }
         }
+        if (-not $atOldFrame -and -not $atNewFrame) { throw "Partial resized frame appeared during $Name." }
         $previousMarker = $frame.marker
     }
     foreach ($axis in 0..3) {
@@ -237,6 +305,7 @@ function Measure-SizeTransition {
             if ([Math]::Abs($clientBounds[$axis] - $workArea[$axis]) -gt 3) { throw 'Max escaped the monitor work area.' }
         }
     } elseif ([ZommiWindowsAcceptanceNative]::IsZoomed($window)) { throw 'Normal size retained native maximized state.' }
+    if (-not [ZommiWindowsAcceptanceNative]::Foreground($window)) { throw "Resize $Name lost foreground ownership." }
     $result.transitions += @{ mode = $Mode; before = $before; after = $after; distinctBounds = $distinct.Count; renderedPositions = $visualDistinct.Count; markerBefore = $markerBefore; markerAfter = $markerAfter; backgroundBefore = $backgroundBefore; maximumBackgroundChange = $maximumBackgroundChange; firstMotionMs = $firstMotionMs; firstObservedMotionMs = $firstObservedMotionMs; settledMs = $settledMs; frames = $frames }
     Write-Host "Rendered $Name transition: $($visualDistinct.Count) positions, RGB change $maximumBackgroundChange, response $firstMotionMs ms, settled $settledMs ms"
 }
@@ -269,7 +338,7 @@ try {
     $normal = [ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
     $normalMarker = [ZommiRenderedSizeProbe]::Capture(0, $false)
     Measure-SizeTransition 'Max' 'maximized'
-    [ZommiWindowsAcceptanceNative]::Restore($window)
+    Measure-SizeTransition 'Restore' 'standard' -NativeRestore
     Wait-SizeCondition -Description 'native Restore retains pre-Max placement' -Condition { ([ZommiWindowsAcceptanceNative]::PhysicalBounds($window) -join ',') -eq ($normal -join ',') }
     Wait-SizeCondition -Description 'native Restore redraws the previous panel' -Condition {
         $marker = [ZommiRenderedSizeProbe]::Capture(0, $false)

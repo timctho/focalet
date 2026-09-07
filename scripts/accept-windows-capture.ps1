@@ -1220,6 +1220,23 @@ function Invoke-PackagedApplicationAcceptance {
             throw "Restoring Maximize did not retain the previous normal window size: before=$($taskbarBounds -join ',') after=$($normalBounds -join ',')."
         }
 
+        [ZommiWindowsAcceptanceNative]::Maximize($window)
+        [ZommiWindowsAcceptanceNative]::Restore($window)
+        [ZommiWindowsAcceptanceNative]::Maximize($window)
+        [ZommiWindowsAcceptanceNative]::Restore($window)
+        $rapidRestoreDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        do {
+            $rapidBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
+            $rapidRestored = -not [ZommiWindowsAcceptanceNative]::IsZoomed($window) -and
+                ($rapidBounds -join ',') -eq ($taskbarBounds -join ',')
+            if ($rapidRestored) { break }
+            Start-Sleep -Milliseconds 50
+        } while ([DateTime]::UtcNow -lt $rapidRestoreDeadline)
+        if (-not $rapidRestored) {
+            throw "Rapid Max/Restore lost the last requested normal placement: before=$($taskbarBounds -join ',') after=$($rapidBounds -join ',')."
+        }
+        Write-Host 'native-max-restore: ok (rapid commands retain the last requested placement)'
+
         $physicalBounds = [ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
         if ($physicalBounds.Count -ne 4) {
             throw 'Could not read the packaged taskbar window physical bounds.'

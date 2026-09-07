@@ -8,6 +8,7 @@
 #include <flutter/method_result.h>
 
 #include <memory>
+#include <cstdint>
 #include "win32_window.h"
 
 // A window that does nothing but host a Flutter view.
@@ -25,6 +26,27 @@ protected:
                          LPARAM const lparam) noexcept override;
 
 private:
+  bool GetSystemSurfaceBounds(bool maximized, RECT& bounds);
+  void ResizeSurface(
+      const RECT& target, bool target_maximized,
+      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+  bool BeginSurfaceHandoff(const RECT& target);
+  void AwaitSurfaceFrame();
+  void CompleteSurfaceHandoff(bool timed_out);
+  void DestroySurfaceHandoff();
+
+  HWND surface_handoff_window_ = nullptr;
+  HBITMAP surface_handoff_bitmap_ = nullptr;
+  std::uint64_t surface_handoff_epoch_ = 0;
+  UINT_PTR surface_handoff_timer_ = 0;
+  SIZE surface_handoff_size_{};
+  bool surface_handoff_applying_ = false;
+  bool surface_handoff_armed_ = false;
+  bool surface_handoff_frame_ready_ = false;
+  WPARAM pending_surface_command_ = 0;
+  std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+      surface_handoff_result_;
+
   void HandleWindowAnimationMethodCall(
       const flutter::MethodCall<flutter::EncodableValue> &call,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
