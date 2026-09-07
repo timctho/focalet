@@ -444,7 +444,7 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertNotIn("SendMessage", click)
         self.assertIn("$cursorClock.ElapsedMilliseconds -lt 5000", acceptance)
         self.assertIn("Context point selector did not expose its crosshair cursor.", acceptance)
-        self.assertIn("point-context: ok (crosshair and click)", acceptance)
+        self.assertIn("point-context: ok (crosshair, click, parent and smaller scope)", acceptance)
 
     def test_manifest_component_cannot_escape_package_root(self) -> None:
         manifest_path = self.root / "release-manifest.json"

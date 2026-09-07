@@ -1575,7 +1575,9 @@ if ($NonVisualOnly) {
 
 Assert-DesktopCaptureSurface
 
-$scopeFixture = [ZommiWindowsAcceptanceNative]::CreateCompetingTopMost(140, 140, 500, 360)
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -ReferencedAssemblies @([System.Windows.Forms.Form].Assembly.Location, [System.Drawing.Bitmap].Assembly.Location) -Path (Join-Path $PSScriptRoot 'windows-context-fixture.cs')
+$scopeFixture = [ZommiContextFixture]::new()
 try {
 $pointContext = Invoke-CaptureRequest -Executable $capture -Method 'selectContext' -Interact {
     param($process)
@@ -1622,15 +1624,21 @@ $pointContext = Invoke-CaptureRequest -Executable $capture -Method 'selectContex
         throw 'The selected element scope was not visible and focused.'
     }
     Add-Type -AssemblyName System.Windows.Forms
-    [System.Windows.Forms.SendKeys]::SendWait('{UP}{DOWN}{ENTER}')
+    [System.Windows.Forms.SendKeys]::SendWait('{UP}{DOWN}{UP}{ENTER}')
 }
 } finally {
-    [ZommiWindowsAcceptanceNative]::CloseCompetingWindow($scopeFixture)
+    $scopeFixture.Dispose()
 }
 if ($pointContext.cancelled -eq $true -or $null -eq $pointContext.snapshot) {
     throw 'Context point selector did not capture the clicked desktop target.'
 }
-Write-Host 'point-context: ok (crosshair and click)'
+$scopeJson = $pointContext.snapshot.accessibilityTree | ConvertTo-Json -Depth 20 -Compress
+if ($pointContext.snapshot.selectionElements[0].name -ne 'Native comment' -or
+    $scopeJson -notmatch 'Selected native line' -or
+    $scopeJson -notmatch 'Parent includes this second line') {
+    throw 'Context scope did not expand, shrink and confirm the intended native parent.'
+}
+Write-Host 'point-context: ok (crosshair, click, parent and smaller scope)'
 
 $selected = Invoke-CaptureRequest -Executable $capture -Method 'selectImage' -Interact {
     param($process)
