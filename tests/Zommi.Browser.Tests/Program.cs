@@ -18,6 +18,7 @@ browser.BeginErrorReadLine(); browser.BeginOutputReadLine();
 using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(50));
 var token = deadline.Token;
 var passed = new List<string>();
+using var desktopPointer = DesktopPointer.Park();
 try
 {
     var portFile = Path.Combine(profile, "DevToolsActivePort");
