@@ -32,7 +32,7 @@ public static class ZommiWindowsAcceptanceNative
     [DllImport("user32.dll")]
     private static extern bool IsWindowEnabled(IntPtr window);
 
-    public static bool ClickNamedButton(IntPtr parent, string name)
+    private static IntPtr FindEnabledButton(IntPtr parent, string name)
     {
         var found = IntPtr.Zero;
         EnumChildWindows(parent, (window, state) => {
@@ -42,6 +42,14 @@ public static class ZommiWindowsAcceptanceNative
             found = window;
             return false;
         }, IntPtr.Zero);
+        return found;
+    }
+
+    public static bool NamedButtonEnabled(IntPtr parent, string name) => FindEnabledButton(parent, name) != IntPtr.Zero;
+
+    public static bool ClickNamedButton(IntPtr parent, string name)
+    {
+        var found = FindEnabledButton(parent, name);
         if (found == IntPtr.Zero) return false;
         SendMessage(found, 0x00F5, IntPtr.Zero, IntPtr.Zero);
         return true;
@@ -1724,6 +1732,16 @@ try {
                     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
                 }
             } elseif ($gesture -eq 'click') {
+                # A native HWND/focus can appear before WinForms completes
+                # initialization. Click the fixture only once its outline exists.
+                $outlineDeadline = [DateTime]::UtcNow.AddSeconds(5)
+                while (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($window, 'Larger') -and
+                       [DateTime]::UtcNow -lt $outlineDeadline) {
+                    Start-Sleep -Milliseconds 25
+                }
+                if (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($window, 'Larger')) {
+                    throw 'The fixture line outline did not become ready for selection.'
+                }
                 if (-not [ZommiWindowsAcceptanceNative]::ClickSelection($window, 220, 220)) { throw 'Unified object click failed.' }
             } else {
                 [ZommiWindowsAcceptanceNative]::DragSelection($window, 100, 100, 140, 130) | Out-Null
