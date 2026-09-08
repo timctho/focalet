@@ -258,7 +258,7 @@ internal sealed class BrowserObservationBridge : IDisposable
         }
     }
 
-    internal static bool IsUnavailable(Exception exception) => exception is OperationCanceledException or IOException or
+    internal static bool IsUnavailable(Exception exception) => exception is OperationCanceledException or TimeoutException or IOException or
         WebSocketException or HttpRequestException or InvalidOperationException or System.Text.Json.JsonException or
         COMException or FlaUI.Core.Exceptions.ElementNotAvailableException or ArgumentException or KeyNotFoundException or FormatException;
     internal static CaptureRectangle ToRectangle(Rectangle rectangle) => new(rectangle.X, rectangle.Y, rectangle.Width, rectangle.Height);

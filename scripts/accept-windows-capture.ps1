@@ -936,6 +936,10 @@ function Invoke-CaptureRequest {
             $process.Kill()
             $process.WaitForExit()
         }
+        $diagnostic = $process.StandardError.ReadToEnd()
+        if (-not [string]::IsNullOrWhiteSpace($diagnostic)) {
+            Write-Host "capture-helper diagnostics: $diagnostic"
+        }
         $process.Dispose()
     }
 }
@@ -1760,7 +1764,7 @@ $scopeJson = $pointContext.snapshot.accessibilityTree | ConvertTo-Json -Depth 20
 if ($pointContext.snapshot.selectionElements[0].name -ne 'Native comment' -or
     $scopeJson -notmatch 'Selected native line' -or
     $scopeJson -notmatch 'Parent includes this second line') {
-    throw 'Context scope did not expand, shrink and confirm the intended native parent.'
+    throw "Context scope did not expand, shrink and confirm the intended native parent. Selected=$($pointContext.snapshot.selectionElements[0].name); truncated=$($pointContext.snapshot.accessibilityTree.truncated); firstLine=$($scopeJson -match 'Selected native line'); secondLine=$($scopeJson -match 'Parent includes this second line')."
 }
 Write-Host 'point-context: ok (crosshair, click, parent and smaller scope)'
 
