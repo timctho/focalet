@@ -446,7 +446,7 @@ public static class ZommiWindowsAcceptanceNative
         return GetForegroundWindow() == window;
     }
 
-    public static IntPtr CreateCompetingTopMost(int x, int y, int width, int height)
+    public static IntPtr CreateCompetingTopMost(int x, int y, int width, int height, IntPtr owner = default(IntPtr))
     {
         const int topMost = 0x00000008;
         const int toolWindow = 0x00000080;
@@ -457,14 +457,15 @@ public static class ZommiWindowsAcceptanceNative
         const uint showWindow = 0x0040;
         var window = CreateWindowEx(
             topMost | toolWindow | noActivate,
-            "STATIC",
+            // WindowFromPoint skips STATIC controls; use a hit-testable cover.
+            "BUTTON",
             "Zommi acceptance competing topmost",
             popup | visible,
             x,
             y,
             width,
             height,
-            IntPtr.Zero,
+            owner,
             IntPtr.Zero,
             IntPtr.Zero,
             IntPtr.Zero);
@@ -480,6 +481,18 @@ public static class ZommiWindowsAcceptanceNative
                 noActivatePosition | showWindow);
         }
         return window;
+    }
+
+    public static IntPtr CreateCoveringWindow(IntPtr source)
+    {
+        var previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
+        try
+        {
+            // An owned popup stays above its source when closing the selector
+            // reactivates that source. An unrelated topmost window can fall behind it.
+            return CreateCompetingTopMost(330, 300, 90, 60, source);
+        }
+        finally { SetThreadDpiAwarenessContext(previous); }
     }
 
     public static bool IsWindowAtPoint(IntPtr window, int x, int y)
@@ -1789,7 +1802,7 @@ try {
             }
             if ($gesture -in @('parent', 'window', 'window-covered')) {
                 if ($gesture -eq 'window-covered') {
-                    $script:contentCoverWindow = [ZommiWindowsAcceptanceNative]::CreateCompetingTopMost(330, 300, 90, 60)
+                    $script:contentCoverWindow = [ZommiWindowsAcceptanceNative]::CreateCoveringWindow($contentFixture.Window)
                     if ($script:contentCoverWindow -eq [IntPtr]::Zero) { throw 'Could not create the covering window.' }
                 }
                 $button = if ($gesture -eq 'parent') { 'Larger' } else { 'Whole window' }
@@ -1882,6 +1895,10 @@ try {
             } else {
                 [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($window, 590, 435, 630, 465)
             }
+        }
+        if ($gesture -eq 'window-covered' -and
+            -not [ZommiWindowsAcceptanceNative]::IsOwnedWindowAtPoint($script:contentCoverWindow, 375, 330)) {
+            throw 'The covering fixture did not remain above the source window.'
         }
         } finally {
             if ($script:contentCoverWindow -ne [IntPtr]::Zero) {
