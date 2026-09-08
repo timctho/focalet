@@ -1493,18 +1493,7 @@ function Invoke-PackagedApplicationAcceptance {
             -not [ZommiWindowsAcceptanceNative]::Foreground($selector)) {
             throw 'Packaged image selector lost its topmost foreground state.'
         }
-        $dpi = [double][ZommiWindowsAcceptanceNative]::WindowDpi($selector)
-        $logicalWidth = [int][Math]::Max(4, [Math]::Round(40 * 96 / $dpi))
-        $logicalHeight = [int][Math]::Max(4, [Math]::Round(30 * 96 / $dpi))
-        if (-not [ZommiWindowsAcceptanceNative]::DragSelection(
-            $selector,
-            100,
-            100,
-            100 + $logicalWidth,
-            100 + $logicalHeight
-        )) {
-            throw 'Could not drag the packaged application region selector.'
-        }
+        [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector, 100, 100, 140, 130)
         $imageResult = Wait-ForAcceptanceEvent `
             -Path $acceptanceLog `
             -Name 'shortcut.image' `
