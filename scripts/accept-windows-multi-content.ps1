@@ -59,6 +59,8 @@ foreach ($case in $cases) {
                     [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,180,270,530,310)
                 } else {
                     [ZommiWindowsAcceptanceNative]::ClickSelection($selector,220,220) | Out-Null
+                    # A fresh hover over the same item must not erase its retained blue outline.
+                    Start-Sleep -Milliseconds 800
                     Wait-MultiOutline 530 225
                     [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,180,270,530,310)
                     # Duplicate region must not produce another attachment.

@@ -387,20 +387,8 @@ internal sealed class ContentSelectionForm : PointSelectionForm
 
     protected override void OnPaint(PaintEventArgs e)
     {
-        using var selectedPen = new Pen(Color.FromArgb(111, 205, 255), 3);
-        using var numberFont = new Font("Segoe UI", 10, FontStyle.Bold);
-        for (var index = 0; index < selections.Count; index++)
-        {
-            var selected = selections[index].Region;
-            selected.Offset(-Left, -Top);
-            e.Graphics.DrawRectangle(selectedPen, selected);
-            var numberX = selected.Left + 3;
-            var numberY = selected.Width < 36 || selected.Height < 30 ? Math.Max(0, selected.Top - 26) : selected.Top + 3;
-            e.Graphics.FillRectangle(Brushes.Black, numberX, numberY, 28, 24);
-            e.Graphics.DrawString((index + 1).ToString(), numberFont, Brushes.White, numberX + 4, numberY + 2);
-        }
         var bounds = OutlineBounds;
-        if (bounds.IsEmpty) return;
+        if (bounds.IsEmpty) { PaintSelections(e.Graphics); return; }
         bounds.Offset(-Left, -Top);
         using var pen = new Pen(Color.White, 3);
         using var fill = new SolidBrush(Color.FromArgb(45, 255, 255, 255));
@@ -412,6 +400,25 @@ internal sealed class ContentSelectionForm : PointSelectionForm
         var position = new PointF(Math.Clamp(bounds.Left, 4, Math.Max(4, ClientSize.Width - size.Width - 16)), Math.Clamp(bounds.Top - size.Height - 8, 4, Math.Max(4, ClientSize.Height - size.Height - 12)));
         e.Graphics.FillRectangle(Brushes.Black, position.X, position.Y, size.Width + 12, size.Height + 6);
         e.Graphics.DrawString(label, font, Brushes.White, position.X + 6, position.Y + 3);
+        PaintSelections(e.Graphics);
+    }
+
+    // Retained choices stay visible above a refreshed hover outline, including
+    // when the pointer remains on an already selected item.
+    private void PaintSelections(Graphics graphics)
+    {
+        using var selectedPen = new Pen(Color.FromArgb(111, 205, 255), 3);
+        using var numberFont = new Font("Segoe UI", 10, FontStyle.Bold);
+        for (var index = 0; index < selections.Count; index++)
+        {
+            var selected = selections[index].Region;
+            selected.Offset(-Left, -Top);
+            graphics.DrawRectangle(selectedPen, selected);
+            var numberX = selected.Left + 3;
+            var numberY = selected.Width < 36 || selected.Height < 30 ? Math.Max(0, selected.Top - 26) : selected.Top + 3;
+            graphics.FillRectangle(Brushes.Black, numberX, numberY, 28, 24);
+            graphics.DrawString((index + 1).ToString(), numberFont, Brushes.White, numberX + 4, numberY + 2);
+        }
     }
 
     protected override void Dispose(bool disposing)
