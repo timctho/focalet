@@ -60,6 +60,9 @@ pub fn compact_accessibility_tree(tree: &Value) -> Value {
 
 fn format_snapshot(snapshot: &Value, index: usize, total: usize) -> String {
     let mut lines = Vec::new();
+    if let Some(label) = non_empty_field(snapshot, "contextLabel") {
+        lines.push(format!("User reference [{}]:", clean_text(&label, 40)));
+    }
     if total > 1 {
         lines.push(format!("Context {} of {total}:", index + 1));
     }
@@ -451,6 +454,25 @@ mod tests {
     use serde_json::json;
 
     use super::{build_context_handoff, compact_accessibility_tree};
+
+    #[test]
+    fn user_reference_labels_keep_their_image_mapping_after_replacement() {
+        let handoff = build_context_handoff(
+            "Compare B and C",
+            &[
+                json!({"contextLabel": "B", "imageIndex": 1, "region": {"status": "image-only"}}),
+                json!({"contextLabel": "C", "selection": ["Selected comment"]}),
+            ],
+            1,
+        );
+        let b = handoff.find("User reference [B]:").unwrap();
+        let image = handoff
+            .find("Attached image 1 corresponds to this context.")
+            .unwrap();
+        let c = handoff.find("User reference [C]:").unwrap();
+        assert!(b < image && image < c);
+        assert!(handoff.contains("Selected comment"));
+    }
 
     #[test]
     fn browser_handoff_preserves_selection_identity_and_image_mapping() {

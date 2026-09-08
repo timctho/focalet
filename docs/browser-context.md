@@ -4,11 +4,26 @@ On Windows, Zommi can enrich accessible context with DOM content from a local
 Chromium debugging connection. `Alt+A` captures the original text selection,
 the pointed element and nearby content. It does not attach pixels.
 
-Use the composer's context picker to click content, inspect its outline, and
-adjust the scope. In a connected browser, move the pointer to another element,
-press Up to select a parent or Down to return to a smaller element, then click
-or press Enter to attach. Escape cancels. Other Windows applications use an
-accessible-element outline with the same parent/smaller/confirm keys.
+Use **Select content** beside the composer to open the Windows content picker.
+Point at content to see its accessible outline, then click to attach it. Drag
+anywhere to choose a rectangle instead. The visible **Larger**, **Smaller** and
+**Whole window** controls change the scope without needing another shortcut.
+Up/Down and Enter remain available. Escape cancels and returns to the draft.
+If an application exposes no usable object, the picker asks you to drag a region.
+
+This first version uses Windows accessibility for the interactive outlines;
+the final rectangle goes through the existing DOM/UIA region capture pipeline.
+Every explicit selection includes an image and aligned text when available.
+Whole-window capture includes the visible desktop portion and rejects a covered
+or moved source window. It is a single snapshot, not a continuing screen share.
+Other platforms retain their existing selection providers.
+
+Attachments show a stable A/B reference and a readable excerpt or image preview.
+**Adjust** replaces that attachment in place, preserving its reference and the
+typed question. Cancellation or a capture failure preserves the old attachment.
+References are included in the agent handoff beside the corresponding image
+index. Removed references are not reused within the same draft. Image markup
+and arrows are not included in this first version.
 
 `Alt+Shift+A` selects an image region. Text is collected from the final region,
 not from the location of the pointer before dragging. The preview says **Image

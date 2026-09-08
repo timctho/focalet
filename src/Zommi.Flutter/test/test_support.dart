@@ -458,6 +458,7 @@ final class FakeDesktopBridge implements DesktopBridge {
   bool closed = false;
   Future<DesktopReadiness>? initializeGate;
   Future<void>? surfaceGate;
+  Future<ContextAttachment?>? selectionGate;
   bool pointerWithinSurface = false;
 
   @override
@@ -481,6 +482,7 @@ final class FakeDesktopBridge implements DesktopBridge {
   @override
   Future<ContextAttachment?> selectPointerContext() async {
     calls.add('selectPointerContext');
+    if (selectionGate case final gate?) return gate;
     return nextContext;
   }
 

@@ -268,6 +268,22 @@ internal sealed class BrowserObservationBridge : IDisposable
 
 internal static class NativeCaptureWindow
 {
+    public static nint BeneathOverlay(Point point, uint excludedProcessId)
+    {
+        nint result = 0;
+        EnumWindows((window, _) =>
+        {
+            var process = ProcessId(window);
+            if (!IsWindowVisible(window) || IsIconic(window) || process == Environment.ProcessId || process == excludedProcessId)
+                return true;
+            if (DwmGetWindowAttribute(window, 14, out var cloaked, sizeof(int)) == 0 && cloaked != 0) return true;
+            var bounds = Bounds(window);
+            if (point.X < bounds.X || point.X >= bounds.Right || point.Y < bounds.Y || point.Y >= bounds.Bottom) return true;
+            result = window;
+            return false;
+        }, 0);
+        return result;
+    }
     public static int ProcessId(nint window) { GetWindowThreadProcessId(window, out var id); return checked((int)id); }
     public static string Title(nint window)
     {
@@ -315,7 +331,8 @@ internal static class NativeCaptureWindow
         nint result = 0;
         EnumWindows((window, _) =>
         {
-            if (!IsWindowVisible(window) || ProcessId(window) == Environment.ProcessId) return true;
+            if (!IsWindowVisible(window) || IsIconic(window) || ProcessId(window) == Environment.ProcessId) return true;
+            if (DwmGetWindowAttribute(window, 14, out var cloaked, sizeof(int)) == 0 && cloaked != 0) return true;
             var bounds = Bounds(window);
             if (!bounds.Intersects(area)) return true;
             if (bounds.Contains(area)) result = window;
@@ -330,6 +347,8 @@ internal static class NativeCaptureWindow
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(nint parent, EnumWindowCallback callback, nint parameter);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(nint window, StringBuilder text, int count);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
+    [DllImport("user32.dll")] private static extern bool IsIconic(nint window);
+    [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(nint window, int attribute, out int value, int size);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(nint window, StringBuilder text, int count);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(nint window, out WindowRect bounds);

@@ -1575,6 +1575,7 @@ class ContextPreviewPanel extends StatelessWidget {
     required this.onClose,
     required this.onPointerEnter,
     required this.onPointerExit,
+    this.onAdjust,
     super.key,
   });
 
@@ -1582,6 +1583,7 @@ class ContextPreviewPanel extends StatelessWidget {
   final VoidCallback onClose;
   final VoidCallback onPointerEnter;
   final VoidCallback onPointerExit;
+  final VoidCallback? onAdjust;
 
   @override
   Widget build(BuildContext context) {
@@ -1609,10 +1611,17 @@ class ContextPreviewPanel extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Text(
-                          attachment.token,
+                          '${attachment.reference} · ${attachment.sourceTitle}',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontWeight: FontWeight.w700),
                         ),
                       ),
+                      if (onAdjust != null)
+                        TextButton(
+                          onPressed: onAdjust,
+                          child: const Text('Adjust'),
+                        ),
                       IconButton(
                         tooltip: 'Close context preview',
                         onPressed: onClose,

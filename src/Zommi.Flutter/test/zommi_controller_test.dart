@@ -399,7 +399,7 @@ void main() {
       desktop.calls.where((call) => call == 'surface:false:false'),
       isEmpty,
     );
-    expect(controller.attachments.single.token, '[example.com]');
+    expect(controller.attachments.single.token, '[A]');
     expect(desktop.surfaceAnimations, everyElement(isFalse));
     await controller.close();
   });

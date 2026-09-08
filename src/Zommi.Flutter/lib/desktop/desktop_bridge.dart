@@ -526,6 +526,9 @@ final class FlutterDesktopBridge
       // invisible capture of the old pointer position.
       await Future<void>.delayed(const Duration(milliseconds: 90));
       final result = await _captureProvider.selectContext();
+      if (result?.image case final image?) {
+        return imageAttachmentFromSelection(image, _nextAttachmentId());
+      }
       if (result?.snapshot == null) return null;
       return ContextAttachment(
         id: _nextAttachmentId(),
@@ -915,10 +918,7 @@ final class FlutterDesktopBridge
           items: [
             MenuItem(key: 'open', label: 'Open Zommi'),
             MenuItem(key: 'capture', label: 'Capture context (Alt+A)'),
-            MenuItem(
-              key: 'image',
-              label: 'Select image + pointer context (Alt+Shift+A)',
-            ),
+            MenuItem(key: 'image', label: 'Select image region (Alt+Shift+A)'),
             MenuItem.separator(),
             MenuItem(key: 'exit', label: 'Exit Zommi'),
           ],
@@ -1315,7 +1315,9 @@ abstract interface class CaptureProvider {
 }
 
 final class CaptureResult {
-  const CaptureResult({this.snapshot, this.previewText = ''});
+  const CaptureResult({this.snapshot, this.previewText = '', this.image});
+
+  final ImageSelection? image;
 
   final Map<String, Object?>? snapshot;
   final String previewText;
@@ -1463,7 +1465,7 @@ final class WindowsCaptureProvider implements CaptureProvider {
   @override
   Future<CaptureResult?> selectContext() async {
     final response = await _selectorClient.request(
-      'selectContext',
+      'selectContent',
       parameters: {'returnProcessId': pid},
     );
     if (response['errorMessage'] case final String message
@@ -1471,9 +1473,19 @@ final class WindowsCaptureProvider implements CaptureProvider {
       throw StateError(message);
     }
     if (response['cancelled'] == true) return null;
+    final dataUrl = response['dataUrl']?.toString() ?? '';
     return CaptureResult(
       snapshot: _nullableMap(response['snapshot']),
       previewText: response['previewText']?.toString() ?? '',
+      image: dataUrl.isNotEmpty
+          ? ImageSelection(
+              dataUrl: dataUrl,
+              bounds: _nullableMap(response['bounds']),
+              snapshot: _nullableMap(response['snapshot']),
+              alignment: _nullableMap(response['alignment']),
+              previewText: response['previewText']?.toString(),
+            )
+          : null,
     );
   }
 
@@ -1812,7 +1824,9 @@ final class ProcessNativeCaptureClient implements NativeCaptureClient {
     _pending[id] = completer;
     if (onReady != null) _ready[id] = onReady;
     final response = completer.future.timeout(
-      method == 'selectContext' || method == 'selectImage'
+      method == 'selectContent' ||
+              method == 'selectContext' ||
+              method == 'selectImage'
           ? selectionTimeout
           : captureTimeout,
       onTimeout: () {

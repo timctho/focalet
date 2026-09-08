@@ -286,9 +286,9 @@ void main() {
         find.byKey(const ValueKey('zommi-composer')),
         'hey i own ',
       );
-      await _selectImageFromComposerMenu(tester);
+      await _selectImageFromComposer(tester, desktop);
       await tester.pumpAndSettle();
-      expect(desktop.calls, contains('selectImage:false'));
+      expect(desktop.calls, contains('selectPointerContext'));
       expect(
         find.byKey(const ValueKey('inline-image-image-1')),
         findsOneWidget,
@@ -302,7 +302,7 @@ void main() {
         token: '',
         imageDataUrl: _onePixelPng,
       );
-      await _selectImageFromComposerMenu(tester);
+      await _selectImageFromComposer(tester, desktop);
       await tester.pumpAndSettle();
       expect(
         find.byKey(const ValueKey('inline-image-image-2')),
@@ -311,7 +311,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('send-message')));
       await tester.pump();
       expect(core.lastMessage, "hey i own and i'd like to consider to buy");
-      expect(core.lastSnapshots, hasLength(1));
+      expect(core.lastSnapshots, hasLength(2));
       expect(core.lastImages, [_onePixelPng, _onePixelPng]);
       expect(find.byType(InlineAttachmentMessage), findsOneWidget);
       expect(
@@ -364,7 +364,7 @@ void main() {
     },
   );
 
-  testWidgets('composer plus menu captures pointer context and offers image', (
+  testWidgets('one visible content entry captures without a mode menu', (
     tester,
   ) async {
     final desktop = FakeDesktopBridge()
@@ -375,31 +375,7 @@ void main() {
       desktop: desktop,
     );
 
-    final composerBounds = tester.getRect(
-      find.byKey(const ValueKey('message-composer-shell')),
-    );
-    await tester.tap(find.byKey(const ValueKey('composer-attachment-menu')));
-    await tester.pump();
-    final menu = find.byKey(const ValueKey('composer-attachment-menu-surface'));
-    expect(tester.widget<ZommiOverlayPanelSurface>(menu).width, 286);
-    final startingTop = tester.getTopLeft(menu).dy;
-    await tester.pump(const Duration(milliseconds: 90));
-    final movingTop = tester.getTopLeft(menu).dy;
-    await tester.pumpAndSettle();
-    final menuBounds = tester.getRect(menu);
-    expect(movingTop, lessThan(startingTop));
-    expect(menuBounds.bottom, lessThanOrEqualTo(composerBounds.top));
-    final menuMaterial = tester.widget<Material>(
-      find.descendant(of: menu, matching: find.byType(Material)).first,
-    );
-    expect(menuMaterial.surfaceTintColor, Colors.transparent);
-    expect(menuMaterial.shadowColor, zommiOverlayPanelShadowColor);
-    expect(find.text('Click to capture context'), findsOneWidget);
-    expect(find.text('Select image'), findsOneWidget);
-    expect(find.text('Alt+A'), findsOneWidget);
-    expect(find.text('Alt+Shift+A'), findsOneWidget);
-
-    await tester.tap(find.byKey(const ValueKey('capture-pointer-context')));
+    await tester.tap(find.byKey(const ValueKey('select-content')));
     await tester.pumpAndSettle();
     expect(
       desktop.calls,
@@ -1766,10 +1742,12 @@ Future<void> _expand(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
-Future<void> _selectImageFromComposerMenu(WidgetTester tester) async {
-  await tester.tap(find.byKey(const ValueKey('composer-attachment-menu')));
-  await tester.pumpAndSettle();
-  await tester.tap(find.byKey(const ValueKey('select-image-context')));
+Future<void> _selectImageFromComposer(
+  WidgetTester tester,
+  FakeDesktopBridge desktop,
+) async {
+  desktop.nextContext = desktop.nextImage;
+  await tester.tap(find.byKey(const ValueKey('select-content')));
 }
 
 void _appendComposerText(WidgetTester tester, String value) {

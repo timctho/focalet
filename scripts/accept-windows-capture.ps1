@@ -5,6 +5,8 @@ param(
 
     [switch] $NonVisualOnly,
 
+    [switch] $NativeOnly,
+
     [switch] $HelpersOnly,
 
     [string] $ResultPath
@@ -23,6 +25,27 @@ public static class ZommiWindowsAcceptanceNative
 
     [DllImport("user32.dll")]
     private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr state);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumChildWindows(IntPtr parent, EnumWindowsProc callback, IntPtr state);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowEnabled(IntPtr window);
+
+    public static bool ClickNamedButton(IntPtr parent, string name)
+    {
+        var found = IntPtr.Zero;
+        EnumChildWindows(parent, (window, state) => {
+            var text = new StringBuilder(256);
+            GetWindowText(window, text, text.Capacity);
+            if (text.ToString() != name || !IsWindowVisible(window) || !IsWindowEnabled(window)) return true;
+            found = window;
+            return false;
+        }, IntPtr.Zero);
+        if (found == IntPtr.Zero) return false;
+        SendMessage(found, 0x00F5, IntPtr.Zero, IntPtr.Zero);
+        return true;
+    }
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
@@ -1579,6 +1602,14 @@ if ($cancelled.cancelled -ne $true) {
 }
 Write-Host 'region-cancel: ok'
 
+$contentCancelled = Invoke-CaptureRequest -Executable $capture -Method 'selectContent' -Interact {
+    param($process)
+    $window = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi content selection'
+    if (-not [ZommiWindowsAcceptanceNative]::CancelSelection($window)) { throw 'Could not cancel unified selection.' }
+}
+if ($contentCancelled.cancelled -ne $true) { throw 'Unified selection did not preserve cancellation.' }
+Write-Host 'content-cancel: ok'
+
 if ($NonVisualOnly) {
     Write-AcceptanceResult -Result @{
         captureHelper = $capture
@@ -1636,6 +1667,10 @@ $pointContext = Invoke-CaptureRequest -Executable $capture -Method 'selectContex
         throw 'Could not click the context point selector.'
     }
     $scope = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi context scope'
+    $scopeDeadline = [DateTime]::UtcNow.AddSeconds(5)
+    while (-not [ZommiWindowsAcceptanceNative]::Foreground($scope) -and [DateTime]::UtcNow -lt $scopeDeadline) {
+        Start-Sleep -Milliseconds 50
+    }
     if (-not [ZommiWindowsAcceptanceNative]::Foreground($scope)) {
         throw 'The selected element scope was not visible and focused.'
     }
@@ -1655,6 +1690,64 @@ if ($pointContext.snapshot.selectionElements[0].name -ne 'Native comment' -or
     throw 'Context scope did not expand, shrink and confirm the intended native parent.'
 }
 Write-Host 'point-context: ok (crosshair, click, parent and smaller scope)'
+
+$contentFixture = [ZommiContextFixture]::new()
+try {
+    foreach ($gesture in @('click', 'parent', 'window', 'drag')) {
+        $content = Invoke-CaptureRequest -Executable $capture -Method 'selectContent' -Interact {
+            param($process)
+            $window = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi content selection'
+            [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(220, 220) | Out-Null
+            $readyDeadline = [DateTime]::UtcNow.AddSeconds(5)
+            while ((-not [ZommiWindowsAcceptanceNative]::Foreground($window) -or
+                    -not [ZommiWindowsAcceptanceNative]::IsOwnedWindowAtPoint($window, 220, 220)) -and
+                   [DateTime]::UtcNow -lt $readyDeadline) {
+                Start-Sleep -Milliseconds 50
+            }
+            if (-not [ZommiWindowsAcceptanceNative]::IsOwnedWindowAtPoint($window, 220, 220)) {
+                throw 'Unified selector did not acquire pointer ownership.'
+            }
+            if ($gesture -in @('parent', 'window')) {
+                $button = if ($gesture -eq 'parent') { 'Larger' } else { 'Whole window' }
+                $deadline = [DateTime]::UtcNow.AddSeconds(8)
+                do {
+                    $clicked = [ZommiWindowsAcceptanceNative]::ClickNamedButton($window, $button)
+                    if ($clicked) { break }
+                    Start-Sleep -Milliseconds 100
+                } while ([DateTime]::UtcNow -lt $deadline)
+                if (-not $clicked) { throw "Unified selector did not expose an enabled $button button." }
+                if ($gesture -eq 'parent') {
+                    if (-not [ZommiWindowsAcceptanceNative]::ClickNamedButton($window, 'Smaller') -or
+                        -not [ZommiWindowsAcceptanceNative]::ClickNamedButton($window, 'Larger')) {
+                        throw 'Unified selector could not shrink and expand using visible buttons.'
+                    }
+                    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+                }
+            } elseif ($gesture -eq 'click') {
+                if (-not [ZommiWindowsAcceptanceNative]::ClickSelection($window, 220, 220)) { throw 'Unified object click failed.' }
+            } else {
+                [ZommiWindowsAcceptanceNative]::DragSelection($window, 100, 100, 140, 130) | Out-Null
+            }
+        }
+        if ($content.cancelled -eq $true -or $content.dataUrl -notlike 'data:image/png;base64,*') {
+            throw "Unified $gesture did not produce a previewable attachment: $($content.errorMessage)"
+        }
+        $text = $content.snapshot | ConvertTo-Json -Depth 30 -Compress
+        if ($gesture -eq 'click' -and ($text -notmatch 'Selected native line' -or $text -match 'Parent includes this second line')) {
+            throw 'Unified object click did not capture only the outlined line.'
+        }
+        if ($gesture -in @('parent', 'window') -and
+            ($text -notmatch 'Selected native line' -or $text -notmatch 'Parent includes this second line')) {
+            throw "Unified $gesture did not include both visible lines."
+        }
+        if ($gesture -eq 'window' -and ($content.bounds.width -ne 500 -or $content.bounds.height -ne 360)) {
+            throw 'Whole-window selection did not match the source window bounds.'
+        }
+        Write-Host "content-${gesture}: ok"
+    }
+} finally {
+    $contentFixture.Dispose()
+}
 
 $selected = Invoke-CaptureRequest -Executable $capture -Method 'selectImage' -Interact {
     param($process)
@@ -1700,9 +1793,9 @@ if ($width -ne $selected.bounds.width -or $height -ne $selected.bounds.height) {
     throw "PNG dimensions ${width}x${height} do not match the reported bounds $($selected.bounds.width)x$($selected.bounds.height)."
 }
 
-$applicationResult = Invoke-PackagedApplicationAcceptance `
-    -Package $package `
-    -CaptureExecutable $capture
+$applicationResult = if (-not $NativeOnly) {
+    Invoke-PackagedApplicationAcceptance -Package $package -CaptureExecutable $capture
+} else { $null }
 
 Write-AcceptanceResult -Result @{
     captureHelper = $capture
@@ -1710,6 +1803,7 @@ Write-AcceptanceResult -Result @{
     windowOwnership = $true
     cancellation = $true
     pointContext = $true
+    unifiedContent = @('cancel', 'click', 'parent', 'window', 'drag')
     selectedBounds = @($selected.bounds.x, $selected.bounds.y, $selected.bounds.width, $selected.bounds.height)
     pngDimensions = @($width, $height)
     pngBytes = $png.Length

@@ -61,6 +61,8 @@ final class ZommiController extends ChangeNotifier {
   bool sessionBusy = false;
   bool sessionSettingsBusy = false;
   bool submitting = false;
+  bool selectingContent = false;
+  int _attachmentSequence = 0;
   bool expanded = true;
   WindowSizeSetting windowSize;
   bool get largePanel => windowSize == WindowSizeSetting.wide;
@@ -619,7 +621,7 @@ final class ZommiController extends ChangeNotifier {
     final text = message.trim();
     final runtimeTargetId = activeRuntime?.id;
     final sessionId = activeSessionId;
-    if (text.isEmpty || submitting) return;
+    if (text.isEmpty || submitting || selectingContent) return;
     if (runtimeTargetId == null || sessionId == null) {
       _setStatus(
         'No agent session is ready. Choose or refresh an agent.',
@@ -631,6 +633,7 @@ final class ZommiController extends ChangeNotifier {
     if (_activeTurns.containsKey(sessionKey)) return;
     final sendingAttachments = _orderedAttachments(attachmentOrder);
     attachments.clear();
+    _attachmentSequence = 0;
     previewAttachment = null;
     final operationId =
         'flutter:${DateTime.now().microsecondsSinceEpoch}:${++_localTurnSequence}';
@@ -784,33 +787,64 @@ final class ZommiController extends ChangeNotifier {
     }
   }
 
-  Future<void> addPointerContext() async {
-    var attachmentAdded = false;
+  Future<void> addPointerContext({String? replacingId}) async {
+    if (selectingContent) return;
+    selectingContent = true;
+    previewAttachment = null;
+    _notify();
     try {
-      final attachment = await desktop.selectPointerContext();
+      var attachment = await desktop.selectPointerContext();
       if (attachment != null) {
-        addAttachment(attachment);
-        attachmentAdded = true;
-        _setStatus('Context attached');
-      } else {
+        if (attachment.hasImage && !imageInputSupported) {
+          if (mapValue(attachment.snapshot?['region'])['status'] ==
+              'image-only') {
+            _setStatus(
+              'This selection needs an agent that accepts images.',
+              warning: true,
+            );
+            return;
+          }
+          attachment = ContextAttachment(
+            id: attachment.id,
+            token: attachment.token,
+            snapshot: attachment.snapshot,
+            previewText: attachment.previewText,
+            bounds: attachment.bounds,
+          );
+        }
+        if (replacingId == null) {
+          addAttachment(attachment);
+        } else {
+          final index = attachments.indexWhere(
+            (item) => item.id == replacingId,
+          );
+          if (index < 0) return;
+          final previous = attachments[index];
+          attachments[index] = ContextAttachment(
+            id: previous.id,
+            token: previous.token,
+            snapshot: attachment.snapshot,
+            previewText: attachment.previewText,
+            imageDataUrl: attachment.imageDataUrl,
+            bounds: attachment.bounds,
+          );
+        }
         _setStatus(
-          'No accessible context was exposed under the pointer',
-          warning: true,
+          replacingId == null ? 'Content attached' : 'Selection updated',
         );
       }
     } on Object catch (error) {
-      _setStatus('Context capture failed · $error', warning: true);
+      _setStatus('Selection failed · $error', warning: true);
     } finally {
-      if (!attachmentAdded) {
-        focusComposerEpoch++;
-        _notify();
-      }
+      selectingContent = false;
+      focusComposerEpoch++;
+      _notify();
       await desktop.showPanel();
     }
   }
 
   void addAttachment(ContextAttachment attachment) {
-    attachments.add(attachment.withToken(_attachmentToken(attachment)));
+    attachments.add(attachment.withToken(_attachmentToken()));
     previewAttachment = null;
     focusComposerEpoch++;
     _notify();
@@ -822,33 +856,15 @@ final class ZommiController extends ChangeNotifier {
     _notify();
   }
 
-  String _attachmentToken(ContextAttachment attachment) {
-    var label = 'image';
-    final snapshot = attachment.snapshot;
-    if (!attachment.hasImage && snapshot != null) {
-      final locator = mapValue(snapshot['locator']);
-      if (locator['kind']?.toString().toLowerCase() == 'url') {
-        final uri = Uri.tryParse(locator['value']?.toString() ?? '');
-        label =
-            uri?.host.replaceFirst(
-              RegExp(r'^www\.', caseSensitive: false),
-              '',
-            ) ??
-            '';
-        if (label.isEmpty) label = 'context';
-      } else {
-        label = (snapshot['application']?.toString() ?? 'context')
-            .toLowerCase()
-            .replaceAll(RegExp(r'\s+'), '-');
-      }
+  String _attachmentToken() {
+    var index = ++_attachmentSequence;
+    var label = '';
+    while (index > 0) {
+      index--;
+      label = String.fromCharCode(65 + index % 26) + label;
+      index ~/= 26;
     }
-    if (label.length > 30) label = label.substring(0, 30);
-    final used = attachments.map((item) => item.token).toSet();
-    var token = '[$label]';
-    for (var suffix = 2; used.contains(token); suffix++) {
-      token = '[$label $suffix]';
-    }
-    return token;
+    return '[$label]';
   }
 
   void showAttachmentPreview(ContextAttachment attachment) {

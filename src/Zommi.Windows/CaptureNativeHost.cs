@@ -112,6 +112,9 @@ internal static class CaptureNativeHost
                 };
                 return false;
             }
+            case "selectContent":
+                result = SelectContent(capture, ReturnProcessId(request.Params));
+                return false;
             case "selectContext":
                 result = SelectContext(capture, ReturnProcessId(request.Params));
                 return false;
@@ -160,7 +163,10 @@ internal static class CaptureNativeHost
             };
         }
 
-        return new
+        return ImageResult(selected);
+    }
+
+    private static object ImageResult(RegionSelectionResult selected) => new
         {
             Cancelled = false,
             DataUrl = $"data:image/png;base64,{Convert.ToBase64String(selected.Png)}",
@@ -177,6 +183,20 @@ internal static class CaptureNativeHost
                 selected.Bounds.Height,
             },
         };
+
+    private static object SelectContent(ForegroundContextCapture capture, uint returnProcessId)
+    {
+        using var selector = new ContentSelectionForm(capture, returnProcessId);
+        if (selector.ShowDialog() != DialogResult.OK || selector.SelectedRegion is not { } region)
+            return new { Cancelled = true };
+        Application.DoEvents();
+        Thread.Sleep(80);
+        if (selector.SelectedWindow != 0 &&
+            (NativeCaptureWindow.ForRegion(region) != selector.SelectedWindow ||
+             NativeCaptureWindow.Bounds(selector.SelectedWindow) != selector.SelectedWindowBounds ||
+             NativeCaptureWindow.Title(selector.SelectedWindow) != selector.SelectedWindowTitle))
+            return new { Cancelled = true, ErrorMessage = "The selected window changed or is covered. Select the content again." };
+        return ImageResult(RegionContextCapture.Capture(region));
     }
 
     private static object SelectContext(ForegroundContextCapture capture, uint returnProcessId)

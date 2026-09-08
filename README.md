@@ -40,9 +40,9 @@ Electron, Node module, or `.mjs` payload.
   collapse;
 - `Alt+A` selection-first context without moving the window to the pointer;
 - browser DOM capture through an available local Chromium connection on Windows;
-- context selection outlines with parent/smaller scope adjustment;
+- one **Select content** entry with click/drag selection and visible scope controls on Windows;
 - `Alt+Shift+A` explicit image-region selection with aligned text when available;
-- cumulative context chips and bounded previews;
+- readable A/B attachments, bounded previews and in-place selection adjustment;
 - exact runtime, model, reasoning, and provider-owned session selection;
 - paged history, concurrent background turns, running/unread state, and exact
   interruption;

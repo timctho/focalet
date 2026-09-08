@@ -755,10 +755,17 @@ void main() {
       );
       final selectorClient = _FakeNativeCaptureClient(
         onRequest: (method) async => switch (method) {
-          'selectContext' => <String, Object?>{
+          'selectContent' => <String, Object?>{
             'cancelled': false,
             'snapshot': <String, Object?>{'application': 'clicked-window'},
             'previewText': 'Clicked window context',
+            'dataUrl': 'data:image/png;base64,YQ==',
+            'bounds': <String, Object?>{
+              'x': -200,
+              'y': 120,
+              'width': 350,
+              'height': 40,
+            },
           },
           'selectImage' => <String, Object?>{
             'cancelled': false,
@@ -785,13 +792,15 @@ void main() {
       final selectedContext = await provider.selectContext().timeout(
         const Duration(milliseconds: 100),
       );
-      expect(selectorClient.requests, ['selectContext']);
+      expect(selectorClient.requests, ['selectContent']);
       expect(selectedContext?.snapshot?['application'], 'clicked-window');
+      expect(selectedContext?.image?.dataUrl, 'data:image/png;base64,YQ==');
+      expect(selectedContext?.image?.bounds?['x'], -200);
 
       final image = await provider.selectImage().timeout(
         const Duration(milliseconds: 100),
       );
-      expect(selectorClient.requests, ['selectContext', 'selectImage']);
+      expect(selectorClient.requests, ['selectContent', 'selectImage']);
       expect(image?.bounds?['width'], 3);
 
       captureResult.complete(<String, Object?>{'snapshot': null});
