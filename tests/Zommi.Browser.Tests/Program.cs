@@ -92,15 +92,16 @@ try
             await Evaluate("document.querySelector('#products').scrollIntoView({block:'start'}); true");
             var viewport = binding.RootElement.GetProperty("viewport").Deserialize<CaptureRectangle>()!;
             var scale = viewport.Width / (await Evaluate("innerWidth")).GetDouble();
+            var scaleY = viewport.Height / (await Evaluate("innerHeight")).GetDouble();
             var imageA = await Bounds("#product-a");
             var imageB = await Bounds("#product-b");
             foreach (var onlyEmptyAlt in new[] { false, true })
             {
                 var leftImage = onlyEmptyAlt ? imageB : imageA;
                 var left = (int)Math.Floor(viewport.X + leftImage.X * scale);
-                var top = (int)Math.Floor(viewport.Y + leftImage.Y * scale);
+                var top = (int)Math.Floor(viewport.Y + leftImage.Y * scaleY);
                 var right = (int)Math.Ceiling(viewport.X + imageB.Right * scale);
-                var bottom = (int)Math.Ceiling(viewport.Y + imageB.Bottom * scale);
+                var bottom = (int)Math.Ceiling(viewport.Y + imageB.Bottom * scaleY);
                 var regionStart = new ProcessStartInfo(nativeHost)
                 {
                     UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true,
