@@ -446,7 +446,10 @@ public static class ZommiWindowsAcceptanceNative
         return GetForegroundWindow() == window;
     }
 
-    public static IntPtr CreateCompetingTopMost(int x, int y, int width, int height, IntPtr owner = default(IntPtr))
+    public static IntPtr CreateCompetingTopMost(int x, int y, int width, int height) =>
+        CreateCompetingTopMost(x, y, width, height, IntPtr.Zero);
+
+    public static IntPtr CreateCompetingTopMost(int x, int y, int width, int height, IntPtr owner)
     {
         const int topMost = 0x00000008;
         const int toolWindow = 0x00000080;

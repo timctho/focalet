@@ -43,6 +43,19 @@ try
         var result = await Command("Runtime.evaluate", new { expression, returnByValue = true });
         return result.GetProperty("result").GetProperty("value").Clone();
     }
+    async Task CloseTarget(string targetId)
+    {
+        await driver.CallAsync("Target.closeTarget", new { targetId }, null, token);
+        // Chrome acknowledges closure before removing the target. Starting the
+        // next binding then can attach to a closing tab whose renderer is gone.
+        while (true)
+        {
+            var remaining = await driver.CallAsync("Target.getTargets", null, null, token);
+            if (!remaining.GetProperty("targetInfos").EnumerateArray().Any(target =>
+                target.GetProperty("targetId").GetString() == targetId)) return;
+            await Task.Delay(20, token);
+        }
+    }
     async Task<CaptureRectangle> Bounds(string selector)
     {
         var value = await Evaluate($"JSON.parse(JSON.stringify(document.querySelector({JsonSerializer.Serialize(selector)}).getBoundingClientRect()))");
@@ -304,7 +317,7 @@ try
     await Task.Delay(300, token);
     var ambiguous = await BrowserDomSession.ConnectAsync(endpoint, browser.Id, title => title == "Zommi DOM capture acceptance", token);
     Check(ambiguous is null, "Two visible windows with identical titles and URLs are rejected as ambiguous");
-    await driver.CallAsync("Target.closeTarget", new { targetId = secondWindow.GetProperty("targetId").GetString() }, null, token);
+    await CloseTarget(secondWindow.GetProperty("targetId").GetString()!);
     using (var finalCapture = await BrowserDomSession.ConnectAsync(endpoint, browser.Id, title => title == "Zommi DOM capture acceptance", token)
         ?? throw new InvalidOperationException("The observation lease was not released.")) { }
     var currentTree = await Command("Page.getFrameTree");
@@ -322,7 +335,7 @@ try
         var switchRejected = false;
         try { await switched.ValidateAsync(token); } catch (InvalidOperationException) { switchRejected = true; }
         Check(switchRejected, "Switching away and back to the same-URL tab invalidates an in-flight capture");
-        await driver.CallAsync("Target.closeTarget", new { targetId = otherTab.GetProperty("targetId").GetString() }, null, token);
+        await CloseTarget(otherTab.GetProperty("targetId").GetString()!);
     }
     await driver.CallAsync("Browser.setWindowBounds", new { windowId = capture.WindowId, bounds = new { width = 1000, height = 900 } }, null, token);
     await Evaluate("window.scrollTo(0, 0); true");
@@ -373,7 +386,7 @@ try
         using (var switchedCapture = await Reopen())
             Check(switchedCapture.TabId == newTab.GetProperty("targetId").GetString() && proxy.AcceptedConnections == 1,
                 "A retained connection binds the newly active tab without reconnecting");
-        await driver.CallAsync("Target.closeTarget", new { targetId = newTab.GetProperty("targetId").GetString() }, null, token);
+        await CloseTarget(newTab.GetProperty("targetId").GetString()!);
         await Task.Delay(100, token);
         proxy.DisconnectClients();
         using (var recovered = await Reopen())
