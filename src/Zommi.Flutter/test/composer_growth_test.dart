@@ -7,6 +7,58 @@ import 'test_support.dart';
 
 void main() {
   testWidgets(
+    'a batch at the end of a long draft reveals the complete last chip',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(720, 620));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final desktop = FakeDesktopBridge()
+        ..nextSelections = [
+          for (final row in [1, 3])
+            ContextAttachment(
+              id: 'row-$row',
+              token: '',
+              snapshot: {
+                'spatialContext': {
+                  'cells': [
+                    {
+                      'dataRowNumber': row,
+                      'columnHeaders': ['Database Alias'],
+                    },
+                  ],
+                },
+              },
+            ),
+        ];
+      await tester.pumpWidget(
+        ZommiApp(core: RichFakeCore()..historyCount = 0, desktop: desktop),
+      );
+      await tester.pumpAndSettle();
+      final field = find.byKey(const ValueKey('zommi-composer'));
+      await tester.enterText(
+        field,
+        List.filled(16, 'Compare these table rows').join(' '),
+      );
+      await tester.pumpAndSettle();
+      final send = tester.getRect(find.byKey(const ValueKey('send-message')));
+      await tester.tap(find.byKey(const ValueKey('select-content')));
+      await tester.pumpAndSettle();
+      final render = tester
+          .state<EditableTextState>(find.byType(EditableText))
+          .renderEditable;
+      final viewport = render.localToGlobal(Offset.zero) & render.size;
+      // RenderEditable paints inline children with its scroll offset, which
+      // its child transform does not include. Compare the actual painted rect.
+      final last = tester
+          .getRect(find.byKey(const ValueKey('composer-inline-tile-row-3')))
+          .shift(Offset(0, -render.offset.pixels));
+      expect(last.top, greaterThanOrEqualTo(viewport.top));
+      expect(last.bottom, lessThanOrEqualTo(viewport.bottom));
+      expect(tester.getRect(find.byKey(const ValueKey('send-message'))), send);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'an inline context expands its line without covering adjacent text',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(720, 620));

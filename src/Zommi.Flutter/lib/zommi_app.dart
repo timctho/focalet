@@ -150,6 +150,7 @@ class ZommiShell extends StatefulWidget {
 class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
   late final InlineAttachmentTextController _composer;
   final FocusNode _composerFocus = FocusNode(debugLabel: 'Zommi composer');
+  final ScrollController _composerScroll = ScrollController();
   late final ZommiController _controller;
   final Object _sessionTapGroup = Object();
   final Object _runtimeTapGroup = Object();
@@ -194,7 +195,19 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
       _controller.hideAttachmentPreview();
       return;
     }
+    final previousAttachmentCount = _composer.inlineAttachments.length;
     _composer.syncAttachments(_controller.attachments);
+    if (_composer.inlineAttachments.length > previousAttachmentCount &&
+        _composer.selection.isCollapsed &&
+        _composer.selection.extentOffset == _composer.text.length) {
+      // EditableText reveals a text-height caret. A taller inline attachment
+      // can still be clipped below it when the draft reaches its height cap.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _composerScroll.hasClients) {
+          _composerScroll.jumpTo(_composerScroll.position.maxScrollExtent);
+        }
+      });
+    }
     if (_lastFocusEpoch != _controller.focusComposerEpoch) {
       _lastFocusEpoch = _controller.focusComposerEpoch;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -214,6 +227,7 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
     unawaited(_controller.close());
     _composer.dispose();
     _composerFocus.dispose();
+    _composerScroll.dispose();
     super.dispose();
   }
 
@@ -709,6 +723,7 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                   key: const ValueKey('zommi-composer'),
                   focusNode: _composerFocus,
                   controller: _composer,
+                  scrollController: _composerScroll,
                   enabled: !_controller.sessionBusy,
                   minLines: 1,
                   maxLines: 5,
