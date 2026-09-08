@@ -73,6 +73,9 @@ internal static class CaptureNativeHost
         ForegroundContextCapture capture,
         out object? result)
     {
+        if (request.Method is "capture" or "selectContent" or "selectContext" or "selectImage")
+            BrowserObservationBridge.SetPageDetailsEnabled(!(request.Params.ValueKind == JsonValueKind.Object &&
+                request.Params.TryGetProperty("browserPageDetails", out var pageDetails) && pageDetails.ValueKind == JsonValueKind.False));
         switch (request.Method)
         {
             case "ping":

@@ -217,10 +217,8 @@ internal sealed class ContentSelectionForm : PointSelectionForm
 
     private void SelectWindow()
     {
-        if (targetBounds is not { IsValid: true } bounds) return;
-        var rectangle = Rectangle.FromLTRB((int)bounds.X, (int)bounds.Y, (int)bounds.Right, (int)bounds.Bottom);
-        // Only the visible desktop portion can be shared by this capture path.
-        Complete(Rectangle.Intersect(rectangle, SystemInformation.VirtualScreen), targetWindow);
+        if (targetBounds is not { IsValid: true }) return;
+        Complete(NativeCaptureWindow.CaptureBounds(targetWindow), targetWindow);
     }
 
     private void Complete(Rectangle bounds, nint window)

@@ -1759,9 +1759,11 @@ Write-Host 'point-context: ok (crosshair, click, parent and smaller scope)'
 
 $contentFixture = [ZommiContextFixture]::new()
 $contentTimings = @{}
-$contentGestures = @('click', 'parent', 'window', 'drag', 'hover-small', 'quick-small', 'quick-return', 'overlap-front', 'overlap-refresh', 'drag-context', 'drag-partial', 'drag-empty', 'thin-then-drag', 'drag-busy')
+$contentGestures = @('click', 'parent', 'window', 'window-covered', 'drag', 'hover-small', 'quick-small', 'quick-return', 'overlap-front', 'overlap-refresh', 'drag-context', 'drag-partial', 'drag-empty', 'thin-then-drag', 'drag-busy')
 try {
     foreach ($gesture in $contentGestures) {
+        $script:contentCoverWindow = [IntPtr]::Zero
+        try {
         $content = Invoke-CaptureRequest -Executable $capture -Method 'selectContent' -Interact {
             param($process)
             $window = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi content selection'
@@ -1785,7 +1787,11 @@ try {
             if (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($window, 'Larger')) {
                 throw 'The fixture line outline did not become ready for selection.'
             }
-            if ($gesture -in @('parent', 'window')) {
+            if ($gesture -in @('parent', 'window', 'window-covered')) {
+                if ($gesture -eq 'window-covered') {
+                    $script:contentCoverWindow = [ZommiWindowsAcceptanceNative]::CreateCompetingTopMost(330, 300, 90, 60)
+                    if ($script:contentCoverWindow -eq [IntPtr]::Zero) { throw 'Could not create the covering window.' }
+                }
                 $button = if ($gesture -eq 'parent') { 'Larger' } else { 'Whole window' }
                 $deadline = [DateTime]::UtcNow.AddSeconds(8)
                 do {
@@ -1877,6 +1883,18 @@ try {
                 [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($window, 590, 435, 630, 465)
             }
         }
+        } finally {
+            if ($script:contentCoverWindow -ne [IntPtr]::Zero) {
+                [ZommiWindowsAcceptanceNative]::CloseCompetingWindow($script:contentCoverWindow)
+            }
+        }
+        if ($gesture -eq 'window-covered') {
+            if ($content.cancelled -ne $true -or $content.errorMessage -notmatch 'covered' -or $content.dataUrl) {
+                throw 'Whole-window selection accepted pixels covered by a different window.'
+            }
+            Write-Host 'content-window-covered: ok'
+            continue
+        }
         if ($content.cancelled -eq $true -or $content.dataUrl -notlike 'data:image/png;base64,*') {
             throw "Unified $gesture did not produce a previewable attachment: $($content.errorMessage)"
         }
@@ -1916,7 +1934,11 @@ try {
             throw 'A partially enclosed element leaked text outside the selected image.'
         }
         if ($gesture -eq 'drag-empty' -and
-            ($null -ne $content.snapshot -or $content.alignment.status -ne 'image-only' -or
+            ($null -eq $content.snapshot -or $content.alignment.status -ne 'image-only' -or
+             $content.alignment.mapping.coordinateSpace -ne 'desktop-physical-pixels' -or
+             $content.alignment.mapping.imageBounds.width -ne $content.bounds.width -or
+             $content.alignment.mapping.imageBounds.height -ne $content.bounds.height -or
+             $content.snapshot.source.nativeWindowId -ne $contentFixture.Window.ToString() -or
              $content.previewText -notmatch 'No complete accessible text or named object')) {
             throw 'An empty area did not explain its image-only result.'
         }

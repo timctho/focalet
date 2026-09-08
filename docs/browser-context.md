@@ -28,6 +28,14 @@ Whole-window capture includes the visible desktop portion and rejects a covered
 or moved source window. It is a single snapshot, not a continuing screen share.
 Other platforms retain their existing selection providers.
 
+Windows captures without accessible text show **Image with screen location**
+and retain the physical screen rectangle and actual image dimensions. A stable source also includes the app/window title, HWND,
+process ID and window bounds. A region spanning multiple windows keeps its
+screen mapping without guessing one source. The agent receives the capture ID,
+time and image-to-screen formula. These coordinates describe that frame; the
+agent must observe again after a window, scroll or content change before acting.
+This supplies location even when a custom UI exposes no accessible text.
+
 Enclosed images and text retain their own wrapping link's URL, including cards
 that use background thumbnails. The preview lists each URL once. Region bounds
 allow one physical pixel of rounding difference. Viewport scrolling does not
@@ -70,6 +78,14 @@ helpers are separate processes, so each may request authorization on first use.
 Restarting Chrome or Zommi, or revoking/disconnecting browser access, may require
 another confirmation. This does not change connections owned by an agent's
 separate Chrome MCP server.
+
+In **App settings**, turn off **Full webpage details** to stop Zommi using a
+debugging connection from the next capture. This applies to Alt+A, Select content
+and image selection, and closes previously retained Zommi browser connections
+when that helper handles its next capture. Images, physical coordinates and
+Windows accessibility remain available; DOM text and image/product URLs may be
+missing. The preference persists and is on by default. It does not change
+connections made by the agent's separate browser tools.
 
 Reading page context does not inherently require debugging permission. This
 implementation uses CDP, so Chrome authorizes a debugging connection even for

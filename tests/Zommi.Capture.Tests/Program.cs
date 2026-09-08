@@ -10,6 +10,7 @@ var tests = new (string Name, Action Body)[]
     ("DOM text remains exact and explicit picks discard ambient selection", DomSelectionPriority),
     ("Image links remain readable in the context preview", ImageLinkPreview),
     ("Card previews show each URL once and retain every caption", CardLinkPreview),
+    ("Image-only previews explain retained screen location", ImageLocationPreview),
 };
 
 var failures = new List<string>();
@@ -29,6 +30,25 @@ foreach (var test in tests)
 
 Console.WriteLine($"{tests.Length - failures.Count}/{tests.Length} capture contracts passed");
 return failures.Count == 0 ? 0 : 1;
+
+static void ImageLocationPreview()
+{
+    var bounds = new CaptureRectangle(-400, 100, 180, 65);
+    var preview = ContextPreviewFormatter.Format(Snapshot() with
+    {
+        SurfaceKind = "Image region", Application = "Redis Insight", WindowTitle = "Redis databases",
+        IndicatedTarget = null, VisibleText = [],
+        Region = new RegionAlignment
+        {
+            Status = "image-only", Reason = "No accessible text", ScreenBounds = bounds,
+            Mapping = new CaptureMapping { CoordinateSpace = "desktop-physical-pixels", ScreenBounds = bounds,
+                ViewportBounds = bounds, ImageBounds = new CaptureRectangle(0, 0, 180, 65) },
+        },
+    });
+    Contains(preview, "Image with screen location");
+    Contains(preview, "Redis databases");
+    NotContains(preview, "Mouse pointer:");
+}
 
 static void CardLinkPreview()
 {

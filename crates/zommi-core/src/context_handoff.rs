@@ -85,6 +85,44 @@ fn format_snapshot(snapshot: &Value, index: usize, total: usize) -> String {
             ));
         }
     }
+    if let Some(region) = snapshot.get("region").filter(|value| value.is_object()) {
+        for field in ["snapshotId", "observedAtUtc", "expiresAtUtc"] {
+            if let Some(value) = non_empty_field(snapshot, field) {
+                lines.push(format!("{field}: {}", clean_text(&value, 100)));
+            }
+        }
+        if let (Some(screen), Some(image)) = (
+            region.get("screenBounds"),
+            region
+                .get("mapping")
+                .and_then(|mapping| mapping.get("imageBounds")),
+        ) {
+            let values = [
+                screen.get("x"),
+                screen.get("y"),
+                screen.get("width"),
+                screen.get("height"),
+                image.get("x"),
+                image.get("y"),
+                image.get("width"),
+                image.get("height"),
+            ];
+            let values: Option<Vec<f64>> = values
+                .into_iter()
+                .map(|value| value.and_then(Value::as_f64))
+                .collect();
+            if let Some(v) = values.filter(|v| {
+                v.iter().all(|value| value.is_finite())
+                    && v[2] > 0.0
+                    && v[3] > 0.0
+                    && v[6] > 0.0
+                    && v[7] > 0.0
+            }) {
+                lines.push(format!("Image pixels map to desktop physical pixels: screenX = {} + (imageX - {}) * {}; screenY = {} + (imageY - {}) * {}.", v[0], v[4], v[2] / v[6], v[1], v[5], v[3] / v[7]));
+                lines.push("These coordinates describe the captured frame. Obtain fresh window state before acting if the window, scroll position or content has changed.".into());
+            }
+        }
+    }
     lines.push(format!("Surface: {surface_kind} in {application}"));
 
     let selections = array_field(snapshot, "selection");
@@ -510,6 +548,32 @@ mod tests {
         );
         assert!(handoff.contains("image-only"));
         assert!(handoff.contains("The page changed during capture"));
+        assert!(!handoff.contains("Mouse pointer:"));
+        assert!(!handoff.contains("PRIMARY SURFACE SELECTION"));
+    }
+
+    #[test]
+    fn image_only_native_app_preserves_location_and_scaled_image_coordinates() {
+        let handoff = build_context_handoff(
+            "this field",
+            &[json!({
+                "surfaceKind": "Image region", "application": "Redis Insight", "imageIndex": 1,
+                "snapshotId": "frame-123", "observedAtUtc": "2026-09-08T18:00:00Z",
+                "expiresAtUtc": "2026-09-08T18:00:30Z",
+                "source": {"provider": "windows-screen-region", "nativeWindowId": "42", "processId": 100,
+                    "windowBounds": {"x": -900, "y": 20, "width": 800, "height": 600}},
+                "region": {"status": "image-only", "reason": "No accessible text",
+                    "screenBounds": {"x": -800, "y": 100, "width": 600, "height": 320},
+                    "mapping": {"coordinateSpace": "desktop-physical-pixels",
+                        "imageBounds": {"x": 0, "y": 0, "width": 300, "height": 160}}}
+            })],
+            1,
+        );
+        assert!(handoff.contains("screenX = -800 + (imageX - 0) * 2"));
+        assert!(handoff.contains("screenY = 100 + (imageY - 0) * 2"));
+        assert!(handoff.contains("snapshotId: frame-123"));
+        assert!(handoff.contains("2026-09-08T18:00:30Z"));
+        assert!(handoff.contains("Redis Insight") && handoff.contains("windowBounds"));
         assert!(!handoff.contains("Mouse pointer:"));
         assert!(!handoff.contains("PRIMARY SURFACE SELECTION"));
     }

@@ -28,7 +28,8 @@ public static class ContextPreviewFormatter
     {
         if (snapshot.Region is { } region)
         {
-            builder.AppendLine(region.Status == "aligned" ? "Image with text from the selected region" : $"Image only — {region.Reason}");
+            builder.AppendLine(region.Status == "aligned" ? "Image with text from the selected region" :
+                region.Mapping is not null ? $"Image with screen location — {region.Reason}" : $"Image only — {region.Reason}");
         }
         if (snapshot.Selection.Count > 0 || snapshot.SelectionElements.Count > 0)
         {

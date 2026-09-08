@@ -106,6 +106,11 @@ final class FileDesktopAcceptanceRecorder implements DesktopAcceptanceRecorder {
   }
 }
 
+abstract interface class BrowserCaptureSettings {
+  bool get supportsBrowserPageDetails;
+  void setBrowserPageDetails(bool enabled);
+}
+
 abstract interface class DesktopBridge {
   Stream<DesktopInvocation> get invocations;
 
@@ -220,7 +225,7 @@ final class NoopDesktopBridge implements DesktopBridge {
 
 final class FlutterDesktopBridge
     with WindowListener, TrayListener, WidgetsBindingObserver
-    implements DesktopBridge {
+    implements DesktopBridge, BrowserCaptureSettings {
   FlutterDesktopBridge({
     CaptureProvider? captureProvider,
     DesktopAcceptanceRecorder? acceptanceRecorder,
@@ -265,6 +270,18 @@ final class FlutterDesktopBridge
       await windowManager.setSkipTaskbar(false);
     });
     return FlutterDesktopBridge();
+  }
+
+  @override
+  bool get supportsBrowserPageDetails =>
+      _captureProvider is BrowserCaptureSettings;
+
+  @override
+  void setBrowserPageDetails(bool enabled) {
+    final provider = _captureProvider;
+    if (provider case final BrowserCaptureSettings settings) {
+      settings.setBrowserPageDetails(enabled);
+    }
   }
 
   final CaptureProvider _captureProvider;
@@ -1354,22 +1371,24 @@ ContextAttachment imageAttachmentFromSelection(
   }
 
   final hasMapping =
-      selected.snapshot?['source'] is Map &&
       sameBounds(capturedRegion?['screenBounds']) &&
       sameBounds(selected.alignment?['screenBounds']) &&
       selected.alignment?['mapping'] is Map;
   final aligned =
       hasMapping &&
+      selected.snapshot?['source'] is Map &&
       selected.alignment?['status'] == 'aligned' &&
       capturedRegion?['status'] == 'aligned';
-  final knownImageSource =
+  final imageOnlyGeometry =
       hasMapping &&
       selected.alignment?['status'] == 'image-only' &&
       capturedRegion?['status'] == 'image-only';
+  final knownImageSource =
+      imageOnlyGeometry && selected.snapshot?['source'] is Map;
   final reason =
       selected.alignment?['reason']?.toString() ??
       'No aligned text was exposed for this region.';
-  final region = aligned || knownImageSource
+  final region = aligned || imageOnlyGeometry
       ? selected.alignment!
       : <String, Object?>{
           'status': 'image-only',
@@ -1377,20 +1396,30 @@ ContextAttachment imageAttachmentFromSelection(
           if (selected.bounds != null) 'screenBounds': selected.bounds,
         };
   final now = DateTime.now().toUtc();
+  final metadata = imageOnlyGeometry
+      ? (selected.snapshot ?? const <String, Object?>{})
+      : const <String, Object?>{};
   final snapshot = aligned
       ? selected.snapshot!
       : <String, Object?>{
-          'snapshotId': id,
-          'observedAtUtc': now.toIso8601String(),
-          'expiresAtUtc': now
-              .add(const Duration(seconds: 30))
-              .toIso8601String(),
+          'snapshotId': metadata['snapshotId'] ?? id,
+          'observedAtUtc': metadata['observedAtUtc'] ?? now.toIso8601String(),
+          'expiresAtUtc':
+              metadata['expiresAtUtc'] ??
+              now.add(const Duration(seconds: 30)).toIso8601String(),
           'surfaceKind': 'Image region',
-          'application': 'Screen',
+          'application': knownImageSource
+              ? (metadata['application'] ?? 'Screen')
+              : 'Screen',
           'region': region,
           'limitation': reason,
           if (knownImageSource)
-            for (final field in ['source', 'locator', 'windowTitle'])
+            for (final field in [
+              'source',
+              'locator',
+              'windowTitle',
+              'processName',
+            ])
               if (selected.snapshot!.containsKey(field))
                 field: selected.snapshot![field],
         };
@@ -1398,11 +1427,11 @@ ContextAttachment imageAttachmentFromSelection(
     id: id,
     token: '',
     snapshot: snapshot,
-    previewText: aligned || knownImageSource
+    previewText: aligned || imageOnlyGeometry
         ? selected.previewText ??
               (aligned
                   ? 'Image with text from the selected region'
-                  : 'Image only — $reason')
+                  : 'Image with screen location — $reason')
         : 'Image only — $reason',
     imageDataUrl: selected.dataUrl,
     bounds: selected.bounds,
@@ -1417,7 +1446,14 @@ CaptureProvider platformCaptureProvider() => Platform.isWindows
       )
     : PortableCaptureProvider();
 
-final class WindowsCaptureProvider implements CaptureProvider {
+final class WindowsCaptureProvider
+    implements CaptureProvider, BrowserCaptureSettings {
+  bool _browserPageDetails = true;
+  @override
+  bool get supportsBrowserPageDetails => true;
+  @override
+  void setBrowserPageDetails(bool enabled) => _browserPageDetails = enabled;
+
   WindowsCaptureProvider({
     String? executablePath,
     NativeCaptureClient? captureClient,
@@ -1451,6 +1487,7 @@ final class WindowsCaptureProvider implements CaptureProvider {
     final response = await _captureClient.request(
       'capture',
       parameters: {
+        'browserPageDetails': _browserPageDetails,
         if (point != null)
           'point': {'x': point.dx.round(), 'y': point.dy.round()},
       },
@@ -1466,7 +1503,10 @@ final class WindowsCaptureProvider implements CaptureProvider {
   Future<CaptureResult?> selectContext() async {
     final response = await _selectorClient.request(
       'selectContent',
-      parameters: {'returnProcessId': pid},
+      parameters: {
+        'returnProcessId': pid,
+        'browserPageDetails': _browserPageDetails,
+      },
     );
     if (response['errorMessage'] case final String message
         when message.isNotEmpty) {
@@ -1493,7 +1533,10 @@ final class WindowsCaptureProvider implements CaptureProvider {
   Future<ImageSelection?> selectImage() async {
     final response = await _selectorClient.request(
       'selectImage',
-      parameters: {'returnProcessId': pid},
+      parameters: {
+        'returnProcessId': pid,
+        'browserPageDetails': _browserPageDetails,
+      },
     );
     if (response['cancelled'] == true) return null;
     final dataUrl = response['dataUrl']?.toString() ?? '';

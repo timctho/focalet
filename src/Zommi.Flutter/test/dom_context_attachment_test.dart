@@ -136,7 +136,35 @@ void main() {
     expect(attachment.snapshot?['region'], imageOnly);
     expect(attachment.snapshot?['dom'], isNull);
     expect(attachment.snapshot?['selection'], isNull);
-    expect(attachment.previewText, startsWith('Image only'));
+    expect(attachment.previewText, startsWith('Image with screen location'));
+  });
+  test('desktop pixels preserve mapping and observation time even without a single source window', () {
+    final geometry = {
+      ...alignment,
+      'status': 'image-only',
+      'reason': 'Spans windows',
+    };
+    final attachment = imageAttachmentFromSelection(
+      ImageSelection(
+        dataUrl: 'data:image/png;base64,YQ==',
+        bounds: bounds,
+        alignment: geometry,
+        snapshot: {
+          'snapshotId': 'captured-frame',
+          'observedAtUtc': '2026-09-08T18:00:00Z',
+          'expiresAtUtc': '2026-09-08T18:00:30Z',
+          'region': geometry,
+        },
+      ),
+      'attachment-id',
+    );
+    final handoff = contextHandoffSnapshots([attachment]).single;
+    expect(handoff['region'], geometry);
+    expect(handoff['snapshotId'], 'captured-frame');
+    expect(handoff['observedAtUtc'], '2026-09-08T18:00:00Z');
+    expect(handoff['imageIndex'], 1);
+    expect(handoff['source'], isNull);
+    expect(handoff['dom'], isNull);
   });
   test('legacy pointer snapshots are never presented as image-region text', () {
     final attachment = imageAttachmentFromSelection(

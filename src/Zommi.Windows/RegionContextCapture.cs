@@ -12,7 +12,8 @@ internal static class RegionContextCapture
 {
     public static RegionSelectionResult Capture(Rectangle region)
     {
-        var window = NativeCaptureWindow.ForRegion(region);
+        var source = SourceAt(region);
+        var window = source?.Handle ?? 0;
         if (window == 0) return ImageOnly(region, "The region spans windows or its source could not be confirmed.");
         var title = NativeCaptureWindow.Title(window);
         var windowBounds = NativeCaptureWindow.Bounds(window);
@@ -25,7 +26,7 @@ internal static class RegionContextCapture
                 var image = browser.CaptureImage(region);
                 var png = image.Png;
                 if (NativeCaptureWindow.ForRegion(region) != window || image.Stamp != observation.Stamp || !browser.StillMatches(observation))
-                    return ImageOnly(region, "The page changed while the image was captured.", png);
+                    return ImageOnly(region, "The page changed while the image was captured.", png, source);
                 var snapshot = browser.Snapshot(observation, region: region);
                 snapshot = snapshot with
                 {
@@ -55,11 +56,11 @@ internal static class RegionContextCapture
             var pixels = ScreenCapture.CapturePng(region);
             var after = ReadUiaRegion(window, region);
             if (before.Count == 0)
-                return ImageOnly(region, "No complete accessible text or named object was exposed inside this region. Try enclosing the whole item.", pixels);
+                return ImageOnly(region, "No complete accessible text or named object was exposed inside this region. Try enclosing the whole item.", pixels, source);
             if (NativeCaptureWindow.ForRegion(region) != window ||
                 NativeCaptureWindow.Title(window) != title || NativeCaptureWindow.Bounds(window) != windowBounds ||
                 JsonSerializer.Serialize(before) != JsonSerializer.Serialize(after))
-                return ImageOnly(region, "The window or its accessible content changed while the image was captured.", pixels);
+                return ImageOnly(region, "The window or its accessible content changed while the image was captured.", pixels, source);
             var now = DateTimeOffset.UtcNow;
             var screenBounds = BrowserObservationBridge.ToRectangle(region);
             var alignment = new RegionAlignment
@@ -78,7 +79,7 @@ internal static class RegionContextCapture
                 Source = new ObservationSource
                 {
                     Provider = "windows-uia-region", NativeWindowId = window.ToString(CultureInfo.InvariantCulture),
-                    ProcessId = NativeCaptureWindow.ProcessId(window),
+                    ProcessId = NativeCaptureWindow.ProcessId(window), WindowBounds = windowBounds,
                 },
                 AccessibilityTree = new AccessibilityTreeInfo { Source = "windows-uia-region", Roots = before, NodeCount = before.Count },
                 Region = alignment, Confidence = "medium",
@@ -92,11 +93,58 @@ internal static class RegionContextCapture
         }
     }
 
-    private static RegionSelectionResult ImageOnly(Rectangle region, string reason, byte[]? png = null) => new(
-        region, png ?? ScreenCapture.CapturePng(region), Alignment: new RegionAlignment
+    private sealed record WindowIdentity(nint Handle, int ProcessId, string Title, CaptureRectangle Bounds);
+
+    private static WindowIdentity? SourceAt(Rectangle region)
+    {
+        var window = NativeCaptureWindow.ForRegion(region);
+        return window == 0 ? null : new(window, NativeCaptureWindow.ProcessId(window),
+            NativeCaptureWindow.Title(window), NativeCaptureWindow.Bounds(window));
+    }
+
+    private static RegionSelectionResult ImageOnly(Rectangle region, string reason, byte[]? png = null, WindowIdentity? source = null)
+    {
+        // Geometry is useful even when the app exposes no accessibility text.
+        // A source identity is retained only across this exact image capture.
+        if (png is null)
         {
-            Status = "image-only", Reason = reason, ScreenBounds = BrowserObservationBridge.ToRectangle(region),
-        });
+            source = SourceAt(region);
+            png = ScreenCapture.CapturePng(region);
+        }
+        if (source != SourceAt(region)) source = null;
+        var screen = BrowserObservationBridge.ToRectangle(region);
+        var width = System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(png.AsSpan(16, 4));
+        var height = System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(png.AsSpan(20, 4));
+        var alignment = new RegionAlignment
+        {
+            Status = "image-only", Reason = reason, ScreenBounds = screen,
+            Mapping = new CaptureMapping
+            {
+                CoordinateSpace = "desktop-physical-pixels", ScreenBounds = screen,
+                ViewportBounds = screen, ImageBounds = new CaptureRectangle(0, 0, width, height),
+            },
+        };
+        var now = DateTimeOffset.UtcNow;
+        var processName = "screen";
+        if (source is not null)
+        {
+            try { using var process = Process.GetProcessById(source.ProcessId); processName = process.ProcessName; }
+            catch (ArgumentException) { source = null; }
+        }
+        var snapshot = new ContextSnapshot
+        {
+            SnapshotId = Guid.NewGuid().ToString("D"), ObservedAtUtc = now, ExpiresAtUtc = now.AddSeconds(30),
+            SurfaceKind = "Image region", Application = source is null ? "Screen" : processName,
+            ProcessName = processName, WindowTitle = source?.Title ?? "",
+            Source = source is null ? null : new ObservationSource
+            {
+                Provider = "windows-screen-region", NativeWindowId = source.Handle.ToString(CultureInfo.InvariantCulture),
+                ProcessId = source.ProcessId, WindowBounds = source.Bounds,
+            },
+            Region = alignment, Confidence = "limited", Limitation = reason,
+        };
+        return new(region, png, snapshot, alignment);
+    }
 
     private static IReadOnlyList<AccessibilityNodeInfo> ReadUiaRegion(nint window, Rectangle region)
     {

@@ -117,6 +117,12 @@ the provider is busy, overlapping controls, and changing their stacking order
 without moving the pointer. It checks painted outlines and returned bounds.
 Dragging and cancelling must remain responsive during provider timeouts.
 
+Whole-window selection uses the visible DWM frame and excludes the taskbar edge
+for windows on one monitor. Check snapped parent application windows, whose native resize
+borders extend outside that frame. The native gate also covers rejection when a
+different window covers the selected window; trimming borders must not disable
+that check.
+
 A browser image fully enclosed by a drawn region includes its directly
 wrapping link's URL, even when the caption is outside the region or the image
 has no alt text. The preview and agent context retain that URL. This requires
@@ -143,6 +149,17 @@ through five lines, then verify further lines scroll within the capped height.
 Deleting back to one line restores the original height. Repeat with soft-wrapped
 text and an attached context. `composer_growth_test.dart` covers these layout
 interactions; a packaged Windows check must also record rendered geometry.
+
+Place a context attachment on its own line between two text lines. Its row must
+grow to the attachment's height without covering either text line. Removing the
+attachment restores ordinary text line spacing. The widget regression measures
+the actual text boxes against the attachment bounds, not just the outer composer.
+
+With **Full webpage details** off, the packaged browser gate counts zero new CDP
+connections for a real capture despite a matching endpoint being available.
+Turning it back on restores DOM capture. For a native app such as Redis Insight,
+draw an area with no exposed text and verify the agent handoff still carries
+the exact image size, screen rectangle, stable source and coordinate formula.
 
 ## Runtime and conversation
 

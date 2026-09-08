@@ -443,7 +443,12 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
   }
 }
 
-final class FakeDesktopBridge implements DesktopBridge {
+final class FakeDesktopBridge implements DesktopBridge, BrowserCaptureSettings {
+  @override
+  bool supportsBrowserPageDetails = false;
+  bool browserPageDetails = true;
+  @override
+  void setBrowserPageDetails(bool enabled) => browserPageDetails = enabled;
   final StreamController<DesktopInvocation> _invocations =
       StreamController<DesktopInvocation>.broadcast(sync: true);
   final List<String> calls = [];

@@ -9,6 +9,30 @@ import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 
 void main() {
+  test('disabling webpage details reaches both native helpers for every capture gesture', () async {
+    final ordinary = _FakeNativeCaptureClient(onRequest: (_) async => {});
+    final selector = _FakeNativeCaptureClient(
+      onRequest: (_) async => {'cancelled': true},
+    );
+    final provider = WindowsCaptureProvider(
+      captureClient: ordinary,
+      selectorClient: selector,
+    );
+    provider.setBrowserPageDetails(false);
+    await provider.capture();
+    await provider.selectContext();
+    await provider.selectImage();
+    for (final parameters in [
+      ...ordinary.requestParameters,
+      ...selector.requestParameters,
+    ]) {
+      expect(parameters['browserPageDetails'], isFalse);
+    }
+    provider.setBrowserPageDetails(true);
+    await provider.capture();
+    expect(ordinary.requestParameters.last['browserPageDetails'], isTrue);
+    await provider.close();
+  });
   testWidgets('native resize feedback reports the actual physical viewport', (
     tester,
   ) async {

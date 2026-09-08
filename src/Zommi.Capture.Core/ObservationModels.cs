@@ -17,6 +17,7 @@ public sealed record ObservationSource
     public required string Provider { get; init; }
     public required string NativeWindowId { get; init; }
     public int ProcessId { get; init; }
+    public CaptureRectangle? WindowBounds { get; init; }
     public int? BrowserWindowId { get; init; }
     public string? TabId { get; init; }
     public string? FrameId { get; init; }

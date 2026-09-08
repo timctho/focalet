@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
+import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
@@ -937,6 +938,24 @@ class AppSettingsPanel extends StatelessWidget {
               'App settings',
               style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
             ),
+            if (controller.desktop case final BrowserCaptureSettings settings
+                when settings.supportsBrowserPageDetails)
+              SwitchListTile(
+                key: const ValueKey('browser-page-details'),
+                contentPadding: EdgeInsets.zero,
+                title: const Text(
+                  'Full webpage details',
+                  style: TextStyle(fontSize: 11.5),
+                ),
+                subtitle: const Text(
+                  'May ask for browser permission. Off keeps images, screen positions and accessible text; some links may be unavailable.',
+                  style: TextStyle(fontSize: 10),
+                ),
+                value: preferences.browserPageDetails,
+                onChanged: (enabled) => onChanged(
+                  preferences.copyWith(browserPageDetails: enabled),
+                ),
+              ),
             const SizedBox(height: 14),
             const Text(
               'Chat message size',

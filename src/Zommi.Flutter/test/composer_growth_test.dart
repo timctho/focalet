@@ -7,6 +7,69 @@ import 'test_support.dart';
 
 void main() {
   testWidgets(
+    'an inline context expands its line without covering adjacent text',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(720, 620));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final desktop = FakeDesktopBridge()
+        ..nextContext = ContextAttachment(
+          id: 'tall-context',
+          token: '',
+          snapshot: {
+            'selection': ['Selected content'],
+          },
+        );
+      await tester.pumpWidget(
+        ZommiApp(core: RichFakeCore()..historyCount = 0, desktop: desktop),
+      );
+      await tester.pumpAndSettle();
+      final field = find.byKey(const ValueKey('zommi-composer'));
+      await tester.enterText(field, 'Above\n\nBelow');
+      await tester.pump();
+      final plainBounds = tester.getRect(field);
+      final editable = tester.state<EditableTextState>(
+        find.byType(EditableText),
+      );
+      editable.widget.controller.selection = const TextSelection.collapsed(
+        offset: 6,
+      );
+      await tester.tap(find.byKey(const ValueKey('select-content')));
+      await tester.pumpAndSettle();
+      final tile = tester.getRect(
+        find.byKey(const ValueKey('composer-inline-tile-tall-context')),
+      );
+      final render = editable.renderEditable;
+      Rect textBounds(int start, int end) {
+        final box = render
+            .getBoxesForSelection(
+              TextSelection(baseOffset: start, extentOffset: end),
+            )
+            .first
+            .toRect();
+        return box.shift(render.localToGlobal(Offset.zero));
+      }
+
+      final above = textBounds(0, 5);
+      final below = textBounds(8, 13);
+      expect(above.bottom, lessThanOrEqualTo(tile.top));
+      expect(tile.bottom, lessThanOrEqualTo(below.top));
+      final fieldBounds = tester.getRect(field);
+      expect(fieldBounds.contains(tile.topLeft), isTrue);
+      expect(fieldBounds.contains(tile.bottomRight), isTrue);
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey('composer-inline-tile-tall-context')),
+          matching: find.byType(IconButton),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(editable.widget.controller.text, 'Above\n\nBelow');
+      expect(tester.getRect(field), plainBounds);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'every added line grows the composer upward with fixed controls',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(720, 620));

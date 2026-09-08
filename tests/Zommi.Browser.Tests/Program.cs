@@ -91,6 +91,47 @@ try
             // that a URL alone is enough to retain aligned structural context.
             await Evaluate("document.querySelector('#products').scrollIntoView({block:'start'}); true");
             var viewport = binding.RootElement.GetProperty("viewport").Deserialize<CaptureRectangle>()!;
+            // The real RPC preference must prevent every CDP handshake, even
+            // when a matching browser and a usable endpoint are available.
+            var policyStart = new ProcessStartInfo(nativeHost)
+            {
+                UseShellExecute = false, RedirectStandardInput = true,
+                RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true,
+            };
+            policyStart.ArgumentList.Add("--capture-host");
+            policyStart.Environment["ZOMMI_BROWSER_CDP_ENDPOINT"] = nativeProxy.Endpoint.AbsoluteUri;
+            using (var policyHost = Process.Start(policyStart)!)
+            {
+                var errors = policyHost.StandardError.ReadToEndAsync(token);
+                async Task<JsonDocument> Request(bool enabled)
+                {
+                    await policyHost.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new
+                    {
+                        id = "policy", method = "capture", @params = new
+                        {
+                            browserPageDetails = enabled,
+                            point = new { x = (int)viewport.X + 20, y = (int)viewport.Y + 20 },
+                        },
+                    }));
+                    await policyHost.StandardInput.FlushAsync(token);
+                    return JsonDocument.Parse(await policyHost.StandardOutput.ReadLineAsync(token) ?? throw new Exception("Capture policy returned no response"));
+                }
+                try
+                {
+                    var count = nativeProxy.AcceptedConnections;
+                    using var disabled = await Request(false);
+                    Check(disabled.RootElement.GetProperty("ok").GetBoolean() && nativeProxy.AcceptedConnections == count,
+                        "Turning off webpage details captures without any browser debugging connection");
+                    using var enabled = await Request(true);
+                    Check(enabled.RootElement.GetProperty("ok").GetBoolean() && nativeProxy.AcceptedConnections == count + 1,
+                        "Re-enabling webpage details restores the browser connection");
+                    await policyHost.StandardInput.WriteLineAsync("{\"id\":\"stop\",\"method\":\"shutdown\",\"params\":{}}");
+                    await policyHost.StandardInput.FlushAsync(token);
+                    await policyHost.WaitForExitAsync(token);
+                    if (policyHost.ExitCode != 0) throw new Exception(await errors);
+                }
+                finally { if (!policyHost.HasExited) policyHost.Kill(entireProcessTree: true); }
+            }
             var scale = viewport.Width / (await Evaluate("innerWidth")).GetDouble();
             var scaleY = viewport.Height / (await Evaluate("innerHeight")).GetDouble();
             var imageA = await Bounds("#product-a");

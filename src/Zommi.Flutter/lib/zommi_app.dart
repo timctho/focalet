@@ -45,9 +45,23 @@ class ZommiApp extends StatefulWidget {
 class _ZommiAppState extends State<ZommiApp> {
   late AppPreferences _preferences = widget.initialPreferences;
 
+  @override
+  void initState() {
+    super.initState();
+    _configureBrowserCapture(_preferences);
+  }
+
+  void _configureBrowserCapture(AppPreferences preferences) {
+    final desktop = widget.desktop;
+    if (desktop case final BrowserCaptureSettings settings) {
+      settings.setBrowserPageDetails(preferences.browserPageDetails);
+    }
+  }
+
   void _updatePreferences(AppPreferences preferences) {
     if (_preferences == preferences) return;
     setState(() => _preferences = preferences);
+    _configureBrowserCapture(preferences);
     unawaited(widget.preferencesStore.save(preferences).catchError((_) {}));
   }
 
@@ -698,6 +712,11 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                   enabled: !_controller.sessionBusy,
                   minLines: 1,
                   maxLines: 5,
+                  // Let inline attachment widgets set the height of their own
+                  // line instead of painting across fixed-height text lines.
+                  strutStyle: _composer.inlineAttachments.isEmpty
+                      ? null
+                      : const StrutStyle(forceStrutHeight: false),
                   keyboardType: TextInputType.multiline,
                   textInputAction: TextInputAction.newline,
                   textAlignVertical: TextAlignVertical.center,

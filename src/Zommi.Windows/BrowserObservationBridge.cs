@@ -11,7 +11,14 @@ namespace Zommi.Windows;
 
 internal sealed class BrowserObservationBridge : IDisposable
 {
-    private static readonly BrowserConnectionPool Connections = new();
+    private static BrowserConnectionPool Connections = new();
+    private static bool pageDetailsEnabled = true;
+    internal static void SetPageDetailsEnabled(bool enabled)
+    {
+        if (enabled == pageDetailsEnabled) return;
+        pageDetailsEnabled = enabled;
+        if (!enabled) { Connections.Dispose(); Connections = new(); }
+    }
     internal static void CloseConnections() => Connections.Dispose();
 
     private readonly nint window;
@@ -33,6 +40,7 @@ internal sealed class BrowserObservationBridge : IDisposable
 
     public static BrowserObservationBridge? TryOpen(nint window, Action<string>? diagnostic = null)
     {
+        if (!pageDetailsEnabled) return null;
         var processId = NativeCaptureWindow.ProcessId(window);
         if (processId == 0) return null;
         try
@@ -181,6 +189,7 @@ internal sealed class BrowserObservationBridge : IDisposable
             {
                 Provider = selection.IncludesNativeSelection || useNativeTarget ? "browser-dom+windows-uia" : "browser-dom", NativeWindowId = window.ToString(CultureInfo.InvariantCulture),
                 ProcessId = processId, BrowserWindowId = session.WindowId, TabId = session.TabId,
+                WindowBounds = NativeCaptureWindow.Bounds(window),
                 FrameId = session.FrameId, DocumentId = $"{session.LoaderId}:{observation.Stamp.DocumentId}",
             },
             Dom = observation.Context, Confidence = "high", Limitation = observation.Limitation,
@@ -276,8 +285,8 @@ internal static class NativeCaptureWindow
             var process = ProcessId(window);
             if (!IsWindowVisible(window) || IsIconic(window) || process == Environment.ProcessId || process == excludedProcessId)
                 return true;
-            if (DwmGetWindowAttribute(window, 14, out var cloaked, sizeof(int)) == 0 && cloaked != 0) return true;
-            var bounds = Bounds(window);
+            if (DwmGetWindowAttribute(window, 14, out int cloaked, sizeof(int)) == 0 && cloaked != 0) return true;
+            var bounds = VisibleBounds(window);
             if (point.X < bounds.X || point.X >= bounds.Right || point.Y < bounds.Y || point.Y >= bounds.Bottom) return true;
             result = window;
             return false;
@@ -291,6 +300,21 @@ internal static class NativeCaptureWindow
     }
     public static CaptureRectangle Bounds(nint window) => GetWindowRect(window, out var bounds)
         ? new(bounds.Left, bounds.Top, bounds.Right - bounds.Left, bounds.Bottom - bounds.Top) : new(0, 0, 0, 0);
+    public static CaptureRectangle VisibleBounds(nint window) =>
+        DwmGetWindowAttribute(window, 9, out WindowRect bounds, Marshal.SizeOf<WindowRect>()) == 0 &&
+        bounds.Right > bounds.Left && bounds.Bottom > bounds.Top
+            ? new(bounds.Left, bounds.Top, bounds.Right - bounds.Left, bounds.Bottom - bounds.Top)
+            : Bounds(window);
+    public static Rectangle CaptureBounds(nint window)
+    {
+        var bounds = VisibleBounds(window);
+        var visible = Rectangle.Intersect(Rectangle.FromLTRB((int)bounds.X, (int)bounds.Y,
+            (int)bounds.Right, (int)bounds.Bottom), SystemInformation.VirtualScreen);
+        // Snapped/maximized frames can extend a few pixels under the taskbar.
+        // Preserve multi-monitor windows; coverage is still checked afterwards.
+        var screen = Screen.AllScreens.FirstOrDefault(screen => screen.Bounds.Contains(visible));
+        return screen is null ? visible : Rectangle.Intersect(visible, screen.WorkingArea);
+    }
     public static nint At(Point point) => GetAncestor(WindowFromPoint(point), 2);
     public static void Activate(nint window) { BringWindowToTop(window); SetForegroundWindow(window); }
     public static IReadOnlyList<CaptureRectangle> RenderViewBounds(nint window)
@@ -332,8 +356,8 @@ internal static class NativeCaptureWindow
         EnumWindows((window, _) =>
         {
             if (!IsWindowVisible(window) || IsIconic(window) || ProcessId(window) == Environment.ProcessId) return true;
-            if (DwmGetWindowAttribute(window, 14, out var cloaked, sizeof(int)) == 0 && cloaked != 0) return true;
-            var bounds = Bounds(window);
+            if (DwmGetWindowAttribute(window, 14, out int cloaked, sizeof(int)) == 0 && cloaked != 0) return true;
+            var bounds = VisibleBounds(window);
             if (!bounds.Intersects(area)) return true;
             if (bounds.Contains(area)) result = window;
             return false;
@@ -349,6 +373,7 @@ internal static class NativeCaptureWindow
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")] private static extern bool IsIconic(nint window);
     [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(nint window, int attribute, out int value, int size);
+    [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(nint window, int attribute, out WindowRect value, int size);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(nint window, StringBuilder text, int count);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(nint window, out WindowRect bounds);
