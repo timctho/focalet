@@ -118,7 +118,7 @@ abstract interface class DesktopBridge {
 
   Future<ContextAttachment?> captureContext({bool hidePanel = false});
 
-  Future<ContextAttachment?> selectPointerContext();
+  Future<List<ContextAttachment>> selectPointerContext();
 
   Future<ContextAttachment?> selectImageContext({
     bool includePointerContext = false,
@@ -170,7 +170,7 @@ final class NoopDesktopBridge implements DesktopBridge {
       null;
 
   @override
-  Future<ContextAttachment?> selectPointerContext() async => null;
+  Future<List<ContextAttachment>> selectPointerContext() async => const [];
 
   @override
   Future<ContextAttachment?> selectImageContext({
@@ -533,7 +533,7 @@ final class FlutterDesktopBridge
   }
 
   @override
-  Future<ContextAttachment?> selectPointerContext() async {
+  Future<List<ContextAttachment>> selectPointerContext() async {
     final wasVisible = await windowManager.isVisible();
     final wasMinimized = await windowManager.isMinimized();
     await windowManager.hide();
@@ -542,17 +542,27 @@ final class FlutterDesktopBridge
       // so selecting context from the composer cannot feel like an immediate,
       // invisible capture of the old pointer position.
       await Future<void>.delayed(const Duration(milliseconds: 90));
-      final result = await _captureProvider.selectContext();
-      if (result?.image case final image?) {
-        return imageAttachmentFromSelection(image, _nextAttachmentId());
-      }
-      if (result?.snapshot == null) return null;
-      return ContextAttachment(
-        id: _nextAttachmentId(),
-        token: '',
-        snapshot: result!.snapshot,
-        previewText: result.previewText,
-      );
+      final selected = await _captureProvider.selectContext();
+      final attachments = <ContextAttachment>[
+        for (final result in selected)
+          if (result.image case final image?)
+            imageAttachmentFromSelection(image, _nextAttachmentId())
+          else if (result.snapshot != null)
+            ContextAttachment(
+              id: _nextAttachmentId(),
+              token: '',
+              snapshot: result.snapshot,
+              previewText: result.previewText,
+            ),
+      ];
+      await _recordAcceptance('selection.content', {
+        'count': attachments.length,
+        'items': [
+          for (final attachment in attachments)
+            {'bounds': attachment.bounds, 'hasImage': attachment.hasImage},
+        ],
+      });
+      return attachments;
     } finally {
       await _restorePanelAfterCapture(
         wasVisible: wasVisible,
@@ -1324,7 +1334,7 @@ abstract interface class CaptureProvider {
 
   Future<CaptureResult> capture({Offset? point, void Function()? onReady});
 
-  Future<CaptureResult?> selectContext();
+  Future<List<CaptureResult>> selectContext();
 
   Future<ImageSelection?> selectImage();
 
@@ -1419,6 +1429,7 @@ ContextAttachment imageAttachmentFromSelection(
               'locator',
               'windowTitle',
               'processName',
+              'spatialContext',
             ])
               if (selected.snapshot!.containsKey(field))
                 field: selected.snapshot![field],
@@ -1500,7 +1511,7 @@ final class WindowsCaptureProvider
   }
 
   @override
-  Future<CaptureResult?> selectContext() async {
+  Future<List<CaptureResult>> selectContext() async {
     final response = await _selectorClient.request(
       'selectContent',
       parameters: {
@@ -1512,7 +1523,18 @@ final class WindowsCaptureProvider
         when message.isNotEmpty) {
       throw StateError(message);
     }
-    if (response['cancelled'] == true) return null;
+    if (response['cancelled'] == true) return const [];
+    final selections = response['selections'];
+    return [
+      for (final item in selections is List ? selections : [response])
+        _contentSelectionResult(
+          _nullableMap(item) ??
+              (throw const FormatException('Invalid content selection')),
+        ),
+    ];
+  }
+
+  CaptureResult _contentSelectionResult(Map<String, Object?> response) {
     final dataUrl = response['dataUrl']?.toString() ?? '';
     return CaptureResult(
       snapshot: _nullableMap(response['snapshot']),
@@ -1605,17 +1627,17 @@ final class LinuxCaptureProvider implements CaptureProvider {
   );
 
   @override
-  Future<CaptureResult?> selectContext() async {
+  Future<List<CaptureResult>> selectContext() async {
     if (_useWaylandPortals) {
       // Wayland does not expose an unrestricted global pointer grab. Preserve
       // the portal's explicit foreground-context authority on that platform.
-      return capture();
+      return [await capture()];
     }
     final response = await _request([
       'point-context',
     ], const Duration(minutes: 5));
-    if (response['cancelled'] == true) return null;
-    return _portableResultFromLinuxResponse(response);
+    if (response['cancelled'] == true) return const [];
+    return [_portableResultFromLinuxResponse(response)];
   }
 
   @override
@@ -1693,7 +1715,7 @@ final class PortableCaptureProvider implements CaptureProvider {
   }
 
   @override
-  Future<CaptureResult?> selectContext() => capture();
+  Future<List<CaptureResult>> selectContext() async => [await capture()];
 
   Future<CaptureResult> _captureMac() async {
     const script = '''

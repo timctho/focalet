@@ -34,6 +34,45 @@ void main() {
       ],
     },
   };
+  test('a partial cell crop keeps verified row context without claiming whole-cell selected text', () {
+    final spatial = {
+      'cells': [
+        {
+          'rowIndex': 1,
+          'columnIndex': 1,
+          'firstDataRowIndex': 1,
+          'dataRowNumber': 1,
+          'columnHeaders': ['Database Alias'],
+        },
+      ],
+    };
+    final geometry = {...alignment, 'status': 'image-only'};
+    ImageSelection selection(Map<String, Object?> selectedBounds) =>
+        ImageSelection(
+          dataUrl: 'data:image/png;base64,YQ==',
+          bounds: selectedBounds,
+          alignment: geometry,
+          snapshot: {
+            ...snapshot,
+            'region': geometry,
+            'spatialContext': spatial,
+            'selection': ['Not fully enclosed'],
+          },
+        );
+    final attachment = imageAttachmentFromSelection(selection(bounds), 'cell');
+    expect(attachment.snapshot?['spatialContext'], spatial);
+    expect(attachment.snapshot?['selection'], isNull);
+    expect(attachment.excerpt, 'Database Alias · row 1');
+    expect(
+      contextHandoffSnapshots([attachment]).single['spatialContext'],
+      spatial,
+    );
+    final mismatched = imageAttachmentFromSelection(
+      selection({...bounds, 'x': 100}),
+      'changed',
+    );
+    expect(mismatched.snapshot?['spatialContext'], isNull);
+  });
   test(
     'an aligned image retains its exact region, source and coordinate mapping',
     () {

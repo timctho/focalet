@@ -14,6 +14,7 @@ public sealed class ZommiContextFixture : IDisposable
     private Form form;
     private Button front;
     private Button back;
+    private DataGridView grid;
     private Exception failure;
     public IntPtr Window { get; private set; }
 
@@ -74,5 +75,40 @@ public sealed class ZommiContextFixture : IDisposable
     public void BringBackToFront()
     {
         form.Invoke(new Action(() => back.BringToFront()));
+    }
+
+    public void ChangeTitle()
+    {
+        form.Invoke(new Action(() => form.Text += " changed"));
+    }
+
+    public void ShowGrid()
+    {
+        form.Invoke(new Action(() => {
+            grid = new DataGridView {
+                Bounds = new Rectangle(20, 20, 450, 290), AllowUserToAddRows = false,
+                RowHeadersVisible = false, ReadOnly = true, AccessibleName = "Database table",
+            };
+            grid.Columns.Add("alias", "Database Alias");
+            grid.Columns.Add("host", "Host");
+            grid.Columns[0].Width = 240;
+            grid.Columns[1].Width = 180;
+            for (var row = 1; row <= 4; row++) grid.Rows.Add("Database " + row, "localhost");
+            grid.RowTemplate.Height = 40;
+            foreach (DataGridViewRow row in grid.Rows) row.Height = 40;
+            form.Controls.Add(grid);
+            grid.BringToFront();
+        }));
+    }
+
+    public int[] GridCellBounds(int row, int column)
+    {
+        int[] result = null;
+        form.Invoke(new Action(() => {
+            var cell = grid.GetCellDisplayRectangle(column, row, false);
+            var point = grid.PointToScreen(cell.Location);
+            result = new[] { point.X, point.Y, cell.Width, cell.Height };
+        }));
+        return result;
     }
 }

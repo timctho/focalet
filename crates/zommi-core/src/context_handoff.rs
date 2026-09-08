@@ -77,6 +77,10 @@ fn format_snapshot(snapshot: &Value, index: usize, total: usize) -> String {
     for (field, label) in [
         ("source", "Observation source"),
         ("region", "Image region alignment and coordinate mapping"),
+        (
+            "spatialContext",
+            "Table location around the crop (context, not a claim that the whole cell was selected)",
+        ),
     ] {
         if let Some(value) = snapshot.get(field).filter(|value| value.is_object()) {
             lines.push(format!(
@@ -84,6 +88,9 @@ fn format_snapshot(snapshot: &Value, index: usize, total: usize) -> String {
                 serde_json::to_string(value).unwrap_or_default()
             ));
         }
+    }
+    if snapshot.get("spatialContext").is_some() {
+        lines.push("Table rowIndex and columnIndex are raw provider grid coordinates. dataRowNumber, when present, is the one-based data row normalized against the verified firstDataRowIndex; providers can include headers or report a nonzero first data index. Use columnHeaders for the visible column name; do not infer a row number from screen Y alone.".into());
     }
     if let Some(region) = snapshot.get("region").filter(|value| value.is_object()) {
         for field in ["snapshotId", "observedAtUtc", "expiresAtUtc"] {
@@ -581,6 +588,28 @@ mod tests {
     #[test]
     fn returns_trimmed_user_message_without_context() {
         assert_eq!(build_context_handoff("  hello  ", &[], 0), "hello");
+    }
+
+    #[test]
+    fn partial_cell_location_and_batch_image_references_reach_the_agent() {
+        let snapshots = [1, 3].map(|row| json!({
+            "contextLabel": if row == 1 { "A" } else { "B" },
+            "imageIndex": if row == 1 { 1 } else { 2 },
+            "region": {"status": "image-only"},
+            "spatialContext": {"cells": [{"rowIndex": row, "columnIndex": 1,
+                "firstDataRowIndex": 1, "dataRowNumber": row, "columnHeaders": ["Database Alias"]}]}
+        }));
+        let handoff = build_context_handoff("which rows?", &snapshots, 2);
+        assert!(
+            handoff.contains("Attached image 1 corresponds")
+                && handoff.contains("Attached image 2 corresponds")
+        );
+        assert!(handoff.contains("\"dataRowNumber\":1") && handoff.contains("\"dataRowNumber\":3"));
+        assert!(
+            handoff.contains("Database Alias") && handoff.contains("verified firstDataRowIndex")
+        );
+        assert!(handoff.contains("not a claim that the whole cell was selected"));
+        assert!(!handoff.contains("PRIMARY SURFACE SELECTION"));
     }
 
     #[test]

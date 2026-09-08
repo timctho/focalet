@@ -40,6 +40,26 @@ public sealed record RegionAlignment
     public CaptureMapping? Mapping { get; init; }
 }
 
+public sealed record RegionCellContext
+{
+    public required CaptureRectangle Bounds { get; init; }
+    public required CaptureRectangle TableBounds { get; init; }
+    public required string Relation { get; init; }
+    public required int RowIndex { get; init; }
+    public required int ColumnIndex { get; init; }
+    public int? DataRowNumber { get; init; }
+    public int? FirstDataRowIndex { get; init; }
+    public string? Label { get; init; }
+    public IReadOnlyList<string> ColumnHeaders { get; init; } = [];
+}
+
+public sealed record RegionSpatialContext
+{
+    public string Provider { get; init; } = "windows-uia-grid";
+    public string CoordinateSpace { get; init; } = "desktop-physical-pixels";
+    public IReadOnlyList<RegionCellContext> Cells { get; init; } = [];
+}
+
 public sealed record DomElementContext
 {
     public required string Role { get; init; }

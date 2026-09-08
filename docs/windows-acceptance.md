@@ -141,6 +141,14 @@ a `100vh` body. Require all 12 visible card URLs, including text/background-imag
 cards and a subpixel right edge, while excluding the fourth row clipped by the
 grid. For a live site, compare against the visible page's own card links.
 
+The native gate also runs `accept-windows-multi-content.ps1`: Ctrl-click mixed
+with rectangles, repeated rectangles, rapid clicks during a paused UIA provider,
+Ctrl release before a queued click resolves, retained blue outlines, ordered
+Enter submission, Escape and atomic source-change rejection. A real DataGridView
+fixture checks partial crops from data rows 1 and 3, including column headers.
+For parent application/Redis reports, repeat the user's actual selection against the exact
+packaged helper and retain that evidence separately from the fixture results.
+
 ## Multiline composer
 
 Type one line, then add a second with Shift+Enter. The composer must grow upward

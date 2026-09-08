@@ -134,4 +134,6 @@ public sealed record ContextSnapshot
     public DomContext? Dom { get; init; }
 
     public RegionAlignment? Region { get; init; }
+
+    public RegionSpatialContext? SpatialContext { get; init; }
 }

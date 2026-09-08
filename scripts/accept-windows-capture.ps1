@@ -670,7 +670,7 @@ public static class ZommiWindowsAcceptanceNative
     private static extern uint GetPixel(IntPtr deviceContext, int x, int y);
 
     // Actual painted outline, not just HWND/focus or a queued mouse event.
-    public static bool HasSelectionEdge(int x, int y)
+    public static bool HasSelectionEdge(int x, int y, bool queued = false)
     {
         var previousDpi = SetThreadDpiAwarenessContext(new IntPtr(-4));
         var dc = GetDC(IntPtr.Zero);
@@ -684,6 +684,8 @@ public static class ZommiWindowsAcceptanceNative
             if (!BitBlt(memory, 0, 0, 6, 1, dc, x, y, 0x40CC0020)) return false;
             var edge = GetPixel(memory, 0, 0);
             var outside = GetPixel(memory, 5, 0);
+            if (queued) return edge != 0xffffffff &&
+                ((edge >> 16) & 255) > (edge & 255) + 35 && ((edge >> 8) & 255) > (edge & 255) + 20;
             return edge != 0xffffffff && outside != 0xffffffff &&
                 (edge & 255) > (outside & 255) + 80;
         }
@@ -2006,6 +2008,8 @@ if ($width -ne $selected.bounds.width -or $height -ne $selected.bounds.height) {
     throw "PNG dimensions ${width}x${height} do not match the reported bounds $($selected.bounds.width)x$($selected.bounds.height)."
 }
 
+$multiContent = & (Join-Path $PSScriptRoot 'accept-windows-multi-content.ps1') -CaptureHost $capture
+
 $applicationResult = if (-not $NativeOnly) {
     Invoke-PackagedApplicationAcceptance -Package $package -CaptureExecutable $capture
 } else { $null }
@@ -2018,6 +2022,7 @@ Write-AcceptanceResult -Result @{
     pointContext = $true
     unifiedContent = @('cancel') + $contentGestures
     contentSelectionTimings = $contentTimings
+    multiContent = $multiContent.cases
     selectedBounds = @($selected.bounds.x, $selected.bounds.y, $selected.bounds.width, $selected.bounds.height)
     pngDimensions = @($width, $height)
     pngBytes = $png.Length

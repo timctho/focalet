@@ -454,6 +454,7 @@ final class FakeDesktopBridge implements DesktopBridge, BrowserCaptureSettings {
   final List<String> calls = [];
   final List<bool> surfaceAnimations = [];
   ContextAttachment? nextContext;
+  List<ContextAttachment>? nextSelections;
   ContextAttachment? nextImage;
   String? copiedText;
   String? copiedImage;
@@ -485,10 +486,11 @@ final class FakeDesktopBridge implements DesktopBridge, BrowserCaptureSettings {
   }
 
   @override
-  Future<ContextAttachment?> selectPointerContext() async {
+  Future<List<ContextAttachment>> selectPointerContext() async {
     calls.add('selectPointerContext');
-    if (selectionGate case final gate?) return gate;
-    return nextContext;
+    if (nextSelections case final selected?) return selected;
+    final selected = await (selectionGate ?? Future.value(nextContext));
+    return selected == null ? [] : [selected];
   }
 
   @override

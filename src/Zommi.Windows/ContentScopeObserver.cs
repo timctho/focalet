@@ -12,7 +12,7 @@ namespace Zommi.Windows;
 
 internal sealed record ContentOutline(Rectangle Bounds, string Label);
 internal sealed record ContentObservation(long Version, Point Point, nint Window,
-    CaptureRectangle? WindowBounds, string WindowTitle, IReadOnlyList<ContentOutline> Outlines);
+    CaptureRectangle? WindowBounds, string WindowTitle, int ProcessId, IReadOnlyList<ContentOutline> Outlines);
 
 /// <summary>Owns UIA on one background MTA. Only geometry crosses to the UI;
 /// pointer requests replace one another instead of building a work queue.</summary>
@@ -78,8 +78,10 @@ internal sealed class ContentScopeObserver : IDisposable
         var window = NativeCaptureWindow.BeneathOverlay(point, excludedProcessId);
         var bounds = window == 0 ? null : NativeCaptureWindow.Bounds(window);
         var title = window == 0 ? "" : NativeCaptureWindow.Title(window);
+        var processId = window == 0 ? 0 : NativeCaptureWindow.ProcessId(window);
         var outlines = new List<ContentOutline>();
-        if (bounds is not { IsValid: true } area) return new(version, point, window, bounds, title, outlines);
+        if (bounds is not { IsValid: true } area) return new(version, point, window, bounds, title, processId, outlines);
+        var captureBounds = NativeCaptureWindow.CaptureBounds(window);
         try
         {
             // Cache geometry, but obtain the target from the application's hit
@@ -106,7 +108,9 @@ internal sealed class ContentScopeObserver : IDisposable
             {
                 if (element.Properties.IsPassword.ValueOrDefault) { outlines.Clear(); break; }
                 if (element.Equals(root)) { belongsToWindow = true; break; }
-                var rectangle = element.Properties.BoundingRectangle.ValueOrDefault;
+                // Accessibility panes can extend into invisible resize borders
+                // and the taskbar just like a top-level window's raw rectangle.
+                var rectangle = Rectangle.Intersect(element.Properties.BoundingRectangle.ValueOrDefault, captureBounds);
                 if (!element.Properties.IsOffscreen.ValueOrDefault && rectangle.Contains(point) &&
                     rectangle.Width > 3 && rectangle.Height > 3 &&
                     BrowserObservationBridge.ToRectangle(rectangle) != area &&
@@ -124,7 +128,7 @@ internal sealed class ContentScopeObserver : IDisposable
             if (!belongsToWindow) outlines.Clear();
         }
         catch (Exception exception) when (BrowserObservationBridge.IsUnavailable(exception)) { outlines.Clear(); }
-        return new(version, point, window, bounds, title, outlines);
+        return new(version, point, window, bounds, title, processId, outlines);
     }
 
     private static AutomationElement? HitTest(UIA3Automation automation, CacheRequest cache, nint window, Point point)

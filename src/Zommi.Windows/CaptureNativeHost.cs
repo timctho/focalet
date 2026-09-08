@@ -190,16 +190,33 @@ internal static class CaptureNativeHost
     private static object SelectContent(uint returnProcessId)
     {
         using var selector = new ContentSelectionForm(returnProcessId);
-        if (selector.ShowDialog() != DialogResult.OK || selector.SelectedRegion is not { } region)
-            return new { Cancelled = true };
+        if (selector.ShowDialog() != DialogResult.OK || selector.Selections.Count == 0)
+            return new { Cancelled = true, selector.ErrorMessage };
         Application.DoEvents();
         Thread.Sleep(80);
-        if (selector.SelectedWindow != 0 &&
-            (NativeCaptureWindow.ForRegion(region) != selector.SelectedWindow ||
-             NativeCaptureWindow.Bounds(selector.SelectedWindow) != selector.SelectedWindowBounds ||
-             NativeCaptureWindow.Title(selector.SelectedWindow) != selector.SelectedWindowTitle))
-            return new { Cancelled = true, ErrorMessage = "The selected window changed or is covered. Select the content again." };
-        return ImageResult(RegionContextCapture.Capture(region));
+        var results = new List<object>();
+        foreach (var selected in selector.Selections)
+        {
+            bool Matches() => NativeCaptureWindow.Bounds(selected.Window) == selected.WindowBounds &&
+                NativeCaptureWindow.Title(selected.Window) == selected.WindowTitle &&
+                NativeCaptureWindow.ProcessId(selected.Window) == selected.ProcessId;
+            if (selected.Window != 0)
+            {
+                if (!Matches()) return new { Cancelled = true, ErrorMessage = "The selected window changed. Select the content again." };
+                if (selected.WholeWindow)
+                {
+                    // Explicit whole-window sharing brings that source forward.
+                    // Owned dialogs still remain above it and fail the coverage check.
+                    NativeCaptureWindow.Activate(selected.Window);
+                    Application.DoEvents();
+                    Thread.Sleep(80);
+                }
+                if (!Matches() || NativeCaptureWindow.ForRegion(selected.Region) != selected.Window)
+                    return new { Cancelled = true, ErrorMessage = "The selected window changed or is covered. Select the content again." };
+            }
+            results.Add(ImageResult(RegionContextCapture.Capture(selected.Region)));
+        }
+        return results.Count == 1 ? results[0] : new { Cancelled = false, Selections = results };
     }
 
     private static object SelectContext(ForegroundContextCapture capture, uint returnProcessId)

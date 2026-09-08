@@ -11,6 +11,12 @@ anywhere to choose a rectangle instead. The visible **Larger**, **Smaller** and
 Up/Down and Enter remain available. Escape cancels and returns to the draft.
 If an application exposes no usable object, the picker asks you to drag a region.
 
+Hold **Ctrl** while clicking or dragging to collect several selections. Numbered
+outlines stay on screen when Ctrl is released. Continue selecting, then press
+**Enter** to attach them in order (up to 16); **Escape** discards the whole batch.
+Each attachment retains its own image, context and coordinates. Repeating an
+identical selection does not add another attachment.
+
 Dragging starts immediately, including over an outlined item. Hover lookup runs
 on a separate thread and keeps only the newest pointer position. Ordinary hover
 can move from a container into its small children; only a scope you explicitly
@@ -24,8 +30,9 @@ Free rectangles automatically collect the readable elements they fully enclose,
 including multiple elements. Partially clipped UIA elements and DOM text lines
 are omitted. Canvas/custom-drawn content, an unconfirmed source window, or a
 changing document can produce **Image only** with an explanation in the preview.
-Whole-window capture includes the visible desktop portion and rejects a covered
-or moved source window. It is a single snapshot, not a continuing screen share.
+Whole-window capture brings the explicitly chosen window forward and includes
+its visible desktop portion. Moved sources and covering owned dialogs are
+rejected. It is a single snapshot, not a continuing screen share.
 Other platforms retain their existing selection providers.
 
 Windows captures without accessible text show **Image with screen location**
@@ -35,6 +42,12 @@ screen mapping without guessing one source. The agent receives the capture ID,
 time and image-to-screen formula. These coordinates describe that frame; the
 agent must observe again after a window, scroll or content change before acting.
 This supplies location even when a custom UI exposes no accessible text.
+
+When a crop intersects an accessible table cell, separate spatial context carries
+its column header, raw grid indices and, when the first data row can be verified,
+the one-based data row number. This can identify a partial Redis cell without
+claiming that its complete text is inside the image. Providers without grid
+semantics retain coordinates without an invented row number.
 
 Enclosed images and text retain their own wrapping link's URL, including cards
 that use background thumbnails. The preview lists each URL once. Region bounds

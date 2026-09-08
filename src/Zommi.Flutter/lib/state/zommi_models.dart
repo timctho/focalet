@@ -43,6 +43,18 @@ final class ContextAttachment {
     final elements = dom is Map ? dom['elements'] : null;
     final selected = snapshot?['selectionElements'];
     final tree = snapshot?['accessibilityTree'];
+    final spatial = snapshot?['spatialContext'];
+    final cells = spatial is Map ? spatial['cells'] : null;
+    String? location;
+    if (cells is List && cells.isNotEmpty && cells.first is Map) {
+      final cell = cells.first as Map;
+      final headers = cell['columnHeaders'];
+      final column = headers is List ? headers.join(' / ') : '';
+      final row = cell['dataRowNumber'];
+      if (column.isNotEmpty) {
+        location = row is num ? '$column · row $row' : column;
+      }
+    }
     String? firstText(Object? items) {
       if (items is! List) return null;
       for (final item in items.whereType<Map>()) {
@@ -60,6 +72,7 @@ final class ContextAttachment {
       firstText(elements) ??
           firstText(selected) ??
           firstText(tree is Map ? tree['roots'] : null) ??
+          location ??
           (hasImage ? 'Selected image' : sourceTitle),
     );
   }

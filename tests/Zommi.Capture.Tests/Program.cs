@@ -11,6 +11,7 @@ var tests = new (string Name, Action Body)[]
     ("Image links remain readable in the context preview", ImageLinkPreview),
     ("Card previews show each URL once and retain every caption", CardLinkPreview),
     ("Image-only previews explain retained screen location", ImageLocationPreview),
+    ("Partial cell previews show the verified data row and column", CellLocationPreview),
 };
 
 var failures = new List<string>();
@@ -30,6 +31,21 @@ foreach (var test in tests)
 
 Console.WriteLine($"{tests.Length - failures.Count}/{tests.Length} capture contracts passed");
 return failures.Count == 0 ? 0 : 1;
+
+static void CellLocationPreview()
+{
+    var preview = ContextPreviewFormatter.Format(Snapshot() with
+    {
+        SpatialContext = new RegionSpatialContext { Cells = [new RegionCellContext
+        {
+            Bounds = new(402, 479, 306, 73), TableBounds = new(341, 395, 1799, 373),
+            Relation = "contains-selection-center", RowIndex = 1, ColumnIndex = 1,
+            DataRowNumber = 1, FirstDataRowIndex = 1, ColumnHeaders = ["Database Alias"],
+        }] },
+    });
+    Contains(preview, "Location: Database Alias · data row 1");
+    Contains(preview, "cell surrounding the selection");
+}
 
 static void ImageLocationPreview()
 {

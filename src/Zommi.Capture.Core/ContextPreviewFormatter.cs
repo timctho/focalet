@@ -31,6 +31,15 @@ public static class ContextPreviewFormatter
             builder.AppendLine(region.Status == "aligned" ? "Image with text from the selected region" :
                 region.Mapping is not null ? $"Image with screen location — {region.Reason}" : $"Image only — {region.Reason}");
         }
+        if (snapshot.SpatialContext is { } spatial)
+        {
+            foreach (var cell in spatial.Cells)
+            {
+                var column = cell.ColumnHeaders.Count > 0 ? string.Join(" / ", cell.ColumnHeaders.Select(value => Clean(value, 120))) : $"column index {cell.ColumnIndex}";
+                var row = cell.DataRowNumber is { } number ? $"data row {number}" : $"grid row index {cell.RowIndex} (zero-based)";
+                builder.AppendLine($"Location: {column} · {row} (cell surrounding the selection)");
+            }
+        }
         if (snapshot.Selection.Count > 0 || snapshot.SelectionElements.Count > 0)
         {
             builder.AppendLine("PRIMARY SURFACE SELECTION (the user deliberately selected this content):");

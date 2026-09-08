@@ -793,8 +793,9 @@ final class ZommiController extends ChangeNotifier {
     previewAttachment = null;
     _notify();
     try {
-      var attachment = await desktop.selectPointerContext();
-      if (attachment != null) {
+      final selected = await desktop.selectPointerContext();
+      final prepared = <ContextAttachment>[];
+      for (var attachment in selected) {
         if (attachment.hasImage && !imageInputSupported) {
           if (mapValue(attachment.snapshot?['region'])['status'] ==
               'image-only') {
@@ -812,14 +813,16 @@ final class ZommiController extends ChangeNotifier {
             bounds: attachment.bounds,
           );
         }
-        if (replacingId == null) {
-          addAttachment(attachment);
-        } else {
+        prepared.add(attachment);
+      }
+      if (prepared.isNotEmpty) {
+        if (replacingId != null) {
           final index = attachments.indexWhere(
             (item) => item.id == replacingId,
           );
           if (index < 0) return;
           final previous = attachments[index];
+          final attachment = prepared.removeAt(0);
           attachments[index] = ContextAttachment(
             id: previous.id,
             token: previous.token,
@@ -829,8 +832,15 @@ final class ZommiController extends ChangeNotifier {
             bounds: attachment.bounds,
           );
         }
+        for (final attachment in prepared) {
+          attachments.add(attachment.withToken(_attachmentToken()));
+        }
         _setStatus(
-          replacingId == null ? 'Content attached' : 'Selection updated',
+          selected.length > 1
+              ? '${selected.length} selections attached'
+              : replacingId == null
+              ? 'Content attached'
+              : 'Selection updated',
         );
       }
     } on Object catch (error) {

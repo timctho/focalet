@@ -9,6 +9,39 @@ import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 
 void main() {
+  test(
+    'Windows selection batches preserve each image and its own coordinates',
+    () async {
+      final client = _FakeNativeCaptureClient(
+        onRequest: (_) async => {
+          'cancelled': false,
+          'selections': [
+            for (final index in [1, 2])
+              {
+                'dataUrl': 'data:image/png;base64,$index',
+                'bounds': {'x': index * 100},
+                'snapshot': {'windowTitle': 'Window $index'},
+                'alignment': {'status': 'image-only'},
+              },
+          ],
+        },
+      );
+      final provider = WindowsCaptureProvider(
+        captureClient: client,
+        selectorClient: client,
+      );
+      final results = await provider.selectContext();
+      expect(results.map((item) => item.image?.dataUrl), [
+        'data:image/png;base64,1',
+        'data:image/png;base64,2',
+      ]);
+      expect(results.map((item) => item.image?.bounds?['x']), [100, 200]);
+      expect(results.map((item) => item.snapshot?['windowTitle']), [
+        'Window 1',
+        'Window 2',
+      ]);
+    },
+  );
   test('disabling webpage details reaches both native helpers for every capture gesture', () async {
     final ordinary = _FakeNativeCaptureClient(onRequest: (_) async => {});
     final selector = _FakeNativeCaptureClient(
@@ -817,9 +850,12 @@ void main() {
         const Duration(milliseconds: 100),
       );
       expect(selectorClient.requests, ['selectContent']);
-      expect(selectedContext?.snapshot?['application'], 'clicked-window');
-      expect(selectedContext?.image?.dataUrl, 'data:image/png;base64,YQ==');
-      expect(selectedContext?.image?.bounds?['x'], -200);
+      expect(selectedContext.single.snapshot?['application'], 'clicked-window');
+      expect(
+        selectedContext.single.image?.dataUrl,
+        'data:image/png;base64,YQ==',
+      );
+      expect(selectedContext.single.image?.bounds?['x'], -200);
 
       final image = await provider.selectImage().timeout(
         const Duration(milliseconds: 100),
@@ -878,7 +914,7 @@ void main() {
       expect(context.snapshot?['windowTitle'], 'Fixture window');
 
       final selectedContext = await provider.selectContext();
-      expect(selectedContext?.snapshot?['application'], 'fixture-app');
+      expect(selectedContext.single.snapshot?['application'], 'fixture-app');
 
       final image = await provider.selectImage();
       expect(image?.dataUrl, 'data:image/png;base64,AQID');

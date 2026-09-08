@@ -2,6 +2,9 @@ using Zommi.Capture;
 
 namespace Zommi.Windows;
 
+internal sealed record ContentSelection(Rectangle Region, nint Window, CaptureRectangle? WindowBounds,
+    string? WindowTitle, int ProcessId, bool WholeWindow);
+
 /// <summary>One desktop gesture surface: click an outlined object, drag a region,
 /// or choose the whole window. Selection clicks never reach the source app.</summary>
 internal sealed class ContentSelectionForm : PointSelectionForm
@@ -32,6 +35,13 @@ internal sealed class ContentSelectionForm : PointSelectionForm
     private nint targetWindow;
     private CaptureRectangle? targetBounds;
     private string targetTitle = "";
+    private int targetProcessId;
+    private readonly List<ContentSelection> selections = [];
+    private readonly Queue<(Point Start, Point End, bool Additive)> pendingGestures = new();
+    private bool additiveGesture;
+    private bool confirmAdditive;
+    private bool finishRequested;
+    private const int MaximumSelections = 16;
 
     public ContentSelectionForm(uint returnProcessId) : base(returnProcessId)
     {
@@ -55,16 +65,20 @@ internal sealed class ContentSelectionForm : PointSelectionForm
         hoverTimer.Tick += (_, _) => ObservePointer();
     }
 
-    public Rectangle? SelectedRegion { get; private set; }
-    public nint SelectedWindow { get; private set; }
-    public CaptureRectangle? SelectedWindowBounds { get; private set; }
-    public string? SelectedWindowTitle { get; private set; }
+    public IReadOnlyList<ContentSelection> Selections => selections;
+    public string? ErrorMessage { get; private set; }
 
     protected override bool ProcessCmdKey(ref Message message, Keys keyData)
     {
         // Enter confirms the outlined content even when a toolbar button has
         // focus. Otherwise WinForms can activate the initially focused Cancel.
-        if (keyData == Keys.Enter) { ConfirmObject(); return true; }
+        if ((keyData & Keys.KeyCode) == Keys.Enter)
+        {
+            if (anchor is not null || confirmPoint is not null || pendingGestures.Count > 0) finishRequested = true;
+            else if (selections.Count > 0) Finish();
+            else ConfirmObject();
+            return true;
+        }
         if (keyData == Keys.Up) { ChangeScope(1); return true; }
         if (keyData == Keys.Down) { ChangeScope(-1); return true; }
         return base.ProcessCmdKey(ref message, keyData);
@@ -149,16 +163,22 @@ internal sealed class ContentSelectionForm : PointSelectionForm
         targetWindow = observation.Window;
         targetBounds = observation.WindowBounds;
         targetTitle = observation.WindowTitle;
+        targetProcessId = observation.ProcessId;
         scopes = observation.Outlines;
         scopeIndex = 0;
         UpdateHint();
         if (changed) InvalidateOutline(previous);
-        if (confirmPoint == observedPoint)
+        ResolveConfirmation();
+    }
+
+    private void ResolveConfirmation()
+    {
+        if (anchor is null && confirmPoint is not null && confirmPoint == observedPoint)
         {
             if (scopes.Count > 0)
             {
                 confirmPoint = null;
-                SelectObject();
+                SelectObject(confirmAdditive);
             }
             else if (Environment.TickCount64 < confirmUntil)
             {
@@ -166,7 +186,13 @@ internal sealed class ContentSelectionForm : PointSelectionForm
                 // press after it recovers, without blocking drag or cancellation.
                 nextRefreshAt = Environment.TickCount64 + 100;
             }
-            else confirmPoint = null;
+            else
+            {
+                ErrorMessage = "The selected item could not be resolved. Try dragging a rectangle around it.";
+                GrantForeground();
+                DialogResult = DialogResult.Cancel;
+                Close();
+            }
         }
     }
 
@@ -185,32 +211,34 @@ internal sealed class ContentSelectionForm : PointSelectionForm
 
     private void UpdateHint()
     {
-        hint.Text = "Drag any area · or click an item";
+        hint.Text = selections.Count == 0 ? "Drag or click · Ctrl to select several" :
+            $"{selections.Count} selected · Enter to attach · Esc to cancel";
         toolbar.AccessibleDescription = "The image includes readable content inside your selection when available.";
         smaller.Enabled = scopeIndex > 0;
         larger.Enabled = scopeIndex + 1 < scopes.Count;
         wholeWindow.Enabled = targetBounds is { IsValid: true };
     }
 
-    private void SelectObject()
+    private void SelectObject(bool additive = false)
     {
         if (scopes.Count == 0) return;
-        Complete(scopes[scopeIndex].Bounds, targetWindow);
+        Complete(scopes[scopeIndex].Bounds, targetWindow, additive);
     }
 
-    private void ConfirmObject(Point? point = null)
+    private void ConfirmObject(Point? point = null, bool additive = false)
     {
-        if (point is null && scopePinned) { SelectObject(); return; }
+        if (point is null && scopePinned) { SelectObject(additive); return; }
         var target = point ?? lastPoint ?? Cursor.Position;
         if ((scopePinned && scopes.Count > 0 && scopes[scopeIndex].Bounds.Contains(target)) ||
-            !observationPending && observedPoint == target)
+            !observationPending && observedPoint == target && scopes.Count > 0)
         {
-            SelectObject();
+            SelectObject(additive);
             return;
         }
         // A quick click may beat the background lookup. Resolve that exact
         // press location without blocking the UI or attaching an old outline.
         confirmPoint = target;
+        confirmAdditive = additive;
         confirmUntil = Environment.TickCount64 + 2_000;
         RequestObservation(target);
     }
@@ -218,19 +246,70 @@ internal sealed class ContentSelectionForm : PointSelectionForm
     private void SelectWindow()
     {
         if (targetBounds is not { IsValid: true }) return;
-        Complete(NativeCaptureWindow.CaptureBounds(targetWindow), targetWindow);
+        Complete(NativeCaptureWindow.CaptureBounds(targetWindow), targetWindow,
+            (ModifierKeys & Keys.Control) != 0 || selections.Count > 0, wholeWindow: true);
     }
 
-    private void Complete(Rectangle bounds, nint window)
+    private void Complete(Rectangle bounds, nint window, bool additive = false, bool wholeWindow = false)
     {
         if (bounds.Width < 4 || bounds.Height < 4) return;
-        SelectedRegion = bounds;
-        SelectedWindow = window;
-        SelectedWindowBounds = window == 0 ? null : targetBounds;
-        SelectedWindowTitle = window == 0 ? null : targetTitle;
+        if (selections.Count >= MaximumSelections)
+        {
+            hint.Text = $"Maximum {MaximumSelections} selections · Enter to attach";
+            finishRequested = false;
+            return;
+        }
+        var identityBounds = window == 0 ? null : targetBounds;
+        var title = window == 0 ? null : targetTitle;
+        var processId = window == 0 ? 0 : targetProcessId;
+        if (window == 0)
+        {
+            // Bind a queued rectangle now, while the overlay excludes itself.
+            // Rectangles spanning several apps keep geometry without a guessed source.
+            window = NativeCaptureWindow.ForRegion(bounds);
+            if (window != 0)
+            {
+                identityBounds = NativeCaptureWindow.Bounds(window);
+                title = NativeCaptureWindow.Title(window);
+                processId = NativeCaptureWindow.ProcessId(window);
+            }
+        }
+        var continueBatch = additive || selections.Count > 0 || pendingGestures.Count > 0;
+        var selected = new ContentSelection(bounds, window, identityBounds, title, processId, wholeWindow);
+        if (!selections.Contains(selected)) selections.Add(selected);
+        if (continueBatch)
+        {
+            observationVersion++;
+            observationPending = false;
+            confirmPoint = null;
+            scopePinned = false;
+            lastPoint = null;
+            var previous = OutlineBounds;
+            scopes = [];
+            scopeIndex = 0;
+            UpdateHint();
+            InvalidateOutline(previous);
+            InvalidateOutline(bounds);
+            ContinuePendingGestures();
+            return;
+        }
+        Finish();
+    }
+
+    private void Finish()
+    {
+        if (selections.Count == 0) return;
         GrantForeground();
         DialogResult = DialogResult.OK;
         Close();
+    }
+
+    private void ContinuePendingGestures()
+    {
+        if (anchor is not null || confirmPoint is not null) return;
+        if (pendingGestures.TryDequeue(out var gesture))
+            CommitGesture(gesture.Start, gesture.End, gesture.Additive);
+        else if (finishRequested) Finish();
     }
 
     protected override void OnMouseDown(MouseEventArgs e)
@@ -239,10 +318,11 @@ internal sealed class ContentSelectionForm : PointSelectionForm
         if (e.Button != MouseButtons.Left) return;
         var previous = OutlineBounds;
         anchor = PointToScreen(e.Location);
-        confirmPoint = null;
+        additiveGesture = (ModifierKeys & Keys.Control) != 0 || selections.Count > 0;
+        finishRequested = false;
         dragged = Rectangle.Empty;
         Capture = true;
-        if (lastPoint != anchor && !(scopePinned && scopes.Count > 0 && scopes[scopeIndex].Bounds.Contains(anchor.Value)))
+        if (confirmPoint is null && lastPoint != anchor && !(scopePinned && scopes.Count > 0 && scopes[scopeIndex].Bounds.Contains(anchor.Value)))
             RequestObservation(anchor.Value);
         InvalidateOutline(previous);
     }
@@ -261,18 +341,31 @@ internal sealed class ContentSelectionForm : PointSelectionForm
     {
         if (e.Button != MouseButtons.Left || anchor is not { } start) return;
         var point = PointToScreen(e.Location);
-        var previous = OutlineBounds;
         anchor = null;
         Capture = false;
+        if (confirmPoint is not null)
+        {
+            if (pendingGestures.Count + selections.Count + 1 < MaximumSelections)
+                pendingGestures.Enqueue((start, point, additiveGesture));
+            ResolveConfirmation();
+            return;
+        }
+        CommitGesture(start, point, additiveGesture);
+    }
+
+    private void CommitGesture(Point start, Point point, bool additive)
+    {
+        var previous = OutlineBounds;
         if (Math.Abs(point.X - start.X) >= 4 && Math.Abs(point.Y - start.Y) >= 4)
-            Complete(Rectangle.FromLTRB(Math.Min(start.X, point.X), Math.Min(start.Y, point.Y), Math.Max(start.X, point.X), Math.Max(start.Y, point.Y)), 0);
-        else if (Math.Abs(point.X - start.X) < 4 && Math.Abs(point.Y - start.Y) < 4) ConfirmObject(start);
+            Complete(Rectangle.FromLTRB(Math.Min(start.X, point.X), Math.Min(start.Y, point.Y), Math.Max(start.X, point.X), Math.Max(start.Y, point.Y)), 0, additive);
+        else if (Math.Abs(point.X - start.X) < 4 && Math.Abs(point.Y - start.Y) < 4) ConfirmObject(start, additive);
         else
         {
             // A thin accidental drag neither attaches a stale object nor
             // disables the next gesture.
             RequestObservation(point);
             InvalidateOutline(previous);
+            ContinuePendingGestures();
         }
     }
 
@@ -294,6 +387,18 @@ internal sealed class ContentSelectionForm : PointSelectionForm
 
     protected override void OnPaint(PaintEventArgs e)
     {
+        using var selectedPen = new Pen(Color.FromArgb(111, 205, 255), 3);
+        using var numberFont = new Font("Segoe UI", 10, FontStyle.Bold);
+        for (var index = 0; index < selections.Count; index++)
+        {
+            var selected = selections[index].Region;
+            selected.Offset(-Left, -Top);
+            e.Graphics.DrawRectangle(selectedPen, selected);
+            var numberX = selected.Left + 3;
+            var numberY = selected.Width < 36 || selected.Height < 30 ? Math.Max(0, selected.Top - 26) : selected.Top + 3;
+            e.Graphics.FillRectangle(Brushes.Black, numberX, numberY, 28, 24);
+            e.Graphics.DrawString((index + 1).ToString(), numberFont, Brushes.White, numberX + 4, numberY + 2);
+        }
         var bounds = OutlineBounds;
         if (bounds.IsEmpty) return;
         bounds.Offset(-Left, -Top);

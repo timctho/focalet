@@ -21,6 +21,104 @@ ContextAttachment selected(String id, String text) => ContextAttachment(
 
 void main() {
   testWidgets(
+    'a confirmed selection batch inserts all chips in order and keeps the draft',
+    (tester) async {
+      const png =
+          'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+      final core = RichFakeCore()..historyCount = 0;
+      final desktop = FakeDesktopBridge()
+        ..nextSelections = [
+          for (final row in [1, 3])
+            ContextAttachment(
+              id: 'row-$row',
+              token: '',
+              imageDataUrl: png,
+              bounds: {
+                'x': 411,
+                'y': 400 + row * 70,
+                'width': 302,
+                'height': 50,
+              },
+              snapshot: {
+                'selection': ['Row $row'],
+                'spatialContext': {
+                  'cells': [
+                    {
+                      'dataRowNumber': row,
+                      'columnHeaders': ['Database Alias'],
+                    },
+                  ],
+                },
+              },
+            ),
+        ];
+      await tester.binding.setSurfaceSize(const Size(1000, 820));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(ZommiApp(core: core, desktop: desktop));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('zommi-composer')),
+        'Compare these rows',
+      );
+      await tester.tap(find.byKey(const ValueKey('select-content')));
+      await tester.pumpAndSettle();
+      final composer =
+          tester
+                  .widget<TextField>(
+                    find.byKey(const ValueKey('zommi-composer')),
+                  )
+                  .controller!
+              as InlineAttachmentTextController;
+      expect(composer.inlineAttachments.map((item) => item.id), [
+        'row-1',
+        'row-3',
+      ]);
+      expect(composer.inlineAttachments.map((item) => item.token), [
+        '[A]',
+        '[B]',
+      ]);
+      expect(composer.messageText, 'Compare these rows');
+      desktop.nextSelections = [];
+      await tester.tap(find.byKey(const ValueKey('select-content')));
+      await tester.pumpAndSettle();
+      expect(composer.inlineAttachments, hasLength(2));
+      await tester.tap(find.byKey(const ValueKey('send-message')));
+      await tester.pump();
+      expect(core.lastImages, [png, png]);
+      expect(core.lastSnapshots.map((item) => item['imageIndex']), [1, 2]);
+      expect(core.lastSnapshots.map((item) => item['contextLabel']), [
+        'A',
+        'B',
+      ]);
+      expect((core.lastSnapshots.last['spatialContext'] as Map)['cells'], [
+        {
+          'dataRowNumber': 3,
+          'columnHeaders': ['Database Alias'],
+        },
+      ]);
+    },
+  );
+
+  test('adjustment to several selections keeps the original reference and appends the rest', () async {
+    final desktop = FakeDesktopBridge()
+      ..nextSelections = [
+        selected('new-a', 'First replacement'),
+        selected('new-b', 'Second replacement'),
+      ];
+    final controller = ZommiController(
+      core: RichFakeCore()..historyCount = 0,
+      desktop: desktop,
+    );
+    addTearDown(controller.close);
+    await controller.initialize();
+    controller.addAttachment(selected('old', 'Original'));
+    await controller.addPointerContext(replacingId: 'old');
+    expect(controller.attachments.map((item) => item.id), ['old', 'new-b']);
+    expect(controller.attachments.map((item) => item.token), ['[A]', '[B]']);
+    expect(controller.attachments.first.excerpt, 'First replacement');
+  });
+
+  testWidgets(
     'adjusting a selection keeps the question, reference and inline position; cancel keeps the old selection',
     (tester) async {
       final core = RichFakeCore()..historyCount = 0;
