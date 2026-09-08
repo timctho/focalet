@@ -12,6 +12,8 @@ public sealed class ZommiContextFixture : IDisposable
     private readonly Thread thread;
     private readonly ManualResetEvent ready = new ManualResetEvent(false);
     private Form form;
+    private Button front;
+    private Button back;
     private Exception failure;
     public IntPtr Window { get; private set; }
 
@@ -33,6 +35,11 @@ public sealed class ZommiContextFixture : IDisposable
                 panel.Controls.Add(new Button { Text = "+", AccessibleName = "Tiny add item", Bounds = new Rectangle(350, 195, 18, 18) });
                 panel.Controls.Add(new Button { Text = "-", AccessibleName = "Tiny remove item", Bounds = new Rectangle(374, 195, 18, 18) });
                 form.Controls.Add(panel);
+                back = new Button { Text = "Behind", AccessibleName = "Back overlap item", TabIndex = 0, Bounds = new Rectangle(20, 290, 180, 55) };
+                front = new Button { Text = "In front", AccessibleName = "Front overlap item", TabIndex = 1, Bounds = new Rectangle(45, 300, 110, 35) };
+                form.Controls.Add(back);
+                form.Controls.Add(front);
+                front.BringToFront();
                 form.Shown += (sender, args) => { Window = form.Handle; ready.Set(); };
                 Application.Run(form);
             }
@@ -62,5 +69,10 @@ public sealed class ZommiContextFixture : IDisposable
             form.BeginInvoke(new Action(() => { entered.Set(); Thread.Sleep(milliseconds); }));
             if (!entered.WaitOne(5000)) throw new TimeoutException("Could not pause the source provider.");
         }
+    }
+
+    public void BringBackToFront()
+    {
+        form.Invoke(new Action(() => back.BringToFront()));
     }
 }

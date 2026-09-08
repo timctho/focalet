@@ -8,6 +8,7 @@ var tests = new (string Name, Action Body)[]
     ("Visible text stays bounded", VisibleTextStaysBounded),
     ("Browser enrichment preserves native object selections", BrowserEnrichmentPreservesObjectSelections),
     ("DOM text remains exact and explicit picks discard ambient selection", DomSelectionPriority),
+    ("Image links remain readable in the context preview", ImageLinkPreview),
 };
 
 var failures = new List<string>();
@@ -27,6 +28,23 @@ foreach (var test in tests)
 
 Console.WriteLine($"{tests.Length - failures.Count}/{tests.Length} capture contracts passed");
 return failures.Count == 0 ? 0 : 1;
+
+static void ImageLinkPreview()
+{
+    var preview = ContextPreviewFormatter.Format(Snapshot() with
+    {
+        Dom = new DomContext
+        {
+            Mode = "region", Elements = [new DomElementContext
+            {
+                Role = "img", Text = "", Href = "https://shop.example/product?color=blue\u202e",
+                Bounds = new CaptureRectangle(1, 2, 30, 40),
+            }],
+        },
+    });
+    Contains(preview, "Link: https://shop.example/product?color=blue");
+    NotContains(preview, "\u202e");
+}
 
 static void SelectionStaysPrimaryAndSanitized()
 {

@@ -22,10 +22,11 @@ internal sealed class ContentSelectionForm : PointSelectionForm
     private bool scopePinned;
     private long observationVersion;
     private bool observationPending;
-    private long nextRetryAt;
+    private long nextRefreshAt;
     private Point? lastPoint;
     private Point? observedPoint;
     private Point? confirmPoint;
+    private long confirmUntil;
     private Point? anchor;
     private Rectangle dragged;
     private nint targetWindow;
@@ -99,9 +100,14 @@ internal sealed class ContentSelectionForm : PointSelectionForm
     private void ObservePointer()
     {
         var point = Cursor.Position;
-        if (anchor is not null || confirmPoint is not null ||
-            toolbar.Bounds.Contains(PointToClient(point))) return;
-        if (point == lastPoint && (observationPending || scopes.Count > 0 || Environment.TickCount64 < nextRetryAt)) return;
+        if (anchor is not null) return;
+        if (confirmPoint is { } pressed)
+        {
+            if (!observationPending && Environment.TickCount64 >= nextRefreshAt) RequestObservation(pressed);
+            return;
+        }
+        if (toolbar.Bounds.Contains(PointToClient(point))) return;
+        if (point == lastPoint && (observationPending || Environment.TickCount64 < nextRefreshAt)) return;
         // Only an explicitly expanded scope stays pinned. Ordinary hover must
         // keep looking inside large containers to find their smaller children.
         if (scopePinned && scopes.Count > 0 && scopes[scopeIndex].Bounds.Contains(point)) return;
@@ -128,9 +134,17 @@ internal sealed class ContentSelectionForm : PointSelectionForm
     private void ApplyObservation(ContentObservation observation)
     {
         if (IsDisposed || !Visible || observation.Version != observationVersion) return;
+        var currentPoint = Cursor.Position;
+        if (anchor is null && confirmPoint is null && currentPoint != observation.Point &&
+            !toolbar.Bounds.Contains(PointToClient(currentPoint)))
+        {
+            RequestObservation(currentPoint);
+            return;
+        }
         var previous = OutlineBounds;
+        var changed = !scopes.SequenceEqual(observation.Outlines);
         observationPending = false;
-        nextRetryAt = Environment.TickCount64 + 600;
+        nextRefreshAt = Environment.TickCount64 + 600;
         observedPoint = observation.Point;
         targetWindow = observation.Window;
         targetBounds = observation.WindowBounds;
@@ -138,11 +152,21 @@ internal sealed class ContentSelectionForm : PointSelectionForm
         scopes = observation.Outlines;
         scopeIndex = 0;
         UpdateHint();
-        InvalidateOutline(previous);
+        if (changed) InvalidateOutline(previous);
         if (confirmPoint == observedPoint)
         {
-            confirmPoint = null;
-            SelectObject();
+            if (scopes.Count > 0)
+            {
+                confirmPoint = null;
+                SelectObject();
+            }
+            else if (Environment.TickCount64 < confirmUntil)
+            {
+                // A provider timeout is not a resolved click. Retry that exact
+                // press after it recovers, without blocking drag or cancellation.
+                nextRefreshAt = Environment.TickCount64 + 100;
+            }
+            else confirmPoint = null;
         }
     }
 
@@ -178,7 +202,8 @@ internal sealed class ContentSelectionForm : PointSelectionForm
     {
         if (point is null && scopePinned) { SelectObject(); return; }
         var target = point ?? lastPoint ?? Cursor.Position;
-        if ((scopePinned && scopes.Count > 0 && scopes[scopeIndex].Bounds.Contains(target)) || observedPoint == target)
+        if ((scopePinned && scopes.Count > 0 && scopes[scopeIndex].Bounds.Contains(target)) ||
+            !observationPending && observedPoint == target)
         {
             SelectObject();
             return;
@@ -186,6 +211,7 @@ internal sealed class ContentSelectionForm : PointSelectionForm
         // A quick click may beat the background lookup. Resolve that exact
         // press location without blocking the UI or attaching an old outline.
         confirmPoint = target;
+        confirmUntil = Environment.TickCount64 + 2_000;
         RequestObservation(target);
     }
 

@@ -87,6 +87,52 @@ try
             Check(binding.RootElement.GetProperty("captures").GetArrayLength() == 3 && nativeProxy.AcceptedConnections == 1,
                 "The packaged native helper reuses one browser WebSocket across three fresh captures");
             await File.WriteAllTextAsync(Path.Combine(output, "native-binding.json"), result, token);
+            // Exercise the actual desktop-region pipeline, including the rule
+            // that a URL alone is enough to retain aligned structural context.
+            await Evaluate("document.querySelector('#products').scrollIntoView({block:'start'}); true");
+            var viewport = binding.RootElement.GetProperty("viewport").Deserialize<CaptureRectangle>()!;
+            var scale = viewport.Width / (await Evaluate("innerWidth")).GetDouble();
+            var imageA = await Bounds("#product-a");
+            var imageB = await Bounds("#product-b");
+            foreach (var onlyEmptyAlt in new[] { false, true })
+            {
+                var leftImage = onlyEmptyAlt ? imageB : imageA;
+                var left = (int)Math.Floor(viewport.X + leftImage.X * scale);
+                var top = (int)Math.Floor(viewport.Y + leftImage.Y * scale);
+                var right = (int)Math.Ceiling(viewport.X + imageB.Right * scale);
+                var bottom = (int)Math.Ceiling(viewport.Y + imageB.Bottom * scale);
+                var regionStart = new ProcessStartInfo(nativeHost)
+                {
+                    UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true,
+                };
+                regionStart.ArgumentList.Add("--acceptance-region");
+                regionStart.ArgumentList.Add($"{left},{top},{right - left},{bottom - top}");
+                regionStart.Environment["ZOMMI_BROWSER_CDP_ENDPOINT"] = nativeProxy.Endpoint.AbsoluteUri;
+                using var regionHost = Process.Start(regionStart)!;
+                var regionOutput = regionHost.StandardOutput.ReadToEndAsync(token);
+                var regionErrors = regionHost.StandardError.ReadToEndAsync(token);
+                try
+                {
+                    await regionHost.WaitForExitAsync(token);
+                    var regionJson = await regionOutput;
+                    if (regionHost.ExitCode != 0) throw new InvalidOperationException(await regionErrors);
+                    using var regionResult = JsonDocument.Parse(regionJson);
+                    var root = regionResult.RootElement;
+                    var snapshot = root.GetProperty("snapshot");
+                    var links = snapshot.GetProperty("dom").GetProperty("elements").EnumerateArray().Select(element => element.GetProperty("href").GetString()).ToArray();
+                    var expected = onlyEmptyAlt ? new[] { "https://shop.example/products/paddle-b" } :
+                        new[] { "https://shop.example/products/paddle-a?color=blue", "https://shop.example/products/paddle-b" };
+                    Check(root.GetProperty("alignment").GetProperty("status").GetString() == "aligned" && links.SequenceEqual(expected) &&
+                        root.GetProperty("previewText").GetString()!.Contains("Link: https://shop.example/products/paddle-b", StringComparison.Ordinal),
+                        onlyEmptyAlt ? "The packaged region pipeline retains URL-only context for an empty-alt image" :
+                            "The packaged region pipeline captures two image links without outside captions");
+                    var stem = onlyEmptyAlt ? "native-empty-alt" : "native-linked-images";
+                    await File.WriteAllBytesAsync(Path.Combine(output, stem + ".png"), root.GetProperty("png").GetBytesFromBase64(), token);
+                    await File.WriteAllTextAsync(Path.Combine(output, stem + ".json"), snapshot.GetRawText(), token);
+                }
+                finally { if (!regionHost.HasExited) regionHost.Kill(entireProcessTree: true); }
+            }
+            await Evaluate("window.scrollTo(0,0); true");
         }
         finally { if (!native.HasExited) native.Kill(entireProcessTree: true); }
     }
@@ -159,6 +205,25 @@ try
     var tableScope = await capture.PollPickerAsync(token);
     Check(tableScope.Observation?.Elements.Single().Text == "Item\tCount\nApples\t42",
         "Expanding a cell to its table preserves row and column text boundaries");
+    await Evaluate("document.querySelector('#products').scrollIntoView({block:'start'}); true");
+    var productA = await Bounds("#product-a");
+    var productB = await Bounds("#product-b");
+    var productRegion = new CaptureRectangle(productA.X, productA.Y, productB.Right - productA.X, productA.Height);
+    var products = await capture.ReadAsync("region", productA.X, productA.Y, productRegion, token);
+    Check(products.Elements.Count == 2 && products.Elements.All(element => element.Role == "img" && element.Text == "") &&
+        products.Elements.Select(element => element.Href).SequenceEqual(new[]
+            { "https://shop.example/products/paddle-a?color=blue", "https://shop.example/products/paddle-b" }),
+        "An image-only rectangle retains each enclosed image's own product link without captions or neighboring products");
+    var noLabel = await capture.ReadAsync("region", productB.X, productB.Y, productB, token);
+    Check(noLabel.Elements.Single().Label == null && noLabel.Elements.Single().Href == "https://shop.example/products/paddle-b",
+        "A linked image with no alt text still exposes its destination");
+    var partialProduct = await capture.ReadAsync("region", productA.X, productA.Y,
+        productA with { Width = productA.Width / 2 }, token);
+    Check(partialProduct.Elements.Count == 0, "A clipped product image does not attach the entire image's link");
+    await Evaluate("document.querySelector('#layers').scrollIntoView({block:'center'}); true");
+    var front = await Bounds("#layer-front");
+    var frontHit = await capture.ReadAsync("capture", front.X + 20, front.Y + 20, null, token);
+    Check(frontHit.Elements.Single().Text == "Foreground action", "Overlapping browser objects use the visually frontmost hit target");
     var stamp = await capture.StampAsync(token);
     await Evaluate("document.getElementById('target').textContent = 'Changed while capturing'; true");
     Check((await capture.StampAsync(token)).Revision > stamp.Revision, "Text changes invalidate an observation stamp");

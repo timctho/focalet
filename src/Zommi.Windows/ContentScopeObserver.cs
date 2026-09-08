@@ -1,8 +1,12 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using FlaUI.Core;
+using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
 using FlaUI.UIA3;
+using FlaUI.UIA3.Extensions;
 using Zommi.Capture;
+using UIA = Interop.UIAutomationClient;
 
 namespace Zommi.Windows;
 
@@ -78,8 +82,8 @@ internal sealed class ContentScopeObserver : IDisposable
         if (bounds is not { IsValid: true } area) return new(version, point, window, bounds, title, outlines);
         try
         {
-            // Batch the properties for each level in one provider call. Reading
-            // each sibling's rectangle separately costs many cross-process calls.
+            // Cache geometry, but obtain the target from the application's hit
+            // test. Accessibility child order is not the visual stacking order.
             var cache = new CacheRequest
             {
                 TreeScope = TreeScope.Element,
@@ -92,14 +96,19 @@ internal sealed class ContentScopeObserver : IDisposable
             cache.Add(automation.PropertyLibrary.Element.ControlType);
             cache.Add(automation.PropertyLibrary.Element.Name);
             using var active = cache.Activate();
-            var element = automation.FromHandle(window);
+            var root = automation.FromHandle(window);
+            var element = HitTest(automation, cache, window, point) ?? UnambiguousElement(root, point);
+            var walker = automation.TreeWalkerFactory.GetControlViewWalker();
             var started = Stopwatch.GetTimestamp();
-            for (var depth = 0; depth < 32 && IsCurrent(version) &&
+            var belongsToWindow = false;
+            for (var depth = 0; element is not null && depth < 32 && IsCurrent(version) &&
                  Stopwatch.GetElapsedTime(started).TotalMilliseconds < 250; depth++)
             {
-                if (element.Properties.IsPassword.ValueOrDefault) break;
+                if (element.Properties.IsPassword.ValueOrDefault) { outlines.Clear(); break; }
+                if (element.Equals(root)) { belongsToWindow = true; break; }
                 var rectangle = element.Properties.BoundingRectangle.ValueOrDefault;
-                if (rectangle.Width > 3 && rectangle.Height > 3 &&
+                if (!element.Properties.IsOffscreen.ValueOrDefault && rectangle.Contains(point) &&
+                    rectangle.Width > 3 && rectangle.Height > 3 &&
                     BrowserObservationBridge.ToRectangle(rectangle) != area &&
                     area.Contains(BrowserObservationBridge.ToRectangle(rectangle)) &&
                     !outlines.Any(outline => outline.Bounds == rectangle))
@@ -108,19 +117,65 @@ internal sealed class ContentScopeObserver : IDisposable
                     if (name.Length > 90) name = name[..90] + "…";
                     outlines.Add(new(rectangle, $"{element.Properties.ControlType.ValueOrDefault}: {name}"));
                 }
-                var child = element.FindAllChildren().Take(512).FirstOrDefault(candidate =>
-                    !candidate.Properties.IsOffscreen.ValueOrDefault &&
-                    candidate.Properties.BoundingRectangle.ValueOrDefault.Contains(point));
-                if (child is null) break;
-                element = child;
+                element = walker.GetParent(element);
+            }
+            // A provider returning an object from another window must not move
+            // this outline to that other surface, even if their bounds overlap.
+            if (!belongsToWindow) outlines.Clear();
+        }
+        catch (Exception exception) when (BrowserObservationBridge.IsUnavailable(exception)) { outlines.Clear(); }
+        return new(version, point, window, bounds, title, outlines);
+    }
+
+    private static AutomationElement? HitTest(UIA3Automation automation, CacheRequest cache, nint window, Point point)
+    {
+        try
+        {
+            var accessibleId = typeof(UIA.IAccessible).GUID;
+            if (AccessibleObjectFromWindow(window, 0xFFFFFFFC, ref accessibleId, out var accessible) < 0 || accessible is null)
+                return null;
+            // accHitTest is relative to this source window. Unlike desktop
+            // ElementFromPoint it can see through Zommi's input-owning overlay.
+            for (var depth = 0; depth < 32; depth++)
+            {
+                var hit = accessible.accHitTest(point.X, point.Y);
+                if (hit is UIA.IAccessible child && !ReferenceEquals(child, accessible))
+                {
+                    accessible = child;
+                    continue;
+                }
+                if (hit is not int && hit is not UIA.IAccessible) return null;
+                var childId = hit is int id ? id : 0;
+                return automation.WrapNativeElement(automation.NativeAutomation.ElementFromIAccessibleBuildCache(
+                    accessible, childId, cache.ToNative(automation)));
             }
         }
         catch (Exception exception) when (BrowserObservationBridge.IsUnavailable(exception)) { }
-        // The descent already gives the ancestor chain; no second series of
-        // remote parent/ownership queries is needed for a preview outline.
-        outlines.Reverse();
-        return new(version, point, window, bounds, title, outlines);
+        return null;
     }
+
+    private static AutomationElement UnambiguousElement(AutomationElement root, Point point)
+    {
+        // Some UIA-only providers do not implement native hit testing. Descend
+        // only when there is one candidate; never guess the front object from
+        // the order of overlapping accessibility siblings.
+        var element = root;
+        var started = Stopwatch.GetTimestamp();
+        for (var depth = 0; depth < 32 && Stopwatch.GetElapsedTime(started).TotalMilliseconds < 120; depth++)
+        {
+            var candidates = element.FindAllChildren().Take(512).Where(candidate =>
+                !candidate.Properties.IsOffscreen.ValueOrDefault &&
+                candidate.Properties.BoundingRectangle.ValueOrDefault.Contains(point)).Take(2).ToArray();
+            if (candidates.Length != 1) break;
+            element = candidates[0];
+            if (element.Properties.IsPassword.ValueOrDefault) break;
+        }
+        return element;
+    }
+
+    [DllImport("oleacc.dll")]
+    private static extern int AccessibleObjectFromWindow(nint window, uint objectId, ref Guid interfaceId,
+        [MarshalAs(UnmanagedType.Interface)] out UIA.IAccessible? accessible);
 
     public void Dispose()
     {

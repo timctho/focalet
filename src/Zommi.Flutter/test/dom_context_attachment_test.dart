@@ -70,6 +70,49 @@ void main() {
       containsPair('status', 'image-only'),
     );
   });
+  test(
+    'a linked image without text keeps its URL in the preview and handoff',
+    () {
+      final linked = {
+        ...snapshot,
+        'dom': {
+          'mode': 'region',
+          'elements': [
+            {
+              'role': 'img',
+              'text': '',
+              'href': 'https://shop.example/products/a',
+            },
+            {
+              'role': 'img',
+              'text': '',
+              'href': 'https://shop.example/products/b',
+            },
+          ],
+        },
+      };
+      final attachment = imageAttachmentFromSelection(
+        ImageSelection(
+          dataUrl: 'data:image/png;base64,YQ==',
+          bounds: bounds,
+          snapshot: linked,
+          alignment: alignment,
+          previewText: 'Link: https://shop.example/products/a',
+        ),
+        'linked-images',
+      );
+      expect(attachment.excerpt, 'https://shop.example/products/a');
+      expect(
+        attachment.previewText,
+        contains('https://shop.example/products/a'),
+      );
+      expect(
+        contextHandoffSnapshots([attachment]).single['dom'],
+        linked['dom'],
+      );
+      expect(contextHandoffSnapshots([attachment]).single['imageIndex'], 1);
+    },
+  );
   test('an image-only canvas retains verified source geometry but no inferred text', () {
     final imageOnly = {
       ...alignment,

@@ -104,6 +104,32 @@ delivery; they are still not physical keyboard evidence.
 4. Treat blank/different GPU-composited Chrome pixels as a documented fidelity
    limitation, not a gesture or attachment failure.
 
+## Select content: overlapping items and image links
+
+The unified selector uses the source application's hit test to choose the
+frontmost item under the pointer. It follows that item's parent scopes for
+Larger/Smaller; accessibility sibling order does not establish stacking order.
+Ordinary stationary hover refreshes when the layout changes. An explicitly
+expanded scope stays pinned until the pointer leaves it.
+
+The native gesture gate covers an 18-pixel control, a quick return click while
+the provider is busy, overlapping controls, and changing their stacking order
+without moving the pointer. It checks painted outlines and returned bounds.
+Dragging and cancelling must remain responsive during provider timeouts.
+
+A browser image fully enclosed by a drawn region includes its directly
+wrapping link's URL, even when the caption is outside the region or the image
+has no alt text. The preview and agent context retain that URL. This requires
+a DOM connection bound to the same browser window and document; UIA cannot
+recover links for images that the page omits from its accessibility tree.
+Partially enclosed images do not claim their whole object's context.
+
+Run `scripts/accept-windows-browser.ps1` against the package to exercise both
+the DOM extraction and native region pipeline for two linked images, empty-alt
+images, excluded captions, and a neighboring product. Those fixture checks
+do not establish behavior on a live shopping site; record its actual crop and
+captured URLs separately when validating one.
+
 ## Runtime and conversation
 
 1. Confirm runtime discovery shows the exact native/WSL host and protocol.

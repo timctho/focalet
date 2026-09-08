@@ -38,7 +38,8 @@ internal static class RegionContextCapture
                     },
                 };
                 if (!observation.Elements.Any(element => !string.IsNullOrWhiteSpace(element.Text) ||
-                    !string.IsNullOrWhiteSpace(element.Value) || !string.IsNullOrWhiteSpace(element.Label)))
+                    !string.IsNullOrWhiteSpace(element.Value) || !string.IsNullOrWhiteSpace(element.Label) ||
+                    !string.IsNullOrWhiteSpace(element.Href)))
                 {
                     var reason = observation.Limitation ?? "No complete text or accessible object was exposed inside this region.";
                     snapshot = snapshot with

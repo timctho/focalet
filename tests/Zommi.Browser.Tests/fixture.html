@@ -22,6 +22,24 @@ last line</textarea>
 <div style="height:27px;overflow:hidden"><p style="margin:0">Visible clipped-container line</p><p style="margin:0">DO_NOT_CAPTURE_CLIPPED</p></div>
 <canvas id="canvas" width="180" height="80"></canvas>
 <button id="disabled" disabled aria-label="Publish"><svg width="24" height="24"><path id="icon" d="M2 2h20v20H2z"/></svg></button>
+<section id="products" style="display:flex;gap:20px;width:580px;margin-top:24px">
+  <a href="https://shop.example/products/paddle-a?color=blue" style="display:block;width:180px">
+    <img id="product-a" alt="Paddle A" width="160" height="100" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='100'%3E%3Crect width='160' height='100' fill='teal'/%3E%3C/svg%3E">
+    <span style="display:block">Product A caption below the selected image</span>
+  </a>
+  <a href="https://shop.example/products/paddle-b" style="display:block;width:180px">
+    <img id="product-b" alt="" width="160" height="100" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='100'%3E%3Crect width='160' height='100' fill='purple'/%3E%3C/svg%3E">
+    <span style="display:block">Product B caption below the selected image</span>
+  </a>
+  <a href="https://shop.example/products/outside" style="display:block;width:180px">
+    <img id="product-outside" alt="Neighboring product" width="160" height="100" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='100'%3E%3Crect width='160' height='100' fill='orange'/%3E%3C/svg%3E">
+    <span style="display:block">Outside product caption</span>
+  </a>
+</section>
+<div id="layers" style="position:relative;width:300px;height:100px;margin-top:20px">
+  <button id="layer-back" style="position:absolute;inset:0;z-index:1">Background action</button>
+  <button id="layer-front" style="position:absolute;left:30px;top:10px;width:150px;height:60px;z-index:10">Foreground action</button>
+</div>
 <script>
   window.pageClicks = 0;
   document.getElementById('comment').addEventListener('click', () => window.pageClicks++);

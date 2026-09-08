@@ -1770,7 +1770,7 @@ Write-Host 'point-context: ok (crosshair, click, parent and smaller scope)'
 
 $contentFixture = [ZommiContextFixture]::new()
 $contentTimings = @{}
-$contentGestures = @('click', 'parent', 'window', 'drag', 'hover-small', 'quick-small', 'drag-context', 'drag-partial', 'drag-empty', 'thin-then-drag', 'drag-busy')
+$contentGestures = @('click', 'parent', 'window', 'drag', 'hover-small', 'quick-small', 'quick-return', 'overlap-front', 'overlap-refresh', 'drag-context', 'drag-partial', 'drag-empty', 'thin-then-drag', 'drag-busy')
 try {
     foreach ($gesture in $contentGestures) {
         $content = Invoke-CaptureRequest -Executable $capture -Method 'selectContent' -Interact {
@@ -1814,6 +1814,32 @@ try {
                 }
             } elseif ($gesture -eq 'click') {
                 if (-not [ZommiWindowsAcceptanceNative]::ClickSelection($window, 220, 220)) { throw 'Unified object click failed.' }
+            } elseif ($gesture -eq 'quick-return') {
+                # Leave a previously observed point while its provider is busy,
+                # then immediately click back there before the new lookup ends.
+                $contentFixture.PauseProvider(400)
+                [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(565, 395) | Out-Null
+                Start-Sleep -Milliseconds 70
+                [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(220, 220) | Out-Null
+                if (-not [ZommiWindowsAcceptanceNative]::ClickSelection($window, 220, 220)) { throw 'Quick return click failed.' }
+            } elseif ($gesture -in @('overlap-front', 'overlap-refresh')) {
+                [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(220, 460) | Out-Null
+                $overlapDeadline = [DateTime]::UtcNow.AddSeconds(3)
+                while (-not [ZommiWindowsAcceptanceNative]::HasSelectionEdge(295, 460) -and [DateTime]::UtcNow -lt $overlapDeadline) {
+                    Start-Sleep -Milliseconds 15
+                }
+                if (-not [ZommiWindowsAcceptanceNative]::HasSelectionEdge(295, 460)) { throw 'The topmost overlapping item was not outlined.' }
+                if ($gesture -eq 'overlap-refresh') {
+                    $contentFixture.BringBackToFront()
+                    $refreshWatch = [Diagnostics.Stopwatch]::StartNew()
+                    $overlapDeadline = [DateTime]::UtcNow.AddSeconds(3)
+                    while (-not [ZommiWindowsAcceptanceNative]::HasSelectionEdge(340, 460) -and [DateTime]::UtcNow -lt $overlapDeadline) {
+                        Start-Sleep -Milliseconds 15
+                    }
+                    $contentTimings.stationaryOverlapRefreshMilliseconds = $refreshWatch.ElapsedMilliseconds
+                    if (-not [ZommiWindowsAcceptanceNative]::HasSelectionEdge(340, 460)) { throw 'A stationary pointer retained the old stacking order.' }
+                }
+                if (-not [ZommiWindowsAcceptanceNative]::ClickSelection($window, 220, 460)) { throw 'Overlapping item click failed.' }
             } elseif ($gesture -in @('hover-small', 'quick-small')) {
                 # First settle over the empty part of the parent, then enter an
                 # 18px child inside that same outline (formerly sticky forever).
@@ -1859,14 +1885,14 @@ try {
                     [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($window, 175, $startY, 535, 315)
                 }
             } else {
-                [ZommiWindowsAcceptanceNative]::DragSelection($window, 100, 100, 140, 130) | Out-Null
+                [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($window, 590, 435, 630, 465)
             }
         }
         if ($content.cancelled -eq $true -or $content.dataUrl -notlike 'data:image/png;base64,*') {
             throw "Unified $gesture did not produce a previewable attachment: $($content.errorMessage)"
         }
         $text = $content.snapshot | ConvertTo-Json -Depth 30 -Compress
-        if ($gesture -eq 'click' -and ($text -notmatch 'Selected native line' -or $text -match 'Parent includes this second line')) {
+        if ($gesture -in @('click', 'quick-return') -and ($text -notmatch 'Selected native line' -or $text -match 'Parent includes this second line')) {
             throw 'Unified object click did not capture only the outlined line.'
         }
         if ($gesture -in @('parent', 'window') -and
@@ -1875,6 +1901,14 @@ try {
         }
         if ($gesture -eq 'window' -and ($content.bounds.width -ne 500 -or $content.bounds.height -ne 360)) {
             throw 'Whole-window selection did not match the source window bounds.'
+        }
+        if ($gesture -eq 'overlap-front' -and ($content.bounds.x -ne 185 -or $content.bounds.y -ne 440 -or
+            $content.bounds.width -ne 110 -or $content.bounds.height -ne 35 -or $text -notmatch 'Front overlap item')) {
+            throw 'The overlapping click did not capture the front item bounds and context.'
+        }
+        if ($gesture -eq 'overlap-refresh' -and ($content.bounds.x -ne 160 -or $content.bounds.y -ne 430 -or
+            $content.bounds.width -ne 180 -or $content.bounds.height -ne 55 -or $text -notmatch 'Back overlap item')) {
+            throw 'The overlapping click did not follow the changed stacking order.'
         }
         if ($gesture -in @('hover-small', 'quick-small') -and
             ($content.bounds.width -ne 18 -or $content.bounds.height -ne 18 -or
@@ -1903,21 +1937,15 @@ try {
     $contentFixture.Dispose()
 }
 
-$selected = Invoke-CaptureRequest -Executable $capture -Method 'selectImage' -Interact {
-    param($process)
-    $window = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi image selection'
-    $dpi = [double][ZommiWindowsAcceptanceNative]::WindowDpi($window)
-    $logicalWidth = [int][Math]::Max(4, [Math]::Round(40 * 96 / $dpi))
-    $logicalHeight = [int][Math]::Max(4, [Math]::Round(30 * 96 / $dpi))
-    if (-not [ZommiWindowsAcceptanceNative]::DragSelection(
-        $window,
-        100,
-        100,
-        100 + $logicalWidth,
-        100 + $logicalHeight
-    )) {
-        throw 'Could not post the region drag to the selector.'
+$imageFixture = [ZommiContextFixture]::new()
+try {
+    $selected = Invoke-CaptureRequest -Executable $capture -Method 'selectImage' -Interact {
+        param($process)
+        $window = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi image selection'
+        [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($window, 200, 200, 240, 230)
     }
+} finally {
+    $imageFixture.Dispose()
 }
 if ($selected.cancelled -eq $true) {
     throw "Region selector cancelled the scripted selection: $($selected.errorMessage)"

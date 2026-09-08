@@ -46,7 +46,7 @@ final class ContextAttachment {
     String? firstText(Object? items) {
       if (items is! List) return null;
       for (final item in items.whereType<Map>()) {
-        for (final key in ['text', 'value', 'name', 'label']) {
+        for (final key in ['text', 'value', 'name', 'label', 'href']) {
           final value = item[key]?.toString().trim();
           if (value != null && value.isNotEmpty) return value;
         }

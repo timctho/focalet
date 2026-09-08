@@ -74,6 +74,7 @@ public static class ContextPreviewFormatter
                 builder.AppendLine($"{element.Role}: {element.Text}");
                 if (!string.IsNullOrEmpty(element.Value)) builder.AppendLine(element.Value);
                 if (!string.IsNullOrEmpty(element.Label)) builder.AppendLine($"Label: {element.Label}");
+                if (!string.IsNullOrEmpty(element.Href)) builder.AppendLine($"Link: {Clean(element.Href, 4_000)}");
             }
             if (dom.Nearby is { } nearby) builder.AppendLine($"Nearby content:\n{nearby.Text}");
             if (dom.Truncated) builder.AppendLine("Some content was omitted; choose a smaller range for complete text.");

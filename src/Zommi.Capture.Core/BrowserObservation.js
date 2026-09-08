@@ -68,13 +68,26 @@
     const text = parts.join('').trim();
     return {text: text.slice(0, maximumText), truncated: truncated || text.length > maximumText};
   };
+  const linkFor = element => {
+    for (let current = element, depth = 0; current && depth < 64; current = parent(current), depth++) {
+      if (current.matches?.('a[href]')) {
+        try {
+          const url = new URL(current.getAttribute('href'), current.baseURI);
+          return /^(https?:|file:)$/.test(url.protocol) ? url.href : null;
+        } catch { return null; }
+      }
+    }
+    return null;
+  };
   const describe = element => {
     const content = textOf(element);
     const role = element.getAttribute('role') || element.tagName.toLowerCase();
     return {
       role, ...content, label: element.getAttribute('aria-label') || element.getAttribute('alt') || null,
       value: /^(INPUT|TEXTAREA|SELECT)$/.test(element.tagName) && !sensitive(element) ? element.value.slice(0, maximumText) : null,
-      href: element.tagName === 'A' ? element.href : null,
+      // The destination belongs to the selected object even when its wrapping
+      // link and product caption extend beyond an image-only rectangle.
+      href: linkFor(element),
       disabled: 'disabled' in element ? element.disabled : element.getAttribute('aria-disabled') === 'true' ? true : null,
       checked: element.matches('input[type=checkbox], input[type=radio]') ? element.checked : null,
       bounds: box(element.getBoundingClientRect())
