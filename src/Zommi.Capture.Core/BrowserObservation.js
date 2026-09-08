@@ -19,8 +19,14 @@
   });
   mutations.observe(document, {subtree: true, childList: true, attributes: true, characterData: true});
   const box = rect => ({x: rect.x, y: rect.y, width: rect.width, height: rect.height});
-  const inside = (a, b) => a.x >= b.x && a.y >= b.y &&
-    a.x + a.width <= b.x + b.width && a.y + a.height <= b.y + b.height;
+  // Layout/CSS and the desktop crop can round the same edge differently. Allow
+  // at most one physical pixel, not enough to claim a clipped line or item.
+  const edgeTolerance = () => 1 / Math.max(1, devicePixelRatio);
+  const inside = (a, b) => {
+    const tolerance = edgeTolerance();
+    return a.x >= b.x - tolerance && a.y >= b.y - tolerance &&
+      a.x + a.width <= b.x + b.width + tolerance && a.y + a.height <= b.y + b.height + tolerance;
+  };
   const intersects = (a, b) => a.x < b.x + b.width && a.x + a.width > b.x &&
     a.y < b.y + b.height && a.y + a.height > b.y;
   const sensitive = element => !!element?.closest?.(
@@ -29,6 +35,14 @@
   const clipFor = element => {
     let left = 0, top = 0, right = innerWidth, bottom = innerHeight;
     for (let ancestor = parent(element), depth = 0; ancestor && depth < 64; ancestor = parent(ancestor), depth++) {
+      // Root overflow clips the viewport, not the root's scrolled border box.
+      // HTML also propagates body's overflow to that viewport when both root
+      // overflow axes are visible (common on pages with a 100vh body).
+      if (ancestor === document.documentElement) continue;
+      if (ancestor === document.body) {
+        const rootStyle = getComputedStyle(document.documentElement);
+        if (rootStyle.overflowX === 'visible' && rootStyle.overflowY === 'visible') continue;
+      }
       const style = getComputedStyle(ancestor);
       const rect = ancestor.getBoundingClientRect();
       if (style.overflowX !== 'visible') { left = Math.max(left, rect.left); right = Math.min(right, rect.right); }
@@ -134,17 +148,18 @@
             const range = document.createRange(); range.selectNodeContents(child);
             const rects = [...range.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0);
             // A partially clipped line is not represented as if its entire text were selected.
-            const clip = clipFor(child.parentElement);
+            const clip = clipFor(child);
             if (rects.length && rects.every(rect => inside(box(rect), region) && inside(box(rect), clip))) {
               const text = child.nodeValue;
-              elements.push({role: 'text', text, bounds: box(range.getBoundingClientRect()), truncated: false});
+              elements.push({role: 'text', text, href: linkFor(child.parentElement), bounds: box(range.getBoundingClientRect()), truncated: false});
               total += text.length;
             }
           } else if (child.nodeType === Node.ELEMENT_NODE && visible(child)) {
             if (child.tagName === 'IFRAME' && intersects(box(child.getBoundingClientRect()), region)) {
               limitation = 'Embedded frame content is not included in this DOM region.';
             } else if (/^(INPUT|TEXTAREA|SELECT|IMG|CANVAS)$/.test(child.tagName)) {
-              if (inside(box(child.getBoundingClientRect()), region)) elements.push(describe(child));
+              const bounds = box(child.getBoundingClientRect());
+              if (inside(bounds, region) && inside(bounds, clipFor(child))) elements.push(describe(child));
             } else walk(child);
             if (child.shadowRoot) walk(child.shadowRoot);
           }

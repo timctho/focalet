@@ -9,6 +9,7 @@ var tests = new (string Name, Action Body)[]
     ("Browser enrichment preserves native object selections", BrowserEnrichmentPreservesObjectSelections),
     ("DOM text remains exact and explicit picks discard ambient selection", DomSelectionPriority),
     ("Image links remain readable in the context preview", ImageLinkPreview),
+    ("Card previews show each URL once and retain every caption", CardLinkPreview),
 };
 
 var failures = new List<string>();
@@ -28,6 +29,24 @@ foreach (var test in tests)
 
 Console.WriteLine($"{tests.Length - failures.Count}/{tests.Length} capture contracts passed");
 return failures.Count == 0 ? 0 : 1;
+
+static void CardLinkPreview()
+{
+    var preview = ContextPreviewFormatter.Format(Snapshot() with
+    {
+        Dom = new DomContext
+        {
+            Mode = "region", Elements = Enumerable.Range(1, 12).SelectMany(index => new[]
+            {
+                new DomElementContext { Role = "img", Text = "", Href = $"https://cards.example/{index}", Bounds = new CaptureRectangle(0, 0, 40, 40) },
+                new DomElementContext { Role = "text", Text = $"Card {index} caption", Href = $"https://cards.example/{index}", Bounds = new CaptureRectangle(0, 40, 40, 20) },
+            }).ToArray(),
+        },
+    });
+    var links = preview.Split('\n').Where(line => line.StartsWith("Link: ", StringComparison.Ordinal)).ToArray();
+    True(links.Length == 12 && links.Distinct().Count() == 12, "Repeated card elements hid or duplicated a card URL.");
+    foreach (var index in Enumerable.Range(1, 12)) Contains(preview, $"Card {index} caption");
+}
 
 static void ImageLinkPreview()
 {

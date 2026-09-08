@@ -40,10 +40,25 @@ last line</textarea>
   <button id="layer-back" style="position:absolute;inset:0;z-index:1">Background action</button>
   <button id="layer-front" style="position:absolute;left:30px;top:10px;width:150px;height:60px;z-index:10">Foreground action</button>
 </div>
+<section id="card-grid" style="display:grid;grid-template-columns:repeat(4,120px);width:479.7px;height:180px;overflow:hidden;margin-top:24px"></section>
+<a id="clipped-link-text" href="https://cards.example/clipped" style="display:block;width:70px;white-space:nowrap;overflow:hidden">DO_NOT_CAPTURE_DIRECTLY_CLIPPED_LINK_TEXT</a>
 <script>
   window.pageClicks = 0;
   document.getElementById('comment').addEventListener('click', () => window.pageClicks++);
   const ctx = document.getElementById('canvas').getContext('2d');
   ctx.fillStyle = '#123c56'; ctx.fillRect(0, 0, 180, 80);
   ctx.fillStyle = 'white'; ctx.font = '18px sans-serif'; ctx.fillText('Visual only chart', 12, 44);
+  for (let number = 1; number <= 16; number++) {
+    const card = document.createElement('a');
+    card.href = `https://cards.example/${number}`;
+    card.className = 'grid-card';
+    card.style.cssText = 'display:block;width:120px;height:60px;overflow:hidden;font:12px/20px sans-serif';
+    // Some cards use background thumbnails instead of an IMG. Their selected
+    // caption is still a link, and must retain that destination.
+    card.innerHTML = number <= 8
+      ? `<img width="120" height="36" style="display:block" alt="" src="${document.querySelector('#product-a').src}">`
+      : '<span style="display:block;height:36px;background:linear-gradient(teal,purple)"></span>';
+    card.innerHTML += `<span>${number <= 12 ? 'Card ' + number : 'CLIPPED_CARD'}</span>`;
+    document.querySelector('#card-grid').append(card);
+  }
 </script>

@@ -218,6 +218,14 @@ try
     var noLabel = await capture.ReadAsync("region", productB.X, productB.Y, productB, token);
     Check(noLabel.Elements.Single().Label == null && noLabel.Elements.Single().Href == "https://shop.example/products/paddle-b",
         "A linked image with no alt text still exposes its destination");
+    var caption = await Bounds("#product-b + span");
+    var captionOnly = await capture.ReadAsync("region", caption.X, caption.Y, caption, token);
+    Check(captionOnly.Elements.All(element => element.Role == "text" && element.Href == "https://shop.example/products/paddle-b") &&
+        captionOnly.Elements.Count > 0, "Selecting a complete link caption retains its URL without enclosing the image");
+    var roundedProduct = await capture.ReadAsync("region", productB.X, productB.Y,
+        productB with { Width = productB.Width - 0.25 / deviceScale }, token);
+    Check(roundedProduct.Elements.Single().Href == "https://shop.example/products/paddle-b",
+        "A subpixel boundary difference does not discard an enclosed image link");
     var partialProduct = await capture.ReadAsync("region", productA.X, productA.Y,
         productA with { Width = productA.Width / 2 }, token);
     Check(partialProduct.Elements.Count == 0, "A clipped product image does not attach the entire image's link");
@@ -225,6 +233,23 @@ try
     var front = await Bounds("#layer-front");
     var frontHit = await capture.ReadAsync("capture", front.X + 20, front.Y + 20, null, token);
     Check(frontHit.Elements.Single().Text == "Foreground action", "Overlapping browser objects use the visually frontmost hit target");
+    await Evaluate("document.body.style.height='100vh'; document.body.style.overflowX='hidden'; document.querySelector('#card-grid').scrollIntoView({block:'center'}); true");
+    var gridBounds = await Bounds("#card-grid");
+    var grid = await capture.ReadAsync("region", gridBounds.X, gridBounds.Y, gridBounds, token);
+    Check(grid.Elements.Where(element => element.Href is not null).Select(element => element.Href).Distinct()
+        .SequenceEqual(Enumerable.Range(1, 12).Select(number => $"https://cards.example/{number}")),
+        "A scrolled 100vh body does not clip the twelve visible cards or their fractional right edge");
+    Check(!JsonSerializer.Serialize(grid.Context).Contains("CLIPPED_CARD", StringComparison.Ordinal) &&
+        grid.Elements.All(element => element.Href is null || !new[] { "13", "14", "15", "16" }.Any(number => element.Href.EndsWith("/" + number, StringComparison.Ordinal))),
+        "The real grid overflow still excludes its clipped next row");
+    await File.WriteAllTextAsync(Path.Combine(output, "twelve-card-grid.json"), JsonSerializer.Serialize(grid.Context), token);
+    await Evaluate("document.body.style.height=''; document.body.style.overflowX=''; true");
+    await Evaluate("document.querySelector('#clipped-link-text').scrollIntoView({block:'center'}); true");
+    var clippedLinkBounds = await Bounds("#clipped-link-text");
+    var clippedLink = await capture.ReadAsync("region", clippedLinkBounds.X, clippedLinkBounds.Y,
+        clippedLinkBounds with { Width = 700 }, token);
+    Check(clippedLink.Elements.All(element => element.Href != "https://cards.example/clipped"),
+        "Text clipped by its own link container does not claim the hidden text or URL");
     var stamp = await capture.StampAsync(token);
     await Evaluate("document.getElementById('target').textContent = 'Changed while capturing'; true");
     Check((await capture.StampAsync(token)).Revision > stamp.Revision, "Text changes invalidate an observation stamp");

@@ -676,7 +676,7 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
             ],
           ),
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               TextButton.icon(
                 key: const ValueKey('select-content'),
@@ -706,7 +706,9 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                     hintText: 'Ask your agent',
                     border: InputBorder.none,
                     isDense: true,
-                    contentPadding: EdgeInsets.symmetric(vertical: 10),
+                    // The first line fills the control row. Further lines add
+                    // height immediately, with the row's bottom staying fixed.
+                    contentPadding: EdgeInsets.symmetric(vertical: 20),
                   ),
                 ),
               ),

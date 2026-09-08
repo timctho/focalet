@@ -28,6 +28,12 @@ Whole-window capture includes the visible desktop portion and rejects a covered
 or moved source window. It is a single snapshot, not a continuing screen share.
 Other platforms retain their existing selection providers.
 
+Enclosed images and text retain their own wrapping link's URL, including cards
+that use background thumbnails. The preview lists each URL once. Region bounds
+allow one physical pixel of rounding difference. Viewport scrolling does not
+clip against the body's scrolled border box; actual nested overflow still excludes
+hidden rows and partially clipped items.
+
 Attachments show a stable A/B reference and a readable excerpt or image preview.
 **Adjust** replaces that attachment in place, preserving its reference and the
 typed question. Cancellation or a capture failure preserves the old attachment.
@@ -64,6 +70,13 @@ helpers are separate processes, so each may request authorization on first use.
 Restarting Chrome or Zommi, or revoking/disconnecting browser access, may require
 another confirmation. This does not change connections owned by an agent's
 separate Chrome MCP server.
+
+Reading page context does not inherently require debugging permission. This
+implementation uses CDP, so Chrome authorizes a debugging connection even for
+read-only capture. A future extension could use `activeTab` and `scripting`
+without `debugger`, after the user invokes sharing in the browser. That requires
+an installed extension and browser activation; Zommi's global shortcut alone
+does not grant `activeTab`. No such extension is included in this build.
 
 Without an available connection, Windows accessibility capture remains usable.
 The DOM implementation currently runs in the Windows native capture helper;

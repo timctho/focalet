@@ -130,6 +130,20 @@ images, excluded captions, and a neighboring product. Those fixture checks
 do not establish behavior on a live shopping site; record its actual crop and
 captured URLs separately when validating one.
 
+The browser fixture also selects a four-column, three-row grid after scrolling
+a `100vh` body. Require all 12 visible card URLs, including text/background-image
+cards and a subpixel right edge, while excluding the fourth row clipped by the
+grid. For a live site, compare against the visible page's own card links.
+
+## Multiline composer
+
+Type one line, then add a second with Shift+Enter. The composer must grow upward
+immediately, with the bottom edge and Send/Select content controls fixed. Continue
+through five lines, then verify further lines scroll within the capped height.
+Deleting back to one line restores the original height. Repeat with soft-wrapped
+text and an attached context. `composer_growth_test.dart` covers these layout
+interactions; a packaged Windows check must also record rendered geometry.
+
 ## Runtime and conversation
 
 1. Confirm runtime discovery shows the exact native/WSL host and protocol.
