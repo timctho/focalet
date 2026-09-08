@@ -616,6 +616,71 @@ public static class ZommiWindowsAcceptanceNative
         return true;
     }
 
+    public static long BeginSelectionDrag(IntPtr window, int startX, int startY, int endX, int endY)
+    {
+        var previousDpi = SetThreadDpiAwarenessContext(new IntPtr(-4));
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var bounds = PhysicalBounds(window);
+            SetCursorPos(startX, startY);
+            SendMessage(window, 0x0201, new IntPtr(1), Point(startX - bounds[0], startY - bounds[1]));
+            SetCursorPos(endX, endY);
+            SendMessage(window, 0x0200, new IntPtr(1), Point(endX - bounds[0], endY - bounds[1]));
+            return timer.ElapsedMilliseconds;
+        }
+        finally { if (previousDpi != IntPtr.Zero) SetThreadDpiAwarenessContext(previousDpi); }
+    }
+
+    public static void EndSelectionDrag(IntPtr window, int x, int y)
+    {
+        var previousDpi = SetThreadDpiAwarenessContext(new IntPtr(-4));
+        try
+        {
+            var bounds = PhysicalBounds(window);
+            SendMessage(window, 0x0202, IntPtr.Zero, Point(x - bounds[0], y - bounds[1]));
+        }
+        finally { if (previousDpi != IntPtr.Zero) SetThreadDpiAwarenessContext(previousDpi); }
+    }
+
+    public static void DragPhysicalSelection(IntPtr window, int startX, int startY, int endX, int endY)
+    {
+        BeginSelectionDrag(window, startX, startY, endX, endY);
+        System.Threading.Thread.Sleep(100);
+        EndSelectionDrag(window, endX, endY);
+    }
+
+    [DllImport("gdi32.dll")]
+    private static extern uint GetPixel(IntPtr deviceContext, int x, int y);
+
+    // Actual painted outline, not just HWND/focus or a queued mouse event.
+    public static bool HasSelectionEdge(int x, int y)
+    {
+        var previousDpi = SetThreadDpiAwarenessContext(new IntPtr(-4));
+        var dc = GetDC(IntPtr.Zero);
+        var memory = CreateCompatibleDC(dc);
+        var bitmap = CreateCompatibleBitmap(dc, 6, 1);
+        var previous = SelectObject(memory, bitmap);
+        try
+        {
+            // GetPixel on the desktop DC can omit layered windows. Read the
+            // composited pixels, including the translucent selection overlay.
+            if (!BitBlt(memory, 0, 0, 6, 1, dc, x, y, 0x40CC0020)) return false;
+            var edge = GetPixel(memory, 0, 0);
+            var outside = GetPixel(memory, 5, 0);
+            return edge != 0xffffffff && outside != 0xffffffff &&
+                (edge & 255) > (outside & 255) + 80;
+        }
+        finally
+        {
+            SelectObject(memory, previous);
+            DeleteObject(bitmap);
+            DeleteDC(memory);
+            ReleaseDC(IntPtr.Zero, dc);
+            if (previousDpi != IntPtr.Zero) SetThreadDpiAwarenessContext(previousDpi);
+        }
+    }
+
     public static bool ClickSelection(IntPtr window, int x, int y)
     {
         var bounds = PhysicalBounds(window);
@@ -1700,8 +1765,10 @@ if ($pointContext.snapshot.selectionElements[0].name -ne 'Native comment' -or
 Write-Host 'point-context: ok (crosshair, click, parent and smaller scope)'
 
 $contentFixture = [ZommiContextFixture]::new()
+$contentTimings = @{}
+$contentGestures = @('click', 'parent', 'window', 'drag', 'hover-small', 'quick-small', 'drag-context', 'drag-partial', 'drag-empty', 'thin-then-drag', 'drag-busy')
 try {
-    foreach ($gesture in @('click', 'parent', 'window', 'drag')) {
+    foreach ($gesture in $contentGestures) {
         $content = Invoke-CaptureRequest -Executable $capture -Method 'selectContent' -Interact {
             param($process)
             $window = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi content selection'
@@ -1714,6 +1781,16 @@ try {
             }
             if (-not [ZommiWindowsAcceptanceNative]::IsOwnedWindowAtPoint($window, 220, 220)) {
                 throw 'Unified selector did not acquire pointer ownership.'
+            }
+            # HWND/focus precede the WinForms message loop being ready. Wait for
+            # the initial async outline before driving an individual gesture.
+            $outlineDeadline = [DateTime]::UtcNow.AddSeconds(5)
+            while (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($window, 'Larger') -and
+                   [DateTime]::UtcNow -lt $outlineDeadline) {
+                Start-Sleep -Milliseconds 25
+            }
+            if (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($window, 'Larger')) {
+                throw 'The fixture line outline did not become ready for selection.'
             }
             if ($gesture -in @('parent', 'window')) {
                 $button = if ($gesture -eq 'parent') { 'Larger' } else { 'Whole window' }
@@ -1732,17 +1809,51 @@ try {
                     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
                 }
             } elseif ($gesture -eq 'click') {
-                # A native HWND/focus can appear before WinForms completes
-                # initialization. Click the fixture only once its outline exists.
-                $outlineDeadline = [DateTime]::UtcNow.AddSeconds(5)
-                while (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($window, 'Larger') -and
-                       [DateTime]::UtcNow -lt $outlineDeadline) {
-                    Start-Sleep -Milliseconds 25
-                }
-                if (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($window, 'Larger')) {
-                    throw 'The fixture line outline did not become ready for selection.'
-                }
                 if (-not [ZommiWindowsAcceptanceNative]::ClickSelection($window, 220, 220)) { throw 'Unified object click failed.' }
+            } elseif ($gesture -in @('hover-small', 'quick-small')) {
+                # First settle over the empty part of the parent, then enter an
+                # 18px child inside that same outline (formerly sticky forever).
+                [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(565, 395) | Out-Null
+                $parentDeadline = [DateTime]::UtcNow.AddSeconds(5)
+                while (-not [ZommiWindowsAcceptanceNative]::HasSelectionEdge(580, 395) -and [DateTime]::UtcNow -lt $parentDeadline) {
+                    Start-Sleep -Milliseconds 15
+                }
+                if (-not [ZommiWindowsAcceptanceNative]::HasSelectionEdge(580, 395)) { throw 'Parent outline did not paint.' }
+                $hoverWatch = [Diagnostics.Stopwatch]::StartNew()
+                [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(519, 364) | Out-Null
+                if ($gesture -eq 'hover-small') {
+                    $smallDeadline = [DateTime]::UtcNow.AddSeconds(2)
+                    while (-not [ZommiWindowsAcceptanceNative]::HasSelectionEdge(528, 364) -and [DateTime]::UtcNow -lt $smallDeadline) {
+                        Start-Sleep -Milliseconds 10
+                    }
+                    $contentTimings.smallItemHoverMilliseconds = $hoverWatch.ElapsedMilliseconds
+                    if (-not [ZommiWindowsAcceptanceNative]::HasSelectionEdge(528, 364)) { throw 'Hover remained on the parent instead of the small child.' }
+                }
+                if (-not [ZommiWindowsAcceptanceNative]::ClickSelection($window, 519, 364)) { throw 'Small object click failed.' }
+            } elseif ($gesture -eq 'drag-empty') {
+                [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($window, 555, 430, 615, 470)
+            } elseif ($gesture -in @('drag-context', 'drag-partial', 'thin-then-drag', 'drag-busy')) {
+                if ($gesture -eq 'drag-busy') {
+                    $contentFixture.PauseProvider(1200)
+                    [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(300, 285) | Out-Null
+                    Start-Sleep -Milliseconds 60
+                    $latency = [ZommiWindowsAcceptanceNative]::BeginSelectionDrag($window, 175, 195, 535, 315)
+                    $contentTimings.busyProviderDragInputMilliseconds = $latency
+                    if ($latency -gt 200) { throw "Drag input waited ${latency}ms for the busy source provider." }
+                    $paintDeadline = [DateTime]::UtcNow.AddMilliseconds(250)
+                    while (-not [ZommiWindowsAcceptanceNative]::HasSelectionEdge(535, 300) -and [DateTime]::UtcNow -lt $paintDeadline) {
+                        Start-Sleep -Milliseconds 10
+                    }
+                    if (-not [ZommiWindowsAcceptanceNative]::HasSelectionEdge(535, 300)) { throw 'Drag outline did not paint while the source provider was busy.' }
+                    Start-Sleep -Milliseconds 1250
+                    [ZommiWindowsAcceptanceNative]::EndSelectionDrag($window, 535, 315)
+                } else {
+                    if ($gesture -eq 'thin-then-drag') {
+                        [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($window, 220, 220, 300, 222)
+                    }
+                    $startY = if ($gesture -eq 'drag-partial') { 210 } else { 195 }
+                    [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($window, 175, $startY, 535, 315)
+                }
             } else {
                 [ZommiWindowsAcceptanceNative]::DragSelection($window, 100, 100, 140, 130) | Out-Null
             }
@@ -1760,6 +1871,27 @@ try {
         }
         if ($gesture -eq 'window' -and ($content.bounds.width -ne 500 -or $content.bounds.height -ne 360)) {
             throw 'Whole-window selection did not match the source window bounds.'
+        }
+        if ($gesture -in @('hover-small', 'quick-small') -and
+            ($content.bounds.width -ne 18 -or $content.bounds.height -ne 18 -or
+             $text -notmatch 'Tiny add item' -or $text -match 'Tiny remove item|Selected native line')) {
+            throw "Unified $gesture did not capture exactly the small child."
+        }
+        if ($gesture -in @('drag-context', 'thin-then-drag', 'drag-busy') -and
+            ($text -notmatch 'Selected native line' -or $text -notmatch 'Parent includes this second line' -or
+             $text -match 'Tiny add item|Tiny remove item' -or $content.alignment.status -ne 'aligned' -or
+             $content.bounds.x -ne 175 -or $content.bounds.y -ne 195 -or
+             $content.bounds.width -ne 360 -or $content.bounds.height -ne 120)) {
+            throw "Unified $gesture did not include precisely the enclosed elements and aligned image."
+        }
+        if ($gesture -eq 'drag-partial' -and
+            ($text -match 'Selected native line' -or $text -notmatch 'Parent includes this second line')) {
+            throw 'A partially enclosed element leaked text outside the selected image.'
+        }
+        if ($gesture -eq 'drag-empty' -and
+            ($null -ne $content.snapshot -or $content.alignment.status -ne 'image-only' -or
+             $content.previewText -notmatch 'No complete accessible text or named object')) {
+            throw 'An empty area did not explain its image-only result.'
         }
         Write-Host "content-${gesture}: ok"
     }
@@ -1821,7 +1953,8 @@ Write-AcceptanceResult -Result @{
     windowOwnership = $true
     cancellation = $true
     pointContext = $true
-    unifiedContent = @('cancel', 'click', 'parent', 'window', 'drag')
+    unifiedContent = @('cancel') + $contentGestures
+    contentSelectionTimings = $contentTimings
     selectedBounds = @($selected.bounds.x, $selected.bounds.y, $selected.bounds.width, $selected.bounds.height)
     pngDimensions = @($width, $height)
     pngBytes = $png.Length

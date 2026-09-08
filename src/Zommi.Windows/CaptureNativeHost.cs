@@ -113,7 +113,7 @@ internal static class CaptureNativeHost
                 return false;
             }
             case "selectContent":
-                result = SelectContent(capture, ReturnProcessId(request.Params));
+                result = SelectContent(ReturnProcessId(request.Params));
                 return false;
             case "selectContext":
                 result = SelectContext(capture, ReturnProcessId(request.Params));
@@ -184,9 +184,9 @@ internal static class CaptureNativeHost
             },
         };
 
-    private static object SelectContent(ForegroundContextCapture capture, uint returnProcessId)
+    private static object SelectContent(uint returnProcessId)
     {
-        using var selector = new ContentSelectionForm(capture, returnProcessId);
+        using var selector = new ContentSelectionForm(returnProcessId);
         if (selector.ShowDialog() != DialogResult.OK || selector.SelectedRegion is not { } region)
             return new { Cancelled = true };
         Application.DoEvents();

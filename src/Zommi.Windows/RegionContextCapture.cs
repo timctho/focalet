@@ -53,10 +53,12 @@ internal static class RegionContextCapture
             var before = ReadUiaRegion(window, region);
             var pixels = ScreenCapture.CapturePng(region);
             var after = ReadUiaRegion(window, region);
-            if (before.Count == 0 || NativeCaptureWindow.ForRegion(region) != window ||
+            if (before.Count == 0)
+                return ImageOnly(region, "No complete accessible text or named object was exposed inside this region. Try enclosing the whole item.", pixels);
+            if (NativeCaptureWindow.ForRegion(region) != window ||
                 NativeCaptureWindow.Title(window) != title || NativeCaptureWindow.Bounds(window) != windowBounds ||
                 JsonSerializer.Serialize(before) != JsonSerializer.Serialize(after))
-                return ImageOnly(region, "No stable accessible text could be aligned with this image.", pixels);
+                return ImageOnly(region, "The window or its accessible content changed while the image was captured.", pixels);
             var now = DateTimeOffset.UtcNow;
             var screenBounds = BrowserObservationBridge.ToRectangle(region);
             var alignment = new RegionAlignment

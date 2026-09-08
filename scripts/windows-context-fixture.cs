@@ -30,6 +30,8 @@ public sealed class ZommiContextFixture : IDisposable
                 var panel = new Panel { Bounds = new Rectangle(20, 20, 420, 260), AccessibleName = "Native comment", BackColor = Color.AliceBlue };
                 panel.Controls.Add(new Label { Text = "Selected native line", AutoSize = false, Bounds = new Rectangle(20, 40, 350, 40), Font = new Font("Segoe UI", 14) });
                 panel.Controls.Add(new Label { Text = "Parent includes this second line.", AutoSize = false, Bounds = new Rectangle(20, 110, 350, 40), Font = new Font("Segoe UI", 14) });
+                panel.Controls.Add(new Button { Text = "+", AccessibleName = "Tiny add item", Bounds = new Rectangle(350, 195, 18, 18) });
+                panel.Controls.Add(new Button { Text = "-", AccessibleName = "Tiny remove item", Bounds = new Rectangle(374, 195, 18, 18) });
                 form.Controls.Add(panel);
                 form.Shown += (sender, args) => { Window = form.Handle; ready.Set(); };
                 Application.Run(form);
@@ -49,5 +51,16 @@ public sealed class ZommiContextFixture : IDisposable
         if (form != null && !form.IsDisposed) form.BeginInvoke(new Action(() => form.Close()));
         if (!thread.Join(5000)) throw new TimeoutException("The native context fixture did not stop.");
         ready.Dispose();
+    }
+
+    // Simulates an application whose accessibility provider cannot immediately
+    // answer. The selection overlay must still paint and accept drag input.
+    public void PauseProvider(int milliseconds)
+    {
+        using (var entered = new ManualResetEvent(false))
+        {
+            form.BeginInvoke(new Action(() => { entered.Set(); Thread.Sleep(milliseconds); }));
+            if (!entered.WaitOne(5000)) throw new TimeoutException("Could not pause the source provider.");
+        }
     }
 }

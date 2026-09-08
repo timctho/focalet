@@ -6,27 +6,39 @@ namespace Zommi.Windows;
 /// or choose the whole window. Selection clicks never reach the source app.</summary>
 internal sealed class ContentSelectionForm : PointSelectionForm
 {
-    private readonly ForegroundContextCapture capture;
-    private readonly uint excludedProcessId;
-    private readonly System.Windows.Forms.Timer hoverTimer = new() { Interval = 160 };
-    private readonly FlowLayoutPanel toolbar = new() { AutoSize = true, WrapContents = false, Padding = new Padding(8) };
+    private readonly ContentScopeObserver observer;
+    private readonly System.Windows.Forms.Timer hoverTimer = new() { Interval = 32 };
+    private readonly FlowLayoutPanel toolbar = new()
+    {
+        AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+        WrapContents = false, Padding = new Padding(8),
+    };
     private readonly Button larger;
     private readonly Button smaller;
     private readonly Button wholeWindow;
     private readonly Label hint = new() { AutoSize = true, Padding = new Padding(8, 10, 8, 4) };
-    private IReadOnlyList<ContextScopeChoice> scopes = [];
+    private IReadOnlyList<ContentOutline> scopes = [];
     private int scopeIndex;
+    private bool scopePinned;
+    private long observationVersion;
+    private bool observationPending;
+    private long nextRetryAt;
     private Point? lastPoint;
+    private Point? observedPoint;
+    private Point? confirmPoint;
     private Point? anchor;
     private Rectangle dragged;
     private nint targetWindow;
     private CaptureRectangle? targetBounds;
     private string targetTitle = "";
 
-    public ContentSelectionForm(ForegroundContextCapture capture, uint returnProcessId) : base(returnProcessId)
+    public ContentSelectionForm(uint returnProcessId) : base(returnProcessId)
     {
-        this.capture = capture;
-        excludedProcessId = returnProcessId;
+        observer = new ContentScopeObserver(returnProcessId, observation =>
+        {
+            try { BeginInvoke(() => ApplyObservation(observation)); }
+            catch (InvalidOperationException) { } // The user closed the picker.
+        });
         Text = "Zommi content selection";
         Opacity = 0.65;
         toolbar.BackColor = Color.FromArgb(35, 39, 51);
@@ -37,8 +49,8 @@ internal sealed class ContentSelectionForm : PointSelectionForm
         wholeWindow = AddButton("Whole window", SelectWindow);
         AddButton("Cancel", () => { GrantForeground(); DialogResult = DialogResult.Cancel; Close(); });
         Controls.Add(toolbar);
-        PositionToolbar(Cursor.Position);
         UpdateHint();
+        PositionToolbar(Cursor.Position);
         hoverTimer.Tick += (_, _) => ObservePointer();
     }
 
@@ -51,7 +63,7 @@ internal sealed class ContentSelectionForm : PointSelectionForm
     {
         // Enter confirms the outlined content even when a toolbar button has
         // focus. Otherwise WinForms can activate the initially focused Cancel.
-        if (keyData == Keys.Enter) { SelectObject(); return true; }
+        if (keyData == Keys.Enter) { ConfirmObject(); return true; }
         if (keyData == Keys.Up) { ChangeScope(1); return true; }
         if (keyData == Keys.Down) { ChangeScope(-1); return true; }
         return base.ProcessCmdKey(ref message, keyData);
@@ -68,6 +80,7 @@ internal sealed class ContentSelectionForm : PointSelectionForm
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
+        PositionToolbar(Cursor.Position);
         hoverTimer.Start();
         ObservePointer();
     }
@@ -76,10 +89,8 @@ internal sealed class ContentSelectionForm : PointSelectionForm
     {
         var area = Screen.FromPoint(point).WorkingArea;
         var size = toolbar.PreferredSize;
-        var bounds = scopes.Count > 0 ? scopes[scopeIndex].Bounds : Rectangle.Empty;
-        var x = bounds.IsEmpty ? area.Left + (area.Width - size.Width) / 2 : bounds.Left;
-        var y = bounds.IsEmpty ? area.Top + 24 : bounds.Bottom + 8;
-        if (y + size.Height > area.Bottom - 12) y = bounds.Top - size.Height - 8;
+        var x = area.Left + (area.Width - size.Width) / 2;
+        var y = area.Top + 24;
         toolbar.Location = new Point(
             Math.Clamp(x, area.Left + 12, Math.Max(area.Left + 12, area.Right - size.Width - 12)) - Left,
             Math.Clamp(y, area.Top + 12, Math.Max(area.Top + 12, area.Bottom - size.Height - 12)) - Top);
@@ -88,40 +99,70 @@ internal sealed class ContentSelectionForm : PointSelectionForm
     private void ObservePointer()
     {
         var point = Cursor.Position;
-        if (anchor is not null || toolbar.Bounds.Contains(PointToClient(point)) || point == lastPoint) return;
-        if (scopes.Count > 0)
-        {
-            var selected = scopes[scopeIndex].Bounds;
-            selected.Inflate(10, 10);
-            if (selected.Contains(point)) return;
-        }
+        if (anchor is not null || confirmPoint is not null ||
+            toolbar.Bounds.Contains(PointToClient(point))) return;
+        if (point == lastPoint && (observationPending || scopes.Count > 0 || Environment.TickCount64 < nextRetryAt)) return;
+        // Only an explicitly expanded scope stays pinned. Ordinary hover must
+        // keep looking inside large containers to find their smaller children.
+        if (scopePinned && scopes.Count > 0 && scopes[scopeIndex].Bounds.Contains(point)) return;
+        RequestObservation(point);
+    }
+
+    private void RequestObservation(Point point)
+    {
         lastPoint = point;
-        targetWindow = NativeCaptureWindow.BeneathOverlay(point, excludedProcessId);
-        targetBounds = targetWindow == 0 ? null : NativeCaptureWindow.Bounds(targetWindow);
-        targetTitle = targetWindow == 0 ? "" : NativeCaptureWindow.Title(targetWindow);
-        scopes = targetWindow == 0 ? [] : capture.ScopeChoices(point, targetWindow)
-            .Where(scope => targetBounds is { } bounds &&
-                BrowserObservationBridge.ToRectangle(scope.Bounds) != bounds &&
-                scope.Bounds.Width > 3 && scope.Bounds.Height > 3 &&
-                bounds.Contains(BrowserObservationBridge.ToRectangle(scope.Bounds)))
-            .ToArray();
+        scopePinned = false;
+        observationPending = true;
+        if (scopes.Count > 0 && !scopes[scopeIndex].Bounds.Contains(point))
+        {
+            var previous = OutlineBounds;
+            scopes = [];
+            scopeIndex = 0;
+            targetBounds = null;
+            UpdateHint();
+            InvalidateOutline(previous);
+        }
+        observer.Request(++observationVersion, point);
+    }
+
+    private void ApplyObservation(ContentObservation observation)
+    {
+        if (IsDisposed || !Visible || observation.Version != observationVersion) return;
+        var previous = OutlineBounds;
+        observationPending = false;
+        nextRetryAt = Environment.TickCount64 + 600;
+        observedPoint = observation.Point;
+        targetWindow = observation.Window;
+        targetBounds = observation.WindowBounds;
+        targetTitle = observation.WindowTitle;
+        scopes = observation.Outlines;
         scopeIndex = 0;
         UpdateHint();
-        PositionToolbar(point);
-        Invalidate();
+        InvalidateOutline(previous);
+        if (confirmPoint == observedPoint)
+        {
+            confirmPoint = null;
+            SelectObject();
+        }
     }
 
     private void ChangeScope(int delta)
     {
         if (scopes.Count == 0) return;
+        var previous = OutlineBounds;
+        // Ignore in-flight hover results after an explicit scope adjustment.
+        observationVersion++;
+        observationPending = false;
+        scopePinned = true;
         scopeIndex = Math.Clamp(scopeIndex + delta, 0, scopes.Count - 1);
         UpdateHint();
-        Invalidate();
+        InvalidateOutline(previous);
     }
 
     private void UpdateHint()
     {
-        hint.Text = scopes.Count == 0 ? "Drag to select a region" : "Click an outline or drag a region";
+        hint.Text = "Drag any area · or click an item";
+        toolbar.AccessibleDescription = "The image includes readable content inside your selection when available.";
         smaller.Enabled = scopeIndex > 0;
         larger.Enabled = scopeIndex + 1 < scopes.Count;
         wholeWindow.Enabled = targetBounds is { IsValid: true };
@@ -131,6 +172,21 @@ internal sealed class ContentSelectionForm : PointSelectionForm
     {
         if (scopes.Count == 0) return;
         Complete(scopes[scopeIndex].Bounds, targetWindow);
+    }
+
+    private void ConfirmObject(Point? point = null)
+    {
+        if (point is null && scopePinned) { SelectObject(); return; }
+        var target = point ?? lastPoint ?? Cursor.Position;
+        if ((scopePinned && scopes.Count > 0 && scopes[scopeIndex].Bounds.Contains(target)) || observedPoint == target)
+        {
+            SelectObject();
+            return;
+        }
+        // A quick click may beat the background lookup. Resolve that exact
+        // press location without blocking the UI or attaching an old outline.
+        confirmPoint = target;
+        RequestObservation(target);
     }
 
     private void SelectWindow()
@@ -157,35 +213,64 @@ internal sealed class ContentSelectionForm : PointSelectionForm
     {
         if (e.Button == MouseButtons.Right) { GrantForeground(); DialogResult = DialogResult.Cancel; Close(); return; }
         if (e.Button != MouseButtons.Left) return;
-        ObservePointer();
+        var previous = OutlineBounds;
         anchor = PointToScreen(e.Location);
+        confirmPoint = null;
         dragged = Rectangle.Empty;
         Capture = true;
+        if (lastPoint != anchor && !(scopePinned && scopes.Count > 0 && scopes[scopeIndex].Bounds.Contains(anchor.Value)))
+            RequestObservation(anchor.Value);
+        InvalidateOutline(previous);
     }
 
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
         if (anchor is not { } start) return;
+        var previous = OutlineBounds;
         var point = PointToScreen(e.Location);
         dragged = Rectangle.FromLTRB(Math.Min(start.X, point.X), Math.Min(start.Y, point.Y), Math.Max(start.X, point.X), Math.Max(start.Y, point.Y));
-        Invalidate();
+        InvalidateOutline(previous);
     }
 
     protected override void OnMouseUp(MouseEventArgs e)
     {
         if (e.Button != MouseButtons.Left || anchor is not { } start) return;
         var point = PointToScreen(e.Location);
+        var previous = OutlineBounds;
         anchor = null;
         Capture = false;
-        if (Math.Abs(point.X - start.X) >= 4 || Math.Abs(point.Y - start.Y) >= 4)
+        if (Math.Abs(point.X - start.X) >= 4 && Math.Abs(point.Y - start.Y) >= 4)
             Complete(Rectangle.FromLTRB(Math.Min(start.X, point.X), Math.Min(start.Y, point.Y), Math.Max(start.X, point.X), Math.Max(start.Y, point.Y)), 0);
-        else SelectObject();
+        else if (Math.Abs(point.X - start.X) < 4 && Math.Abs(point.Y - start.Y) < 4) ConfirmObject(start);
+        else
+        {
+            // A thin accidental drag neither attaches a stale object nor
+            // disables the next gesture.
+            RequestObservation(point);
+            InvalidateOutline(previous);
+        }
+    }
+
+    private Rectangle OutlineBounds => anchor is not null ? dragged : scopes.Count > 0 ? scopes[scopeIndex].Bounds : Rectangle.Empty;
+
+    private void InvalidateOutline(Rectangle previous)
+    {
+        foreach (var bounds in new[] { previous, OutlineBounds })
+        {
+            if (bounds.IsEmpty) continue;
+            var dirty = bounds;
+            dirty.Offset(-Left, -Top);
+            dirty.Inflate(4, 4);
+            Invalidate(dirty);
+            // Include the old/new label without repainting the whole desktop.
+            Invalidate(new Rectangle(0, Math.Max(0, dirty.Top - 48), ClientSize.Width, 96));
+        }
     }
 
     protected override void OnPaint(PaintEventArgs e)
     {
-        var bounds = anchor is not null ? dragged : scopes.Count > 0 ? scopes[scopeIndex].Bounds : Rectangle.Empty;
+        var bounds = OutlineBounds;
         if (bounds.IsEmpty) return;
         bounds.Offset(-Left, -Top);
         using var pen = new Pen(Color.White, 3);
@@ -202,7 +287,7 @@ internal sealed class ContentSelectionForm : PointSelectionForm
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) hoverTimer.Dispose();
+        if (disposing) { hoverTimer.Dispose(); observer.Dispose(); }
         base.Dispose(disposing);
     }
 }

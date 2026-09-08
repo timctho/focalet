@@ -11,9 +11,19 @@ anywhere to choose a rectangle instead. The visible **Larger**, **Smaller** and
 Up/Down and Enter remain available. Escape cancels and returns to the draft.
 If an application exposes no usable object, the picker asks you to drag a region.
 
+Dragging starts immediately, including over an outlined item. Hover lookup runs
+on a separate thread and keeps only the newest pointer position. Ordinary hover
+can move from a container into its small children; only a scope you explicitly
+expand stays pinned while the pointer remains inside it. The toolbar stays at
+the top of the starting screen instead of chasing the outline.
+
 This first version uses Windows accessibility for the interactive outlines;
 the final rectangle goes through the existing DOM/UIA region capture pipeline.
 Every explicit selection includes an image and aligned text when available.
+Free rectangles automatically collect the readable elements they fully enclose,
+including multiple elements. Partially clipped UIA elements and DOM text lines
+are omitted. Canvas/custom-drawn content, an unconfirmed source window, or a
+changing document can produce **Image only** with an explanation in the preview.
 Whole-window capture includes the visible desktop portion and rejects a covered
 or moved source window. It is a single snapshot, not a continuing screen share.
 Other platforms retain their existing selection providers.
