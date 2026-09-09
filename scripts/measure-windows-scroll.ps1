@@ -100,8 +100,12 @@ try{
                 if($remaining -gt 0){Start-Sleep -Milliseconds $remaining}
             }
             $elapsed=$watch.ElapsedMilliseconds
-            Start-Sleep -Milliseconds 1300
-            $samples=@(Read-Trace $trace|Where-Object event -eq 'scroll')
+            $flushDeadline=[DateTime]::UtcNow.AddSeconds(5)
+            do{
+                Start-Sleep -Milliseconds 100
+                $samples=@(Read-Trace $trace|Where-Object event -eq 'scroll')
+                if($samples.Count -gt $measurements.Count){break}
+            }while([DateTime]::UtcNow -lt $flushDeadline)
             if($samples.Count -ne $measurements.Count+1){throw 'The app did not record exactly one sample for the injected wheel sequence.'}
             $last=$samples[-1]
             if($last.inputCount -lt $WheelEvents*0.9 -or $last.frameCount -lt 30 -or $last.travel -lt 1000){throw 'The benchmark did not exercise a moving, rendered transcript.'}
@@ -111,7 +115,9 @@ try{
     }
     Screenshot $window (Join-Path $results 'after.png')
     $manifest=Get-Content (Join-Path $package 'release-manifest.json') -Raw|ConvertFrom-Json
-    @{package=$package;packageCommit=$manifest.gitCommit;ready=$ready[0];samples=$measurements;testedAtUtc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json -Depth 12|Set-Content (Join-Path $results 'result.json')
+    $harnessHash=(Get-FileHash $PSCommandPath).Hash.ToLowerInvariant()
+    $fixtureHash=(Get-FileHash (Join-Path $PSScriptRoot 'scroll-runtime-fixture.py')).Hash.ToLowerInvariant()
+    @{package=$package;packageCommit=$manifest.gitCommit;harnessSha256=$harnessHash;fixtureSha256=$fixtureHash;wheelEvents=$WheelEvents;ready=$ready[0];samples=$measurements;testedAtUtc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json -Depth 12|Set-Content (Join-Path $results 'result.json')
 }finally{
     if($application -and -not $application.HasExited){$application.Kill($true);$application.WaitForExit()}
     if($stderr){$stderr.GetAwaiter().GetResult()|Set-Content (Join-Path $results 'stderr.log')}

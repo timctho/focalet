@@ -17,7 +17,9 @@ watching = False
 
 def send(value):
     with lock:
-        print(json.dumps(value, ensure_ascii=False, separators=(",", ":")), flush=True)
+        # Windows redirected stdout may use a legacy code page. JSON escapes
+        # preserve the Unicode workload without depending on console encoding.
+        print(json.dumps(value, ensure_ascii=True, separators=(",", ":")), flush=True)
 
 
 def answer(number, sections=8):
