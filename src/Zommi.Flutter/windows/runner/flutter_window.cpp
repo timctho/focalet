@@ -1,6 +1,8 @@
 #include "flutter_window.h"
 
 #include <dwmapi.h>
+#include <dxgi.h>
+#include <fstream>
 #include <cmath>
 #include <cstdint>
 #include <optional>
@@ -10,6 +12,7 @@
 
 #include "flutter/generated_plugin_registrant.h"
 #include "zommi_instance.h"
+#include "utils.h"
 #include <flutter/method_result_functions.h>
 #include <flutter/standard_method_codec.h>
 
@@ -74,6 +77,28 @@ bool FlutterWindow::OnCreate() {
         HandleWindowAnimationMethodCall(call, std::move(result));
       });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
+
+  wchar_t trace_path[32768]{};
+  if (GetEnvironmentVariableW(L"ZOMMI_SCROLL_TRACE", trace_path, 32768) > 0) {
+    IDXGIAdapter* adapter = nullptr;
+    DXGI_ADAPTER_DESC description{};
+    if (flutter_controller_->engine()->GetGraphicsAdapter(&adapter)) {
+      adapter->GetDesc(&description);
+      adapter->Release();
+    }
+    DWM_TIMING_INFO timing{};
+    timing.cbSize = sizeof(timing);
+    DwmGetCompositionTimingInfo(nullptr, &timing);
+    std::ofstream output(std::wstring(trace_path) + L".graphics.txt");
+    output << "adapter=" << Utf8FromUtf16(description.Description) << "\n"
+           << "vendor=" << description.VendorId << "\n"
+           << "device=" << description.DeviceId << "\n"
+           << "refreshNumerator=" << timing.rateRefresh.uiNumerator << "\n"
+           << "refreshDenominator=" << timing.rateRefresh.uiDenominator << "\n"
+           << "renderer="
+           << (project_.impeller_switch() == flutter::ImpellerSwitch::Disabled
+                   ? "skia" : "impeller") << "\n";
+  }
 
   // FlutterDesktopBridge shows the window only after it has applied the
   // compact frameless bounds and monitor anchor. Showing from this first-frame

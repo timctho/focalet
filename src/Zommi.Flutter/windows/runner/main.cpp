@@ -27,6 +27,15 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
   flutter::DartProject project(L"data");
+  // A release-capable diagnostic override for paired renderer measurements.
+  // Flutter itself only accepts engine environment switches in debug/profile.
+  wchar_t renderer[32]{};
+  GetEnvironmentVariableW(L"ZOMMI_WINDOWS_RENDERER", renderer, 32);
+  if (std::wstring(renderer) == L"skia") {
+    project.set_impeller_switch(flutter::ImpellerSwitch::Disabled);
+  } else if (std::wstring(renderer) == L"impeller") {
+    project.set_impeller_switch(flutter::ImpellerSwitch::Enabled);
+  }
 
   std::vector<std::string> command_line_arguments =
       GetCommandLineArguments();
