@@ -1,7 +1,9 @@
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
 #include <windows.h>
+#include <d3d11.h>
 #include <dxgi.h>
+#include <wrl/client.h>
 
 #include "flutter_window.h"
 #include "utils.h"
@@ -9,26 +11,31 @@
 
 namespace {
 
-bool HasHardwareRenderAdapter() {
-  IDXGIFactory1* factory = nullptr;
-  if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) {
-    // Preserve Flutter's default when capability discovery is unavailable.
+bool HasHardwareRenderDevice() {
+  // Virtual/remote display adapters can enumerate as hardware even when the
+  // default D3D device is WARP. Inspect the device actually selected by D3D.
+  const D3D_FEATURE_LEVEL levels[] = {
+      D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1,
+      D3D_FEATURE_LEVEL_10_0, D3D_FEATURE_LEVEL_9_3};
+  Microsoft::WRL::ComPtr<ID3D11Device> device;
+  if (FAILED(D3D11CreateDevice(
+          nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
+          D3D11_CREATE_DEVICE_BGRA_SUPPORT, levels, ARRAYSIZE(levels),
+          D3D11_SDK_VERSION, device.GetAddressOf(), nullptr, nullptr))) {
+    return false;
+  }
+  Microsoft::WRL::ComPtr<IDXGIDevice> dxgi_device;
+  Microsoft::WRL::ComPtr<IDXGIAdapter> adapter;
+  Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter1;
+  DXGI_ADAPTER_DESC1 description{};
+  if (FAILED(device.As(&dxgi_device)) ||
+      FAILED(dxgi_device->GetAdapter(adapter.GetAddressOf())) ||
+      FAILED(adapter.As(&adapter1)) ||
+      FAILED(adapter1->GetDesc1(&description))) {
+    // Preserve Flutter's default if the selected device cannot be identified.
     return true;
   }
-  bool hardware = false;
-  for (UINT index = 0; ; ++index) {
-    IDXGIAdapter1* adapter = nullptr;
-    if (factory->EnumAdapters1(index, &adapter) != S_OK) break;
-    DXGI_ADAPTER_DESC1 description{};
-    if (SUCCEEDED(adapter->GetDesc1(&description)) &&
-        (description.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) == 0) {
-      hardware = true;
-    }
-    adapter->Release();
-    if (hardware) break;
-  }
-  factory->Release();
-  return hardware;
+  return (description.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) == 0;
 }
 
 }  // namespace
@@ -60,7 +67,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   GetEnvironmentVariableW(L"ZOMMI_WINDOWS_RENDERER", renderer, 32);
   if (std::wstring(renderer) == L"impeller") {
     project.set_impeller_switch(flutter::ImpellerSwitch::Enabled);
-  } else if (std::wstring(renderer) == L"skia" || !HasHardwareRenderAdapter()) {
+  } else if (std::wstring(renderer) == L"skia" || !HasHardwareRenderDevice()) {
     // Impeller's Windows/WARP path can take >100 ms to raster a text frame.
     // Skia avoids that cost on software-only hosts, including remote VMs.
     project.set_impeller_switch(flutter::ImpellerSwitch::Disabled);
