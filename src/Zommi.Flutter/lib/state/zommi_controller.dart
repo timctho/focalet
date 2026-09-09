@@ -102,8 +102,8 @@ final class ZommiController extends ChangeNotifier {
   List<ConversationTurn> get turns =>
       _turnsBySession[_activeSessionKey] ?? const [];
 
-  /// Content changes only; folding UI or unrelated sessions must not cause
-  /// the active transcript to rescan its history or follow a new message.
+  /// Visible content changes only; folded activity deltas, folding UI and
+  /// unrelated sessions must not make the transcript follow a new message.
   int get transcriptRevision => _transcriptRevisions[_activeSessionKey] ?? 0;
 
   void _transcriptChanged(String sessionKey) {
@@ -1517,6 +1517,19 @@ final class ZommiController extends ChangeNotifier {
         : sourceMatch == null
         ? nativeItemId
         : '$nativeItemId:${event.sequence}';
+    // The folded header only displays presence, tool count and completion.
+    // Store every delta, but avoid notifying the entire UI (and auto-following)
+    // when none of that visible state changes. Opening the group reads the
+    // latest stored content, including deltas received while it was folded.
+    final foldedActivity =
+        !turn.activityExpanded &&
+        (kind == TranscriptKind.thinking || kind == TranscriptKind.tool);
+    final previousHeader = block == null
+        ? null
+        : (
+            block.completed,
+            block.text.trim().isNotEmpty || block.artifacts.isNotEmpty,
+          );
     if (block == null) {
       block = TranscriptBlock(
         id: blockId,
@@ -1549,8 +1562,20 @@ final class ZommiController extends ChangeNotifier {
         block.artifacts.add(artifact);
       }
     }
+    final backgroundStarted =
+        !_isActiveSession(runtimeTargetId, sessionId) &&
+        !_activeTurns.containsKey(sessionKey);
     if (!_isActiveSession(runtimeTargetId, sessionId)) {
       _activeTurns.putIfAbsent(sessionKey, () => event.turnId ?? 'running');
+    }
+    if (foldedActivity &&
+        previousHeader ==
+            (
+              block.completed,
+              block.text.trim().isNotEmpty || block.artifacts.isNotEmpty,
+            )) {
+      if (backgroundStarted) _notify();
+      return;
     }
     _transcriptChanged(sessionKey);
     _notify();

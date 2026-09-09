@@ -57,6 +57,7 @@ class _TranscriptPaneState extends State<TranscriptPane> {
   int _knownTurnCount = 0;
   int _knownContentRevision = 0;
   (String?, String?)? _knownSession;
+  final _retention = _TurnRetention();
   final _turnViews =
       <
         String,
@@ -108,6 +109,7 @@ class _TranscriptPaneState extends State<TranscriptPane> {
       widget.controller.activeSessionId,
     );
     _turnViews.clear();
+    _retention.clear();
     _autoFollow = true;
     _awayFromLatest.value = false;
   }
@@ -162,13 +164,18 @@ class _TranscriptPaneState extends State<TranscriptPane> {
     // Only visible rows are fingerprinted. Keep completed rows' widget trees
     // unchanged when another row streams, while preserving folds and updates.
     final revision = Object.hash(
-      transcriptContentRevision([turn]),
+      transcriptContentRevision([turn], visibleOnly: true),
       turn.activityExpanded,
       Object.hashAll(turn.contextTokens),
       Object.hashAll(
-        turn.blocks.expand(
-          (block) => [block.title, block.status, block.expanded],
-        ),
+        turn.blocks
+            .where(
+              (block) =>
+                  turn.activityExpanded ||
+                  (block.kind != TranscriptKind.thinking &&
+                      block.kind != TranscriptKind.tool),
+            )
+            .expand((block) => [block.title, block.status, block.expanded]),
       ),
     );
     final runtimeName = widget.controller.activeRuntimeName;
@@ -179,7 +186,7 @@ class _TranscriptPaneState extends State<TranscriptPane> {
         cached.revision == revision &&
         cached.width == viewportWidth &&
         cached.runtimeName == runtimeName) {
-      return cached.view;
+      return _retain(turn, cached.view);
     }
     final view = ConversationTurnView(
       key: ValueKey('turn-${turn.id}'),
@@ -197,7 +204,33 @@ class _TranscriptPaneState extends State<TranscriptPane> {
       view: view,
     );
     if (_turnViews.length > 128) _turnViews.remove(_turnViews.keys.first);
-    return view;
+    return _retain(turn, view);
+  }
+
+  Widget _retain(ConversationTurn turn, Widget child) {
+    // Bound retained render trees by both row count and visible source size.
+    // Running/expanded activity and image-heavy rows are not retained offscreen.
+    final eligible =
+        !turn.activityExpanded &&
+        turn.attachments.isEmpty &&
+        turn.blocks.every(
+          (block) => block.completed && block.artifacts.isEmpty,
+        );
+    final characters =
+        turn.userText.length +
+        turn.blocks
+            .where(
+              (block) =>
+                  block.kind != TranscriptKind.thinking &&
+                  block.kind != TranscriptKind.tool,
+            )
+            .fold<int>(0, (sum, block) => sum + block.text.length);
+    return _RetainedTurn(
+      key: ValueKey('turn-layout-${turn.id}'),
+      retention: _retention,
+      characters: eligible ? characters : null,
+      child: child,
+    );
   }
 
   @override
@@ -241,55 +274,54 @@ class _TranscriptPaneState extends State<TranscriptPane> {
       for (var index = 0; index < visible.length; index++)
         ValueKey('turn-layout-${visible[index].id}'): index,
     };
-    return Stack(
-      children: [
-        Semantics(
-          container: true,
-          liveRegion: true,
-          label: 'Agent conversation including thinking and tool activity',
-          child: ListView.builder(
-            key: const ValueKey('zommi-transcript'),
-            controller: _scroll,
-            padding: const EdgeInsets.fromLTRB(24, 14, 24, 20),
-            itemCount: visible.length,
-            findChildIndexCallback: (key) => indices[key],
-            itemBuilder: (context, index) {
-              final turn = visible[index];
-              return LayoutBuilder(
-                key: ValueKey('turn-layout-${turn.id}'),
-                builder: (context, constraints) => _turnView(
-                  turn,
-                  constraints.maxWidth + _transcriptHorizontalInsets,
-                ),
-              );
-            },
+    // A LayoutBuilder inside each row makes even a descendant spinner/hover
+    // rebuild schedule row layout and repaint. Resolve the shared width once,
+    // outside the sliver, so those updates stay inside their paint boundary.
+    return LayoutBuilder(
+      builder: (context, constraints) => Stack(
+        children: [
+          Semantics(
+            container: true,
+            liveRegion: true,
+            label: 'Agent conversation including thinking and tool activity',
+            child: ListView.builder(
+              key: const ValueKey('zommi-transcript'),
+              controller: _scroll,
+              padding: const EdgeInsets.fromLTRB(24, 14, 24, 20),
+              itemCount: visible.length,
+              findChildIndexCallback: (key) => indices[key],
+              itemBuilder: (context, index) {
+                final turn = visible[index];
+                return _turnView(turn, constraints.maxWidth);
+              },
+            ),
           ),
-        ),
-        Positioned(
-          left: 0,
-          right: 0,
-          bottom: 12,
-          child: ValueListenableBuilder<bool>(
-            valueListenable: _awayFromLatest,
-            builder: (context, awayFromLatest, _) => Center(
-              child: AnimatedScale(
-                scale: awayFromLatest ? 1 : 0,
-                duration: const Duration(milliseconds: 140),
-                child: Semantics(
-                  button: true,
-                  label: 'Scroll to latest message',
-                  child: SizedBox.square(
-                    dimension: 36,
-                    child: IconButton.filledTonal(
-                      key: const ValueKey('scroll-to-latest'),
-                      tooltip: 'Latest message',
-                      padding: EdgeInsets.zero,
-                      alignment: Alignment.center,
-                      iconSize: 20,
-                      onPressed: awayFromLatest ? _scrollToLatest : null,
-                      icon: const Icon(
-                        Icons.keyboard_arrow_down_rounded,
-                        key: ValueKey('scroll-to-latest-glyph'),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 12,
+            child: ValueListenableBuilder<bool>(
+              valueListenable: _awayFromLatest,
+              builder: (context, awayFromLatest, _) => Center(
+                child: AnimatedScale(
+                  scale: awayFromLatest ? 1 : 0,
+                  duration: const Duration(milliseconds: 140),
+                  child: Semantics(
+                    button: true,
+                    label: 'Scroll to latest message',
+                    child: SizedBox.square(
+                      dimension: 36,
+                      child: IconButton.filledTonal(
+                        key: const ValueKey('scroll-to-latest'),
+                        tooltip: 'Latest message',
+                        padding: EdgeInsets.zero,
+                        alignment: Alignment.center,
+                        iconSize: 20,
+                        onPressed: awayFromLatest ? _scrollToLatest : null,
+                        icon: const Icon(
+                          Icons.keyboard_arrow_down_rounded,
+                          key: ValueKey('scroll-to-latest-glyph'),
+                        ),
                       ),
                     ),
                   ),
@@ -297,8 +329,8 @@ class _TranscriptPaneState extends State<TranscriptPane> {
               ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -450,30 +482,128 @@ class ConversationTurnView extends StatelessWidget {
   }
 }
 
-int transcriptContentRevision(Iterable<ConversationTurn> turns) =>
-    ScrollPerformance.measure(
-      'revisionScan',
-      () => Object.hashAll(
-        turns.expand(
-          (turn) => <Object?>[
-            turn.id,
-            turn.userText,
-            turn.inlineUserText,
-            ...turn.attachments.map((attachment) => attachment.id),
-            ...turn.blocks.expand(
-              (block) => <Object?>[
-                block.id,
-                block.kind,
-                block.text,
-                block.lifecycle,
-                block.preview,
-                ...block.artifacts.map((artifact) => artifact.identity),
-              ],
-            ),
-          ],
+int transcriptContentRevision(
+  Iterable<ConversationTurn> turns, {
+  bool visibleOnly = false,
+}) => ScrollPerformance.measure(
+  'revisionScan',
+  () => Object.hashAll(
+    turns.expand(
+      (turn) => <Object?>[
+        turn.id,
+        turn.userText,
+        turn.inlineUserText,
+        ...turn.attachments.map((attachment) => attachment.id),
+        ...turn.blocks.expand(
+          (block) =>
+              visibleOnly &&
+                  !turn.activityExpanded &&
+                  (block.kind == TranscriptKind.thinking ||
+                      block.kind == TranscriptKind.tool)
+              ? <Object?>[
+                  block.id,
+                  block.kind,
+                  block.completed,
+                  block.text.trim().isNotEmpty || block.artifacts.isNotEmpty,
+                ]
+              : <Object?>[
+                  block.id,
+                  block.kind,
+                  block.text,
+                  block.lifecycle,
+                  block.preview,
+                  ...block.artifacts.map((artifact) => artifact.identity),
+                ],
         ),
-      ),
-    );
+      ],
+    ),
+  ),
+);
+
+// ListView normally disposes an offscreen row, including Markdown's parsed
+// state. Keep a small working set alive for scrolling back over recent replies.
+// Eviction only changes keep-alive parent data after layout has finished.
+class _TurnRetention {
+  final _entries = <_RetainedTurnState, int>{};
+  static const maxTurns = 8;
+  static const maxCharacters = 128000;
+  int _characters = 0;
+
+  bool claim(_RetainedTurnState state, int? characters) {
+    forget(state);
+    if (characters == null || characters > maxCharacters) return false;
+    _entries[state] = characters;
+    _characters += characters;
+    while (_entries.length > maxTurns || _characters > maxCharacters) {
+      final oldest = _entries.keys.first;
+      forget(oldest);
+      _releaseAfterLayout(oldest);
+    }
+    return true;
+  }
+
+  void forget(_RetainedTurnState state) {
+    _characters -= _entries.remove(state) ?? 0;
+  }
+
+  void clear() {
+    final old = _entries.keys.toList();
+    _entries.clear();
+    _characters = 0;
+    for (final state in old) {
+      _releaseAfterLayout(state);
+    }
+  }
+
+  void _releaseAfterLayout(_RetainedTurnState state) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (state.mounted && !_entries.containsKey(state)) state.release();
+    });
+  }
+}
+
+class _RetainedTurn extends StatefulWidget {
+  const _RetainedTurn({
+    required this.retention,
+    required this.characters,
+    required this.child,
+    super.key,
+  });
+  final _TurnRetention retention;
+  final int? characters;
+  final Widget child;
+  @override
+  State<_RetainedTurn> createState() => _RetainedTurnState();
+}
+
+class _RetainedTurnState extends State<_RetainedTurn>
+    with AutomaticKeepAliveClientMixin {
+  bool _retained = false;
+  @override
+  bool get wantKeepAlive => _retained;
+
+  void release() {
+    _retained = false;
+    updateKeepAlive();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final retained = widget.retention.claim(this, widget.characters);
+    if (_retained != retained) {
+      _retained = retained;
+      updateKeepAlive();
+    }
+    super.build(context);
+    return widget.child;
+  }
+
+  @override
+  void dispose() {
+    widget.retention.forget(this);
+    super.dispose();
+  }
+}
 
 List<TranscriptBlock> distinctTranscriptBlocks(
   Iterable<TranscriptBlock> blocks,
@@ -628,7 +758,11 @@ class ThinkingActivityGroup extends StatelessWidget {
                         if (!completed)
                           const SizedBox.square(
                             dimension: 13,
-                            child: CircularProgressIndicator(strokeWidth: 1.5),
+                            child: RepaintBoundary(
+                              child: CircularProgressIndicator(
+                                strokeWidth: 1.5,
+                              ),
+                            ),
                           )
                         else
                           const Icon(
@@ -786,7 +920,9 @@ class _ThinkingActivitySubItem extends StatelessWidget {
               if (!block.completed)
                 const SizedBox.square(
                   dimension: 11,
-                  child: CircularProgressIndicator(strokeWidth: 1.4),
+                  child: RepaintBoundary(
+                    child: CircularProgressIndicator(strokeWidth: 1.4),
+                  ),
                 )
               else
                 const Icon(
@@ -858,7 +994,9 @@ class _ToolActivitySubItem extends StatelessWidget {
                   if (!block.completed)
                     const SizedBox.square(
                       dimension: 11,
-                      child: CircularProgressIndicator(strokeWidth: 1.4),
+                      child: RepaintBoundary(
+                        child: CircularProgressIndicator(strokeWidth: 1.4),
+                      ),
                     )
                   else
                     const Icon(
@@ -1026,7 +1164,11 @@ class ActivityBlockView extends StatelessWidget {
                         if (!completed)
                           const SizedBox.square(
                             dimension: 13,
-                            child: CircularProgressIndicator(strokeWidth: 1.5),
+                            child: RepaintBoundary(
+                              child: CircularProgressIndicator(
+                                strokeWidth: 1.5,
+                              ),
+                            ),
                           )
                         else
                           const Icon(

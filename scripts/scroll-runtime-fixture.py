@@ -9,6 +9,7 @@ import time
 
 THREAD = "scroll-benchmark"
 COUNT = int(os.environ.get("ZOMMI_SCROLL_TURNS", "120"))
+WORKLOAD = os.environ.get("ZOMMI_SCROLL_WORKLOAD", "standard")
 lock = threading.Lock()
 cancel = threading.Event()
 signal_path = os.environ.get("ZOMMI_SCROLL_STREAM_SIGNAL")
@@ -47,9 +48,23 @@ for number in range(1, COUNT + 1):
         {"id": f"tool-{number}", "type": "commandExecution", "command": "python verify.py", "aggregatedOutput": "24 checks passed", "status": "completed", "exitCode": 0},
         {"id": f"answer-{number}", "type": "agentMessage", "phase": "final", "text": answer(number, 32 if number == COUNT else 8)},
     ]})
+    if WORKLOAD == "folded":
+        activities = []
+        for step in range(100):
+            activities.extend([
+                {"id": f"reason-{number}-{step}", "type": "reasoning", "status": "completed",
+                 "summary": [f"Inspection {step}. " + "Hidden reasoning with **formatting**. " * 60]},
+                {"id": f"tool-{number}-{step}", "type": "commandExecution", "status": "completed",
+                 "command": f"python verify.py --step {step}", "exitCode": 0,
+                 "aggregatedOutput": f"Result {step}. " + "Hidden tool output. " * 100},
+            ])
+        history[-1]["items"][1:3] = activities
 
 
 def stream():
+    if WORKLOAD == "folded":
+        stream_folded()
+        return
     turn = "streaming-turn"
     base = {"threadId": THREAD, "turnId": turn}
     send({"method": "turn/started", "params": {"threadId": THREAD, "turn": {"id": turn, "status": "inProgress"}}})
@@ -63,6 +78,23 @@ def stream():
         sent += fragment
         send({"method": "item/agentMessage/delta", "params": {**base, "itemId": "stream-answer", "delta": fragment}})
     send({"method": "item/completed", "params": {**base, "item": {"id": "stream-answer", "type": "agentMessage", "phase": "final", "text": sent, "status": "completed"}}})
+    send({"method": "turn/completed", "params": {"threadId": THREAD, "turn": {"id": turn, "status": "completed"}}})
+
+
+def stream_folded():
+    # Update folded reasoning in the same turn as the long visible answer.
+    turn = f"history-{COUNT}"
+    base = {"threadId": THREAD, "turnId": turn}
+    send({"method": "turn/started", "params": {"threadId": THREAD, "turn": {"id": turn, "status": "inProgress"}}})
+    send({"method": "item/started", "params": {**base, "item": {"id": "live-reasoning", "type": "reasoning"}}})
+    sent = ""
+    for index in range(2400):
+        if cancel.wait(0.05):
+            break
+        fragment = f"Inspecting step {index}. Hidden reasoning. "
+        sent += fragment
+        send({"method": "item/reasoning/summaryTextDelta", "params": {**base, "itemId": "live-reasoning", "delta": fragment, "summaryIndex": 0}})
+    send({"method": "item/completed", "params": {**base, "item": {"id": "live-reasoning", "type": "reasoning", "summary": [sent], "status": "completed"}}})
     send({"method": "turn/completed", "params": {"threadId": THREAD, "turn": {"id": turn, "status": "completed"}}})
 
 

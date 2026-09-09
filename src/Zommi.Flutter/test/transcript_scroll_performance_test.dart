@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
@@ -9,6 +11,169 @@ import 'package:zommi_flutter/zommi_app.dart';
 import 'test_support.dart';
 
 void main() {
+  testWidgets(
+    'folded thinking updates keep the visible reply and scroll idle',
+    (tester) async {
+      await tester.binding.setSurfaceSize(normalWindowSize);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final core = RichFakeCore()..historyCount = 0;
+      await tester.pumpWidget(
+        ZommiApp(core: core, desktop: FakeDesktopBridge()),
+      );
+      await tester.pumpAndSettle();
+      var sequence = 0;
+      void emit(String id, String kind, String text, {bool completed = false}) {
+        core.emit(
+          CoreEvent(
+            name: 'item.update',
+            sequence: ++sequence,
+            runtimeTargetId: 'runtime-codex',
+            sessionId: 'session-1',
+            turnId: 'folded-turn',
+            payload: {
+              'itemId': id,
+              'kind': kind,
+              'text': text,
+              'textMode': 'append',
+              'lifecycle': completed ? 'completed' : 'delta',
+            },
+          ),
+        );
+      }
+
+      emit(
+        'answer',
+        'assistant',
+        'A visible answer.\n\n' * 30,
+        completed: true,
+      );
+      for (var index = 0; index < 100; index++) {
+        emit(
+          'tool-$index',
+          'tool',
+          'Large hidden result. ' * 200,
+          completed: true,
+        );
+      }
+      emit('reasoning', 'thinking', 'Hidden starting text.');
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 300));
+      final transcript = find.byKey(const ValueKey('zommi-transcript'));
+      final position = tester.widget<ListView>(transcript).controller!.position;
+      final originalBodies = tester
+          .elementList(find.byType(MarkdownBody))
+          .toList();
+      var messageBuilds = 0;
+      debugOnRebuildDirtyWidget = (element, _) {
+        if (element.widget is ConversationTurnView) messageBuilds++;
+      };
+      addTearDown(() => debugOnRebuildDirtyWidget = null);
+      for (var delta = 0; delta < 20; delta++) {
+        emit('reasoning', 'thinking', ' Hidden delta $delta.');
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(position.isScrollingNotifier.value, isFalse);
+      }
+      expect(messageBuilds, 0);
+      expect(tester.elementList(find.byType(MarkdownBody)), originalBodies);
+      expect(
+        find.byKey(const ValueKey('thinking-activity-list')),
+        findsNothing,
+      );
+      debugOnRebuildDirtyWidget = null;
+      final toggle = find.byKey(const ValueKey('thinking-toggle-folded-turn'));
+      await tester.ensureVisible(toggle);
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.tap(toggle);
+      await tester.pump();
+      expect(
+        tester
+            .widgetList<MarkdownBody>(find.byType(MarkdownBody))
+            .any((body) => body.data.contains('Hidden delta 19.')),
+        isTrue,
+      );
+      await tester.tap(toggle);
+      await tester.pump();
+      emit('reasoning', 'thinking', '', completed: true);
+      await tester.pumpAndSettle();
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('live thinking spinner does not repaint the surrounding turn', (
+    tester,
+  ) async {
+    final core = RichFakeCore()..historyCount = 0;
+    await tester.pumpWidget(ZommiApp(core: core, desktop: FakeDesktopBridge()));
+    await tester.pumpAndSettle();
+    core.emit(
+      const CoreEvent(
+        name: 'item.update',
+        sequence: 1,
+        runtimeTargetId: 'runtime-codex',
+        sessionId: 'session-1',
+        turnId: 'live',
+        payload: {
+          'itemId': 'reason',
+          'kind': 'thinking',
+          'text': 'Working',
+          'lifecycle': 'delta',
+        },
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 300));
+    final group = find.byType(ThinkingActivityGroup);
+    final boundary = tester.renderObject<RenderRepaintBoundary>(
+      find.ancestor(of: group, matching: find.byType(RepaintBoundary)).first,
+    );
+    final paintedContent = boundary.debugLayer!.firstChild;
+    for (var frame = 0; frame < 5; frame++) {
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    expect(boundary.debugLayer!.firstChild, same(paintedContent));
+  });
+
+  testWidgets(
+    'recent replies retain Markdown state on return with a bounded cache',
+    (tester) async {
+      await tester.binding.setSurfaceSize(normalWindowSize);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final core = RichFakeCore()..historyCount = 18;
+      await tester.pumpWidget(
+        ZommiApp(core: core, desktop: FakeDesktopBridge()),
+      );
+      await tester.pumpAndSettle();
+      final transcript = find.byKey(const ValueKey('zommi-transcript'));
+      final position = tester.widget<ListView>(transcript).controller!.position;
+      final body = find.byWidgetPredicate(
+        (widget) =>
+            widget is MarkdownBody && widget.data == 'history answer 18',
+        skipOffstage: false,
+      );
+      final original = tester.element(body);
+      final lastOffset = position.pixels;
+      position.jumpTo(lastOffset - 700);
+      await tester.pumpAndSettle();
+      position.jumpTo(lastOffset);
+      await tester.pumpAndSettle();
+      expect(tester.element(body), same(original));
+      for (var offset = lastOffset; offset > 0; offset -= 400) {
+        position.jumpTo(offset);
+        await tester.pumpAndSettle();
+      }
+      expect(original.mounted, isFalse, reason: 'Old rows must be evicted');
+      final mounted = find
+          .byType(ConversationTurnView, skipOffstage: false)
+          .evaluate()
+          .length;
+      expect(mounted, lessThan(18));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('scrolling inside a long reply does not rebuild its message', (
     tester,
   ) async {

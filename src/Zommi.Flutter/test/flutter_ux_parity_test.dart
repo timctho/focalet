@@ -116,7 +116,7 @@ void main() {
     await pumpMarkdown(singleLine);
     await tester.pump();
     final responseCopy = find.byKey(ValueKey('copy-${singleLine.hashCode}'));
-    final layout = find.byKey(ValueKey('copy-layout-${singleLine.hashCode}'));
+    final layout = find.byKey(const ValueKey('copy-layout'));
     final responseCopyRect = tester.getRect(responseCopy);
     final layoutRect = tester.getRect(layout);
     final singleLineMarkdown = tester.getRect(find.byType(MarkdownBody));

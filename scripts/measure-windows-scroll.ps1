@@ -4,7 +4,8 @@ param(
     [Parameter(Mandatory=$true)][string]$ResultDirectory,
     [string]$PythonExecutable = 'python',
     [int]$Samples = 3,
-    [int]$WheelEvents = 240
+    [int]$WheelEvents = 240,
+    [ValidateSet('standard','folded')][string]$Workload = 'standard'
 )
 $ErrorActionPreference='Stop'
 $package=(Resolve-Path $PackageDirectory).Path
@@ -65,6 +66,7 @@ $start.Environment['ZOMMI_CORE_STATE_PATH']=$binding
 $start.Environment['ZOMMI_RUNTIME_OVERRIDES_PATH']=Join-Path $runProfile 'overrides.json'
 $start.Environment['ZOMMI_RUNTIME_DISCOVERY_CACHE_PATH']=Join-Path $runProfile 'discovery.json'
 $start.Environment['ZOMMI_SCROLL_STREAM_SIGNAL']=$streamSignal
+$start.Environment['ZOMMI_SCROLL_WORKLOAD']=$Workload
 $start.Environment['ZOMMI_ACCEPTANCE_LOG']=Join-Path $results 'desktop.jsonl'
 $application=$null
 try{
@@ -111,7 +113,7 @@ try{
             # Windows coalesces wheel messages when the UI is busy. Check the
             # delivered distance as well as rendered movement, not a 1:1 count.
             if($last.inputCount -lt 30 -or $last.pointerDistance -lt $WheelEvents*10 -or $last.frameCount -lt 30 -or $last.travel -lt 1000){throw 'The benchmark did not exercise a moving, rendered transcript.'}
-            $expectedTurns=if($scenario -eq 'static'){120}else{121}
+            $expectedTurns=if($scenario -eq 'static' -or $Workload -eq 'folded'){120}else{121}
             if($last.turns -ne $expectedTurns){throw 'The expected static or streaming conversation was not rendered.'}
             if(@($last.receiptToRasterUs).Count -lt $last.inputCount*0.98){throw 'Frame timings did not cover the end of the wheel sequence.'}
             $measurements+=@{scenario=$scenario;sample=$sample;inputElapsedMs=$elapsed;data=$last}
@@ -122,7 +124,7 @@ try{
     $manifest=Get-Content (Join-Path $package 'release-manifest.json') -Raw|ConvertFrom-Json
     $harnessHash=(Get-FileHash $PSCommandPath).Hash.ToLowerInvariant()
     $fixtureHash=(Get-FileHash (Join-Path $PSScriptRoot 'scroll-runtime-fixture.py')).Hash.ToLowerInvariant()
-    @{package=$package;packageCommit=$manifest.gitCommit;harnessSha256=$harnessHash;fixtureSha256=$fixtureHash;wheelEvents=$WheelEvents;ready=$ready[0];samples=$measurements;testedAtUtc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json -Depth 12|Set-Content (Join-Path $results 'result.json')
+    @{package=$package;packageCommit=$manifest.gitCommit;workload=$Workload;harnessSha256=$harnessHash;fixtureSha256=$fixtureHash;wheelEvents=$WheelEvents;ready=$ready[0];samples=$measurements;testedAtUtc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json -Depth 12|Set-Content (Join-Path $results 'result.json')
 }finally{
     if($application -and -not $application.HasExited){$application.Kill($true);$application.WaitForExit()}
     if($stderr){$stderr.GetAwaiter().GetResult()|Set-Content (Join-Path $results 'stderr.log')}

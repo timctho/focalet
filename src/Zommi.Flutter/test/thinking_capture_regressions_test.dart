@@ -222,6 +222,8 @@ void main() {
     );
     await tester.pumpWidget(view('**Stable** reasoning'));
     final original = tester.widget<MarkdownBody>(find.byType(MarkdownBody));
+    final originalElement = tester.element(find.byType(MarkdownBody));
+    final selection = tester.element(find.byType(SelectionArea));
     await tester.pumpWidget(view('**Stable** reasoning'));
     expect(
       tester.widget<MarkdownBody>(find.byType(MarkdownBody)),
@@ -232,6 +234,8 @@ void main() {
       tester.widget<MarkdownBody>(find.byType(MarkdownBody)).data,
       '**New** reasoning',
     );
+    expect(tester.element(find.byType(MarkdownBody)), same(originalElement));
+    expect(tester.element(find.byType(SelectionArea)), same(selection));
   });
 
   testWidgets('Maximize applies native state and restores Wide or Standard', (

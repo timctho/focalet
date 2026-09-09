@@ -66,7 +66,7 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
       child: Stack(
         children: [
           ConstrainedBox(
-            key: ValueKey('copy-layout-${widget.text.hashCode}'),
+            key: const ValueKey('copy-layout'),
             constraints: const BoxConstraints(minHeight: 24),
             child: Align(
               alignment: Alignment.centerLeft,
