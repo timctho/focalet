@@ -72,11 +72,11 @@ if ($IndependentWorkerOnly) {
         if (-not $slow -or ($slow.ok -ne $true -and [string]::IsNullOrWhiteSpace($slow.error))) { throw 'The shared host lost the slow capture response.' }
         # A deliberately frozen provider may time out. After it recovers, the same
         # helper must still complete a fresh capture without restarting Chrome.
-        Start-Sleep -Milliseconds 1000
+        $fixture.WaitForProvider()
         $shared.StandardInput.WriteLine('{"id":"recovered","method":"capture","params":{"browserPageDetails":false,"point":{"x":220,"y":220}}}')
         $shared.StandardInput.Flush()
         $recovered = $shared.StandardOutput.ReadLineAsync().WaitAsync([TimeSpan]::FromSeconds(8)).GetAwaiter().GetResult() | ConvertFrom-Json
-        if ($recovered.id -ne 'recovered' -or $recovered.ok -ne $true) { throw 'The text worker did not recover after the provider timeout.' }
+        if ($recovered.id -ne 'recovered' -or $recovered.ok -ne $true) { throw "The text worker did not recover after the provider timeout: $($recovered.error)" }
         Write-Host 'shared-host-independent-workers: ok'
     } finally {
         if ($shared -and -not $shared.HasExited) { $shared.Kill($true); $shared.WaitForExit() }

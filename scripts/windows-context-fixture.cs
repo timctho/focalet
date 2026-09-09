@@ -77,6 +77,12 @@ public sealed class ZommiContextFixture : IDisposable
         form.Invoke(new Action(() => back.BringToFront()));
     }
 
+    public void WaitForProvider()
+    {
+        // A posted barrier confirms the deliberately paused UI thread resumed.
+        form.Invoke(new Action(() => { }));
+    }
+
     public void ChangeTitle()
     {
         form.Invoke(new Action(() => form.Text += " changed"));
