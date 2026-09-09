@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([Parameter(Mandatory=$true)][string]$CaptureHost, [string]$ResultPath)
+param([Parameter(Mandatory=$true)][string]$CaptureHost, [string]$ResultPath, [switch]$IndependentWorkerOnly)
 $ErrorActionPreference = 'Stop'
 if (-not ('ZommiWindowsAcceptanceNative' -as [type])) {
     . (Join-Path $PSScriptRoot 'accept-windows-capture.ps1') -PackageDirectory (Split-Path $CaptureHost) -HelpersOnly
@@ -30,6 +30,60 @@ function Wait-MultiOutline([int]$X, [int]$Y) {
     throw "Queued blue outline missing at ${X},${Y}."
 }
 Assert-DesktopCaptureSurface
+# A single helper must show its modal selector while its MTA is blocked in UIA.
+if ($IndependentWorkerOnly) {
+    $fixture = [ZommiContextFixture]::new()
+    $shared = $null
+    try {
+        $start = [System.Diagnostics.ProcessStartInfo]::new($CaptureHost)
+        $start.ArgumentList.Add('--capture-host')
+        $start.UseShellExecute = $false
+        $start.CreateNoWindow = $true
+        $start.RedirectStandardInput = $true
+        $start.RedirectStandardOutput = $true
+        $start.RedirectStandardError = $true
+        $shared = [System.Diagnostics.Process]::Start($start)
+        $errors = $shared.StandardError.ReadToEndAsync()
+        $fixture.PauseProvider(1800)
+        $shared.StandardInput.WriteLine('{"id":"slow","method":"capture","params":{"browserPageDetails":false,"point":{"x":220,"y":220}}}')
+        $shared.StandardInput.Flush()
+        Start-Sleep -Milliseconds 150
+        $watch = [Diagnostics.Stopwatch]::StartNew()
+        $shared.StandardInput.WriteLine('{"id":"select","method":"selectContent","params":{"browserPageDetails":false}}')
+        $shared.StandardInput.Flush()
+        $selector = Wait-ForWindow -ProcessId $shared.Id -Title 'Zommi content selection'
+        if ($watch.ElapsedMilliseconds -gt 1200) { throw 'The shared-host selector waited for the slow UIA worker.' }
+        [ZommiWindowsAcceptanceNative]::CancelSelection($selector) | Out-Null
+        $responses = @{}
+        while (-not $responses.ContainsKey('select')) {
+            $remaining = 1200 - $watch.ElapsedMilliseconds
+            if ($remaining -le 0) { throw 'Slow capture blocked the independent selector response.' }
+            $response = $shared.StandardOutput.ReadLineAsync().WaitAsync([TimeSpan]::FromMilliseconds($remaining)).GetAwaiter().GetResult() | ConvertFrom-Json
+            $responses[$response.id] = $response
+        }
+        if ($responses.select.ok -ne $true -or $responses.select.result.cancelled -ne $true) { throw 'The independent selector did not cancel.' }
+        # A provider timeout can finish before selection. Correlate replies by ID;
+        # the measured selector deadline, not reply order, proves responsiveness.
+        if (-not $responses.ContainsKey('slow')) {
+            $response = $shared.StandardOutput.ReadLineAsync().WaitAsync([TimeSpan]::FromSeconds(8)).GetAwaiter().GetResult() | ConvertFrom-Json
+            $responses[$response.id] = $response
+        }
+        $slow = $responses.slow
+        if (-not $slow -or ($slow.ok -ne $true -and [string]::IsNullOrWhiteSpace($slow.error))) { throw 'The shared host lost the slow capture response.' }
+        # A deliberately frozen provider may time out. After it recovers, the same
+        # helper must still complete a fresh capture without restarting Chrome.
+        Start-Sleep -Milliseconds 1000
+        $shared.StandardInput.WriteLine('{"id":"recovered","method":"capture","params":{"browserPageDetails":false,"point":{"x":220,"y":220}}}')
+        $shared.StandardInput.Flush()
+        $recovered = $shared.StandardOutput.ReadLineAsync().WaitAsync([TimeSpan]::FromSeconds(8)).GetAwaiter().GetResult() | ConvertFrom-Json
+        if ($recovered.id -ne 'recovered' -or $recovered.ok -ne $true) { throw 'The text worker did not recover after the provider timeout.' }
+        Write-Host 'shared-host-independent-workers: ok'
+    } finally {
+        if ($shared -and -not $shared.HasExited) { $shared.Kill($true); $shared.WaitForExit() }
+        $fixture.Dispose()
+    }
+    return
+}
 $cases = @('mixed', 'rectangles', 'rapid', 'rapid-release', 'cancel', 'changed')
 $results = @()
 foreach ($case in $cases) {
@@ -122,6 +176,10 @@ try {
         Write-Host "grid-row-$($row+1): ok"
     }
 } finally { $fixture.Dispose() }
-$evidence = @{captureHelper=$CaptureHost; cases=$results}
+# A deliberately stalled UIA provider can leave process-local accessibility
+# state behind. Give that fault-injection fixture its own driver process.
+& (Get-Process -Id $PID).Path -NoProfile -File $PSCommandPath -CaptureHost $CaptureHost -IndependentWorkerOnly | ForEach-Object { Write-Host $_ }
+if ($LASTEXITCODE -ne 0) { throw 'Shared-host independent-worker acceptance failed.' }
+$evidence = @{captureHelper=$CaptureHost; cases=$results; independentSelector=$true}
 if ($ResultPath) { $evidence | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $ResultPath -Encoding utf8 }
 $evidence

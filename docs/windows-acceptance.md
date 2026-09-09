@@ -43,7 +43,7 @@ It checks stable normal/expanded taskbar
 window bounds, taskbar minimize/restore behavior, real operating-system shortcut
 registration, injected
 `Alt+A`/`Alt+Shift+A` activation, context attachment, image cancellation,
-image-plus-pointer pairing, and the adjacent Flutter/Rust/two-helper process
+image-plus-pointer pairing, and the adjacent Flutter/Rust/single-helper process
 topology. Run it from an interactive desktop PowerShell; a process launched
 through WSL interop does not inherit an authoritative screen device context.
 The native context fixture runs its own message loop and sets its thread DPI
@@ -143,6 +143,7 @@ grid. For a live site, compare against the visible page's own card links.
 
 The native gate also runs `accept-windows-multi-content.ps1`: Ctrl-click mixed
 with rectangles, repeated rectangles, rapid clicks during a paused UIA provider,
+an independent selector during a slow UIA read in the same helper,
 Ctrl release before a queued click resolves, retained blue outlines, ordered
 Enter submission, Escape and atomic source-change rejection. A real DataGridView
 fixture checks partial crops from data rows 1 and 3, including column headers.

@@ -15,15 +15,25 @@ foreach (var argument in new[] { "--no-sandbox", "--disable-gpu", "--no-first-ru
     "--remote-debugging-port=0", "--window-size=1000,900", "--user-data-dir=" + profile, fixture }) start.ArgumentList.Add(argument);
 using var browser = Process.Start(start) ?? throw new InvalidOperationException("Could not start Chromium.");
 browser.BeginErrorReadLine(); browser.BeginOutputReadLine();
-using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(50));
+using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(OperatingSystem.IsWindows() ? 120 : 50));
 var token = deadline.Token;
 var passed = new List<string>();
 using var desktopPointer = DesktopPointer.Park();
 try
 {
     var portFile = Path.Combine(profile, "DevToolsActivePort");
-    while (!File.Exists(portFile)) { if (browser.HasExited) throw new InvalidOperationException("Chromium exited before opening CDP."); await Task.Delay(50, token); }
-    var port = File.ReadAllLines(portFile);
+    string[] port;
+    while (true)
+    {
+        if (browser.HasExited) throw new InvalidOperationException("Chromium exited before opening CDP.");
+        try
+        {
+            port = File.ReadAllLines(portFile);
+            if (port.Length >= 2 && int.TryParse(port[0], out _) && port[1].StartsWith("/devtools/browser/", StringComparison.Ordinal)) break;
+        }
+        catch (IOException) { } // Chrome may still hold/write the startup file.
+        await Task.Delay(50, token);
+    }
     var endpoint = new Uri($"ws://127.0.0.1:{port[0]}{port[1]}");
     using var driver = await CdpConnection.ConnectAsync(endpoint, token);
     string tab;
@@ -75,7 +85,11 @@ try
     void Check(bool condition, string name) { if (!condition) throw new InvalidOperationException(name); passed.Add(name); Console.WriteLine("PASS " + name); }
     if (OperatingSystem.IsWindows() && Environment.GetEnvironmentVariable("ZOMMI_TEST_CAPTURE_HOST") is { Length: > 0 } nativeHost)
     {
-        while (browser.MainWindowHandle == 0) { await Task.Delay(50, token); browser.Refresh(); }
+        while (browser.MainWindowHandle == 0 || !browser.MainWindowTitle.StartsWith("Zommi DOM capture acceptance", StringComparison.Ordinal))
+        { await Task.Delay(50, token); browser.Refresh(); }
+        await driver.CallAsync("Target.activateTarget", new { targetId = tab }, null, token);
+        NativeContentInput.Activate(browser.MainWindowHandle);
+        while ((await Evaluate("document.visibilityState")).GetString() != "visible") await Task.Delay(25, token);
         await using var nativeProxy = new CountingBrowserProxy(endpoint);
         var nativeStart = new ProcessStartInfo(nativeHost)
         {
@@ -99,6 +113,8 @@ try
                 "Windows HWND and native viewport bind to the exact CDP tab and document");
             Check(binding.RootElement.GetProperty("captures").GetArrayLength() == 3 && nativeProxy.AcceptedConnections == 1,
                 "The packaged native helper reuses one browser WebSocket across three fresh captures");
+            Check(nativeProxy.Count("Target.attachToTarget") == 1 && nativeProxy.Count("Target.detachFromTarget") == 0,
+                "Three native captures retain one debugger target without attach/detach churn");
             await File.WriteAllTextAsync(Path.Combine(output, "native-binding.json"), result, token);
             // Exercise the actual desktop-region pipeline, including the rule
             // that a URL alone is enough to retain aligned structural context.
@@ -113,6 +129,7 @@ try
             };
             policyStart.ArgumentList.Add("--capture-host");
             policyStart.Environment["ZOMMI_BROWSER_CDP_ENDPOINT"] = nativeProxy.Endpoint.AbsoluteUri;
+            policyStart.Environment["ZOMMI_CAPTURE_DIAGNOSTICS"] = "1";
             using (var policyHost = Process.Start(policyStart)!)
             {
                 var errors = policyHost.StandardError.ReadToEndAsync(token);
@@ -127,7 +144,9 @@ try
                         },
                     }));
                     await policyHost.StandardInput.FlushAsync(token);
-                    return JsonDocument.Parse(await policyHost.StandardOutput.ReadLineAsync(token) ?? throw new Exception("Capture policy returned no response"));
+                    var response = await policyHost.StandardOutput.ReadLineAsync(token);
+                    if (response is null) throw new Exception("Capture policy returned no response: " + await errors);
+                    return JsonDocument.Parse(response);
                 }
                 try
                 {
@@ -138,6 +157,51 @@ try
                     using var enabled = await Request(true);
                     Check(enabled.RootElement.GetProperty("ok").GetBoolean() && nativeProxy.AcceptedConnections == count + 1,
                         "Re-enabling webpage details restores the browser connection");
+                    var attachments = nativeProxy.Count("Target.attachToTarget");
+                    var detaches = nativeProxy.Count("Target.detachFromTarget");
+                    await Evaluate("window.__captureResizes = 0; window.addEventListener('resize', () => window.__captureResizes++); true");
+                    var cssWidth = (await Evaluate("innerWidth")).GetDouble();
+                    var cssHeight = (await Evaluate("innerHeight")).GetDouble();
+                    var regions = new List<CaptureRectangle>();
+                    foreach (var selector in new[] { "#product-a", "#product-b" })
+                    {
+                        var bounds = await Bounds(selector);
+                        regions.Add(new CaptureRectangle(viewport.X + bounds.X * viewport.Width / cssWidth,
+                            viewport.Y + bounds.Y * viewport.Height / cssHeight,
+                            bounds.Width * viewport.Width / cssWidth, bounds.Height * viewport.Height / cssHeight));
+                    }
+                    // Repeat selection after ordinary text capture through the same
+                    // actual RPC helper, not merely through a shared test pool.
+                    for (var batch = 0; batch < 2; batch++)
+                    {
+                        NativeContentInput.Activate(browser.MainWindowHandle);
+                        NativeContentInput.AssertSource(browser.MainWindowHandle, regions);
+                        await policyHost.StandardInput.WriteLineAsync("{\"id\":\"multi\",\"method\":\"selectContent\",\"params\":{\"browserPageDetails\":true}}");
+                        await policyHost.StandardInput.FlushAsync(token);
+                        await NativeContentInput.SelectAsync(policyHost.Id, regions, token);
+                        using var response = JsonDocument.Parse(await policyHost.StandardOutput.ReadLineAsync(token) ?? throw new IOException("The shared selector returned no response."));
+                        await File.WriteAllTextAsync(Path.Combine(output, $"multi-{batch + 1}.json"), response.RootElement.GetRawText(), token);
+                        if (!response.RootElement.TryGetProperty("result", out var selectionResult) ||
+                            !selectionResult.TryGetProperty("selections", out var selectedItems))
+                        {
+                            policyHost.StandardInput.Close();
+                            throw new InvalidOperationException("Native batch did not return two selections: " +
+                                (selectionResult.ValueKind == JsonValueKind.Object ? string.Join(", ", selectionResult.EnumerateObject()
+                                    .Where(property => property.Name is "cancelled" or "errorMessage" or "bounds").Select(property => $"{property.Name}: {property.Value}")) : "missing result") + await errors);
+                        }
+                        var resultItems = selectedItems.EnumerateArray().ToArray();
+                        Check(resultItems.Length == 2 && resultItems.All(item => item.GetProperty("alignment").GetProperty("status").GetString() == "aligned") &&
+                            resultItems[0].GetProperty("snapshot").GetProperty("dom").GetProperty("elements").EnumerateArray().Any(element => element.TryGetProperty("href", out var href) && href.GetString() == "https://shop.example/products/paddle-a?color=blue") &&
+                            resultItems[1].GetProperty("snapshot").GetProperty("dom").GetProperty("elements").EnumerateArray().Any(element => element.TryGetProperty("href", out var href) && href.GetString() == "https://shop.example/products/paddle-b"),
+                            $"Native Ctrl batch {batch + 1} retains two correctly aligned images and product URLs");
+                        for (var index = 0; index < resultItems.Length; index++)
+                            await File.WriteAllBytesAsync(Path.Combine(output, $"multi-{batch + 1}-{index + 1}.png"),
+                                Convert.FromBase64String(resultItems[index].GetProperty("dataUrl").GetString()!.Split(',')[1]), token);
+                    }
+                    Check(nativeProxy.AcceptedConnections == count + 1 && nativeProxy.Count("Target.attachToTarget") == attachments &&
+                        nativeProxy.Count("Target.detachFromTarget") == detaches && nativeProxy.Count("Page.captureScreenshot") == 0 &&
+                        (await Evaluate("window.__captureResizes")).GetInt32() == 0,
+                        "Text capture and two Ctrl batches share one connection and attachment without screenshot commands or viewport resize");
                     await policyHost.StandardInput.WriteLineAsync("{\"id\":\"stop\",\"method\":\"shutdown\",\"params\":{}}");
                     await policyHost.StandardInput.FlushAsync(token);
                     await policyHost.WaitForExitAsync(token);
@@ -188,6 +252,9 @@ try
                 finally { if (!regionHost.HasExited) regionHost.Kill(entireProcessTree: true); }
             }
             await Evaluate("window.scrollTo(0,0); true");
+            Check(nativeProxy.Count("Page.captureScreenshot") == 0,
+                "Native region images do not request Chrome compositor screenshots");
+            desktopPointer?.Repark();
         }
         finally { if (!native.HasExited) native.Kill(entireProcessTree: true); }
     }
@@ -354,6 +421,16 @@ try
             Check(await connections.OpenAsync(proxy.Endpoint, browser.Id, title => title == "Zommi DOM capture acceptance", token) is null,
                 "A second lease on the retained connection cannot replace an active capture");
             await first.ValidateAsync(token);
+            proxy.DelayNextReply("Runtime.evaluate", 250);
+            using (var shortDeadline = new CancellationTokenSource(TimeSpan.FromMilliseconds(50)))
+            {
+                var timedOut = false;
+                try { await first.StampAsync(shortDeadline.Token); }
+                catch (OperationCanceledException) { timedOut = true; }
+                Check(timedOut, "A delayed browser reply respects the observation deadline");
+            }
+            await first.ValidateAsync(token);
+            Check(proxy.AcceptedConnections == 1, "An observation timeout keeps the authorized browser connection usable");
             await first.BeginPickerAsync(x, y, token);
         }
         var pooledWorld = await Command("Page.createIsolatedWorld", new { frameId = currentFrame, worldName = "zommi-context-observation" });
@@ -370,6 +447,8 @@ try
             var image = await second.CaptureImageAsync(imageRegion, token);
             Check(image.Stamp == aligned.Stamp && aligned.Elements.Count > 0, "A reused connection captures aligned region text and pixels");
             Check(proxy.AcceptedConnections == 1, "Repeated text, picker and image captures use one browser WebSocket");
+            Check(proxy.Count("Target.attachToTarget") == 1 && proxy.Count("Target.detachFromTarget") == 0,
+                "Fresh observations reuse one attached tab without debugger banner churn");
             await Command("Page.reload");
             await Task.Delay(150, token);
             var staleRejected = false;
@@ -401,6 +480,16 @@ try
         var closedPoolRejected = false;
         try { await Reopen(); } catch (ObjectDisposedException) { closedPoolRejected = true; }
         Check(closedPoolRejected, "Closing the capture host's connection pool prevents further browser access");
+    }
+    await using (var rejectedProxy = new CountingBrowserProxy(endpoint) { RejectConnections = true })
+    {
+        using var connections = new BrowserConnectionPool();
+        for (var item = 0; item < 3; item++)
+        {
+            try { await connections.OpenAsync(rejectedProxy.Endpoint, browser.Id, _ => true, token); }
+            catch (Exception exception) when (exception is System.Net.WebSockets.WebSocketException or IOException or InvalidOperationException) { }
+        }
+        Check(rejectedProxy.AttemptedConnections == 1, "A declined connection is not retried for every selected item");
     }
     await File.WriteAllTextAsync(Path.Combine(output, "result.json"), JsonSerializer.Serialize(new { passed, count = passed.Count }, new JsonSerializerOptions { WriteIndented = true }), token);
     Console.WriteLine($"{passed.Count} live browser checks passed. Evidence: {output}");

@@ -1465,28 +1465,34 @@ final class WindowsCaptureProvider
   @override
   void setBrowserPageDetails(bool enabled) => _browserPageDetails = enabled;
 
-  WindowsCaptureProvider({
+  factory WindowsCaptureProvider({
     String? executablePath,
     NativeCaptureClient? captureClient,
     NativeCaptureClient? selectorClient,
-  }) : _captureClient =
-           captureClient ??
-           ProcessNativeCaptureClient(executablePath ?? _nativeHostPath()),
-       _selectorClient =
-           selectorClient ??
-           ProcessNativeCaptureClient(executablePath ?? _nativeHostPath());
+  }) {
+    final shared =
+        captureClient ??
+        selectorClient ??
+        ProcessNativeCaptureClient(executablePath ?? _nativeHostPath());
+    return WindowsCaptureProvider._(
+      captureClient ?? shared,
+      selectorClient ?? shared,
+    );
+  }
+
+  WindowsCaptureProvider._(this._captureClient, this._selectorClient);
 
   final NativeCaptureClient _captureClient;
   final NativeCaptureClient _selectorClient;
 
   @override
   Future<void> initialize() async {
-    // The native host handles requests synchronously. Keep image selection on
-    // a separate prewarmed process so slow UIA capture cannot delay the region
-    // selector that the user is already trying to drag.
+    // The shared host has independent UI and accessibility workers.
+    // One process keeps one browser authorization across both entry points.
     await Future.wait([
       _captureClient.request('ping'),
-      _selectorClient.request('ping'),
+      if (!identical(_captureClient, _selectorClient))
+        _selectorClient.request('ping'),
     ]);
   }
 
@@ -1574,7 +1580,10 @@ final class WindowsCaptureProvider
 
   @override
   Future<void> close() async {
-    await Future.wait([_captureClient.close(), _selectorClient.close()]);
+    await Future.wait([
+      _captureClient.close(),
+      if (!identical(_captureClient, _selectorClient)) _selectorClient.close(),
+    ]);
   }
 }
 

@@ -801,6 +801,37 @@ void main() {
     },
   );
 
+  test('Windows text and selection share one host without waiting for text completion', () async {
+    final pending = Completer<Map<String, Object?>>();
+    final shared = _FakeNativeCaptureClient(
+      onRequest: (method) => method == 'capture'
+          ? pending.future
+          : Future.value(<String, Object?>{'cancelled': true}),
+    );
+    final provider = WindowsCaptureProvider(captureClient: shared);
+    await provider.initialize();
+    expect(shared.requests, ['ping']);
+    final capture = provider.capture();
+    expect(
+      await provider.selectContext().timeout(const Duration(milliseconds: 100)),
+      isEmpty,
+    );
+    expect(
+      await provider.selectImage().timeout(const Duration(milliseconds: 100)),
+      isNull,
+    );
+    expect(shared.requests, [
+      'ping',
+      'capture',
+      'selectContent',
+      'selectImage',
+    ]);
+    pending.complete(<String, Object?>{});
+    await capture;
+    await provider.close();
+    expect(shared.closed, isTrue);
+  });
+
   test(
     'Windows region selection is not queued behind slow UIA capture',
     () async {

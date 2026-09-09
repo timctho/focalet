@@ -27,4 +27,10 @@ internal sealed class DesktopPointer : IDisposable
         if (GetCursorPos(out var current) && current.X == parked.X && current.Y == parked.Y)
             SetCursorPos(previous.X, previous.Y);
     }
+
+    public void Repark()
+    {
+        if (!SetCursorPos(-32768, -32768) || !GetCursorPos(out parked))
+            throw new InvalidOperationException("Could not park the pointer after native selection.");
+    }
 }

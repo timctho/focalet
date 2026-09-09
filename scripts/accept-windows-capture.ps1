@@ -1556,7 +1556,7 @@ function Invoke-PackagedApplicationAcceptance {
         })
         if ($applicationCoreProcesses.Count -ne 1 -or
             $proxyCoreProcesses.Count -lt 1 -or
-            $captureProcesses.Count -ne 2) {
+            $captureProcesses.Count -ne 1) {
             throw "Unexpected packaged process topology: $($processes | Select-Object Name,ProcessId,ExecutablePath | ConvertTo-Json -Compress)"
         }
 
@@ -2023,6 +2023,7 @@ Write-AcceptanceResult -Result @{
     unifiedContent = @('cancel') + $contentGestures
     contentSelectionTimings = $contentTimings
     multiContent = $multiContent.cases
+    independentSelector = $multiContent.independentSelector
     selectedBounds = @($selected.bounds.x, $selected.bounds.y, $selected.bounds.width, $selected.bounds.height)
     pngDimensions = @($width, $height)
     pngBytes = $png.Length

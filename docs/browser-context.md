@@ -77,25 +77,30 @@ change its profile. For a browser that exposes a different local debugging
 port, launch Zommi with `ZOMMI_BROWSER_CDP_ENDPOINT=http://127.0.0.1:9222`
 (substitute the port supplied by that browser). A loopback browser WebSocket
 endpoint is also accepted. Remote endpoints and credentials in URLs are
-rejected.
+rejected. An explicit endpoint is exclusive; failed binding does not try another
+profile. Automatic discovery only considers the selected browser family.
 
-Each native capture helper keeps its browser connection open for later captures.
-Closing a capture removes its page observers, selection outline and tab session;
-the next capture binds the current native window, tab and document again over the
-same browser connection. Reloading or switching tabs does not require a new
-browser connection. An interrupted connection is discarded and reconnected once.
-The first connection allows up to 20 seconds for Chrome's authorization dialog.
+Text, content selection and image selection share one native helper and one
+browser connection per endpoint. Separate UI and accessibility workers keep the selector
+responsive while text accessibility capture is busy. Browser tab attachments
+stay open between captures; each capture still binds the current native window,
+tab and document, and removes its own page observers and selection outline.
+Reloading and switching tabs rebind without a new browser connection.
 
-Chrome controls authorization for a new connection. The text-capture and selector
-helpers are separate processes, so each may request authorization on first use.
-Restarting Chrome or Zommi, or revoking/disconnecting browser access, may require
-another confirmation. This does not change connections owned by an agent's
-separate Chrome MCP server.
+An observation timeout leaves the authorized connection open and discards its
+late reply. A real disconnect reconnects once. The first connection allows up to
+20 seconds for Chrome's authorization dialog. A failed connection pauses fresh
+attempts for one minute so a rejected prompt is not repeated for each item.
+Turning Full webpage details off and on clears this connection state.
+
+Chrome controls authorization for a new connection. Restarting Chrome or Zommi,
+or revoking/disconnecting browser access, can require another confirmation.
+Connections owned by an agent's separate Chrome MCP server are independent.
 
 In **App settings**, turn off **Full webpage details** to stop Zommi using a
 debugging connection from the next capture. This applies to Alt+A, Select content
 and image selection, and closes previously retained Zommi browser connections
-when that helper handles its next capture. Images, physical coordinates and
+when the helper handles its next capture. Images, physical coordinates and
 Windows accessibility remain available; DOM text and image/product URLs may be
 missing. The preference persists and is on by default. It does not change
 connections made by the agent's separate browser tools.
@@ -126,9 +131,10 @@ Its dimensions must agree with the browser's CSS viewport. Unsupported or
 ambiguous geometry does not receive DOM coordinates. Image capture records the
 physical region, image size and CSS viewport mapping, including negative desktop
 coordinates. Viewport movement, document mutations, scroll changes and window
-changes invalidate alignment. DOM text is read before requesting a compositor
-crop from that same browser tab, and checked again afterward. The PNG's actual
-dimensions are retained in the image mapping. UIA fallback compares the enclosed accessible elements
+changes invalidate alignment. On Windows, DOM text is read before copying the selected physical screen
+pixels, then checked again afterward along with window coverage. This avoids
+Chrome compositor screenshot commands and their visible surface changes. The
+PNG dimensions are retained in the image mapping. UIA fallback compares the enclosed accessible elements
 on both sides of the image capture.
 
 ## Coverage and limits
@@ -172,6 +178,7 @@ For the packaged Windows browser gate, run
 `./scripts/accept-windows-browser.ps1 -PackageDirectory ./artifacts/zommi-windows-x64`.
 It uses a temporary Chromium profile, verifies the native window/viewport binding
 with the packaged helper, and records the helper's SHA-256 beside the test
-results. The packaged gate also counts browser WebSocket handshakes across three fresh
-captures. The browser observer is released after capture; a disconnected client
+results. The packaged gate also counts browser WebSocket handshakes and target
+attachments across three fresh captures, checks that native crops issue no
+Chrome screenshot commands, and exercises delayed replies and declined connections. The browser observer is released after capture; a disconnected client
 also loses its browser observation lease after 30 seconds.

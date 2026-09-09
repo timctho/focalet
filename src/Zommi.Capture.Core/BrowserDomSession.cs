@@ -1,4 +1,5 @@
 using System.Net;
+using System.Collections.Concurrent;
 using System.Buffers.Binary;
 using System.Net.WebSockets;
 using System.Text;
@@ -58,6 +59,7 @@ public sealed class BrowserDomSession : IDisposable
     private bool disposed;
     private bool acquired;
     private bool ownsConnection;
+    private readonly bool retainedAttachment;
     private long? visibilityRevision;
 
     private BrowserDomSession(CdpConnection connection, Func<string, bool> matchesNativeWindow,
@@ -65,6 +67,7 @@ public sealed class BrowserDomSession : IDisposable
     {
         this.connection = connection;
         this.ownsConnection = ownsConnection;
+        retainedAttachment = !ownsConnection;
         this.matchesNativeWindow = matchesNativeWindow;
         this.sessionId = sessionId;
         this.contextId = contextId;
@@ -104,14 +107,15 @@ public sealed class BrowserDomSession : IDisposable
             if (connection.BrowserProcessId != processId) return null;
 
             var targets = await connection.CallAsync("Target.getTargets", null, null, cancellationToken).ConfigureAwait(false);
+            await connection.PruneTargetsAsync(targets.GetProperty("targetInfos").EnumerateArray()
+                .Select(target => target.GetProperty("targetId").GetString()!).ToHashSet(), cancellationToken).ConfigureAwait(false);
             foreach (var target in targets.GetProperty("targetInfos").EnumerateArray())
             {
                 if (target.GetProperty("type").GetString() != "page" ||
                     !matchesNativeWindow(target.GetProperty("title").GetString() ?? "")) continue;
                 var tabId = target.GetProperty("targetId").GetString()!;
-                var attached = await connection.CallAsync("Target.attachToTarget", new { targetId = tabId, flatten = true }, null, cancellationToken).ConfigureAwait(false);
-                var session = attached.GetProperty("sessionId").GetString()!;
-                attachedSessions.Add(session);
+                var session = await connection.AttachTargetAsync(tabId, !ownsConnection, cancellationToken).ConfigureAwait(false);
+                if (ownsConnection) attachedSessions.Add(session);
                 var frameTree = await connection.CallAsync("Page.getFrameTree", null, session, cancellationToken).ConfigureAwait(false);
                 var frame = frameTree.GetProperty("frameTree").GetProperty("frame");
                 var frameId = frame.GetProperty("id").GetString()!;
@@ -120,7 +124,9 @@ public sealed class BrowserDomSession : IDisposable
                 var context = world.GetProperty("executionContextId").GetInt32();
                 var window = await connection.CallAsync("Browser.getWindowForTarget", new { targetId = tabId }, null, cancellationToken).ConfigureAwait(false);
                 var candidate = new BrowserDomSession(connection, matchesNativeWindow, session, context, tabId, frameId, loaderId,
-                    window.GetProperty("windowId").GetInt32(), ownsConnection: false);
+                    window.GetProperty("windowId").GetInt32(), ownsConnection);
+                // The selected observation owns the transport only after binding succeeds.
+                candidate.ownsConnection = false;
                 sessions.Add(candidate);
                 attachedSessions.Remove(session);
                 var metadata = await candidate.EvaluateAsync("({ visible: document.visibilityState === 'visible', title: document.title })", cancellationToken).ConfigureAwait(false);
@@ -255,7 +261,7 @@ public sealed class BrowserDomSession : IDisposable
             if (acquired) InvokeAsync(new { mode = "release" }, timeout.Token).GetAwaiter().GetResult();
         }
         catch (Exception exception) when (exception is OperationCanceledException or WebSocketException or InvalidOperationException or IOException) { }
-        Detach(connection, sessionId);
+        if (!retainedAttachment) Detach(connection, sessionId);
         if (ownsConnection) connection.Dispose();
     }
 
@@ -281,9 +287,13 @@ public sealed class BrowserDomSession : IDisposable
 internal sealed class CdpConnection : IDisposable
 {
     private readonly ClientWebSocket socket = new();
+    private readonly CancellationTokenSource lifetime = new();
+    private readonly SemaphoreSlim writes = new(1, 1);
+    private readonly ConcurrentDictionary<int, TaskCompletionSource<JsonElement>> pending = new();
+    private readonly ConcurrentDictionary<string, string> targets = [];
     private int sequence;
-    private readonly SemaphoreSlim calls = new(1, 1);
-    public bool IsOpen => socket.State == WebSocketState.Open;
+    private int disposed;
+    public bool IsOpen => Volatile.Read(ref disposed) == 0 && socket.State == WebSocketState.Open;
     public int? BrowserProcessId { get; set; }
 
     public static async Task<CdpConnection> ConnectAsync(Uri endpoint, CancellationToken cancellationToken)
@@ -306,6 +316,9 @@ internal sealed class CdpConnection : IDisposable
             if (endpoint.Scheme is not ("ws" or "wss")) throw new InvalidOperationException("Expected a local browser debugging endpoint.");
             connection.socket.Options.Proxy = null;
             await connection.socket.ConnectAsync(endpoint, cancellationToken).ConfigureAwait(false);
+            // Command deadlines must not cancel ReceiveAsync: doing that aborts
+            // an authorized WebSocket and forces Chrome to ask again next time.
+            _ = connection.ReceiveAsync();
             return connection;
         }
         catch { connection.Dispose(); throw; }
@@ -319,45 +332,97 @@ internal sealed class CdpConnection : IDisposable
             throw new InvalidOperationException("Browser capture only connects to local loopback endpoints.");
     }
 
+    // Binding is serialized by BrowserConnectionPool. Keep the debugger target
+    // attached while each observation still creates and releases its own lease.
+    public async Task<string> AttachTargetAsync(string tabId, bool retain, CancellationToken cancellationToken)
+    {
+        if (retain && targets.TryGetValue(tabId, out var existing)) return existing;
+        var attached = await CallAsync("Target.attachToTarget", new { targetId = tabId, flatten = true }, null, cancellationToken).ConfigureAwait(false);
+        var session = attached.GetProperty("sessionId").GetString()!;
+        if (retain) targets[tabId] = session;
+        return session;
+    }
+
+    public async Task PruneTargetsAsync(HashSet<string> liveTargets, CancellationToken cancellationToken)
+    {
+        foreach (var tab in targets.Keys.Where(tab => !liveTargets.Contains(tab)).ToArray())
+        {
+            if (!targets.TryRemove(tab, out var session)) continue;
+            try { await CallAsync("Target.detachFromTarget", new { sessionId = session }, null, cancellationToken).ConfigureAwait(false); }
+            catch (InvalidOperationException) { } // Chrome already detached a closed tab.
+        }
+    }
+
     public async Task<JsonElement> CallAsync(string method, object? parameters, string? sessionId, CancellationToken cancellationToken)
     {
-        await calls.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try { return await SendCallAsync(method, parameters, sessionId, cancellationToken).ConfigureAwait(false); }
-        catch (Exception exception) when (exception is OperationCanceledException or WebSocketException or IOException)
+        ObjectDisposedException.ThrowIf(!IsOpen, this);
+        var id = Interlocked.Increment(ref sequence);
+        var completion = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        pending.TryAdd(id, completion);
+        try
         {
-            // An interrupted receive may leave a partial reply. Never reuse it.
-            Dispose();
-            throw;
-        }
-        finally { calls.Release(); }
-    }
-
-    private async Task<JsonElement> SendCallAsync(string method, object? parameters, string? sessionId, CancellationToken cancellationToken)
-    {
-        var id = ++sequence;
-        var request = new Dictionary<string, object?> { ["id"] = id, ["method"] = method, ["params"] = parameters ?? new { } };
-        if (sessionId is not null) request["sessionId"] = sessionId;
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(request);
-        await socket.SendAsync(bytes.AsMemory(), WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
-        var buffer = new byte[16384];
-        while (true)
-        {
-            using var message = new MemoryStream();
-            ValueWebSocketReceiveResult received;
-            do
+            var request = new Dictionary<string, object?> { ["id"] = id, ["method"] = method, ["params"] = parameters ?? new { } };
+            if (sessionId is not null) request["sessionId"] = sessionId;
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(request);
+            await writes.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                received = await socket.ReceiveAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
-                if (received.MessageType == WebSocketMessageType.Close) throw new IOException("The browser connection closed.");
-                message.Write(buffer, 0, received.Count);
-                if (message.Length > 4 * 1024 * 1024) throw new IOException("The browser observation exceeded its size limit.");
-            } while (!received.EndOfMessage);
-            using var document = JsonDocument.Parse(message.ToArray());
-            var response = document.RootElement;
-            if (!response.TryGetProperty("id", out var responseId) || responseId.GetInt32() != id) continue;
-            if (response.TryGetProperty("error", out _)) throw new InvalidOperationException($"Browser command {method} could not complete.");
-            return response.GetProperty("result").Clone();
+                cancellationToken.ThrowIfCancellationRequested();
+                await socket.SendAsync(bytes.AsMemory(), WebSocketMessageType.Text, true, lifetime.Token).ConfigureAwait(false);
+            }
+            finally { writes.Release(); }
+            return await completion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested && lifetime.IsCancellationRequested)
+        {
+            throw new IOException("The browser connection closed.", exception);
+        }
+        finally { pending.TryRemove(id, out _); }
     }
 
-    public void Dispose() => socket.Dispose();
+    private async Task ReceiveAsync()
+    {
+        try
+        {
+            var buffer = new byte[32768];
+            while (true)
+            {
+                using var message = new MemoryStream();
+                ValueWebSocketReceiveResult received;
+                do
+                {
+                    received = await socket.ReceiveAsync(buffer.AsMemory(), lifetime.Token).ConfigureAwait(false);
+                    if (received.MessageType == WebSocketMessageType.Close) throw new IOException("The browser connection closed.");
+                    message.Write(buffer, 0, received.Count);
+                    if (message.Length > 64 * 1024 * 1024) throw new IOException("The browser reply exceeded its size limit.");
+                } while (!received.EndOfMessage);
+                using var document = JsonDocument.Parse(message.ToArray());
+                var response = document.RootElement;
+                if (response.TryGetProperty("method", out var method) && method.GetString() == "Target.detachedFromTarget" &&
+                    response.TryGetProperty("params", out var parameters) && parameters.TryGetProperty("sessionId", out var detached))
+                    foreach (var target in targets.Where(target => target.Value == detached.GetString()))
+                        targets.TryRemove(target.Key, out _);
+                if (!response.TryGetProperty("id", out var responseId) ||
+                    !pending.TryRemove(responseId.GetInt32(), out var completion)) continue;
+                if (response.TryGetProperty("error", out _))
+                    completion.TrySetException(new InvalidOperationException("The browser command could not complete."));
+                else completion.TrySetResult(response.GetProperty("result").Clone());
+            }
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or WebSocketException or IOException or
+            ObjectDisposedException or JsonException or InvalidOperationException)
+        {
+            foreach (var completion in pending.Values) completion.TrySetException(new IOException("The browser connection closed.", exception));
+        }
+        finally { Dispose(); }
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref disposed, 1) != 0) return;
+        lifetime.Cancel();
+        socket.Dispose();
+        foreach (var completion in pending.Values) completion.TrySetException(new IOException("The browser connection closed."));
+        pending.Clear();
+    }
 }

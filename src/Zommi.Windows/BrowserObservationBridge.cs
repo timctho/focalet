@@ -12,14 +12,18 @@ namespace Zommi.Windows;
 internal sealed class BrowserObservationBridge : IDisposable
 {
     private static BrowserConnectionPool Connections = new();
+    private static readonly object ConnectionSettings = new();
     private static bool pageDetailsEnabled = true;
     internal static void SetPageDetailsEnabled(bool enabled)
     {
-        if (enabled == pageDetailsEnabled) return;
-        pageDetailsEnabled = enabled;
-        if (!enabled) { Connections.Dispose(); Connections = new(); }
+        lock (ConnectionSettings)
+        {
+            if (enabled == pageDetailsEnabled) return;
+            pageDetailsEnabled = enabled;
+            if (!enabled) { Connections.Dispose(); Connections = new(); }
+        }
     }
-    internal static void CloseConnections() => Connections.Dispose();
+    internal static void CloseConnections() { lock (ConnectionSettings) Connections.Dispose(); }
 
     private readonly nint window;
     private readonly int processId;
@@ -40,25 +44,32 @@ internal sealed class BrowserObservationBridge : IDisposable
 
     public static BrowserObservationBridge? TryOpen(nint window, Action<string>? diagnostic = null)
     {
-        if (!pageDetailsEnabled) return null;
+        BrowserConnectionPool connections;
+        lock (ConnectionSettings)
+        {
+            if (!pageDetailsEnabled) return null;
+            connections = Connections;
+        }
         var processId = NativeCaptureWindow.ProcessId(window);
         if (processId == 0) return null;
+        string processName;
         try
         {
             using var process = Process.GetProcessById(processId);
-            if (process.ProcessName.ToLowerInvariant() is not ("chrome" or "msedge" or "brave" or "opera")) return null;
+            processName = process.ProcessName.ToLowerInvariant();
+            if (processName is not ("chrome" or "msedge" or "brave" or "opera")) return null;
         }
         catch (ArgumentException) { return null; }
         // Leave time for the first Chrome authorization; subsequent captures reuse the socket.
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        foreach (var endpoint in Endpoints())
+        foreach (var endpoint in Endpoints(processName))
         {
             BrowserDomSession? session = null;
             try
             {
-                session = Connections.OpenAsync(endpoint, processId,
+                session = connections.OpenAsync(endpoint, processId,
                     title => NativeCaptureWindow.IsUniqueBrowserWindow(window, processId, title), timeout.Token).GetAwaiter().GetResult();
-                if (session is null) { diagnostic?.Invoke("No unique visible tab matched the native browser process and window."); continue; }
+                if (session is null) { diagnostic?.Invoke($"No unique visible tab matched native HWND {window}, PID {processId}, title {NativeCaptureWindow.Title(window)}."); continue; }
                 var stamp = session.StampAsync(timeout.Token).GetAwaiter().GetResult();
                 var viewport = ReadViewport(window, stamp, diagnostic);
                 if (viewport is null || !GeometryMatches(viewport, stamp))
@@ -146,13 +157,14 @@ internal sealed class BrowserObservationBridge : IDisposable
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
         var stamp = Validate(timeout.Token);
         if (!viewport.Contains(ToRectangle(region))) throw new InvalidOperationException("The region crosses the browser viewport.");
-        var image = session.CaptureImageAsync(new CaptureRectangle(
-            (region.X - viewport.X) * stamp.Width / viewport.Width,
-            (region.Y - viewport.Y) * stamp.Height / viewport.Height,
-            region.Width * stamp.Width / viewport.Width,
-            region.Height * stamp.Height / viewport.Height), timeout.Token).GetAwaiter().GetResult();
-        Validate(timeout.Token);
-        return image;
+        // The picker has left the desktop. Copy the visible physical pixels
+        // without Chrome's screenshot command temporarily changing its surface.
+        if (NativeCaptureWindow.ForRegion(region) != window)
+            throw new InvalidOperationException("The selected browser region is covered.");
+        var pixels = ScreenCapture.CapturePng(region);
+        if (Validate(timeout.Token) != stamp || NativeCaptureWindow.ForRegion(region) != window)
+            throw new InvalidOperationException("The page changed while capturing the image.");
+        return new BrowserRegionImage(pixels, region.Width, region.Height, stamp);
     }
 
     public ContextSnapshot Snapshot(BrowserDomObservation observation, ContextSnapshot? fallback = null, Rectangle? region = null)
@@ -247,13 +259,26 @@ internal sealed class BrowserObservationBridge : IDisposable
         return documents.Length == 1 ? documents[0] : null;
     }
 
-    internal static IEnumerable<Uri> Endpoints()
+    internal static IEnumerable<Uri> Endpoints(string processName)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var configured = Environment.GetEnvironmentVariable("ZOMMI_BROWSER_CDP_ENDPOINT");
-        if (Uri.TryCreate(configured, UriKind.Absolute, out var explicitEndpoint) && seen.Add(explicitEndpoint.AbsoluteUri)) yield return explicitEndpoint;
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            if (Uri.TryCreate(configured, UriKind.Absolute, out var explicitEndpoint)) yield return explicitEndpoint;
+            // An explicitly configured browser must never fall through to
+            // another profile and prompt for unrelated browser access.
+            yield break;
+        }
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        foreach (var relative in new[] { "Google/Chrome/User Data", "Microsoft/Edge/User Data", "BraveSoftware/Brave-Browser/User Data" })
+        var directories = processName switch
+        {
+            "chrome" => new[] { "Google/Chrome/User Data" },
+            "msedge" => ["Microsoft/Edge/User Data"],
+            "brave" => ["BraveSoftware/Brave-Browser/User Data"],
+            _ => [],
+        };
+        foreach (var relative in directories)
         {
             string[] lines;
             try { lines = File.ReadAllLines(Path.Combine(local, relative, "DevToolsActivePort")); }
@@ -360,6 +385,8 @@ internal static class NativeCaptureWindow
             var bounds = VisibleBounds(window);
             if (!bounds.Intersects(area)) return true;
             if (bounds.Contains(area)) result = window;
+            else if (Environment.GetEnvironmentVariable("ZOMMI_CAPTURE_DIAGNOSTICS") == "1")
+                Console.Error.WriteLine($"Region coverage: intersecting HWND={window}, PID={ProcessId(window)}, frame={bounds}, region={area}");
             return false;
         }, 0);
         return result;

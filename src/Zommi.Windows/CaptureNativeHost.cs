@@ -1,4 +1,5 @@
 using System.IO;
+using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Zommi.Capture;
@@ -19,58 +20,153 @@ internal static class CaptureNativeHost
     public static int Run()
     {
         ApplicationConfiguration.Initialize();
-        using var capture = new ForegroundContextCapture();
+        using var dispatcher = new Control();
+        _ = dispatcher.Handle;
+        var selections = new ConcurrentQueue<NativeHostRequest>();
+        ForegroundContextCapture? legacyCapture = null;
+        var selecting = false;
+        var pending = 0;
+        var inputClosed = 0;
+        var exitCode = 0;
 
-        try
+        void Post(Action action)
         {
-            string? line;
-            while ((line = Console.In.ReadLine()) is not null)
+            try { dispatcher.BeginInvoke(action); }
+            catch (InvalidOperationException) { } // The host is already shutting down.
+        }
+        void Complete()
+        {
+            if (Interlocked.Decrement(ref pending) == 0 && Volatile.Read(ref inputClosed) != 0)
+                Post(Application.ExitThread);
+        }
+        void SelectNext()
+        {
+            // ShowDialog pumps messages, so guard against a second queued
+            // selection opening a nested picker while the first is active.
+            if (selecting || !selections.TryDequeue(out var request)) return;
+            selecting = true;
+            try
             {
-                NativeHostRequest? request;
-                try
-                {
-                    request = JsonSerializer.Deserialize<NativeHostRequest>(line, JsonOptions);
-                }
-                catch (JsonException exception)
-                {
-                    WriteResponse(null, false, null, $"Invalid native-host request: {exception.Message}");
-                    continue;
-                }
+                if (request.Method == "selectContext") legacyCapture ??= new ForegroundContextCapture();
+                ProcessRequest(request, legacyCapture, out var result);
+                WriteResponse(request.Id, true, result, null);
+            }
+            catch (Exception exception) { WriteResponse(request.Id, false, null, exception.Message); }
+            finally
+            {
+                selecting = false;
+                Complete();
+                if (!selections.IsEmpty) Post(SelectNext);
+            }
+        }
 
-                if (request is null || string.IsNullOrWhiteSpace(request.Id) || string.IsNullOrWhiteSpace(request.Method))
+        using var captures = new CaptureWorker(Complete);
+        var reader = new Thread(() =>
+        {
+            try
+            {
+                string? line;
+                while ((line = Console.In.ReadLine()) is not null)
                 {
-                    WriteResponse(request?.Id, false, null, "Native-host requests require id and method.");
-                    continue;
-                }
-
-                try
-                {
-                    var shouldExit = ProcessRequest(request, capture, out var result);
-                    WriteResponse(request.Id, true, result, null);
-                    if (shouldExit)
+                    NativeHostRequest? request;
+                    try { request = JsonSerializer.Deserialize<NativeHostRequest>(line, JsonOptions); }
+                    catch (JsonException exception)
                     {
+                        WriteResponse(null, false, null, $"Invalid native-host request: {exception.Message}");
+                        continue;
+                    }
+                    if (request is null || string.IsNullOrWhiteSpace(request.Id) || string.IsNullOrWhiteSpace(request.Method))
+                    {
+                        WriteResponse(request?.Id, false, null, "Native-host requests require id and method.");
+                        continue;
+                    }
+                    if (request.Method == "shutdown")
+                    {
+                        WriteResponse(request.Id, true, new { stopped = true }, null);
+                        Post(Application.ExitThread);
                         break;
                     }
-                }
-                catch (Exception exception)
-                {
-                    WriteResponse(request.Id, false, null, exception.Message);
+                    if (request.Method == "ping")
+                    {
+                        WriteResponse(request.Id, true, new { platform = "windows",
+                            version = typeof(CaptureNativeHost).Assembly.GetName().Version?.ToString() ?? "0.0.0" }, null);
+                        continue;
+                    }
+                    Interlocked.Increment(ref pending);
+                    if (request.Method == "capture") captures.Enqueue(request);
+                    else { selections.Enqueue(request); Post(SelectNext); }
                 }
             }
-
-            return 0;
-        }
-        catch (IOException exception)
+            catch (IOException exception) { Console.Error.Write(exception); Volatile.Write(ref exitCode, 1); }
+            finally
+            {
+                Volatile.Write(ref inputClosed, 1);
+                if (Volatile.Read(ref pending) == 0) Post(Application.ExitThread);
+            }
+        }) { IsBackground = true, Name = "Zommi capture requests" };
+        reader.Start();
+        try
         {
-            Console.Error.Write(exception);
-            return 1;
+            // Keep the initial STA pumping even between selections. UIA/COM
+            // callbacks and layered-window input must not wait on stdin reads.
+            Application.Run();
+            return Volatile.Read(ref exitCode);
         }
-        finally { BrowserObservationBridge.CloseConnections(); }
+        finally
+        {
+            legacyCapture?.Dispose();
+            BrowserObservationBridge.CloseConnections();
+        }
+    }
+
+    // A slow provider cannot block the main STA's selector. Browser transports
+    // are shared within this one helper; UIA objects stay on their owning MTA.
+    private sealed class CaptureWorker : IDisposable
+    {
+        private readonly BlockingCollection<NativeHostRequest> requests = new();
+        private readonly Thread thread;
+        private readonly Action completed;
+
+        public CaptureWorker(Action completed)
+        {
+            this.completed = completed;
+            thread = new Thread(Run) { IsBackground = true, Name = "Zommi text capture" };
+            thread.SetApartmentState(ApartmentState.MTA);
+            thread.Start();
+        }
+
+        public void Enqueue(NativeHostRequest request) => requests.Add(request);
+
+        private void Run()
+        {
+            ForegroundContextCapture? capture = null;
+            try
+            {
+                foreach (var request in requests.GetConsumingEnumerable())
+                {
+                    try
+                    {
+                        capture ??= new ForegroundContextCapture();
+                        ProcessRequest(request, capture, out var result);
+                        WriteResponse(request.Id, true, result, null);
+                    }
+                    catch (Exception exception) { WriteResponse(request.Id, false, null, exception.Message); }
+                    finally { completed(); }
+                }
+            }
+            finally { capture?.Dispose(); }
+        }
+
+        public void Dispose()
+        {
+            requests.CompleteAdding();
+            thread.Join(TimeSpan.FromMilliseconds(500));
+        }
     }
 
     private static bool ProcessRequest(
         NativeHostRequest request,
-        ForegroundContextCapture capture,
+        ForegroundContextCapture? capture,
         out object? result)
     {
         if (request.Method is "capture" or "selectContent" or "selectContext" or "selectImage")
@@ -97,8 +193,8 @@ internal static class CaptureNativeHost
                     }
                 }
                 var captured = TryReadCapturePoint(request.Params, out var pointerX, out var pointerY)
-                    ? capture.CaptureAt(DateTimeOffset.UtcNow, pointerX, pointerY, TargetResolved)
-                    : capture.Capture(DateTimeOffset.UtcNow, TargetResolved);
+                    ? capture!.CaptureAt(DateTimeOffset.UtcNow, pointerX, pointerY, TargetResolved)
+                    : capture!.Capture(DateTimeOffset.UtcNow, TargetResolved);
                 var previewStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
                 var previewText = captured.Snapshot is null
                     ? null
@@ -119,7 +215,7 @@ internal static class CaptureNativeHost
                 result = SelectContent(ReturnProcessId(request.Params));
                 return false;
             case "selectContext":
-                result = SelectContext(capture, ReturnProcessId(request.Params));
+                result = SelectContext(capture!, ReturnProcessId(request.Params));
                 return false;
             case "selectImage":
                 result = SelectImage(ReturnProcessId(request.Params));
@@ -211,8 +307,13 @@ internal static class CaptureNativeHost
                     Application.DoEvents();
                     Thread.Sleep(80);
                 }
-                if (!Matches() || NativeCaptureWindow.ForRegion(selected.Region) != selected.Window)
+                var actualWindow = NativeCaptureWindow.ForRegion(selected.Region);
+                if (!Matches() || actualWindow != selected.Window)
+                {
+                    if (Environment.GetEnvironmentVariable("ZOMMI_CAPTURE_DIAGNOSTICS") == "1")
+                        Console.Error.WriteLine($"Selection mismatch: expected={selected.Window}, actual={actualWindow}, identityMatches={Matches()}, region={selected.Region}, queuedBounds={selected.WindowBounds}, currentBounds={NativeCaptureWindow.Bounds(selected.Window)}");
                     return new { Cancelled = true, ErrorMessage = "The selected window changed or is covered. Select the content again." };
+                }
             }
             results.Add(ImageResult(RegionContextCapture.Capture(selected.Region)));
         }
