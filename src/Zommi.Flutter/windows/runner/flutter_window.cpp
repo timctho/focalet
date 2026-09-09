@@ -2,6 +2,7 @@
 
 #include <dwmapi.h>
 #include <dxgi.h>
+#include <filesystem>
 #include <fstream>
 #include <cmath>
 #include <cstdint>
@@ -89,7 +90,8 @@ bool FlutterWindow::OnCreate() {
     DWM_TIMING_INFO timing{};
     timing.cbSize = sizeof(timing);
     DwmGetCompositionTimingInfo(nullptr, &timing);
-    std::ofstream output(std::wstring(trace_path) + L".graphics.txt");
+    std::ofstream output(
+        std::filesystem::path(std::wstring(trace_path) + L".graphics.txt"));
     output << "adapter=" << Utf8FromUtf16(description.Description) << "\n"
            << "vendor=" << description.VendorId << "\n"
            << "device=" << description.DeviceId << "\n"
