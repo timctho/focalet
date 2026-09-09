@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:zommi_flutter/diagnostics/scroll_performance.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
@@ -421,13 +423,15 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                       Positioned.fill(
                         child: NotificationListener<ScrollStartNotification>(
                           onNotification: _closePreviewOnScroll,
-                          child: TranscriptPane(
-                            key: ValueKey(
-                              'transcript-${_controller.activeSessionId}',
+                          child: ScrollPerformanceBoundary(
+                            child: TranscriptPane(
+                              key: ValueKey(
+                                'transcript-${_controller.activeSessionId}',
+                              ),
+                              controller: _controller,
+                              onAttachmentEnter: _showAttachmentPreview,
+                              onAttachmentExit: (_) => _schedulePreviewClose(),
                             ),
-                            controller: _controller,
-                            onAttachmentEnter: _showAttachmentPreview,
-                            onAttachmentExit: (_) => _schedulePreviewClose(),
                           ),
                         ),
                       ),

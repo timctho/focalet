@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:zommi_flutter/diagnostics/scroll_performance.dart';
 import 'package:zommi_flutter/state/history_mapper.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
@@ -141,6 +142,8 @@ class _TranscriptPaneState extends State<TranscriptPane> {
   @override
   Widget build(BuildContext context) {
     final turns = widget.controller.turns;
+    ScrollPerformance.ready(turns.length);
+    ScrollPerformance.count('transcriptBuild');
     if (turns.isEmpty) {
       return Center(
         child: Column(
@@ -250,7 +253,11 @@ class ConversationTurnView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final blocks = distinctTranscriptBlocks(turn.blocks);
+    ScrollPerformance.count('turnBuild');
+    final blocks = ScrollPerformance.measure(
+      'normalizeBlocks',
+      () => distinctTranscriptBlocks(turn.blocks),
+    );
     final activities = blocks
         .where(
           (block) =>
@@ -374,24 +381,27 @@ class ConversationTurnView extends StatelessWidget {
 }
 
 int transcriptContentRevision(Iterable<ConversationTurn> turns) =>
-    Object.hashAll(
-      turns.expand(
-        (turn) => <Object?>[
-          turn.id,
-          turn.userText,
-          turn.inlineUserText,
-          ...turn.attachments.map((attachment) => attachment.id),
-          ...turn.blocks.expand(
-            (block) => <Object?>[
-              block.id,
-              block.kind,
-              block.text,
-              block.lifecycle,
-              block.preview,
-              ...block.artifacts.map((artifact) => artifact.identity),
-            ],
-          ),
-        ],
+    ScrollPerformance.measure(
+      'revisionScan',
+      () => Object.hashAll(
+        turns.expand(
+          (turn) => <Object?>[
+            turn.id,
+            turn.userText,
+            turn.inlineUserText,
+            ...turn.attachments.map((attachment) => attachment.id),
+            ...turn.blocks.expand(
+              (block) => <Object?>[
+                block.id,
+                block.kind,
+                block.text,
+                block.lifecycle,
+                block.preview,
+                ...block.artifacts.map((artifact) => artifact.identity),
+              ],
+            ),
+          ],
+        ),
       ),
     );
 

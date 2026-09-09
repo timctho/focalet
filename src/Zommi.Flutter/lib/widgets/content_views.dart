@@ -8,6 +8,7 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:markdown/markdown.dart' as md;
 import 'package:zommi_flutter/state/zommi_models.dart';
+import 'package:zommi_flutter/diagnostics/scroll_performance.dart';
 import 'package:zommi_flutter/theme/zommi_typography.dart';
 
 class CopyableMarkdown extends StatefulWidget {
@@ -52,6 +53,8 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
 
   @override
   Widget build(BuildContext context) {
+    ScrollPerformance.count('markdownBuild');
+    if (_markdown == null) ScrollPerformance.count('markdownWidgetCreated');
     final chatFontSize = chatFontSizeOf(context);
     final headingDelta = chatFontSize - topBarAndChatFontSize;
     final base = DefaultTextStyle.of(context).style
