@@ -50,11 +50,23 @@ class TranscriptPane extends StatefulWidget {
 
 class _TranscriptPaneState extends State<TranscriptPane> {
   final ScrollController _scroll = ScrollController();
+  final ValueNotifier<bool> _awayFromLatest = ValueNotifier(false);
   int _start = 0;
   bool _autoFollow = true;
   bool _loadScheduled = false;
   int _knownTurnCount = 0;
   int _knownContentRevision = 0;
+  (String?, String?)? _knownSession;
+  final _turnViews =
+      <
+        String,
+        ({
+          int revision,
+          double width,
+          String runtimeName,
+          ConversationTurnView view,
+        })
+      >{};
 
   @override
   void initState() {
@@ -68,9 +80,12 @@ class _TranscriptPaneState extends State<TranscriptPane> {
   void didUpdateWidget(covariant TranscriptPane oldWidget) {
     super.didUpdateWidget(oldWidget);
     final turns = widget.controller.turns;
-    final contentRevision = transcriptContentRevision(turns);
-    if (oldWidget.controller.activeSessionId !=
-        widget.controller.activeSessionId) {
+    final contentRevision = widget.controller.transcriptRevision;
+    if (_knownSession !=
+        (
+          widget.controller.activeRuntime?.id,
+          widget.controller.activeSessionId,
+        )) {
       _resetRange();
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToLatest());
       return;
@@ -87,14 +102,21 @@ class _TranscriptPaneState extends State<TranscriptPane> {
     final count = widget.controller.turns.length;
     _start = math.max(0, count - historyPageSize);
     _knownTurnCount = count;
-    _knownContentRevision = transcriptContentRevision(widget.controller.turns);
+    _knownContentRevision = widget.controller.transcriptRevision;
+    _knownSession = (
+      widget.controller.activeRuntime?.id,
+      widget.controller.activeSessionId,
+    );
+    _turnViews.clear();
     _autoFollow = true;
+    _awayFromLatest.value = false;
   }
 
   void _handleScroll() {
     if (!_scroll.hasClients) return;
     final position = _scroll.position;
     _autoFollow = position.maxScrollExtent - position.pixels <= 36;
+    _awayFromLatest.value = !_autoFollow;
     if (position.pixels <= 96 && _start > 0 && !_loadScheduled) {
       _loadScheduled = true;
       final oldExtent = position.maxScrollExtent;
@@ -115,11 +137,10 @@ class _TranscriptPaneState extends State<TranscriptPane> {
         });
       });
     }
-    if (mounted) setState(() {});
   }
 
   void _scrollToLatest() {
-    if (!_scroll.hasClients) return;
+    if (!mounted || !_scroll.hasClients) return;
     _autoFollow = true;
     unawaited(
       _scroll.animateTo(
@@ -128,7 +149,55 @@ class _TranscriptPaneState extends State<TranscriptPane> {
         curve: Curves.easeOut,
       ),
     );
-    if (mounted) setState(() {});
+    _awayFromLatest.value = false;
+  }
+
+  void _attachmentEnter(ContextAttachment attachment, BuildContext anchor) =>
+      widget.onAttachmentEnter(attachment, anchor);
+
+  void _attachmentExit(ContextAttachment attachment) =>
+      widget.onAttachmentExit(attachment);
+
+  Widget _turnView(ConversationTurn turn, double viewportWidth) {
+    // Only visible rows are fingerprinted. Keep completed rows' widget trees
+    // unchanged when another row streams, while preserving folds and updates.
+    final revision = Object.hash(
+      transcriptContentRevision([turn]),
+      turn.activityExpanded,
+      Object.hashAll(turn.contextTokens),
+      Object.hashAll(
+        turn.blocks.expand(
+          (block) => [block.title, block.status, block.expanded],
+        ),
+      ),
+    );
+    final runtimeName = widget.controller.activeRuntimeName;
+    final cached = _turnViews[turn.id];
+    if (cached != null &&
+        identical(cached.view.turn, turn) &&
+        identical(cached.view.controller, widget.controller) &&
+        cached.revision == revision &&
+        cached.width == viewportWidth &&
+        cached.runtimeName == runtimeName) {
+      return cached.view;
+    }
+    final view = ConversationTurnView(
+      key: ValueKey('turn-${turn.id}'),
+      turn: turn,
+      viewportWidth: viewportWidth,
+      runtimeName: runtimeName,
+      controller: widget.controller,
+      onAttachmentEnter: _attachmentEnter,
+      onAttachmentExit: _attachmentExit,
+    );
+    _turnViews[turn.id] = (
+      revision: revision,
+      width: viewportWidth,
+      runtimeName: runtimeName,
+      view: view,
+    );
+    if (_turnViews.length > 128) _turnViews.remove(_turnViews.keys.first);
+    return view;
   }
 
   @override
@@ -136,6 +205,7 @@ class _TranscriptPaneState extends State<TranscriptPane> {
     _scroll
       ..removeListener(_handleScroll)
       ..dispose();
+    _awayFromLatest.dispose();
     super.dispose();
   }
 
@@ -167,9 +237,10 @@ class _TranscriptPaneState extends State<TranscriptPane> {
       );
     }
     final visible = turns.sublist(_start.clamp(0, turns.length));
-    final awayFromLatest =
-        _scroll.hasClients &&
-        _scroll.position.maxScrollExtent - _scroll.position.pixels > 36;
+    final indices = {
+      for (var index = 0; index < visible.length; index++)
+        ValueKey('turn-layout-${visible[index].id}'): index,
+    };
     return Stack(
       children: [
         Semantics(
@@ -181,18 +252,14 @@ class _TranscriptPaneState extends State<TranscriptPane> {
             controller: _scroll,
             padding: const EdgeInsets.fromLTRB(24, 14, 24, 20),
             itemCount: visible.length,
+            findChildIndexCallback: (key) => indices[key],
             itemBuilder: (context, index) {
               final turn = visible[index];
               return LayoutBuilder(
-                builder: (context, constraints) => ConversationTurnView(
-                  key: ValueKey('turn-${turn.id}'),
-                  turn: turn,
-                  viewportWidth:
-                      constraints.maxWidth + _transcriptHorizontalInsets,
-                  runtimeName: widget.controller.activeRuntimeName,
-                  controller: widget.controller,
-                  onAttachmentEnter: widget.onAttachmentEnter,
-                  onAttachmentExit: widget.onAttachmentExit,
+                key: ValueKey('turn-layout-${turn.id}'),
+                builder: (context, constraints) => _turnView(
+                  turn,
+                  constraints.maxWidth + _transcriptHorizontalInsets,
                 ),
               );
             },
@@ -202,25 +269,28 @@ class _TranscriptPaneState extends State<TranscriptPane> {
           left: 0,
           right: 0,
           bottom: 12,
-          child: Center(
-            child: AnimatedScale(
-              scale: awayFromLatest ? 1 : 0,
-              duration: const Duration(milliseconds: 140),
-              child: Semantics(
-                button: true,
-                label: 'Scroll to latest message',
-                child: SizedBox.square(
-                  dimension: 36,
-                  child: IconButton.filledTonal(
-                    key: const ValueKey('scroll-to-latest'),
-                    tooltip: 'Latest message',
-                    padding: EdgeInsets.zero,
-                    alignment: Alignment.center,
-                    iconSize: 20,
-                    onPressed: awayFromLatest ? _scrollToLatest : null,
-                    icon: const Icon(
-                      Icons.keyboard_arrow_down_rounded,
-                      key: ValueKey('scroll-to-latest-glyph'),
+          child: ValueListenableBuilder<bool>(
+            valueListenable: _awayFromLatest,
+            builder: (context, awayFromLatest, _) => Center(
+              child: AnimatedScale(
+                scale: awayFromLatest ? 1 : 0,
+                duration: const Duration(milliseconds: 140),
+                child: Semantics(
+                  button: true,
+                  label: 'Scroll to latest message',
+                  child: SizedBox.square(
+                    dimension: 36,
+                    child: IconButton.filledTonal(
+                      key: const ValueKey('scroll-to-latest'),
+                      tooltip: 'Latest message',
+                      padding: EdgeInsets.zero,
+                      alignment: Alignment.center,
+                      iconSize: 20,
+                      onPressed: awayFromLatest ? _scrollToLatest : null,
+                      icon: const Icon(
+                        Icons.keyboard_arrow_down_rounded,
+                        key: ValueKey('scroll-to-latest-glyph'),
+                      ),
                     ),
                   ),
                 ),

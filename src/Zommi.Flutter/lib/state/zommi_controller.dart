@@ -30,6 +30,7 @@ final class ZommiController extends ChangeNotifier {
   final List<ContextAttachment> attachments = [];
   Map<String, Object?> runtimeSettings = {};
   final Map<String, List<ConversationTurn>> _turnsBySession = {};
+  final Map<String, int> _transcriptRevisions = {};
   final Map<String, String> _activeTurns = {};
   final Set<String> _unreadSessions = {};
   final Set<String> _cancelRequestedSessions = {};
@@ -100,6 +101,18 @@ final class ZommiController extends ChangeNotifier {
 
   List<ConversationTurn> get turns =>
       _turnsBySession[_activeSessionKey] ?? const [];
+
+  /// Content changes only; folding UI or unrelated sessions must not cause
+  /// the active transcript to rescan its history or follow a new message.
+  int get transcriptRevision => _transcriptRevisions[_activeSessionKey] ?? 0;
+
+  void _transcriptChanged(String sessionKey) {
+    _transcriptRevisions.update(
+      sessionKey,
+      (value) => value + 1,
+      ifAbsent: () => 1,
+    );
+  }
 
   String? get activeTurnId => _activeTurns[_activeSessionKey];
 
@@ -516,6 +529,7 @@ final class ZommiController extends ChangeNotifier {
         cached,
         preserveCached: _activeTurns.containsKey(sessionKey),
       );
+      _transcriptChanged(sessionKey);
     } on Object catch (error) {
       _turnsBySession.putIfAbsent(sessionKey, () => []);
       _setStatus('History unavailable · $error', warning: true);
@@ -649,6 +663,7 @@ final class ZommiController extends ChangeNotifier {
       attachments: sendingAttachments,
     );
     _turnsBySession.putIfAbsent(sessionKey, () => []).add(localTurn);
+    _transcriptChanged(sessionKey);
     _activeTurns[sessionKey] = operationId;
     _updateSessionTitle(sessionId, text);
     submitting = true;
@@ -704,6 +719,7 @@ final class ZommiController extends ChangeNotifier {
         ),
       );
       _setStatus('Core request failed · $error', warning: true);
+      _transcriptChanged(sessionKey);
     } finally {
       submitting = false;
       _notify();
@@ -1431,6 +1447,7 @@ final class ZommiController extends ChangeNotifier {
             }
           }
         }
+        _transcriptChanged(sessionKey);
         if (_isActiveSession(event.runtimeTargetId, sessionId)) {
           _setStatus(switch (statusValue.toLowerCase()) {
             'completed' => '$activeRuntimeName reply complete',
@@ -1535,6 +1552,7 @@ final class ZommiController extends ChangeNotifier {
     if (!_isActiveSession(runtimeTargetId, sessionId)) {
       _activeTurns.putIfAbsent(sessionKey, () => event.turnId ?? 'running');
     }
+    _transcriptChanged(sessionKey);
     _notify();
   }
 
