@@ -60,6 +60,12 @@ for number in range(1, COUNT + 1):
             ])
         history[-1]["items"][1:3] = activities
 
+history_path = os.environ.get("ZOMMI_SCROLL_HISTORY")
+if history_path:
+    with open(history_path, encoding="utf-8-sig") as source:
+        history = json.load(source)["thread"]["turns"]
+    COUNT = len(history)
+
 
 def stream():
     if WORKLOAD == "folded":
@@ -83,7 +89,7 @@ def stream():
 
 def stream_folded():
     # Update folded reasoning in the same turn as the long visible answer.
-    turn = f"history-{COUNT}"
+    turn = history[-1]["id"]
     base = {"threadId": THREAD, "turnId": turn}
     send({"method": "turn/started", "params": {"threadId": THREAD, "turn": {"id": turn, "status": "inProgress"}}})
     send({"method": "item/started", "params": {**base, "item": {"id": "live-reasoning", "type": "reasoning"}}})

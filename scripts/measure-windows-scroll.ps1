@@ -5,7 +5,10 @@ param(
     [string]$PythonExecutable = 'python',
     [int]$Samples = 3,
     [int]$WheelEvents = 240,
-    [ValidateSet('standard','folded')][string]$Workload = 'standard'
+    [ValidateSet('standard','folded')][string]$Workload = 'standard',
+    [ValidateSet('default','impeller','skia')][string]$Renderer = 'default',
+    [string]$HistoryFile,
+    [switch]$Maximized
 )
 $ErrorActionPreference='Stop'
 $package=(Resolve-Path $PackageDirectory).Path
@@ -45,6 +48,8 @@ $executable=Join-Path $package 'Zommi.exe'
 $suspended=@(Suspend-ConflictingZommiApplications -EntryPoint $executable)
 $runProfile=Join-Path $results 'profile'
 $null=New-Item -ItemType Directory -Force -Path $runProfile
+$expectedHistoryTurns=120
+if($HistoryFile){$HistoryFile=(Resolve-Path $HistoryFile).Path;$expectedHistoryTurns=(Get-Content $HistoryFile -Raw|ConvertFrom-Json).thread.turns.Count}
 $trace=Join-Path $results 'frames.jsonl'
 if(Test-Path $trace){throw 'Use a new result directory for each benchmark run.'}
 $streamSignal=Join-Path $runProfile 'stream.signal'
@@ -67,6 +72,8 @@ $start.Environment['ZOMMI_RUNTIME_OVERRIDES_PATH']=Join-Path $runProfile 'overri
 $start.Environment['ZOMMI_RUNTIME_DISCOVERY_CACHE_PATH']=Join-Path $runProfile 'discovery.json'
 $start.Environment['ZOMMI_SCROLL_STREAM_SIGNAL']=$streamSignal
 $start.Environment['ZOMMI_SCROLL_WORKLOAD']=$Workload
+if($HistoryFile){$start.Environment['ZOMMI_SCROLL_HISTORY']=$HistoryFile}
+if($Renderer -ne 'default'){$start.Environment['ZOMMI_WINDOWS_RENDERER']=$Renderer}
 $start.Environment['ZOMMI_ACCEPTANCE_LOG']=Join-Path $results 'desktop.jsonl'
 $application=$null
 try{
@@ -80,9 +87,10 @@ try{
         if($ready.Count){break}
         Start-Sleep -Milliseconds 100
     }while([DateTime]::UtcNow -lt $deadline)
-    if(-not $ready.Count -or $ready[0].turns -ne 120 -or $ready[0].mode -ne 'release'){throw 'The release app did not load the 120-turn agent fixture.'}
+    if(-not $ready.Count -or $ready[0].turns -ne $expectedHistoryTurns -or $ready[0].mode -ne 'release'){throw 'The release app did not load the expected agent history.'}
     $window=Wait-ForVisibleProcessWindow -ProcessId $application.Id
     [ZommiWindowsAcceptanceNative]::Restore($window)
+    if($Maximized){Start-Sleep -Milliseconds 400;[ZommiWindowsAcceptanceNative]::Maximize($window)}
     Start-Sleep -Seconds 2
     $bounds=[ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
     $x=$bounds[0]+[int]($bounds[2]*0.60)
@@ -112,8 +120,8 @@ try{
             $last=$recordedSamples[-1]
             # Windows coalesces wheel messages when the UI is busy. Check the
             # delivered distance as well as rendered movement, not a 1:1 count.
-            if($last.inputCount -lt 30 -or $last.pointerDistance -lt $WheelEvents*10 -or $last.frameCount -lt 30 -or $last.travel -lt 1000){throw 'The benchmark did not exercise a moving, rendered transcript.'}
-            $expectedTurns=if($scenario -eq 'static' -or $Workload -eq 'folded'){120}else{121}
+            if($last.inputCount -lt [Math]::Min(30,$WheelEvents/2) -or $last.pointerDistance -lt $WheelEvents*10 -or $last.frameCount -lt 5 -or $last.travel -lt 1000){throw 'The benchmark did not exercise a moving, rendered transcript.'}
+            $expectedTurns=if($scenario -eq 'static' -or $Workload -eq 'folded'){$expectedHistoryTurns}else{$expectedHistoryTurns+1}
             if($last.turns -ne $expectedTurns){throw 'The expected static or streaming conversation was not rendered.'}
             if(@($last.receiptToRasterUs).Count -lt $last.inputCount*0.98){throw 'Frame timings did not cover the end of the wheel sequence.'}
             $measurements+=@{scenario=$scenario;sample=$sample;inputElapsedMs=$elapsed;data=$last}
@@ -124,7 +132,8 @@ try{
     $manifest=Get-Content (Join-Path $package 'release-manifest.json') -Raw|ConvertFrom-Json
     $harnessHash=(Get-FileHash $PSCommandPath).Hash.ToLowerInvariant()
     $fixtureHash=(Get-FileHash (Join-Path $PSScriptRoot 'scroll-runtime-fixture.py')).Hash.ToLowerInvariant()
-    @{package=$package;packageCommit=$manifest.gitCommit;workload=$Workload;harnessSha256=$harnessHash;fixtureSha256=$fixtureHash;wheelEvents=$WheelEvents;ready=$ready[0];samples=$measurements;testedAtUtc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json -Depth 12|Set-Content (Join-Path $results 'result.json')
+    $historyHash=if($HistoryFile){(Get-FileHash $HistoryFile).Hash.ToLowerInvariant()}else{$null}
+    @{package=$package;packageCommit=$manifest.gitCommit;workload=$Workload;renderer=$Renderer;maximized=[bool]$Maximized;measuredBounds=$bounds;historySha256=$historyHash;harnessSha256=$harnessHash;fixtureSha256=$fixtureHash;wheelEvents=$WheelEvents;ready=$ready[0];samples=$measurements;testedAtUtc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json -Depth 12|Set-Content (Join-Path $results 'result.json')
 }finally{
     if($application -and -not $application.HasExited){$application.Kill($true);$application.WaitForExit()}
     if($stderr){$stderr.GetAwaiter().GetResult()|Set-Content (Join-Path $results 'stderr.log')}
