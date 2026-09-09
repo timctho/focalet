@@ -21,6 +21,8 @@ final class ScrollPerformance {
   final Map<String, int> _costs = {};
   Timer? _idle;
   bool _ready = false;
+  int _turnCount = 0;
+  double _pointerDistance = 0;
   double? _firstOffset;
   double? _lastOffset;
   double _travel = 0;
@@ -37,7 +39,9 @@ final class ScrollPerformance {
 
   static void ready(int turns) {
     final recorder = _instance;
-    if (recorder == null || recorder._ready || turns == 0) return;
+    if (recorder == null) return;
+    recorder._turnCount = turns;
+    if (recorder._ready || turns == 0) return;
     recorder._ready = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final view = WidgetsBinding.instance.platformDispatcher.views.first;
@@ -80,10 +84,11 @@ final class ScrollPerformance {
   void _input(PointerSignalEvent event) {
     if (event is! PointerScrollEvent) return;
     _inputs.add(DateTime.now().microsecondsSinceEpoch);
+    _pointerDistance += event.scrollDelta.distance;
     _idle?.cancel();
     // FrameTiming callbacks are batched by the engine. Leave time for the last
     // raster result before serializing a sample, outside the scrolling interval.
-    _idle = Timer(const Duration(milliseconds: 900), _flush);
+    _idle = Timer(const Duration(milliseconds: 1500), _flush);
   }
 
   void _onFrames(List<ui.FrameTiming> timings) {
@@ -107,7 +112,13 @@ final class ScrollPerformance {
       final finish = frame.timestampInMicroseconds(
         ui.FramePhase.rasterFinishWallTime,
       );
-      return finish >= start && finish <= end;
+      final buildStart =
+          finish -
+          (frame.timestampInMicroseconds(ui.FramePhase.rasterFinish) -
+              frame.timestampInMicroseconds(ui.FramePhase.buildStart));
+      // Retain a slow frame that started during the sample even when it
+      // finishes after the input interval. Do not truncate the worst stalls.
+      return finish >= start && buildStart <= end;
     }).toList();
     final latencies = <int>[];
     for (final input in _inputs) {
@@ -128,7 +139,10 @@ final class ScrollPerformance {
     _write({
       'event': 'scroll',
       'sample': ++_sequence,
+      'turns': _turnCount,
       'inputCount': _inputs.length,
+      // Windows can coalesce several wheel notches into one pointer event.
+      'pointerDistance': _pointerDistance,
       'durationUs': _inputs.last - start,
       'frameCount': frames.length,
       'buildUs': frames
@@ -153,6 +167,7 @@ final class ScrollPerformance {
     _costs.clear();
     _firstOffset = _lastOffset = null;
     _travel = 0;
+    _pointerDistance = 0;
   }
 
   void _write(Map<String, Object?> event) {

@@ -103,12 +103,17 @@ try{
             $flushDeadline=[DateTime]::UtcNow.AddSeconds(5)
             do{
                 Start-Sleep -Milliseconds 100
-                $samples=@(Read-Trace $trace|Where-Object event -eq 'scroll')
-                if($samples.Count -gt $measurements.Count){break}
+                $recordedSamples=@(Read-Trace $trace|Where-Object event -eq 'scroll')
+                if($recordedSamples.Count -gt $measurements.Count){break}
             }while([DateTime]::UtcNow -lt $flushDeadline)
-            if($samples.Count -ne $measurements.Count+1){throw 'The app did not record exactly one sample for the injected wheel sequence.'}
-            $last=$samples[-1]
-            if($last.inputCount -lt $WheelEvents*0.9 -or $last.frameCount -lt 30 -or $last.travel -lt 1000){throw 'The benchmark did not exercise a moving, rendered transcript.'}
+            if($recordedSamples.Count -ne $measurements.Count+1){throw 'The app did not record exactly one sample for the injected wheel sequence.'}
+            $last=$recordedSamples[-1]
+            # Windows coalesces wheel messages when the UI is busy. Check the
+            # delivered distance as well as rendered movement, not a 1:1 count.
+            if($last.inputCount -lt 30 -or $last.pointerDistance -lt $WheelEvents*10 -or $last.frameCount -lt 30 -or $last.travel -lt 1000){throw 'The benchmark did not exercise a moving, rendered transcript.'}
+            $expectedTurns=if($scenario -eq 'static'){120}else{121}
+            if($last.turns -ne $expectedTurns){throw 'The expected static or streaming conversation was not rendered.'}
+            if(@($last.receiptToRasterUs).Count -lt $last.inputCount*0.98){throw 'Frame timings did not cover the end of the wheel sequence.'}
             $measurements+=@{scenario=$scenario;sample=$sample;inputElapsedMs=$elapsed;data=$last}
             Write-Host "scroll-$scenario-$sample`: $($last.frameCount) frames, $($last.inputCount) wheel events, $([int]$last.travel) px"
         }

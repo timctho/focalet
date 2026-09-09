@@ -33,6 +33,7 @@ def summarize(path):
         scenarios[scenario] = {
             "samples": len(samples),
             "inputs": inputs,
+            "pointerDistancePx": round(sum(sample["pointerDistance"] for sample in samples)),
             "travelPx": round(sum(sample["travel"] for sample in samples)),
             "build": distribution(build),
             "raster": distribution(raster),
