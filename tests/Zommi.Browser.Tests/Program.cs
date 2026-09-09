@@ -380,8 +380,22 @@ try
     try { await capture.ReadAsync("capture", x, y, null, token); }
     catch (InvalidOperationException) { rejected = true; }
     Check(rejected, "Reloading the same URL invalidates the old document binding");
-    var secondWindow = await driver.CallAsync("Target.createTarget", new { url = fixture, newWindow = true }, null, token);
-    await Task.Delay(300, token);
+    // The native gesture fixture stays topmost. Put the second window partly
+    // beside it so Chrome does not hide a fully occluded page, and wait for
+    // both documents to be ready before testing ambiguous visible windows.
+    var secondWindow = await driver.CallAsync("Target.createTarget", new
+        { url = fixture, newWindow = true, left = 700, top = 20, width = 600, height = 700 }, null, token);
+    var secondAttachment = await driver.CallAsync("Target.attachToTarget", new
+        { targetId = secondWindow.GetProperty("targetId").GetString(), flatten = true }, null, token);
+    var secondSession = secondAttachment.GetProperty("sessionId").GetString()!;
+    const string visibleFixture = "document.readyState === 'complete' && document.title === 'Zommi DOM capture acceptance' && document.visibilityState === 'visible'";
+    while (true)
+    {
+        var secondReady = await driver.CallAsync("Runtime.evaluate", new { expression = visibleFixture, returnByValue = true }, secondSession, token);
+        if (secondReady.GetProperty("result").GetProperty("value").GetBoolean() && (await Evaluate(visibleFixture)).GetBoolean()) break;
+        await Task.Delay(20, token);
+    }
+    await driver.CallAsync("Target.detachFromTarget", new { sessionId = secondSession }, null, token);
     var ambiguous = await BrowserDomSession.ConnectAsync(endpoint, browser.Id, title => title == "Zommi DOM capture acceptance", token);
     Check(ambiguous is null, "Two visible windows with identical titles and URLs are rejected as ambiguous");
     await CloseTarget(secondWindow.GetProperty("targetId").GetString()!);
