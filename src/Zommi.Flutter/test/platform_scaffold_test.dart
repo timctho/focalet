@@ -248,9 +248,15 @@ void main() {
       ]) {
         expect(source, contains(contract));
       }
+      // Adapter diagnostics use DXGI, but retained-frame capture stays on CPU.
+      final handoff = source.substring(
+        source.indexOf('bool FlutterWindow::BeginSurfaceHandoff('),
+        source.indexOf('void FlutterWindow::CompleteSurfaceHandoff('),
+      );
+      expect(handoff, isNot(contains('IDXGI')));
+      expect(source, isNot(contains('AcquireNextFrame(')));
       for (final forbidden in [
         'D3D11CreateDevice',
-        'IDXGI',
         'DWMWA_CLOAK',
         'AC_SRC_ALPHA',
         'DwmFlush',
