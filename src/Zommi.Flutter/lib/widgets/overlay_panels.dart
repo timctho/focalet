@@ -8,6 +8,7 @@ import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 import 'package:zommi_flutter/widgets/content_views.dart';
+import 'package:zommi_flutter/widgets/runtime_logo.dart';
 
 const Color zommiOverlayPanelColor = Color(0xfaf7f9fd);
 const Color zommiOverlayPanelShadowColor = Color(0x260d172a);
@@ -66,15 +67,84 @@ class SessionSidebar extends StatelessWidget {
                       style: TextStyle(fontWeight: FontWeight.w700),
                     ),
                   ),
-                  if (controller.sessionCreationSupported)
-                    IconButton(
-                      key: const ValueKey('new-session'),
-                      tooltip: 'Create new chat',
-                      onPressed: controller.sessionBusy
-                          ? null
-                          : () => unawaited(controller.createSession()),
-                      icon: const Icon(Icons.add_rounded),
+                  PopupMenuButton<String>(
+                    key: const ValueKey('new-session'),
+                    tooltip: 'Create new chat',
+                    enabled:
+                        !controller.sessionBusy &&
+                        !controller.runtimeBusy &&
+                        controller.sessionCreationSupported,
+                    position: PopupMenuPosition.under,
+                    color: zommiOverlayPanelColor,
+                    surfaceTintColor: Colors.transparent,
+                    elevation: zommiOverlayPanelElevation,
+                    shadowColor: zommiOverlayPanelShadowColor,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(
+                        zommiOverlayPanelRadius,
+                      ),
                     ),
+                    constraints: const BoxConstraints(
+                      minWidth: 250,
+                      maxWidth: 320,
+                    ),
+                    onSelected: (id) => unawaited(
+                      controller.createSession(runtimeTargetId: id),
+                    ),
+                    itemBuilder: (context) => [
+                      const PopupMenuItem<String>(
+                        enabled: false,
+                        height: 36,
+                        child: Text(
+                          'New chat with',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xff3c4352),
+                          ),
+                        ),
+                      ),
+                      for (final target in controller.visibleRuntimeTargets)
+                        PopupMenuItem<String>(
+                          key: ValueKey('create-session-${target.id}'),
+                          value: target.id,
+                          enabled: controller.canCreateSession(target),
+                          child: Row(
+                            children: [
+                              RuntimeLogo(
+                                runtimeId: target.runtimeId,
+                                size: 16,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      target.displayName,
+                                      style: const TextStyle(fontSize: 12),
+                                    ),
+                                    Text(
+                                      controller.canCreateSession(target)
+                                          ? '${target.protocolName} · ${target.executionHost['displayName'] ?? 'Local'}'
+                                          : 'New chats unavailable',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        color: Color(0xff737887),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                    icon: const Icon(Icons.add_rounded, size: 20),
+                  ),
                 ],
               ),
             ),
@@ -96,14 +166,23 @@ class SessionSidebar extends StatelessWidget {
                       itemCount: controller.sessions.length,
                       itemBuilder: (context, index) {
                         final session = controller.sessions[index];
-                        final presence = controller.presenceFor(session.id);
+                        final runtime = controller.runtimeForSession(session);
+                        final presence = controller.presenceFor(
+                          session.id,
+                          runtimeTargetId: session.runtimeTargetId,
+                        );
                         final selected =
-                            session.id == controller.activeSessionId;
+                            session.id == controller.activeSessionId &&
+                            session.runtimeTargetId ==
+                                controller.activeRuntime?.id;
                         return Semantics(
                           selected: selected,
-                          label: '${session.title}, ${presence.name} session',
+                          label:
+                              '${session.title}, ${runtime?.displayName ?? 'Agent'}, ${presence.name} session',
                           child: ListTile(
-                            key: ValueKey('session-${session.id}'),
+                            key: ValueKey(
+                              'session-${session.runtimeTargetId}-${session.id}',
+                            ),
                             dense: true,
                             visualDensity: const VisualDensity(vertical: -3),
                             contentPadding: const EdgeInsets.symmetric(
@@ -114,17 +193,46 @@ class SessionSidebar extends StatelessWidget {
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
                             ),
-                            leading: _SessionStatusIcon(presence: presence),
+                            minLeadingWidth: 0,
+                            horizontalTitleGap: 9,
+                            leading: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                SizedBox.square(
+                                  dimension: 18,
+                                  child: Center(
+                                    child: _SessionStatusIcon(
+                                      presence: presence,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Tooltip(
+                                  message:
+                                      runtime?.displayName ?? 'Agent runtime',
+                                  child: RuntimeLogo(
+                                    key: ValueKey(
+                                      'session-runtime-${session.runtimeTargetId}-${session.id}',
+                                    ),
+                                    runtimeId: runtime?.runtimeId ?? '',
+                                  ),
+                                ),
+                              ],
+                            ),
                             title: Text(
                               session.title,
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(fontSize: 11),
                             ),
-                            onTap: controller.sessionBusy
+                            onTap:
+                                controller.sessionBusy || controller.runtimeBusy
                                 ? null
                                 : () => unawaited(
-                                    controller.switchSession(session.id),
+                                    controller.switchSession(
+                                      session.id,
+                                      runtimeTargetId: session.runtimeTargetId,
+                                    ),
                                   ),
                           ),
                         );
@@ -320,7 +428,7 @@ class _RuntimeTargetTile extends StatelessWidget {
               : _runtimeStatus(target.status),
           style: const TextStyle(fontSize: 10, color: Color(0xff747988)),
         ),
-        onTap: controller.runtimeBusy
+        onTap: controller.runtimeBusy || controller.sessionBusy
             ? null
             : () => unawaited(controller.selectRuntime(target.id)),
       ),
@@ -835,17 +943,6 @@ class _SettingsOverview extends StatelessWidget {
                 style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
               ),
             ),
-            const SizedBox(height: 4),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Text(
-                'Saved separately for this chat',
-                style: TextStyle(
-                  fontSize: 10.5,
-                  color: Colors.blueGrey.shade500,
-                ),
-              ),
-            ),
             const SizedBox(height: 12),
             _SettingsRow(
               key: const ValueKey('settings-model'),
@@ -1185,20 +1282,31 @@ class _WorkspacePanelState extends State<WorkspacePanel> {
     if (!_dirty && _path.text != widget.controller.selectedWorkspace) {
       _path.text = widget.controller.selectedWorkspace;
     }
-    return _SettingsDetailShell(
-      title: 'Workspace',
-      onBack: widget.onBack,
-      closeButton: true,
+    return ZommiOverlayPanelSurface(
+      width: 286,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+        padding: const EdgeInsets.fromLTRB(18, 10, 18, 14),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              'Commands and file tools for this chat run from this folder.',
-              style: TextStyle(fontSize: 10.5, color: Colors.blueGrey.shade600),
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Workspace',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Close workspace',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: widget.onBack,
+                  icon: const Icon(Icons.close_rounded, size: 17),
+                ),
+              ],
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 10),
             TextField(
               key: const ValueKey('workspace-path'),
               controller: _path,
@@ -1338,14 +1446,12 @@ class _SettingsDetailShell extends StatelessWidget {
     required this.onBack,
     required this.child,
     this.height = 390,
-    this.closeButton = false,
   });
 
   final String title;
   final VoidCallback onBack;
   final Widget child;
   final double height;
-  final bool closeButton;
 
   @override
   Widget build(BuildContext context) {
@@ -1360,16 +1466,9 @@ class _SettingsDetailShell extends StatelessWidget {
               children: [
                 IconButton(
                   key: const ValueKey('settings-back'),
-                  tooltip: closeButton
-                      ? 'Close workspace'
-                      : 'Back to model settings',
+                  tooltip: 'Back to model settings',
                   onPressed: onBack,
-                  icon: Icon(
-                    closeButton
-                        ? Icons.close_rounded
-                        : Icons.arrow_back_rounded,
-                    size: 17,
-                  ),
+                  icon: const Icon(Icons.arrow_back_rounded, size: 17),
                 ),
                 Text(
                   title,

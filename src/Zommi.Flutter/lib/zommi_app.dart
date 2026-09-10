@@ -14,6 +14,7 @@ import 'package:zommi_flutter/theme/zommi_typography.dart';
 import 'package:zommi_flutter/widgets/context_preview_layout.dart';
 import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
 import 'package:zommi_flutter/widgets/overlay_panels.dart';
+import 'package:zommi_flutter/widgets/runtime_logo.dart';
 import 'package:zommi_flutter/widgets/transcript_view.dart';
 
 export 'package:zommi_flutter/theme/zommi_typography.dart';
@@ -663,12 +664,6 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 7),
           child: Row(
             children: [
-              _HeaderButton(
-                key: const ValueKey('hide-zommi'),
-                label: 'Minimize Zommi',
-                icon: Icons.remove_rounded,
-                onPressed: () => unawaited(_controller.hideWindow()),
-              ),
               Semantics(
                 expanded: _controller.sessionPanelOpen,
                 child: _HeaderButton(
@@ -676,7 +671,7 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                   label: _controller.sessionPanelOpen
                       ? 'Hide chat sessions'
                       : 'Show chat sessions',
-                  icon: Icons.view_sidebar_outlined,
+                  customIcon: const SessionSidebarIcon(),
                   onPressed: _controller.sessionNavigationSupported
                       ? () => _controller.toggleSessionPanel()
                       : null,
@@ -755,6 +750,18 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                     onPressed: _controller.toggleAppSettingsPanel,
                   ),
                 ),
+              ),
+              _HeaderButton(
+                key: const ValueKey('hide-zommi'),
+                label: 'Minimize Zommi',
+                icon: Icons.remove_rounded,
+                onPressed: () => unawaited(_controller.hideWindow()),
+              ),
+              _HeaderButton(
+                key: const ValueKey('close-zommi'),
+                label: 'Close Zommi',
+                icon: Icons.close_rounded,
+                onPressed: () => unawaited(_controller.closeWindow()),
               ),
             ],
           ),
@@ -857,7 +864,10 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                     key: const ValueKey('send-message'),
                     tooltip: 'Send',
                     onPressed:
-                        _controller.submitting || _controller.selectingContent
+                        _controller.submitting ||
+                            _controller.selectingContent ||
+                            _controller.sessionBusy ||
+                            _controller.runtimeBusy
                         ? null
                         : _submit,
                     icon: Icon(
@@ -919,13 +929,15 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
 class _HeaderButton extends StatelessWidget {
   const _HeaderButton({
     required this.label,
-    required this.icon,
+    this.icon,
+    this.customIcon,
     required this.onPressed,
     super.key,
   });
 
   final String label;
-  final IconData icon;
+  final IconData? icon;
+  final Widget? customIcon;
   final VoidCallback? onPressed;
 
   @override
@@ -936,7 +948,7 @@ class _HeaderButton extends StatelessWidget {
       child: IconButton(
         tooltip: label,
         onPressed: onPressed,
-        icon: Icon(icon, size: 18),
+        icon: customIcon ?? Icon(icon, size: 18),
         visualDensity: VisualDensity.compact,
       ),
     );

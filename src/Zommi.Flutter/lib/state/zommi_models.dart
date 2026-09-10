@@ -112,15 +112,20 @@ final class SessionSummary {
   const SessionSummary({
     required this.id,
     required this.title,
+    required this.runtimeTargetId,
     this.cwd,
     this.profile,
     this.updatedAt,
   });
 
-  factory SessionSummary.fromJson(Map<String, Object?> json) {
+  factory SessionSummary.fromJson(
+    Map<String, Object?> json, {
+    required String runtimeTargetId,
+  }) {
     final source = _firstText(json, const ['name', 'preview', 'title']);
     return SessionSummary(
       id: json['id']?.toString() ?? json['sessionId']?.toString() ?? '',
+      runtimeTargetId: runtimeTargetId,
       title: compactSessionTitle(source),
       cwd: json['cwd']?.toString(),
       profile: json['profile']?.toString(),
@@ -129,6 +134,7 @@ final class SessionSummary {
   }
 
   final String id;
+  final String runtimeTargetId;
   final String title;
   final String? cwd;
   final String? profile;
@@ -137,6 +143,7 @@ final class SessionSummary {
   SessionSummary copyWith({String? title, String? cwd, String? profile}) =>
       SessionSummary(
         id: id,
+        runtimeTargetId: runtimeTargetId,
         title: title ?? this.title,
         cwd: cwd ?? this.cwd,
         profile: profile ?? this.profile,

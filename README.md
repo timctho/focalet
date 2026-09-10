@@ -40,7 +40,9 @@ Electron, Node module, or `.mjs` payload.
   collapse;
 - `Alt+A` or **Select content** opens the same content picker; click an object,
   drag a region, or use Ctrl to accumulate selections on Windows;
-- a button-controlled sliding chat sidebar, with workspace beside model settings;
+- a sliding chat sidebar with mixed-runtime sessions, runtime logos, and a runtime
+  picker for new chats;
+- compact workspace and model menus, with settings, minimize, and close at the right;
 - readable A/B attachments, bounded previews and in-place selection adjustment;
 - exact runtime, model, reasoning, and provider-owned session selection;
 - paged history, concurrent background turns, running/unread state, and exact

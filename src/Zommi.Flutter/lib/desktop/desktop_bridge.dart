@@ -144,6 +144,8 @@ abstract interface class DesktopBridge {
 
   Future<void> hide();
 
+  Future<void> closeWindow();
+
   Future<void> toggleMaximized();
 
   Future<void> startDragging();
@@ -200,6 +202,9 @@ final class NoopDesktopBridge implements DesktopBridge {
 
   @override
   Future<void> hide() async {}
+
+  @override
+  Future<void> closeWindow() async {}
 
   @override
   Future<void> toggleMaximized() async {}
@@ -680,6 +685,9 @@ final class FlutterDesktopBridge
 
   @override
   Future<void> hide() => windowManager.minimize();
+
+  @override
+  Future<void> closeWindow() => windowManager.close();
 
   @override
   Future<void> toggleMaximized() async {

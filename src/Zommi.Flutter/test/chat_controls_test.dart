@@ -9,6 +9,7 @@ import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/zommi_app.dart';
+import 'package:zommi_flutter/widgets/runtime_logo.dart';
 
 import 'test_support.dart';
 
@@ -138,7 +139,9 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.byKey(const ValueKey('workspace-panel')), findsNothing);
         expect(sidebar, findsOneWidget);
-        await tester.tap(find.byKey(const ValueKey('session-session-2')));
+        await tester.tap(
+          find.byKey(const ValueKey('session-runtime-codex-session-2')),
+        );
         await tester.pumpAndSettle();
         expect(core.activeSessionId, 'session-2');
         expect(sidebar, findsOneWidget);
@@ -170,7 +173,9 @@ void main() {
       matching: find.byType(IconButton),
     );
     final focus = Focus.of(
-      tester.element(find.descendant(of: button, matching: find.byType(Icon))),
+      tester.element(
+        find.descendant(of: button, matching: find.byType(SessionSidebarIcon)),
+      ),
     );
     focus.requestFocus();
     await tester.pump();
