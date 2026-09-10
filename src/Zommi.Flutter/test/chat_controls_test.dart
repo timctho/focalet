@@ -132,6 +132,11 @@ void main() {
         final workspace = tester.getRect(
           find.byKey(const ValueKey('workspace-panel')),
         );
+        final workspaceButton = tester.getRect(
+          find.byKey(const ValueKey('workspace-summary')),
+        );
+        expect(workspace.left, closeTo(workspaceButton.left, 0.1));
+        expect(workspace.top, closeTo(workspaceButton.bottom + 6, 0.1));
         expect(workspace.left, greaterThanOrEqualTo(0));
         expect(workspace.right, lessThanOrEqualTo(size.width));
         expect(workspace.bottom, lessThanOrEqualTo(size.height));

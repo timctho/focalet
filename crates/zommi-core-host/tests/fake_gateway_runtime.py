@@ -15,6 +15,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 
 GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -528,7 +529,21 @@ def handle_connection(connection: socket.socket, mode: str) -> None:
     try:
         request_line, headers = read_http_request(connection)
         if mode == "hermes" and "upgrade" not in headers:
-            if request_line.startswith("GET /api/profiles/active "):
+            if request_line.startswith("GET /api/sessions?") and not os.environ.get("ZOMMI_FAKE_HERMES_LEGACY_SESSION_LIST"):
+                if headers.get("x-hermes-session-token") != os.environ.get("HERMES_DASHBOARD_SESSION_TOKEN"):
+                    connection.sendall(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                    return
+                params = parse_qs(urlsplit(request_line.split()[1]).query)
+                profile = params.get("profile", ["default"])[0]
+                write_log({"method": "http.sessions", "params": params})
+                payload = {"sessions": [{
+                    "id": "hermes-coder-session" if profile == "coder" else "hermes-stored-session",
+                    "title": f"Saved Hermes {profile} chat",
+                    "started_at": 12,
+                    "last_active": 50.5 if profile == "coder" else 40.25,
+                    "message_count": 2,
+                }]}
+            elif request_line.startswith("GET /api/profiles/active "):
                 payload = {"active": "default", "current": "default"}
             elif request_line.startswith("GET /api/profiles "):
                 payload = {

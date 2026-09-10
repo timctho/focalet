@@ -129,7 +129,7 @@ final class SessionSummary {
       title: compactSessionTitle(source),
       cwd: json['cwd']?.toString(),
       profile: json['profile']?.toString(),
-      updatedAt: json['updatedAt']?.toString(),
+      updatedAt: (json['updatedAt'] ?? json['createdAt'])?.toString(),
     );
   }
 
@@ -140,15 +140,35 @@ final class SessionSummary {
   final String? profile;
   final String? updatedAt;
 
-  SessionSummary copyWith({String? title, String? cwd, String? profile}) =>
-      SessionSummary(
-        id: id,
-        runtimeTargetId: runtimeTargetId,
-        title: title ?? this.title,
-        cwd: cwd ?? this.cwd,
-        profile: profile ?? this.profile,
-        updatedAt: updatedAt,
-      );
+  DateTime? get activityTime {
+    final value = updatedAt;
+    if (value == null) return null;
+    final epoch = num.tryParse(value);
+    if (epoch == null) return DateTime.tryParse(value)?.toUtc();
+    // Codex and Hermes use Unix seconds; gateway runtimes may use milliseconds.
+    final milliseconds = epoch.abs() < 100000000000 ? epoch * 1000 : epoch;
+    if (!milliseconds.isFinite || milliseconds.abs() > 8640000000000000) {
+      return null;
+    }
+    return DateTime.fromMillisecondsSinceEpoch(
+      milliseconds.round(),
+      isUtc: true,
+    );
+  }
+
+  SessionSummary copyWith({
+    String? title,
+    String? cwd,
+    String? profile,
+    String? updatedAt,
+  }) => SessionSummary(
+    id: id,
+    runtimeTargetId: runtimeTargetId,
+    title: title ?? this.title,
+    cwd: cwd ?? this.cwd,
+    profile: profile ?? this.profile,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
 }
 
 final class SessionSettings {

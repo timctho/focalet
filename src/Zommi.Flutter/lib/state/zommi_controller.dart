@@ -75,7 +75,6 @@ final class ZommiController extends ChangeNotifier {
   bool transitionTargetExpanded = true;
   bool transitionTargetLarge = false;
   bool sessionPanelOpen = false;
-  bool runtimePanelOpen = false;
   bool runtimeSetupPanelOpen = false;
   bool modelPanelOpen = false;
   bool workspacePanelOpen = false;
@@ -141,7 +140,7 @@ final class ZommiController extends ChangeNotifier {
       activeRuntime == null || capabilities.contains('input.image.v1');
 
   bool get sessionNavigationSupported =>
-      sessions.isNotEmpty || visibleRuntimeTargets.isNotEmpty;
+      initialized || sessions.isNotEmpty || visibleRuntimeTargets.isNotEmpty;
 
   bool get sessionCreationSupported =>
       visibleRuntimeTargets.any(canCreateSession);
@@ -194,21 +193,6 @@ final class ZommiController extends ChangeNotifier {
         orElse: () => null,
       )
       ?.displayName;
-
-  String get runtimeSummary {
-    if (switchingRuntimeId != null) {
-      return 'Switching to ${switchingRuntimeName ?? 'agent'}…';
-    }
-    final runtime = activeRuntime;
-    if (runtime == null) {
-      return runtimeBusy ? 'Finding agents…' : 'Choose agent';
-    }
-    final host = runtime.executionHost;
-    final hostName = host['kind'] == 'wsl'
-        ? host['name']?.toString() ?? host['displayName']?.toString() ?? 'WSL'
-        : host['displayName']?.toString() ?? 'Local';
-    return '${runtime.displayName} · $hostName';
-  }
 
   String get modelSummary {
     final selected = models.cast<Map<String, Object?>?>().firstWhere(
@@ -360,7 +344,11 @@ final class ZommiController extends ChangeNotifier {
     }
   }
 
-  bool _applyConnectionError(String targetId, Object error) {
+  bool _applyConnectionError(
+    String targetId,
+    Object error, {
+    bool activateTarget = true,
+  }) {
     final message = error.toString();
     final authenticationRequired =
         error is CoreProtocolException &&
@@ -375,15 +363,22 @@ final class ZommiController extends ChangeNotifier {
       runtimeTargets[index] = runtimeTargets[index].copyWith(
         status: 'sign-in-required',
       );
-      activeRuntime = runtimeTargets[index];
-      capabilities = activeRuntime!.capabilityHints.toSet();
+      if (activateTarget) {
+        activeRuntime = runtimeTargets[index];
+        capabilities = activeRuntime!.capabilityHints.toSet();
+      }
     }
-    _setStatus('$activeRuntimeName sign-in required', warning: true);
+    _setStatus(
+      '${_runtimeTarget(targetId)?.displayName ?? 'Agent'} sign-in required',
+      warning: true,
+    );
     return true;
   }
 
-  Future<void> openRuntimeSignIn() async {
-    final runtime = activeRuntime;
+  Future<void> openRuntimeSignIn({String? runtimeTargetId}) async {
+    final runtime = runtimeTargetId == null
+        ? activeRuntime
+        : _runtimeTarget(runtimeTargetId);
     if (runtime == null) return;
     try {
       await desktop.openRuntimeSignIn(runtime);
@@ -570,9 +565,12 @@ final class ZommiController extends ChangeNotifier {
       );
       if (initialConnection != null) _cacheConnection(initialConnection);
       await _applySessionConnection(connection, inherited: inherited);
+      _recordSessionActivity(connection.runtimeTargetId, connection.sessionId);
       _setStatus('New chat ready');
     } on Object catch (error) {
-      _setStatus('Could not create chat · $error', warning: true);
+      if (!_applyConnectionError(target.id, error, activateTarget: false)) {
+        _setStatus('Could not create chat · $error', warning: true);
+      }
     } finally {
       sessionBusy = false;
       switchingRuntimeId = null;
@@ -1182,19 +1180,6 @@ final class ZommiController extends ChangeNotifier {
   void toggleSessionPanel([bool? open]) {
     sessionPanelOpen = open ?? !sessionPanelOpen;
     if (sessionPanelOpen) {
-      runtimePanelOpen = false;
-      modelPanelOpen = false;
-      workspacePanelOpen = false;
-      sessionSettingsDetailOpen = false;
-      appSettingsPanelOpen = false;
-    }
-    _notify();
-  }
-
-  void toggleRuntimePanel() {
-    runtimePanelOpen = !runtimePanelOpen;
-    if (runtimePanelOpen) {
-      runtimeSetupPanelOpen = false;
       modelPanelOpen = false;
       workspacePanelOpen = false;
       sessionSettingsDetailOpen = false;
@@ -1206,7 +1191,6 @@ final class ZommiController extends ChangeNotifier {
   void toggleRuntimeSetupPanel([bool? open]) {
     runtimeSetupPanelOpen = open ?? !runtimeSetupPanelOpen;
     if (runtimeSetupPanelOpen) {
-      runtimePanelOpen = false;
       modelPanelOpen = false;
       workspacePanelOpen = false;
       sessionSettingsDetailOpen = false;
@@ -1227,7 +1211,6 @@ final class ZommiController extends ChangeNotifier {
       modelPanelOpen = true;
       workspacePanelOpen = false;
       sessionSettingsDetailOpen = false;
-      runtimePanelOpen = false;
       runtimeSetupPanelOpen = false;
       appSettingsPanelOpen = false;
     }
@@ -1237,7 +1220,6 @@ final class ZommiController extends ChangeNotifier {
   void toggleWorkspacePanel() {
     workspacePanelOpen = !workspacePanelOpen;
     if (workspacePanelOpen) {
-      runtimePanelOpen = false;
       runtimeSetupPanelOpen = false;
       modelPanelOpen = false;
       sessionSettingsDetailOpen = false;
@@ -1254,7 +1236,6 @@ final class ZommiController extends ChangeNotifier {
 
   void closeTransientPanels() {
     sessionPanelOpen = false;
-    runtimePanelOpen = false;
     runtimeSetupPanelOpen = false;
     modelPanelOpen = false;
     workspacePanelOpen = false;
@@ -1266,7 +1247,6 @@ final class ZommiController extends ChangeNotifier {
   void toggleAppSettingsPanel() {
     appSettingsPanelOpen = !appSettingsPanelOpen;
     if (appSettingsPanelOpen) {
-      runtimePanelOpen = false;
       runtimeSetupPanelOpen = false;
       modelPanelOpen = false;
       workspacePanelOpen = false;
@@ -1293,22 +1273,16 @@ final class ZommiController extends ChangeNotifier {
     _notify();
   }
 
-  void dismissRuntimePanel() {
-    if (!runtimePanelOpen) return;
-    runtimePanelOpen = false;
+  void dismissModelPanel() {
+    if (!modelPanelOpen) return;
+    modelPanelOpen = false;
+    sessionSettingsDetailOpen = false;
     _notify();
   }
 
   void dismissRuntimeSetupPanel() {
     if (!runtimeSetupPanelOpen) return;
     runtimeSetupPanelOpen = false;
-    _notify();
-  }
-
-  void dismissModelPanel() {
-    if (!modelPanelOpen) return;
-    modelPanelOpen = false;
-    sessionSettingsDetailOpen = false;
     _notify();
   }
 
@@ -1539,6 +1513,9 @@ final class ZommiController extends ChangeNotifier {
           _unreadSessions.add(sessionKey);
         }
         final statusValue = event.payload['status']?.toString() ?? 'completed';
+        if (statusValue.toLowerCase() == 'completed') {
+          _recordSessionActivity(event.runtimeTargetId, sessionId);
+        }
         for (final turn in _turnsBySession[sessionKey] ?? const []) {
           turn.activityExpanded = false;
           for (final block in turn.blocks) {
@@ -1599,6 +1576,9 @@ final class ZommiController extends ChangeNotifier {
     final lifecycle = _lifecycle(event.payload['lifecycle']?.toString());
     final nativeItemId = event.payload['itemId']?.toString() ?? '';
     final incomingText = event.payload['text']?.toString() ?? '';
+    if (kind == TranscriptKind.assistant && incomingText.isNotEmpty) {
+      _recordSessionActivity(runtimeTargetId, sessionId);
+    }
     final sourceMatch = nativeItemId.isEmpty
         ? null
         : _latestBlockForSource(turn.blocks, kind, nativeItemId);
@@ -1695,8 +1675,10 @@ final class ZommiController extends ChangeNotifier {
           id: sessionId,
           runtimeTargetId: runtimeTargetId,
           title: 'New $activeRuntimeName chat',
+          updatedAt: DateTime.now().toUtc().toIso8601String(),
         ),
       );
+      _sortSessions();
     }
     _turnsBySession.putIfAbsent(
       _sessionKey(runtimeTargetId, sessionId),
@@ -1722,9 +1704,44 @@ final class ZommiController extends ChangeNotifier {
       if (index < 0) {
         sessions.add(session);
       } else {
-        sessions[index] = session;
+        final existing = sessions[index];
+        // Reopening a chat can return an older provider snapshot. Keep the
+        // latest observed reply time when merging that snapshot.
+        sessions[index] =
+            (existing.activityTime?.microsecondsSinceEpoch ?? 0) >
+                (session.activityTime?.microsecondsSinceEpoch ?? 0)
+            ? session.copyWith(updatedAt: existing.updatedAt)
+            : session;
       }
     }
+    _sortSessions();
+  }
+
+  void _recordSessionActivity(String runtimeTargetId, String sessionId) {
+    final index = sessions.indexWhere(
+      (session) =>
+          session.runtimeTargetId == runtimeTargetId && session.id == sessionId,
+    );
+    if (index < 0) return;
+    final session = sessions
+        .removeAt(index)
+        .copyWith(updatedAt: DateTime.now().toUtc().toIso8601String());
+    sessions.insert(0, session);
+    _sortSessions();
+  }
+
+  void _sortSessions() {
+    final ordered =
+        [
+          for (final (index, session) in sessions.indexed)
+            (index, session, session.activityTime?.microsecondsSinceEpoch ?? 0),
+        ]..sort((a, b) {
+          final byTime = b.$3.compareTo(a.$3);
+          return byTime != 0 ? byTime : a.$1.compareTo(b.$1);
+        });
+    sessions
+      ..clear()
+      ..addAll(ordered.map((entry) => entry.$2));
   }
 
   void _updateSessionTitle(String sessionId, String message) {
