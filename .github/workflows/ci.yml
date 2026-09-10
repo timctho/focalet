@@ -193,6 +193,11 @@ jobs:
           # multi-gigabyte GitHub cache makes the post-job slower than the build.
           cache: false
 
+      - name: Test Windows session metadata persistence
+        shell: pwsh
+        working-directory: src/Zommi.Flutter
+        run: flutter test test/session_catalog_cache_test.dart
+
       - name: Verify local .NET capture publisher
         shell: pwsh
         run: |

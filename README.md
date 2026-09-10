@@ -44,8 +44,8 @@ Electron, Node module, or `.mjs` payload.
   picker for new chats;
 - chats ordered by latest response across runtimes, with the runtime bound when
   creating each chat;
-- existing chats from discovered runtimes load in the background at startup,
-  without creating a new chat or changing the selected session;
+- cached chat metadata appears before runtime initialization; missing or stale
+  catalogs sync in the background without creating or switching chats;
 - compact workspace and model menus anchored below their controls, with settings,
   minimize, and close at the right;
 - readable A/B attachments, bounded previews and in-place selection adjustment;
@@ -68,6 +68,21 @@ active-window metadata, so that context is visibly degraded. See
 
 Browser connection, selection gestures and alignment limits are described in
 [docs/browser-context.md](docs/browser-context.md).
+
+The sidebar keeps a rebuildable `session-catalog.json` beside the session binding
+in the platform's Zommi application state directory. It stores runtime labels,
+session IDs, titles, workspaces, profiles, last activity, and sync/use timestamps;
+transcripts and credentials remain with the runtimes. Writes are coalesced and
+replace complete snapshots with a recovery backup. Failed or partial listings
+retain known chats.
+
+The app restores its selected runtime as before, while other catalogs start
+refreshing five seconds after initialization (or when Chats is opened). A shared
+queue allows at most two reads, prioritizing recently used runtimes. Runtimes
+used in the past seven days refresh after 15 minutes; others after six hours.
+Failures have a persisted two-minute cooldown. Opening Chats checks freshness;
+**Refresh agents** and the catalog retry button bypass it. Opening a cached chat
+connects its exact runtime/session and reads canonical history on demand.
 
 ## Native packages
 

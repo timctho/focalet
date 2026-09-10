@@ -6,6 +6,7 @@ import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/desktop/artifact_loader.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/history_mapper.dart';
+import 'package:zommi_flutter/state/session_catalog_store.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 
@@ -16,13 +17,20 @@ final class ZommiController extends ChangeNotifier {
     required this.core,
     required this.desktop,
     ArtifactLoader? artifactLoader,
+    this.sessionCatalogStore = const NoopSessionCatalogStore(),
+    this.catalogStartupDelay = Duration.zero,
+    DateTime Function()? clock,
     WindowSizeSetting initialWindowSize = WindowSizeSetting.standard,
   }) : artifactLoader = artifactLoader ?? const LocalArtifactLoader(),
-       windowSize = initialWindowSize;
+       windowSize = initialWindowSize,
+       _clock = clock ?? DateTime.now;
 
   final CoreBridge core;
   final DesktopBridge desktop;
   final ArtifactLoader artifactLoader;
+  final SessionCatalogStore sessionCatalogStore;
+  final Duration catalogStartupDelay;
+  final DateTime Function() _clock;
 
   final List<RuntimeTarget> runtimeTargets = [];
   final List<SessionSummary> sessions = [];
@@ -42,7 +50,15 @@ final class ZommiController extends ChangeNotifier {
   final Map<String, String> _runtimeTargetAliases = {};
   final Map<String, RuntimeTarget> _knownRuntimes = {};
   final Map<String, Set<String>> _runtimeCapabilities = {};
-  final Set<String> _catalogLoaded = {};
+  final Map<String, DateTime> _catalogSyncedAt = {};
+  final Map<String, DateTime> _catalogAttemptedAt = {};
+  final Map<String, DateTime> _catalogUsedAt = {};
+  final List<(RuntimeTarget, Completer<void>)> _catalogQueue = [];
+  int _catalogWorkerCount = 0;
+  Timer? _catalogStartupTimer;
+  Timer? _catalogSaveTimer;
+  Future<void>? _catalogSave;
+  bool _catalogRestored = false;
   final Set<String> _catalogLoading = {};
   final Set<String> _catalogErrors = {};
 
@@ -243,6 +259,8 @@ final class ZommiController extends ChangeNotifier {
     });
     final desktopInitialization = _initializeDesktopIntegration();
     try {
+      await _restoreSessionCatalog();
+      if (_closed) return;
       final coreStatus = await core.initialize();
       _setStatus('Finding agent runtimes…');
       final discovery = await core.discoverRuntimeTargets();
@@ -279,7 +297,7 @@ final class ZommiController extends ChangeNotifier {
       await desktopInitialization;
       starting = false;
       _notify();
-      unawaited(refreshSessionCatalog());
+      _scheduleStartupCatalogRefresh();
     }
   }
 
@@ -332,47 +350,165 @@ final class ZommiController extends ChangeNotifier {
     }
   }
 
+  Future<void> _restoreSessionCatalog() async {
+    try {
+      final snapshot = await sessionCatalogStore.load();
+      if (_closed) return;
+      sessions.addAll(snapshot.sessions);
+      for (final runtime in snapshot.runtimes) {
+        _knownRuntimes[runtime.id] = runtime;
+      }
+      _catalogSyncedAt.addAll(snapshot.syncedAt);
+      _catalogAttemptedAt.addAll(snapshot.attemptedAt);
+      _catalogUsedAt.addAll(snapshot.usedAt);
+      _sortSessions();
+      _notify();
+    } on Object {
+      // A rebuildable cache must never prevent the app from connecting.
+    } finally {
+      _catalogRestored = true;
+    }
+  }
+
+  void _scheduleStartupCatalogRefresh() {
+    if (_closed) return;
+    if (catalogStartupDelay == Duration.zero) {
+      unawaited(refreshSessionCatalog());
+    } else {
+      _catalogStartupTimer = Timer(catalogStartupDelay, () {
+        unawaited(refreshSessionCatalog());
+      });
+    }
+  }
+
+  bool _catalogIsDue(String id) {
+    final now = _clock().toUtc();
+    final attempt = _catalogAttemptedAt[id];
+    // Persist retry cooldowns too, so repeated launches do not hammer an
+    // unavailable provider. Explicit refresh/retry bypasses this cooldown.
+    if (attempt != null &&
+        now.difference(attempt) < const Duration(minutes: 2) &&
+        !attempt.isAfter(now)) {
+      return false;
+    }
+    final synced = _catalogSyncedAt[id];
+    if (synced == null || synced.isAfter(now)) return true;
+    final used = _catalogUsedAt[id];
+    final recentlyUsed =
+        used != null && now.difference(used) < const Duration(days: 7);
+    final ttl = recentlyUsed
+        ? const Duration(minutes: 15)
+        : const Duration(hours: 6);
+    return now.difference(synced) >= ttl;
+  }
+
   Future<void> refreshSessionCatalog({bool force = false}) async {
-    if (_closed || core is! SessionCatalogBridge) return;
-    final catalog = core as SessionCatalogBridge;
-    final targets = visibleRuntimeTargets
-        .where(
-          (target) =>
-              target.id != activeRuntime?.id &&
-              target.capabilityHints.contains('session.list.v1') &&
-              !_catalogLoading.contains(target.id) &&
-              (force || !_catalogLoaded.contains(target.id)),
-        )
-        .toList();
-    _catalogLoading.addAll(targets.map((target) => target.id));
+    if (_closed || starting || core is! SessionCatalogBridge) return;
+    final targets =
+        visibleRuntimeTargets
+            .where(
+              (target) =>
+                  target.capabilityHints.contains('session.list.v1') &&
+                  !_catalogLoading.contains(target.id) &&
+                  (force || _catalogIsDue(target.id)),
+            )
+            .toList()
+          ..sort(
+            (a, b) => (_catalogUsedAt[b.id]?.millisecondsSinceEpoch ?? 0)
+                .compareTo(_catalogUsedAt[a.id]?.millisecondsSinceEpoch ?? 0),
+          );
+    final completed = <Future<void>>[];
+    for (final target in targets) {
+      final completion = Completer<void>();
+      _catalogQueue.add((target, completion));
+      _catalogLoading.add(target.id);
+      completed.add(completion.future);
+    }
     if (targets.isNotEmpty) _notify();
-    // Bound startup work while letting each successful runtime populate Chats
-    // independently of a slow or unavailable provider.
-    for (var offset = 0; offset < targets.length && !_closed; offset += 2) {
-      await Future.wait(
-        targets.skip(offset).take(2).map((target) async {
-          try {
-            final values = await catalog.listSessionCatalog(
-              runtimeTargetId: target.id,
-            );
-            if (_closed ||
-                !visibleRuntimeTargets.any((value) => value.id == target.id)) {
-              return;
-            }
-            _knownRuntimes[target.id] = target;
-            _mergeSessions(target.id, values);
-            _hydrateSessionSettingsFromSummaries(target.id);
-            _catalogLoaded.add(target.id);
-            _catalogErrors.remove(target.id);
-          } on Object {
-            if (!_closed) _catalogErrors.add(target.id);
-          } finally {
-            _catalogLoading.remove(target.id);
-            _notify();
-          }
+    _drainCatalogQueue();
+    await Future.wait(completed);
+  }
+
+  void _drainCatalogQueue() {
+    // One global queue also bounds overlapping startup, retry and discovery
+    // refreshes. A slow provider does not hold the next available worker slot.
+    while (!_closed && _catalogWorkerCount < 2 && _catalogQueue.isNotEmpty) {
+      final (target, completion) = _catalogQueue.removeAt(0);
+      _catalogWorkerCount++;
+      unawaited(
+        _loadCatalog(target).whenComplete(() {
+          _catalogWorkerCount--;
+          _catalogLoading.remove(target.id);
+          completion.complete();
+          _notify();
+          _drainCatalogQueue();
         }),
       );
     }
+  }
+
+  Future<void> _loadCatalog(RuntimeTarget target) async {
+    if (!visibleRuntimeTargets.any((value) => value.id == target.id)) {
+      return;
+    }
+    _catalogAttemptedAt[target.id] = _clock().toUtc();
+    _scheduleCatalogSave();
+    try {
+      final values = target.id == activeRuntime?.id
+          ? await core.listSessions(runtimeTargetId: target.id)
+          : await (core as SessionCatalogBridge).listSessionCatalog(
+              runtimeTargetId: target.id,
+            );
+      if (_closed ||
+          !visibleRuntimeTargets.any((value) => value.id == target.id)) {
+        return;
+      }
+      _knownRuntimes[target.id] = target;
+      _mergeSessions(target.id, values);
+      _hydrateSessionSettingsFromSummaries(target.id);
+      _markCatalogSynced(target.id);
+    } on Object {
+      if (!_closed) _catalogErrors.add(target.id);
+    }
+  }
+
+  void _markCatalogSynced(String id) {
+    _catalogSyncedAt[id] = _clock().toUtc();
+    _catalogErrors.remove(id);
+    _scheduleCatalogSave();
+  }
+
+  void _scheduleCatalogSave() {
+    if (_closed ||
+        !_catalogRestored ||
+        sessionCatalogStore is NoopSessionCatalogStore) {
+      return;
+    }
+    // Coalesce streaming activity without postponing writes indefinitely.
+    _catalogSaveTimer ??= Timer(const Duration(milliseconds: 250), () {
+      _catalogSaveTimer = null;
+      unawaited(flushSessionCatalog());
+    });
+  }
+
+  Future<void> flushSessionCatalog() {
+    _catalogSaveTimer?.cancel();
+    _catalogSaveTimer = null;
+    if (!_catalogRestored || sessionCatalogStore is NoopSessionCatalogStore) {
+      return Future.value();
+    }
+    final snapshot = SessionCatalogSnapshot(
+      runtimes: _knownRuntimes.values.toList(),
+      sessions: List.of(sessions),
+      syncedAt: Map.of(_catalogSyncedAt),
+      attemptedAt: Map.of(_catalogAttemptedAt),
+      usedAt: Map.of(_catalogUsedAt),
+    );
+    final write = (_catalogSave ?? Future<void>.value())
+        .then((_) => sessionCatalogStore.save(snapshot))
+        .catchError((Object _) {});
+    _catalogSave = write;
+    return write;
   }
 
   Future<void> selectRuntime(String targetId) async {
@@ -541,6 +677,7 @@ final class ZommiController extends ChangeNotifier {
           runtimeTargetId: connection.runtimeTargetId,
         );
         _mergeSessions(connection.runtimeTargetId, values);
+        _markCatalogSynced(connection.runtimeTargetId);
         _ensureSession(connection.sessionId);
       } on Object {
         // The exact connection remains usable when optional listing fails.
@@ -587,6 +724,7 @@ final class ZommiController extends ChangeNotifier {
     final targetId = runtimeTargetId ?? activeRuntime?.id;
     final target = targetId == null ? null : _runtimeTarget(targetId);
     if (target == null ||
+        starting ||
         sessionBusy ||
         runtimeBusy ||
         sessionSettingsBusy ||
@@ -644,6 +782,7 @@ final class ZommiController extends ChangeNotifier {
   }) async {
     final targetId = runtimeTargetId ?? activeRuntime?.id;
     if (targetId == null ||
+        starting ||
         sessionBusy ||
         runtimeBusy ||
         sessionSettingsBusy ||
@@ -699,8 +838,9 @@ final class ZommiController extends ChangeNotifier {
       _modelCatalogs[connection.runtimeTargetId] = List.of(connection.models);
     }
     _mergeSessions(connection.runtimeTargetId, connection.sessions);
-    _catalogLoaded.add(connection.runtimeTargetId);
-    _catalogErrors.remove(connection.runtimeTargetId);
+    if (connection.sessions.isNotEmpty) {
+      _markCatalogSynced(connection.runtimeTargetId);
+    }
   }
 
   void _activateConnection(RuntimeConnection connection) {
@@ -708,6 +848,8 @@ final class ZommiController extends ChangeNotifier {
     _cacheConnection(connection);
     activeRuntime = _runtimeTarget(connection.runtimeTargetId);
     activeSessionId = connection.sessionId;
+    _catalogUsedAt[connection.runtimeTargetId] = _clock().toUtc();
+    _scheduleCatalogSave();
     capabilities = _runtimeCapabilities[connection.runtimeTargetId] ?? {};
     models
       ..clear()
@@ -1738,10 +1880,11 @@ final class ZommiController extends ChangeNotifier {
           id: sessionId,
           runtimeTargetId: runtimeTargetId,
           title: 'New $activeRuntimeName chat',
-          updatedAt: DateTime.now().toUtc().toIso8601String(),
+          updatedAt: _clock().toUtc().toIso8601String(),
         ),
       );
       _sortSessions();
+      _scheduleCatalogSave();
     }
     _turnsBySession.putIfAbsent(
       _sessionKey(runtimeTargetId, sessionId),
@@ -1770,14 +1913,25 @@ final class ZommiController extends ChangeNotifier {
         final existing = sessions[index];
         // Reopening a chat can return an older provider snapshot. Keep the
         // latest observed reply time when merging that snapshot.
-        sessions[index] =
-            (existing.activityTime?.microsecondsSinceEpoch ?? 0) >
-                (session.activityTime?.microsecondsSinceEpoch ?? 0)
-            ? session.copyWith(updatedAt: existing.updatedAt)
-            : session;
+        final hasTitle = [
+          'name',
+          'preview',
+          'title',
+        ].any((key) => value[key]?.toString().trim().isNotEmpty == true);
+        sessions[index] = session.copyWith(
+          title: hasTitle ? session.title : existing.title,
+          cwd: session.cwd ?? existing.cwd,
+          profile: session.profile ?? existing.profile,
+          updatedAt:
+              (existing.activityTime?.microsecondsSinceEpoch ?? 0) >
+                  (session.activityTime?.microsecondsSinceEpoch ?? 0)
+              ? existing.updatedAt
+              : session.updatedAt,
+        );
       }
     }
     _sortSessions();
+    _scheduleCatalogSave();
   }
 
   void _recordSessionActivity(String runtimeTargetId, String sessionId) {
@@ -1788,9 +1942,11 @@ final class ZommiController extends ChangeNotifier {
     if (index < 0) return;
     final session = sessions
         .removeAt(index)
-        .copyWith(updatedAt: DateTime.now().toUtc().toIso8601String());
+        .copyWith(updatedAt: _clock().toUtc().toIso8601String());
     sessions.insert(0, session);
     _sortSessions();
+    _catalogUsedAt[runtimeTargetId] = _clock().toUtc();
+    _scheduleCatalogSave();
   }
 
   void _sortSessions() {
@@ -1827,6 +1983,7 @@ final class ZommiController extends ChangeNotifier {
     } else if (sessions[index].title.startsWith('New ')) {
       sessions[index] = sessions[index].copyWith(title: title);
     }
+    _scheduleCatalogSave();
   }
 
   Map<String, Object?>? _selectedModel() =>
@@ -1845,6 +2002,10 @@ final class ZommiController extends ChangeNotifier {
       ..clear()
       ..addAll(visible);
     runtimeSettings = discovery.settings;
+    for (final target in visible) {
+      _knownRuntimes[target.id] = target;
+    }
+    _scheduleCatalogSave();
   }
 
   String? _visibleSelectedTargetId(String? selectedTargetId) {
@@ -1903,6 +2064,19 @@ final class ZommiController extends ChangeNotifier {
     if (runtimeTargetId == null || sessionId == null) return;
     _sessionSettings[_sessionKey(runtimeTargetId, sessionId)] =
         activeSessionSettings;
+    final index = sessions.indexWhere(
+      (session) =>
+          session.runtimeTargetId == runtimeTargetId && session.id == sessionId,
+    );
+    if (index >= 0 &&
+        (sessions[index].cwd != selectedWorkspace ||
+            sessions[index].profile != selectedProfile)) {
+      sessions[index] = sessions[index].copyWith(
+        cwd: selectedWorkspace,
+        profile: selectedProfile,
+      );
+      _scheduleCatalogSave();
+    }
   }
 
   void _hydrateProfiles(RuntimeConnection connection) {
@@ -2041,6 +2215,12 @@ final class ZommiController extends ChangeNotifier {
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
+    _catalogStartupTimer?.cancel();
+    for (final (_, completion) in _catalogQueue) {
+      completion.complete();
+    }
+    _catalogQueue.clear();
+    await flushSessionCatalog();
     await _coreEvents?.cancel();
     await _desktopEvents?.cancel();
     await Future.wait([core.close(), desktop.close()]);

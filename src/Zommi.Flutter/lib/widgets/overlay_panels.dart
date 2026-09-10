@@ -201,7 +201,9 @@ class SessionSidebar extends StatelessWidget {
                       tooltip: 'Retry loading chats',
                       onPressed: controller.sessionCatalogLoading
                           ? null
-                          : () => unawaited(controller.refreshSessionCatalog()),
+                          : () => unawaited(
+                              controller.refreshSessionCatalog(force: true),
+                            ),
                       icon: const Icon(Icons.refresh_rounded, size: 16),
                     ),
                   ],
