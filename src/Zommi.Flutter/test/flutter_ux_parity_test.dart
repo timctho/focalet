@@ -823,6 +823,13 @@ void main() {
     await tester.tap(find.text('Large'));
     await tester.pumpAndSettle();
     expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('zommi-composer')))
+          .style
+          ?.fontSize,
+      14,
+    );
+    expect(
       Theme.of(tester.element(find.byType(ZommiShell)))
           .extension<ZommiVisualSettings>()
           ?.chatFontSize,
@@ -857,7 +864,7 @@ void main() {
   });
 
   testWidgets(
-    'chat typography stays readable without changing composer layout',
+    'composer and message typography share the configured font, size, and weight',
     (tester) async {
       final core = RichFakeCore()..historyCount = 0;
       final desktop = FakeDesktopBridge();
@@ -886,7 +893,9 @@ void main() {
       final field = tester.widget<TextField>(
         find.byKey(const ValueKey('zommi-composer')),
       );
-      expect(field.style?.fontSize, 12);
+      expect(field.style?.fontSize, 13);
+      expect(field.style?.fontWeight, FontWeight.w400);
+      expect(field.style?.fontFamily, codexUiFontFamily);
       expect(field.textAlignVertical, TextAlignVertical.center);
       final markdown = tester.widgetList<MarkdownBody>(
         find.byType(MarkdownBody),
@@ -897,6 +906,7 @@ void main() {
           .whereType<double>()
           .toSet();
       expect(bodySizes, <double>{13});
+      expect(bodySizes, {field.style?.fontSize});
       expect(
         markdown.map((body) => body.styleSheet?.p?.fontWeight),
         everyElement(FontWeight.w400),

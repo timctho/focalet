@@ -62,9 +62,9 @@ TranscriptBlock? _historyBlock(Map<String, Object?> item, String? cwd) {
       return TranscriptBlock(
         id: id,
         kind: phase == 'commentary'
-            ? TranscriptKind.thinking
+            ? TranscriptKind.commentary
             : TranscriptKind.assistant,
-        title: phase == 'commentary' ? 'Thinking' : 'Agent',
+        title: 'Agent',
         text: item['text']?.toString() ?? '',
         lifecycle: lifecycle,
         status: status,

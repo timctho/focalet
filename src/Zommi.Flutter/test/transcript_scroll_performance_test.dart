@@ -81,7 +81,9 @@ void main() {
         findsNothing,
       );
       debugOnRebuildDirtyWidget = null;
-      final toggle = find.byKey(const ValueKey('thinking-toggle-folded-turn'));
+      final toggle = find.byKey(
+        const ValueKey('thinking-toggle-folded-turn-tool-0'),
+      );
       await tester.ensureVisible(toggle);
       await tester.pump(const Duration(milliseconds: 200));
       await tester.tap(toggle);

@@ -977,13 +977,7 @@ impl Inner {
         {
             let item_id = value_string(params.pointer("/item/id"));
             if !item_id.is_empty() {
-                let kind = if params.pointer("/item/phase").and_then(Value::as_str)
-                    == Some("commentary")
-                {
-                    "thinking"
-                } else {
-                    "assistant"
-                };
+                let kind = agent_message_kind(&params["item"]);
                 state.item_kinds.insert(item_id.clone(), kind.into());
                 state.item_threads.insert(item_id, thread_id.clone());
             }
@@ -1211,7 +1205,7 @@ fn completed_agent_source_id(
     item_id: &str,
     kind: &str,
 ) -> Option<String> {
-    if state.item_kinds.contains_key(item_id) || !matches!(kind, "assistant" | "thinking") {
+    if state.item_kinds.contains_key(item_id) || !matches!(kind, "assistant" | "commentary") {
         return None;
     }
     let mut candidates = state.item_kinds.iter().filter(|(source_id, source_kind)| {
@@ -1226,6 +1220,14 @@ fn completed_agent_source_id(
         return None;
     }
     Some(source_id.clone())
+}
+
+fn agent_message_kind(item: &Value) -> &'static str {
+    if item.get("phase").and_then(Value::as_str) == Some("commentary") {
+        "commentary"
+    } else {
+        "assistant"
+    }
 }
 
 fn parse_stream_update(
@@ -1245,11 +1247,7 @@ fn parse_stream_update(
         return Some(update(
             kind,
             "delta",
-            if kind == "thinking" {
-                "Thinking"
-            } else {
-                "Codex"
-            },
+            "Codex",
             value_string(params.get("delta")),
             &item_id,
             None,
@@ -1321,21 +1319,11 @@ fn parse_stream_update(
         let kind = item_kinds
             .get(&item_id)
             .map(String::as_str)
-            .unwrap_or_else(|| {
-                if item.get("phase").and_then(Value::as_str) == Some("commentary") {
-                    "thinking"
-                } else {
-                    "assistant"
-                }
-            });
+            .unwrap_or_else(|| agent_message_kind(item));
         let mut value = update(
             kind,
             lifecycle,
-            if kind == "thinking" {
-                "Thinking"
-            } else {
-                "Codex"
-            },
+            "Codex",
             text.into(),
             &item_id,
             status,
@@ -1568,9 +1556,42 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        AdapterState, build_session_name, codex_runtime_version, completed_agent_source_id,
-        parse_stream_update,
+        AdapterState, agent_message_kind, build_session_name, codex_runtime_version,
+        completed_agent_source_id, parse_stream_update,
     };
+
+    #[test]
+    fn commentary_stays_a_message_during_streaming_and_completion() {
+        for (phase, expected) in [("commentary", "commentary"), ("final_answer", "assistant")] {
+            let item = json!({
+                "id": "agent", "type": "agentMessage", "phase": phase,
+                "text": "Checking the selected rows"
+            });
+            let kind = agent_message_kind(&item);
+            assert_eq!(kind, expected);
+            let kinds = HashMap::from([("agent".into(), kind.into())]);
+            let delta = parse_stream_update(
+                "item/agentMessage/delta",
+                &json!({"itemId": "agent", "delta": "Checking"}),
+                &kinds,
+                None,
+            )
+            .unwrap();
+            assert_eq!(delta["kind"], expected);
+            for known_kinds in [&kinds, &HashMap::new()] {
+                let completed = parse_stream_update(
+                    "item/completed",
+                    &json!({"item": item}),
+                    known_kinds,
+                    None,
+                )
+                .unwrap();
+                assert_eq!(completed["kind"], expected);
+                assert_eq!(completed["text"], item["text"]);
+                assert_eq!(completed["replace"], true);
+            }
+        }
+    }
 
     #[test]
     fn rekeyed_completion_only_matches_an_unambiguous_agent_in_the_same_thread() {

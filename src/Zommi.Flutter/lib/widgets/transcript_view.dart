@@ -166,14 +166,17 @@ class _TranscriptPaneState extends State<TranscriptPane> {
     final revision = Object.hash(
       transcriptContentRevision([turn], visibleOnly: true),
       turn.activityExpanded,
+      Object.hashAll(
+        turn.activityGroupExpansion.entries.map(
+          (entry) => Object.hash(entry.key, entry.value),
+        ),
+      ),
       Object.hashAll(turn.contextTokens),
       Object.hashAll(
         turn.blocks
             .where(
               (block) =>
-                  turn.activityExpanded ||
-                  (block.kind != TranscriptKind.thinking &&
-                      block.kind != TranscriptKind.tool),
+                  turn.hasExpandedActivity || !block.kind.isFoldedActivity,
             )
             .expand((block) => [block.title, block.status, block.expanded]),
       ),
@@ -211,7 +214,7 @@ class _TranscriptPaneState extends State<TranscriptPane> {
     // Bound retained render trees by both row count and visible source size.
     // Running/expanded activity and image-heavy rows are not retained offscreen.
     final eligible =
-        !turn.activityExpanded &&
+        !turn.hasExpandedActivity &&
         turn.attachments.isEmpty &&
         turn.blocks.every(
           (block) => block.completed && block.artifacts.isEmpty,
@@ -219,11 +222,7 @@ class _TranscriptPaneState extends State<TranscriptPane> {
     final characters =
         turn.userText.length +
         turn.blocks
-            .where(
-              (block) =>
-                  block.kind != TranscriptKind.thinking &&
-                  block.kind != TranscriptKind.tool,
-            )
+            .where((block) => !block.kind.isFoldedActivity)
             .fold<int>(0, (sum, block) => sum + block.text.length);
     return _RetainedTurn(
       key: ValueKey('turn-layout-${turn.id}'),
@@ -360,18 +359,16 @@ class ConversationTurnView extends StatelessWidget {
       'normalizeBlocks',
       () => distinctTranscriptBlocks(turn.blocks),
     );
-    final activities = blocks
-        .where(
-          (block) =>
-              block.kind == TranscriptKind.thinking ||
-              block.kind == TranscriptKind.tool,
-        )
-        .toList(growable: false);
-    final firstActivityIndex = blocks.indexWhere(
-      (block) =>
-          block.kind == TranscriptKind.thinking ||
-          block.kind == TranscriptKind.tool,
-    );
+    final segments = <List<TranscriptBlock>>[];
+    for (final block in blocks) {
+      if (block.kind.isFoldedActivity &&
+          segments.isNotEmpty &&
+          segments.last.first.kind.isFoldedActivity) {
+        segments.last.add(block);
+      } else {
+        segments.add([block]);
+      }
+    }
     return Semantics(
       container: true,
       label: 'Conversation turn ${turn.number}',
@@ -443,14 +440,14 @@ class ConversationTurnView extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
-            for (var index = 0; index < blocks.length; index++)
-              if (blocks[index].kind != TranscriptKind.tool &&
-                  blocks[index].kind != TranscriptKind.thinking)
+            for (final segment in segments)
+              if (!segment.first.kind.isFoldedActivity)
                 Padding(
+                  key: ValueKey('message-segment-${segment.first.id}'),
                   padding: const EdgeInsets.only(bottom: 9),
-                  child: blocks[index].kind == TranscriptKind.assistant
+                  child: segment.first.kind.isMessage
                       ? AssistantBlockView(
-                          block: blocks[index],
+                          block: segment.first,
                           width: responsiveAssistantMessageBoxWidth(
                             viewportWidth,
                           ),
@@ -458,19 +455,20 @@ class ConversationTurnView extends StatelessWidget {
                           controller: controller,
                         )
                       : ActivityBlockView(
-                          block: blocks[index],
+                          block: segment.first,
                           width: responsiveAssistantMessageBoxWidth(
                             viewportWidth,
                           ),
                           controller: controller,
                         ),
                 )
-              else if (index == firstActivityIndex)
+              else
                 Padding(
+                  key: ValueKey('activity-segment-${segment.first.id}'),
                   padding: const EdgeInsets.only(bottom: 9),
                   child: ThinkingActivityGroup(
                     turn: turn,
-                    activities: activities,
+                    activities: segment,
                     width: responsiveAssistantMessageBoxWidth(viewportWidth),
                     controller: controller,
                   ),
@@ -497,9 +495,8 @@ int transcriptContentRevision(
         ...turn.blocks.expand(
           (block) =>
               visibleOnly &&
-                  !turn.activityExpanded &&
-                  (block.kind == TranscriptKind.thinking ||
-                      block.kind == TranscriptKind.tool)
+                  !turn.hasExpandedActivity &&
+                  block.kind.isFoldedActivity
               ? <Object?>[
                   block.id,
                   block.kind,
@@ -695,8 +692,12 @@ class ThinkingActivityGroup extends StatelessWidget {
   final double width;
   final ZommiController controller;
 
+  String get groupId => activities.first.id;
+  String get id => '${turn.id}-$groupId';
+
   @override
   Widget build(BuildContext context) {
+    final expanded = turn.isActivityGroupExpanded(groupId);
     final completed = activities.every((activity) => activity.completed);
     final toolCount = activities
         .where((activity) => activity.kind == TranscriptKind.tool)
@@ -709,7 +710,7 @@ class ThinkingActivityGroup extends StatelessWidget {
         child: ConstrainedBox(
           constraints: BoxConstraints.tightFor(width: width),
           child: Container(
-            key: ValueKey('activity-section-${turn.id}'),
+            key: ValueKey('activity-section-$id'),
             decoration: BoxDecoration(
               color: const Color(0x80ffffff),
               borderRadius: BorderRadius.circular(14),
@@ -719,11 +720,12 @@ class ThinkingActivityGroup extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 InkWell(
-                  key: ValueKey('thinking-toggle-${turn.id}'),
+                  key: ValueKey('thinking-toggle-$id'),
                   borderRadius: BorderRadius.circular(14),
                   onTap: () => controller.setTurnActivityExpanded(
                     turn,
-                    !turn.activityExpanded,
+                    !expanded,
+                    groupId: groupId,
                   ),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
@@ -772,7 +774,7 @@ class ThinkingActivityGroup extends StatelessWidget {
                           ),
                         const SizedBox(width: 5),
                         Icon(
-                          turn.activityExpanded
+                          expanded
                               ? Icons.expand_less_rounded
                               : Icons.expand_more_rounded,
                           size: 17,
@@ -782,8 +784,8 @@ class ThinkingActivityGroup extends StatelessWidget {
                   ),
                 ),
                 _ExpandableActivityBody(
-                  key: ValueKey('thinking-fold-${turn.id}'),
-                  expanded: turn.activityExpanded,
+                  key: ValueKey('thinking-fold-$id'),
+                  expanded: expanded,
                   duration: completed
                       ? const Duration(milliseconds: 150)
                       : Duration.zero,

@@ -161,6 +161,9 @@ final class InlineAttachmentTextController extends TextEditingController {
       text: text,
       attachments: _attachments,
       style: style,
+      composing: withComposing && value.isComposingRangeValid
+          ? value.composing
+          : TextRange.empty,
       tileBuilder: (attachment) => InlineAttachmentTile(
         key: ValueKey('composer-inline-tile-${attachment.id}'),
         attachment: attachment,
@@ -240,17 +243,48 @@ List<InlineSpan> inlineAttachmentSpans({
   required List<ContextAttachment> attachments,
   required TextStyle? style,
   required Widget Function(ContextAttachment attachment) tileBuilder,
+  TextRange composing = TextRange.empty,
 }) {
   final spans = <InlineSpan>[];
+  final showComposing =
+      composing.isValid &&
+      !composing.isCollapsed &&
+      composing.end <= text.length;
+  void addText(int start, int end) {
+    if (start >= end) return;
+    if (!showComposing || composing.end <= start || composing.start >= end) {
+      spans.add(TextSpan(text: text.substring(start, end), style: style));
+      return;
+    }
+    final composingStart = composing.start.clamp(start, end);
+    final composingEnd = composing.end.clamp(start, end);
+    if (start < composingStart) {
+      spans.add(
+        TextSpan(text: text.substring(start, composingStart), style: style),
+      );
+    }
+    spans.add(
+      TextSpan(
+        text: text.substring(composingStart, composingEnd),
+        style:
+            style?.merge(
+              const TextStyle(decoration: TextDecoration.underline),
+            ) ??
+            const TextStyle(decoration: TextDecoration.underline),
+      ),
+    );
+    if (composingEnd < end) {
+      spans.add(
+        TextSpan(text: text.substring(composingEnd, end), style: style),
+      );
+    }
+  }
+
   var textStart = 0;
   var attachmentIndex = 0;
   for (var offset = 0; offset < text.length; offset++) {
     if (text[offset] != inlineAttachmentMarker) continue;
-    if (textStart < offset) {
-      spans.add(
-        TextSpan(text: text.substring(textStart, offset), style: style),
-      );
-    }
+    addText(textStart, offset);
     if (attachmentIndex < attachments.length) {
       spans.add(
         WidgetSpan(
@@ -265,9 +299,7 @@ List<InlineSpan> inlineAttachmentSpans({
     attachmentIndex++;
     textStart = offset + 1;
   }
-  if (textStart < text.length) {
-    spans.add(TextSpan(text: text.substring(textStart), style: style));
-  }
+  addText(textStart, text.length);
   return spans;
 }
 
