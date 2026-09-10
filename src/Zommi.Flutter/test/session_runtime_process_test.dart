@@ -26,6 +26,13 @@ void main() {
               .path,
         ]),
         'ZOMMI_HERMES_COMMAND': python,
+        'ZOMMI_OPENCLAW_COMMAND': python,
+        for (final adapter in ['HERMES_ACP', 'OPENCLAW_ACP'])
+          'ZOMMI_${adapter}_ARGS_JSON': jsonEncode([
+            File('../../crates/zommi-core-host/tests/fake_acp_runtime.py')
+                .absolute
+                .path,
+          ]),
         'ZOMMI_HERMES_GATEWAY_ARGS_JSON': jsonEncode([
           File('../../crates/zommi-core-host/tests/fake_gateway_runtime.py')
               .absolute

@@ -41,6 +41,7 @@ pub struct HermesGatewayConfig {
     pub command: RuntimeCommand,
     pub cwd: PathBuf,
     pub preferred_session_id: Option<String>,
+    pub list_only: bool,
 }
 
 pub struct HermesGatewayTurnRequest<'a> {
@@ -261,14 +262,21 @@ impl HermesGatewayAdapter {
                 inner.handle_process_exit(status).await;
             }
         }));
-        if let Err(error) = adapter.initialize(config.preferred_session_id).await {
+        if let Err(error) = adapter
+            .initialize(config.preferred_session_id, config.list_only)
+            .await
+        {
             adapter.shutdown().await;
             return Err(error);
         }
         Ok(adapter)
     }
 
-    async fn initialize(&self, preferred_session_id: Option<String>) -> Result<(), CodexError> {
+    async fn initialize(
+        &self,
+        preferred_session_id: Option<String>,
+        list_only: bool,
+    ) -> Result<(), CodexError> {
         if !self.inner.state.lock().await.gateway_ready {
             timeout(REQUEST_TIMEOUT, self.inner.ready.notified())
                 .await
@@ -278,6 +286,9 @@ impl HermesGatewayAdapter {
                         "Hermes Gateway did not emit gateway.ready.",
                     )
                 })?;
+        }
+        if list_only {
+            return Ok(());
         }
         let sessions = self.load_sessions().await?;
         if let Some(session_id) = preferred_session_id

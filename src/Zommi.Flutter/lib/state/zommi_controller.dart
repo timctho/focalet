@@ -42,6 +42,9 @@ final class ZommiController extends ChangeNotifier {
   final Map<String, String> _runtimeTargetAliases = {};
   final Map<String, RuntimeTarget> _knownRuntimes = {};
   final Map<String, Set<String>> _runtimeCapabilities = {};
+  final Set<String> _catalogLoaded = {};
+  final Set<String> _catalogLoading = {};
+  final Set<String> _catalogErrors = {};
 
   StreamSubscription<CoreEvent>? _coreEvents;
   StreamSubscription<DesktopInvocation>? _desktopEvents;
@@ -144,6 +147,18 @@ final class ZommiController extends ChangeNotifier {
 
   bool get sessionCreationSupported =>
       visibleRuntimeTargets.any(canCreateSession);
+
+  bool get sessionCatalogLoading => _catalogLoading.isNotEmpty;
+
+  String? get sessionCatalogError {
+    final names = visibleRuntimeTargets
+        .where((target) => _catalogErrors.contains(target.id))
+        .map((target) => target.displayName)
+        .toSet();
+    return names.isEmpty
+        ? null
+        : '${names.join(', ')} chats could not be loaded';
+  }
 
   bool canCreateSession(RuntimeTarget target) =>
       (_runtimeCapabilities[target.id] ?? target.capabilityHints.toSet())
@@ -264,6 +279,7 @@ final class ZommiController extends ChangeNotifier {
       await desktopInitialization;
       starting = false;
       _notify();
+      unawaited(refreshSessionCatalog());
     }
   }
 
@@ -312,6 +328,50 @@ final class ZommiController extends ChangeNotifier {
     } finally {
       runtimeBusy = false;
       _notify();
+      unawaited(refreshSessionCatalog(force: true));
+    }
+  }
+
+  Future<void> refreshSessionCatalog({bool force = false}) async {
+    if (_closed || core is! SessionCatalogBridge) return;
+    final catalog = core as SessionCatalogBridge;
+    final targets = visibleRuntimeTargets
+        .where(
+          (target) =>
+              target.id != activeRuntime?.id &&
+              target.capabilityHints.contains('session.list.v1') &&
+              !_catalogLoading.contains(target.id) &&
+              (force || !_catalogLoaded.contains(target.id)),
+        )
+        .toList();
+    _catalogLoading.addAll(targets.map((target) => target.id));
+    if (targets.isNotEmpty) _notify();
+    // Bound startup work while letting each successful runtime populate Chats
+    // independently of a slow or unavailable provider.
+    for (var offset = 0; offset < targets.length && !_closed; offset += 2) {
+      await Future.wait(
+        targets.skip(offset).take(2).map((target) async {
+          try {
+            final values = await catalog.listSessionCatalog(
+              runtimeTargetId: target.id,
+            );
+            if (_closed ||
+                !visibleRuntimeTargets.any((value) => value.id == target.id)) {
+              return;
+            }
+            _knownRuntimes[target.id] = target;
+            _mergeSessions(target.id, values);
+            _hydrateSessionSettingsFromSummaries(target.id);
+            _catalogLoaded.add(target.id);
+            _catalogErrors.remove(target.id);
+          } on Object {
+            if (!_closed) _catalogErrors.add(target.id);
+          } finally {
+            _catalogLoading.remove(target.id);
+            _notify();
+          }
+        }),
+      );
     }
   }
 
@@ -639,6 +699,8 @@ final class ZommiController extends ChangeNotifier {
       _modelCatalogs[connection.runtimeTargetId] = List.of(connection.models);
     }
     _mergeSessions(connection.runtimeTargetId, connection.sessions);
+    _catalogLoaded.add(connection.runtimeTargetId);
+    _catalogErrors.remove(connection.runtimeTargetId);
   }
 
   void _activateConnection(RuntimeConnection connection) {
@@ -1186,6 +1248,7 @@ final class ZommiController extends ChangeNotifier {
       appSettingsPanelOpen = false;
     }
     _notify();
+    if (sessionPanelOpen) unawaited(refreshSessionCatalog());
   }
 
   void toggleRuntimeSetupPanel([bool? open]) {

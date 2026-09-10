@@ -5,7 +5,8 @@ import 'package:zommi_flutter/desktop/artifact_loader.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 
-final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
+final class RichFakeCore
+    implements CoreBridge, RuntimeConfigurationBridge, SessionCatalogBridge {
   final StreamController<CoreEvent> _events =
       StreamController<CoreEvent>.broadcast(sync: true);
   String activeTargetId = 'runtime-codex';
@@ -40,6 +41,9 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
   final Map<String, Map<String, Object?>> historyBySession = {};
   final Map<String, List<Map<String, Object?>>> modelCatalogByRuntime = {};
   final Map<String, List<Map<String, Object?>>> sessionsByRuntime = {};
+  final List<String> catalogRequests = [];
+  final Map<String, Future<void>> catalogGates = {};
+  final Set<String> catalogFailures = {};
   final List<Map<String, Object?>> configuredOverrides = [
     {
       'id': 'override-existing',
@@ -282,6 +286,21 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
   Future<List<Map<String, Object?>>> listSessions({
     required String runtimeTargetId,
   }) async => _sessions();
+
+  @override
+  Future<List<Map<String, Object?>>> listSessionCatalog({
+    required String runtimeTargetId,
+  }) async {
+    catalogRequests.add(runtimeTargetId);
+    if (catalogGates[runtimeTargetId] case final gate?) await gate;
+    if (catalogFailures.contains(runtimeTargetId)) {
+      throw const CoreProtocolException(
+        'runtime-unavailable',
+        'Agent unavailable',
+      );
+    }
+    return sessionsByRuntime[runtimeTargetId] ?? const [];
+  }
 
   @override
   Future<RuntimeConnection> createSession({

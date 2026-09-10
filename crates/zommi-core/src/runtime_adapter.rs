@@ -47,10 +47,58 @@ impl RuntimeAdapter {
         preferred_session_file: Option<String>,
         event_tx: EventSender,
     ) -> Result<Self, CodexError> {
+        Self::connect_with_mode(
+            target,
+            command,
+            cwd,
+            preferred_session_id,
+            preferred_session_file,
+            event_tx,
+            false,
+        )
+        .await
+    }
+
+    pub async fn connect_for_listing(
+        target: RuntimeTarget,
+        command: RuntimeCommand,
+        cwd: PathBuf,
+        event_tx: EventSender,
+    ) -> Result<Self, CodexError> {
+        if !matches!(
+            target.adapter_id.as_str(),
+            "codex-app-server"
+                | "hermes-gateway"
+                | "hermes-acp"
+                | "openclaw-acp"
+                | "openclaw-gateway"
+        ) {
+            return Err(CodexError {
+                code: "capability-unavailable".into(),
+                message: "This runtime does not support listing saved chats without opening one."
+                    .into(),
+                retryable: false,
+            });
+        }
+        Self::connect_with_mode(target, command, cwd, None, None, event_tx, true).await
+    }
+
+    async fn connect_with_mode(
+        target: RuntimeTarget,
+        command: RuntimeCommand,
+        cwd: PathBuf,
+        preferred_session_id: Option<String>,
+        preferred_session_file: Option<String>,
+        event_tx: EventSender,
+        list_only: bool,
+    ) -> Result<Self, CodexError> {
         match target.adapter_id.as_str() {
             "codex-app-server" => Ok(Self::Codex(
                 CodexAdapter::connect(
-                    CodexConfig::new(target, command, cwd, preferred_session_id),
+                    CodexConfig {
+                        list_only,
+                        ..CodexConfig::new(target, command, cwd, preferred_session_id)
+                    },
                     event_tx,
                 )
                 .await?,
@@ -62,6 +110,7 @@ impl RuntimeAdapter {
                         command,
                         cwd,
                         preferred_session_id,
+                        list_only,
                     },
                     event_tx,
                 )
@@ -74,6 +123,7 @@ impl RuntimeAdapter {
                         command,
                         cwd,
                         preferred_session_id,
+                        list_only,
                     },
                     event_tx,
                 )
@@ -84,6 +134,7 @@ impl RuntimeAdapter {
                     OpenClawGatewayConfig {
                         target,
                         preferred_session_id,
+                        list_only,
                     },
                     event_tx,
                 )

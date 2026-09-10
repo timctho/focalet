@@ -88,6 +88,7 @@ pub struct CodexConfig {
     pub command: RuntimeCommand,
     pub cwd: PathBuf,
     pub preferred_session_id: Option<String>,
+    pub list_only: bool,
     pub request_timeout: Duration,
 }
 
@@ -103,6 +104,7 @@ impl CodexConfig {
             command,
             cwd,
             preferred_session_id,
+            list_only: false,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
         }
     }
@@ -258,14 +260,21 @@ impl CodexAdapter {
         });
         *adapter.inner.wait_task.lock().await = Some(wait_task);
 
-        if let Err(error) = adapter.initialize(config.preferred_session_id).await {
+        if let Err(error) = adapter
+            .initialize(config.preferred_session_id, config.list_only)
+            .await
+        {
             adapter.shutdown().await;
             return Err(error);
         }
         Ok(adapter)
     }
 
-    async fn initialize(&self, preferred_session_id: Option<String>) -> Result<(), CodexError> {
+    async fn initialize(
+        &self,
+        preferred_session_id: Option<String>,
+        list_only: bool,
+    ) -> Result<(), CodexError> {
         let initialized = self
             .inner
             .request(
@@ -286,6 +295,9 @@ impl CodexAdapter {
         }
         self.inner.notify("initialized", json!({})).await?;
 
+        if list_only {
+            return Ok(());
+        }
         let tools_adapter = self.clone();
         tokio::spawn(async move {
             let result = tools_adapter

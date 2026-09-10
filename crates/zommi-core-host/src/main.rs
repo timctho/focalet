@@ -165,6 +165,7 @@ impl HostState {
                     "runtime.adapters.v1",
                     "session.binding.v1",
                     "session.list.v1",
+                    "session.catalog.v1",
                     "session.create.v1",
                     "session.resume.v1",
                     "session.configure.v1",
@@ -247,7 +248,11 @@ impl HostState {
                 self.refresh_runtime_targets(true).await?;
                 Ok(self.discovery_value(payload))
             }
-            "runtime.connect" => self.connect_runtime(payload).await,
+            "runtime.connect" => self.connect_runtime(payload, false).await,
+            "session.catalog" => {
+                required_string(payload, "runtimeTargetId")?;
+                self.connect_runtime(payload, true).await
+            }
             "session.list" => {
                 let adapter = self.exact_adapter(payload)?;
                 Ok(json!({"data": adapter.list_sessions().await?}))
@@ -538,7 +543,11 @@ impl HostState {
         })
     }
 
-    async fn connect_runtime(&mut self, payload: &Value) -> Result<Value, HostError> {
+    async fn connect_runtime(
+        &mut self,
+        payload: &Value,
+        catalog_only: bool,
+    ) -> Result<Value, HostError> {
         if self.targets.is_empty() {
             self.refresh_runtime_targets(false).await?;
         }
@@ -619,6 +628,9 @@ impl HostState {
                     .map(str::to_owned)
             });
         if let Some(adapter) = self.adapters.get(&target.id).cloned() {
+            if adapter.is_running().await && catalog_only {
+                return Ok(json!({"data": adapter.list_sessions().await?}));
+            }
             if adapter.is_running().await {
                 let connection = adapter.connection_value().await?;
                 let session_id = adapter.active_session_id().await?;
@@ -658,6 +670,19 @@ impl HostState {
         if cfg!(target_os = "windows") && target.execution_host.kind == "wsl" {
             runtime_command = wsl_relay::wrap_wsl_command(&target, runtime_command)
                 .map_err(|error| HostError::new("runtime-unavailable", error.to_string()))?;
+        }
+        if catalog_only {
+            let adapter = RuntimeAdapter::connect_for_listing(
+                target,
+                runtime_command,
+                cwd,
+                self.event_tx.clone(),
+            )
+            .await?;
+            // Listing has no selected session and must never persist a binding.
+            let result = adapter.list_sessions().await;
+            adapter.shutdown().await;
+            return Ok(json!({"data": result?}));
         }
         let adapter = RuntimeAdapter::connect(
             target,
@@ -834,6 +859,9 @@ async fn main() -> io::Result<()> {
     #[cfg(target_os = "linux")]
     parent_lifetime::bind_to_parent()?;
     let arguments = env::args().skip(1).collect::<Vec<_>>();
+    let catalog_worker = arguments
+        .iter()
+        .any(|argument| argument == "--session-catalog-worker");
     if arguments
         .first()
         .is_some_and(|argument| argument == "--wsl-proxy")
@@ -883,6 +911,32 @@ async fn main() -> io::Result<()> {
             )
         } else {
             match serde_json::from_str::<CoreRequest>(&line) {
+                Ok(request)
+                    if catalog_worker
+                        && request.operation.as_deref() == Some("session.catalog") =>
+                {
+                    // This dedicated host only reads a catalog. Accept shutdown
+                    // while a provider is starting so closing the UI cancels
+                    // the read and drops its child processes promptly.
+                    tokio::select! {
+                        action = state.handle(request) => action,
+                        next = lines.next_line() => {
+                            let shutdown = next?.filter(|line| line.len() <= MAX_REQUEST_BYTES)
+                                .and_then(|line| serde_json::from_str::<CoreRequest>(&line).ok())
+                                .filter(|request| request.protocol_version == Some(CORE_PROTOCOL_VERSION)
+                                    && request.operation.as_deref() == Some("core.shutdown")
+                                    && request.id.as_deref().is_some_and(|id| !id.is_empty())
+                                    && request.payload.is_object());
+                            HostAction {
+                                response: match shutdown {
+                                    Some(request) => success_response(request.id, json!({"shutdown": true})),
+                                    None => failure(None, "core-closed", "Catalog worker input closed.", false).response,
+                                },
+                                shutdown: true,
+                            }
+                        }
+                    }
+                }
                 Ok(request) => state.handle(request).await,
                 Err(error) => failure(
                     None,

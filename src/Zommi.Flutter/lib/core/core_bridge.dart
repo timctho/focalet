@@ -109,6 +109,13 @@ abstract interface class RuntimeConfigurationBridge {
   Future<RuntimeDiscovery> removeRuntimeOverride(String overrideId);
 }
 
+abstract interface class SessionCatalogBridge {
+  /// Lists stored chats without creating, resuming, or selecting a session.
+  Future<List<Map<String, Object?>>> listSessionCatalog({
+    required String runtimeTargetId,
+  });
+}
+
 final class RuntimeTarget {
   const RuntimeTarget({
     required this.id,
@@ -304,16 +311,23 @@ final class CoreProtocolException implements Exception {
 }
 
 final class ProcessCoreBridge
-    implements CoreBridge, RuntimeConfigurationBridge {
+    implements CoreBridge, RuntimeConfigurationBridge, SessionCatalogBridge {
   ProcessCoreBridge({
     this.executablePath,
     this.requestTimeout = const Duration(seconds: 30),
     this.environment = const {},
-  });
+  }) : _catalogWorker = false;
+
+  ProcessCoreBridge._catalog({
+    required this.executablePath,
+    required this.environment,
+  }) : requestTimeout = const Duration(seconds: 90),
+       _catalogWorker = true;
 
   final String? executablePath;
   final Duration requestTimeout;
   final Map<String, String> environment;
+  final bool _catalogWorker;
   final Map<String, Completer<Map<String, Object?>>> _pending = {};
   final StreamController<CoreEvent> _events =
       StreamController<CoreEvent>.broadcast(sync: true);
@@ -324,6 +338,8 @@ final class ProcessCoreBridge
   int _nextId = 0;
   String _stderr = '';
   bool _closing = false;
+  Future<void>? _closeFuture;
+  final Set<ProcessCoreBridge> _catalogWorkers = {};
 
   @override
   Stream<CoreEvent> get events => _events.stream;
@@ -413,6 +429,35 @@ final class ProcessCoreBridge
       'runtimeTargetId': runtimeTargetId,
     });
     return _mapList(result['data']);
+  }
+
+  @override
+  Future<List<Map<String, Object?>>> listSessionCatalog({
+    required String runtimeTargetId,
+  }) async {
+    if (_closing) {
+      throw const CoreProtocolException(
+        'core-closed',
+        'The Rust core was closed.',
+      );
+    }
+    // Runtime startup can be slow. A short-lived listing host keeps it off the
+    // foreground host's request queue and never changes the persisted binding.
+    final worker = ProcessCoreBridge._catalog(
+      executablePath: executablePath,
+      environment: environment,
+    );
+    _catalogWorkers.add(worker);
+    try {
+      await worker.initialize();
+      final result = await worker._request('session.catalog', {
+        'runtimeTargetId': runtimeTargetId,
+      });
+      return _mapList(result['data']);
+    } finally {
+      await worker.close();
+      _catalogWorkers.remove(worker);
+    }
   }
 
   @override
@@ -584,7 +629,18 @@ final class ProcessCoreBridge
     String operation, [
     Map<String, Object?> payload = const {},
   ]) async {
+    void checkOpen() {
+      if (_closing && operation != 'core.shutdown') {
+        throw const CoreProtocolException(
+          'core-closed',
+          'The Rust core was closed.',
+        );
+      }
+    }
+
+    checkOpen();
     await _ensureStarted();
+    checkOpen();
     final process = _process;
     if (process == null) {
       throw const CoreProtocolException(
@@ -636,7 +692,7 @@ final class ProcessCoreBridge
   Future<void> _startProcess() async {
     final process = await Process.start(
       _resolveExecutablePath(),
-      const [],
+      _catalogWorker ? const ['--session-catalog-worker'] : const [],
       runInShell: false,
       environment: environment,
       includeParentEnvironment: true,
@@ -724,8 +780,11 @@ final class ProcessCoreBridge
   }
 
   @override
-  Future<void> close() async {
+  Future<void> close() => _closeFuture ??= _close();
+
+  Future<void> _close() async {
     _closing = true;
+    await Future.wait(_catalogWorkers.toList().map((worker) => worker.close()));
     try {
       await _starting;
     } on Object {
