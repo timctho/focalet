@@ -1,12 +1,13 @@
 import 'dart:async';
 
-import 'package:zommi_flutter/diagnostics/scroll_performance.dart';
+import 'package:zommi_flutter/core/core_bridge.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/desktop/artifact_loader.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
+import 'package:zommi_flutter/diagnostics/scroll_performance.dart';
+import 'package:zommi_flutter/state/session_catalog_store.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
@@ -30,6 +31,8 @@ class ZommiApp extends StatefulWidget {
     required this.core,
     this.desktop = const NoopDesktopBridge(),
     this.artifactLoader,
+    this.sessionCatalogStore = const NoopSessionCatalogStore(),
+    this.catalogStartupDelay = Duration.zero,
     this.initialPreferences = const AppPreferences(),
     this.preferencesStore = const NoopAppPreferencesStore(),
     super.key,
@@ -38,6 +41,8 @@ class ZommiApp extends StatefulWidget {
   final CoreBridge core;
   final DesktopBridge desktop;
   final ArtifactLoader? artifactLoader;
+  final SessionCatalogStore sessionCatalogStore;
+  final Duration catalogStartupDelay;
   final AppPreferences initialPreferences;
   final AppPreferencesStore preferencesStore;
 
@@ -97,6 +102,8 @@ class _ZommiAppState extends State<ZommiApp> {
         core: widget.core,
         desktop: widget.desktop,
         artifactLoader: widget.artifactLoader,
+        sessionCatalogStore: widget.sessionCatalogStore,
+        catalogStartupDelay: widget.catalogStartupDelay,
         preferences: _preferences,
         onPreferencesChanged: _updatePreferences,
       ),
@@ -137,12 +144,16 @@ class ZommiShell extends StatefulWidget {
     required this.onPreferencesChanged,
     this.desktop = const NoopDesktopBridge(),
     this.artifactLoader,
+    this.sessionCatalogStore = const NoopSessionCatalogStore(),
+    this.catalogStartupDelay = Duration.zero,
     super.key,
   });
 
   final CoreBridge core;
   final DesktopBridge desktop;
   final ArtifactLoader? artifactLoader;
+  final SessionCatalogStore sessionCatalogStore;
+  final Duration catalogStartupDelay;
   final AppPreferences preferences;
   final ValueChanged<AppPreferences> onPreferencesChanged;
 
@@ -176,6 +187,8 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
       core: widget.core,
       desktop: widget.desktop,
       artifactLoader: widget.artifactLoader,
+      sessionCatalogStore: widget.sessionCatalogStore,
+      catalogStartupDelay: widget.catalogStartupDelay,
       initialWindowSize: widget.preferences.windowSize,
     );
     _composer = InlineAttachmentTextController(
