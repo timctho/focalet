@@ -156,7 +156,8 @@ packaged helper and retain that evidence separately from the fixture results.
 ## Multiline composer
 
 Type one line, then add a second with Shift+Enter. The composer must grow upward
-immediately, with the bottom edge and Send/Select content controls fixed. Continue
+immediately, keeping the bottom edge fixed and Send/Select content vertically
+centered. Continue
 through five lines, then verify further lines scroll within the capped height.
 Deleting back to one line restores the original height. Repeat with soft-wrapped
 text and an attached context. `composer_growth_test.dart` covers these layout
