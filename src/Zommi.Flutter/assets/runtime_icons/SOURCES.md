@@ -8,7 +8,7 @@
 - claude: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/claude-color.svg
 - hermes: the official portrait app icon at https://raw.githubusercontent.com/NousResearch/hermes-agent/main/apps/desktop/assets/icon.png, also corroborated by the portrait favicon on https://hermes-agent.nousresearch.com/.
 
-Per the requested UI identity, Codex is represented by the OpenAI knot, tinted green (#10A37F). Hermes preserves the official portrait artwork with a gold frame (#E7BD65). These UI color treatments are not separate official logo variants. Claude and OpenClaw retain their upstream brand colors. Pi retains its upstream monochrome mark.
+Codex uses the original black OpenAI knot. Hermes uses the original black-and-white portrait app icon. Both preserve the source artwork and colors; only transparent padding and export resolution are normalized. Claude and OpenClaw retain their upstream brand colors. Pi retains its upstream monochrome mark.
 
 Lobe Icons license:
 
