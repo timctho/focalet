@@ -2,13 +2,13 @@
 
 96px PNG exports, displayed at 14 logical pixels in Chats and 16 in the runtime picker. Transparent padding is normalized before downsampling.
 
-- codex: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/codex-color.svg
+- codex: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/openai.svg
 - pi: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/pi.svg
 - openclaw: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/openclaw-color.svg
 - claude: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/claude-color.svg
-- hermes: the project mark `☤` in https://github.com/NousResearch/hermes-agent/blob/main/README.md, exported from the adjacent `hermes.svg` using DejaVu Sans with a gold gradient matching the project's gold visual identity. The website SVG favicon uses the distinct medical symbol `⚕` and is not used.
+- hermes: the official portrait app icon at https://raw.githubusercontent.com/NousResearch/hermes-agent/main/apps/desktop/assets/icon.png, also corroborated by the portrait favicon on https://hermes-agent.nousresearch.com/.
 
-Codex uses the blue/purple mark from the color app icon with its white background removed. Claude and OpenClaw retain their upstream brand colors. Pi retains its upstream monochrome mark.
+Per the requested UI identity, Codex is represented by the OpenAI knot, tinted green (#10A37F). Hermes preserves the official portrait artwork with a gold frame (#E7BD65). These UI color treatments are not separate official logo variants. Claude and OpenClaw retain their upstream brand colors. Pi retains its upstream monochrome mark.
 
 Lobe Icons license:
 
