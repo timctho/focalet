@@ -52,7 +52,7 @@ void main() {
       'CaptureMode.region',
       'skipTaskbar: false',
       'windowManager.minimize()',
-      'DesktopInvocationKind.captureStarted',
+      'DesktopInvocationKind.selectContent',
       "'--capture-host'",
       'Zommi.Capture.exe',
       "'selectImage',",
@@ -440,9 +440,9 @@ void main() {
       linuxAcceptance,
       allOf(
         contains('XTestFakeKeyEvent'),
-        contains('shortcut.image.cancelled'),
+        contains('selection.content'),
         contains('ZOMMI_X11_CONTEXT_FIXTURE'),
-        contains('alignmentStatus'),
+        contains('contentCancelRestoredFocusedTaskbar'),
       ),
     );
   });

@@ -1,10 +1,8 @@
 # Browser context selection
 
 On Windows, Zommi can enrich accessible context with DOM content from a local
-Chromium debugging connection. `Alt+A` captures the original text selection,
-the pointed element and nearby content. It does not attach pixels.
-
-Use **Select content** beside the composer to open the Windows content picker.
+Chromium debugging connection. Press `Alt+A` or use **Select content** beside
+the composer to open the same Windows content picker.
 Point at content to see its accessible outline, then click to attach it. Drag
 anywhere to choose a rectangle instead. The visible **Larger**, **Smaller** and
 **Whole window** controls change the scope without needing another shortcut.
@@ -62,7 +60,7 @@ References are included in the agent handoff beside the corresponding image
 index. Removed references are not reused within the same draft. Image markup
 and arrows are not included in this first version.
 
-`Alt+Shift+A` selects an image region. Text is collected from the final region,
+Drag in **Select content** to select an image region. Text is collected from the final region,
 not from the location of the pointer before dragging. The preview says **Image
 only** when structural data cannot be aligned. A text context can still be
 attached separately. Each image and its associated context retains an image

@@ -153,11 +153,7 @@ async fn portal_shortcuts() -> AppResult<()> {
     let response = portal
         .bind_shortcuts(
             &session,
-            &[
-                NewShortcut::new("context", "Capture context").preferred_trigger("ALT+a"),
-                NewShortcut::new("image", "Select image and pointer context")
-                    .preferred_trigger("ALT+SHIFT+a"),
-            ],
+            &[NewShortcut::new("context", "Select content").preferred_trigger("ALT+a")],
             None,
             BindShortcutsOptions::default(),
         )
@@ -167,20 +163,16 @@ async fn portal_shortcuts() -> AppResult<()> {
         .shortcuts()
         .iter()
         .any(|shortcut| shortcut.id() == "context");
-    let image_shortcut = response
-        .shortcuts()
-        .iter()
-        .any(|shortcut| shortcut.id() == "image");
     emit_json(&json!({
         "event": "ready",
         "provider": "wayland-portal",
         "portalVersion": portal.version(),
         "contextShortcut": context_shortcut,
-        "imageShortcut": image_shortcut,
+        "imageShortcut": false,
     }))?;
 
     while let Some(activation) = activations.next().await {
-        if matches!(activation.shortcut_id(), "context" | "image") {
+        if activation.shortcut_id() == "context" {
             emit_json(&json!({
                 "event": "activated",
                 "shortcutId": activation.shortcut_id(),

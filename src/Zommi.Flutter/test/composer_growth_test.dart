@@ -39,7 +39,6 @@ void main() {
         List.filled(16, 'Compare these table rows').join(' '),
       );
       await tester.pumpAndSettle();
-      final send = tester.getRect(find.byKey(const ValueKey('send-message')));
       await tester.tap(find.byKey(const ValueKey('select-content')));
       await tester.pumpAndSettle();
       final render = tester
@@ -53,7 +52,12 @@ void main() {
           .shift(Offset(0, -render.offset.pixels));
       expect(last.top, greaterThanOrEqualTo(viewport.top));
       expect(last.bottom, lessThanOrEqualTo(viewport.bottom));
-      expect(tester.getRect(find.byKey(const ValueKey('send-message'))), send);
+      expect(
+        tester.getCenter(find.byKey(const ValueKey('send-message'))).dy,
+        tester
+            .getCenter(find.byKey(const ValueKey('message-composer-shell')))
+            .dy,
+      );
       expect(tester.takeException(), isNull);
     },
   );
@@ -122,7 +126,7 @@ void main() {
   );
 
   testWidgets(
-    'every added line grows the composer upward with fixed controls',
+    'every added line grows the composer upward with vertically centered controls',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(720, 620));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -139,14 +143,16 @@ void main() {
       await tester.enterText(field, 'First line');
       await tester.pump();
       final first = tester.getRect(shell);
-      final sendFirst = tester.getRect(send);
       await tester.enterText(field, 'First line\nSecond line');
       await tester.pump();
       final second = tester.getRect(shell);
       // Every extra line needs room of its own; controls must not mask its growth.
       expect(first.top - second.top, greaterThanOrEqualTo(10));
       expect(second.bottom, closeTo(first.bottom, .1));
-      expect(tester.getRect(send).center.dy, closeTo(sendFirst.center.dy, .1));
+      expect(
+        tester.getRect(send).center.dy,
+        closeTo(tester.getRect(shell).center.dy, .1),
+      );
       var previous = second;
       for (var lines = 3; lines <= 5; lines++) {
         await tester.enterText(
@@ -159,7 +165,7 @@ void main() {
         expect(grown.bottom, closeTo(first.bottom, .1));
         expect(
           tester.getRect(send).center.dy,
-          closeTo(sendFirst.center.dy, .1),
+          closeTo(tester.getRect(shell).center.dy, .1),
         );
         previous = grown;
       }
@@ -174,7 +180,7 @@ void main() {
   );
 
   testWidgets(
-    'soft wrapping and attachments grow above the anchored send button',
+    'soft wrapping and attachments grow with centered selection and send buttons',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(720, 620));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -194,7 +200,6 @@ void main() {
       final shell = find.byKey(const ValueKey('message-composer-shell'));
       final send = find.byKey(const ValueKey('send-message'));
       final bottom = tester.getRect(shell).bottom;
-      final sendPosition = tester.getRect(send).center;
       final initialHeight = tester.getSize(shell).height;
       await tester.enterText(
         field,
@@ -203,7 +208,11 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.getSize(shell).height, greaterThan(initialHeight));
       expect(tester.getRect(shell).bottom, closeTo(bottom, .1));
-      expect(tester.getRect(send).center, sendPosition);
+      expect(tester.getRect(send).center.dy, tester.getRect(shell).center.dy);
+      expect(
+        tester.getCenter(find.byKey(const ValueKey('select-content'))).dy,
+        tester.getRect(shell).center.dy,
+      );
       await tester.enterText(field, 'Compare\nthese cards');
       await tester.tap(find.byKey(const ValueKey('select-content')));
       await tester.pumpAndSettle();
@@ -212,7 +221,11 @@ void main() {
         findsOneWidget,
       );
       expect(tester.getRect(shell).bottom, closeTo(bottom, .1));
-      expect(tester.getRect(send).center, sendPosition);
+      expect(tester.getRect(send).center.dy, tester.getRect(shell).center.dy);
+      expect(
+        tester.getCenter(find.byKey(const ValueKey('select-content'))).dy,
+        tester.getRect(shell).center.dy,
+      );
       expect(tester.takeException(), isNull);
     },
   );

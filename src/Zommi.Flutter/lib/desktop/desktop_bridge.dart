@@ -41,7 +41,14 @@ Rect pixelAlignedSurfaceBounds(Rect bounds, double scale) => Rect.fromLTRB(
   (bounds.bottom * scale).round() / scale,
 );
 
-enum DesktopInvocationKind { open, captureStarted, context, image, status }
+enum DesktopInvocationKind {
+  open,
+  selectContent,
+  captureStarted,
+  context,
+  image,
+  status,
+}
 
 final class DesktopInvocation {
   const DesktopInvocation({
@@ -285,7 +292,6 @@ final class FlutterDesktopBridge
   }
 
   final CaptureProvider _captureProvider;
-  bool _invocationPending = false;
   final WaylandPortalShortcutClient _waylandPortalShortcutClient;
   final bool _useWaylandPortals;
   final DesktopAcceptanceRecorder? _acceptanceRecorder;
@@ -296,18 +302,12 @@ final class FlutterDesktopBridge
     modifiers: const [HotKeyModifier.alt],
     scope: HotKeyScope.system,
   );
-  final HotKey _imageHotKey = HotKey(
-    key: PhysicalKeyboardKey.keyA,
-    modifiers: const [HotKeyModifier.alt, HotKeyModifier.shift],
-    scope: HotKeyScope.system,
-  );
   bool _initialized = false;
   bool _surfacePositionInitialized = false;
   int _surfaceTransitionEpoch = 0;
   Future<void> _surfaceResizeQueue = Future<void>.value();
   Offset? _surfaceAnchor;
   bool _nativeContextRegistered = false;
-  bool _nativeImageRegistered = false;
   DesktopReadiness _readiness = const DesktopReadiness();
   StreamSubscription<String>? _portalShortcutSubscription;
   String? _trayIconPath;
@@ -334,20 +334,16 @@ final class FlutterDesktopBridge
     }
 
     var contextRegistered = false;
-    var imageRegistered = false;
     if (_useWaylandPortals) {
       try {
         final registration = await registerWaylandPortalShortcuts(
           _waylandPortalShortcutClient,
-          onContext: () =>
-              unawaited(invokeShortcut(DesktopInvocationKind.context)),
-          onImage: () => unawaited(invokeShortcut(DesktopInvocationKind.image)),
+          onContext: () => unawaited(invokeContentSelection()),
           onError: (error) =>
               _emitWarning('Wayland global shortcuts stopped: $error'),
         );
         _portalShortcutSubscription = registration.subscription;
         contextRegistered = registration.readiness.contextShortcut;
-        imageRegistered = registration.readiness.imageShortcut;
       } on Object catch (error) {
         _emitWarning('Wayland global shortcuts are unavailable: $error');
       }
@@ -355,139 +351,30 @@ final class FlutterDesktopBridge
       try {
         await hotKeyManager.register(
           _contextHotKey,
-          keyDownHandler: (_) =>
-              unawaited(invokeShortcut(DesktopInvocationKind.context)),
+          keyDownHandler: (_) => unawaited(invokeContentSelection()),
         );
         contextRegistered = true;
         _nativeContextRegistered = true;
       } on Object catch (error) {
         _emitWarning('Alt+A could not be registered: $error');
       }
-      try {
-        await hotKeyManager.register(
-          _imageHotKey,
-          keyDownHandler: (_) =>
-              unawaited(invokeShortcut(DesktopInvocationKind.image)),
-        );
-        imageRegistered = true;
-        _nativeImageRegistered = true;
-      } on Object catch (error) {
-        _emitWarning('Alt+Shift+A could not be registered: $error');
-      }
     }
     await _configureTray();
     await _recordAcceptance('desktop.ready', {
       'contextShortcut': contextRegistered,
-      'imageShortcut': imageRegistered,
+      'imageShortcut': false,
     });
-    _readiness = DesktopReadiness(
-      contextShortcut: contextRegistered,
-      imageShortcut: imageRegistered,
-    );
+    _readiness = DesktopReadiness(contextShortcut: contextRegistered);
     return _readiness;
   }
 
-  Future<void> invokeShortcut(DesktopInvocationKind kind) => switch (kind) {
-    DesktopInvocationKind.context => _captureAndEmit(),
-    DesktopInvocationKind.image => _selectImageAndEmit(),
-    _ => Future.error(
-      ArgumentError.value(kind, 'kind', 'Not a capture shortcut'),
-    ),
-  };
-
-  Future<void> _captureAndEmit() async {
-    if (_invocationPending) return;
-    _invocationPending = true;
-    final clock = Stopwatch()..start();
-    try {
-      final attachment = await _capturePointerContext(
-        onReady: () {
-          if (_invocations.isClosed) return;
-          unawaited(
-            _recordAcceptance('shortcut.context.ready', {
-              'elapsedMilliseconds': clock.elapsedMilliseconds,
-            }),
-          );
-          _invocations.add(
-            const DesktopInvocation(
-              kind: DesktopInvocationKind.captureStarted,
-              message: 'Capturing context…',
-            ),
-          );
-        },
-      );
-      await _recordAcceptance('shortcut.context', {
-        'elapsedMilliseconds': clock.elapsedMilliseconds,
-        'attached': attachment != null,
-        'application': attachment?.snapshot?['application'],
-        'windowTitle': attachment?.snapshot?['windowTitle'],
-      });
-      _invocations.add(
-        DesktopInvocation(
-          kind: DesktopInvocationKind.context,
-          attachment: attachment,
-          message: attachment == null
-              ? 'No accessible context was exposed under the pointer'
-              : 'Context attached',
-          warning: attachment == null,
-        ),
-      );
-    } on Object catch (error) {
-      await _recordAcceptance('shortcut.context.failed', {
-        'error': error.toString(),
-      });
-      _invocations.add(
-        DesktopInvocation(
-          kind: DesktopInvocationKind.context,
-          message: 'Context capture failed: $error',
-          warning: true,
-        ),
-      );
-    } finally {
-      _invocationPending = false;
-    }
-  }
-
-  Future<void> _selectImageAndEmit() async {
-    if (_invocationPending) return;
-    _invocationPending = true;
-    final clock = Stopwatch()..start();
-    try {
-      final attachment = await selectImageContext(includePointerContext: true);
-      final invocation = imageSelectionInvocation(attachment);
-      if (attachment == null) {
-        await _recordAcceptance('shortcut.image.cancelled', const {});
-        _invocations.add(invocation);
-        return;
-      }
-      await _recordAcceptance('shortcut.image', {
-        'elapsedMilliseconds': clock.elapsedMilliseconds,
-        'attached': true,
-        'hasImage': attachment.imageDataUrl?.isNotEmpty == true,
-        'hasAlignedContext':
-            _nullableMap(attachment.snapshot?['region'])?['status'] ==
-            'aligned',
-        'alignmentStatus': _nullableMap(
-          attachment.snapshot?['region'],
-        )?['status'],
-        'width': attachment.bounds?['width'],
-        'height': attachment.bounds?['height'],
-      });
-      _invocations.add(invocation);
-    } on Object catch (error) {
-      await _recordAcceptance('shortcut.image.failed', {
-        'error': error.toString(),
-      });
-      _invocations.add(
-        DesktopInvocation(
-          kind: DesktopInvocationKind.image,
-          message: 'Image selection failed: $error',
-          warning: true,
-        ),
-      );
-    } finally {
-      _invocationPending = false;
-    }
+  Future<void> invokeContentSelection() async {
+    if (_invocations.isClosed) return;
+    // The controller shares selection, cancellation and single-flight handling
+    // with the composer button, including ordered multi-selection batches.
+    _invocations.add(
+      const DesktopInvocation(kind: DesktopInvocationKind.selectContent),
+    );
   }
 
   void _emitWarning(String message) {
@@ -559,7 +446,15 @@ final class FlutterDesktopBridge
         'count': attachments.length,
         'items': [
           for (final attachment in attachments)
-            {'bounds': attachment.bounds, 'hasImage': attachment.hasImage},
+            {
+              'bounds': attachment.bounds,
+              'hasImage': attachment.hasImage,
+              'windowTitle': attachment.snapshot?['windowTitle'],
+              'application': attachment.snapshot?['application'],
+              'alignmentStatus': mapValue(
+                attachment.snapshot?['region'],
+              )['status'],
+            },
         ],
       });
       return attachments;
@@ -944,8 +839,7 @@ final class FlutterDesktopBridge
         Menu(
           items: [
             MenuItem(key: 'open', label: 'Open Zommi'),
-            MenuItem(key: 'capture', label: 'Capture context (Alt+A)'),
-            MenuItem(key: 'image', label: 'Select image region (Alt+Shift+A)'),
+            MenuItem(key: 'capture', label: 'Select content (Alt+A)'),
             MenuItem.separator(),
             MenuItem(key: 'exit', label: 'Exit Zommi'),
           ],
@@ -978,9 +872,7 @@ final class FlutterDesktopBridge
       case 'open':
         onTrayIconMouseDown();
       case 'capture':
-        unawaited(invokeShortcut(DesktopInvocationKind.context));
-      case 'image':
-        unawaited(invokeShortcut(DesktopInvocationKind.image));
+        unawaited(invokeContentSelection());
       case 'exit':
         unawaited(windowManager.destroy());
     }
@@ -1019,9 +911,6 @@ final class FlutterDesktopBridge
     await _waylandPortalShortcutClient.close();
     if (_nativeContextRegistered) {
       await hotKeyManager.unregister(_contextHotKey);
-    }
-    if (_nativeImageRegistered) {
-      await hotKeyManager.unregister(_imageHotKey);
     }
     await trayManager.destroy();
     await _captureProvider.close();
@@ -1207,15 +1096,12 @@ final class WaylandPortalShortcutRegistration {
 Future<WaylandPortalShortcutRegistration> registerWaylandPortalShortcuts(
   WaylandPortalShortcutClient client, {
   required void Function() onContext,
-  required void Function() onImage,
   required void Function(Object error) onError,
 }) async {
   final subscription = client.activations.listen((shortcut) {
     switch (shortcut) {
       case 'context':
         onContext();
-      case 'image':
-        onImage();
     }
   }, onError: onError);
   try {
@@ -1277,7 +1163,7 @@ final class ProcessWaylandPortalShortcutClient
               );
             } else if (message?['event'] == 'activated') {
               final shortcut = message?['shortcutId']?.toString();
-              if (shortcut == 'context' || shortcut == 'image') {
+              if (shortcut == 'context') {
                 _activations.add(shortcut!);
               }
             }

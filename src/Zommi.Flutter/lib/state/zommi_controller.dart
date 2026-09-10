@@ -76,6 +76,7 @@ final class ZommiController extends ChangeNotifier {
   bool runtimePanelOpen = false;
   bool runtimeSetupPanelOpen = false;
   bool modelPanelOpen = false;
+  bool workspacePanelOpen = false;
   bool appSettingsPanelOpen = false;
   bool sessionSettingsDetailOpen = false;
   bool contextShortcutRegistered = false;
@@ -568,7 +569,6 @@ final class ZommiController extends ChangeNotifier {
     if (runtimeTargetId == null ||
         sessionBusy ||
         sessionId == activeSessionId) {
-      sessionPanelOpen = false;
       _notify();
       return;
     }
@@ -585,7 +585,6 @@ final class ZommiController extends ChangeNotifier {
       );
       await _applySessionConnection(connection);
       _setStatus('Chat switched');
-      sessionPanelOpen = false;
     } on Object catch (error) {
       _setStatus('Could not switch chat · $error', warning: true);
     } finally {
@@ -1111,6 +1110,7 @@ final class ZommiController extends ChangeNotifier {
     if (sessionPanelOpen) {
       runtimePanelOpen = false;
       modelPanelOpen = false;
+      workspacePanelOpen = false;
       sessionSettingsDetailOpen = false;
       appSettingsPanelOpen = false;
     }
@@ -1120,9 +1120,9 @@ final class ZommiController extends ChangeNotifier {
   void toggleRuntimePanel() {
     runtimePanelOpen = !runtimePanelOpen;
     if (runtimePanelOpen) {
-      sessionPanelOpen = false;
       runtimeSetupPanelOpen = false;
       modelPanelOpen = false;
+      workspacePanelOpen = false;
       sessionSettingsDetailOpen = false;
       appSettingsPanelOpen = false;
     }
@@ -1132,9 +1132,9 @@ final class ZommiController extends ChangeNotifier {
   void toggleRuntimeSetupPanel([bool? open]) {
     runtimeSetupPanelOpen = open ?? !runtimeSetupPanelOpen;
     if (runtimeSetupPanelOpen) {
-      sessionPanelOpen = false;
       runtimePanelOpen = false;
       modelPanelOpen = false;
+      workspacePanelOpen = false;
       sessionSettingsDetailOpen = false;
       appSettingsPanelOpen = false;
     }
@@ -1151,12 +1151,30 @@ final class ZommiController extends ChangeNotifier {
       }
     } else {
       modelPanelOpen = true;
+      workspacePanelOpen = false;
       sessionSettingsDetailOpen = false;
-      sessionPanelOpen = false;
       runtimePanelOpen = false;
       runtimeSetupPanelOpen = false;
       appSettingsPanelOpen = false;
     }
+    _notify();
+  }
+
+  void toggleWorkspacePanel() {
+    workspacePanelOpen = !workspacePanelOpen;
+    if (workspacePanelOpen) {
+      runtimePanelOpen = false;
+      runtimeSetupPanelOpen = false;
+      modelPanelOpen = false;
+      sessionSettingsDetailOpen = false;
+      appSettingsPanelOpen = false;
+    }
+    _notify();
+  }
+
+  void dismissWorkspacePanel() {
+    if (!workspacePanelOpen) return;
+    workspacePanelOpen = false;
     _notify();
   }
 
@@ -1165,6 +1183,7 @@ final class ZommiController extends ChangeNotifier {
     runtimePanelOpen = false;
     runtimeSetupPanelOpen = false;
     modelPanelOpen = false;
+    workspacePanelOpen = false;
     sessionSettingsDetailOpen = false;
     appSettingsPanelOpen = false;
     _notify();
@@ -1173,10 +1192,10 @@ final class ZommiController extends ChangeNotifier {
   void toggleAppSettingsPanel() {
     appSettingsPanelOpen = !appSettingsPanelOpen;
     if (appSettingsPanelOpen) {
-      sessionPanelOpen = false;
       runtimePanelOpen = false;
       runtimeSetupPanelOpen = false;
       modelPanelOpen = false;
+      workspacePanelOpen = false;
       sessionSettingsDetailOpen = false;
     }
     _notify();
@@ -1335,6 +1354,10 @@ final class ZommiController extends ChangeNotifier {
   }
 
   Future<void> _handleDesktopInvocation(DesktopInvocation invocation) async {
+    if (invocation.kind == DesktopInvocationKind.selectContent) {
+      await addPointerContext();
+      return;
+    }
     if (invocation.kind == DesktopInvocationKind.captureStarted) {
       _setStatus(invocation.message ?? 'Capturing context…');
       await setExpanded(true);

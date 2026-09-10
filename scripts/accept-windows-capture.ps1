@@ -832,7 +832,7 @@ function Wait-ForPackagedSelector {
         foreach ($helper in $helpers) {
             $window = [ZommiWindowsAcceptanceNative]::FindWindow(
                 $helper.ProcessId,
-                'Zommi image selection'
+                'Zommi content selection'
             )
             if ($window -ne [IntPtr]::Zero) {
                 $lastWindow = $window
@@ -1293,8 +1293,8 @@ function Invoke-PackagedApplicationAcceptance {
         $readyResult = Wait-ForAcceptanceEvent -Path $acceptanceLog -Name 'desktop.ready'
         $ready = $readyResult.Event
         $eventCount = $readyResult.Count
-        if ($ready.contextShortcut -ne $true -or $ready.imageShortcut -ne $true) {
-            throw "Packaged shortcuts were not both registered: $($ready | ConvertTo-Json -Compress)"
+        if ($ready.contextShortcut -ne $true -or $ready.imageShortcut -eq $true) {
+            throw "Expected only the Alt+A content shortcut to be registered: $($ready | ConvertTo-Json -Compress)"
         }
 
         $taskbarBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
@@ -1425,14 +1425,18 @@ function Invoke-PackagedApplicationAcceptance {
             throw 'Could not place the pointer for packaged context capture.'
         }
         [ZommiWindowsAcceptanceNative]::SendAltA($false)
+        $selector = Wait-ForPackagedSelector -CaptureExecutable $CaptureExecutable
+        if (-not [ZommiWindowsAcceptanceNative]::ClickSelection($selector, 300, 300)) {
+            throw 'Could not confirm the packaged content selection.'
+        }
         $contextResult = Wait-ForAcceptanceEvent `
             -Path $acceptanceLog `
-            -Name 'shortcut.context' `
+            -Name 'selection.content' `
             -After $eventCount
         $context = $contextResult.Event
         $eventCount = $contextResult.Count
-        if ($context.attached -ne $true) {
-            throw "Packaged context shortcut did not attach context: $($context | ConvertTo-Json -Compress)"
+        if ($context.count -lt 1) {
+            throw "Packaged content shortcut did not attach a selection: $($context | ConvertTo-Json -Compress)"
         }
         $contextFocusDeadline = [DateTime]::UtcNow.AddSeconds(5)
         while (-not [ZommiWindowsAcceptanceNative]::Foreground($window) -and
@@ -1454,10 +1458,10 @@ function Invoke-PackagedApplicationAcceptance {
             Start-Sleep -Milliseconds 50
         }
         if (-not [ZommiWindowsAcceptanceNative]::Minimized($window)) {
-            throw 'Could not minimize Zommi before the Alt+Shift+A restore gate.'
+            throw 'Could not minimize Zommi before the Alt+A restore gate.'
         }
 
-        [ZommiWindowsAcceptanceNative]::SendAltA($true)
+        [ZommiWindowsAcceptanceNative]::SendAltA($false)
         $selector = Wait-ForPackagedSelector -CaptureExecutable $CaptureExecutable
         $selectorBounds = [ZommiWindowsAcceptanceNative]::Bounds($selector)
         $probeX = $selectorBounds[0] + 40
@@ -1489,9 +1493,10 @@ function Invoke-PackagedApplicationAcceptance {
         }
         $cancelResult = Wait-ForAcceptanceEvent `
             -Path $acceptanceLog `
-            -Name 'shortcut.image.cancelled' `
+            -Name 'selection.content' `
             -After $eventCount
         $eventCount = $cancelResult.Count
+        if ($cancelResult.Event.count -ne 0) { throw 'Cancelled selection attached content.' }
         $cancelFocusDeadline = [DateTime]::UtcNow.AddSeconds(5)
         while (([ZommiWindowsAcceptanceNative]::Minimized($window) -or
                 -not [ZommiWindowsAcceptanceNative]::Visible($window) -or
@@ -1502,10 +1507,10 @@ function Invoke-PackagedApplicationAcceptance {
         if ([ZommiWindowsAcceptanceNative]::Minimized($window) -or
             -not [ZommiWindowsAcceptanceNative]::Visible($window) -or
             -not [ZommiWindowsAcceptanceNative]::Foreground($window)) {
-            throw 'Cancelled Alt+Shift+A did not restore, show, and focus the minimized packaged taskbar window.'
+            throw 'Cancelled Alt+A did not restore, show, and focus the minimized packaged taskbar window.'
         }
 
-        [ZommiWindowsAcceptanceNative]::SendAltA($true)
+        [ZommiWindowsAcceptanceNative]::SendAltA($false)
         $selector = Wait-ForPackagedSelector -CaptureExecutable $CaptureExecutable
         if (-not [ZommiWindowsAcceptanceNative]::TopMost($selector) -or
             -not [ZommiWindowsAcceptanceNative]::Foreground($selector)) {
@@ -1514,18 +1519,17 @@ function Invoke-PackagedApplicationAcceptance {
         [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector, 100, 100, 140, 130)
         $imageResult = Wait-ForAcceptanceEvent `
             -Path $acceptanceLog `
-            -Name 'shortcut.image' `
+            -Name 'selection.content' `
             -After $eventCount
-        $image = $imageResult.Event
+        if ($imageResult.Event.count -ne 1) { throw 'Region selection did not attach one item.' }
+        $image = $imageResult.Event.items[0]
         Assert-ProbeRegionSize `
-            -Width $image.width `
-            -Height $image.height `
-            -Source 'Packaged image shortcut'
-        if ($image.attached -ne $true -or
-            $image.hasImage -ne $true -or
-            $image.alignmentStatus -notin @('aligned', 'image-only') -or
-            $image.hasAlignedContext -ne ($image.alignmentStatus -eq 'aligned')) {
-            throw "Packaged image shortcut contract failed: $($image | ConvertTo-Json -Compress)"
+            -Width $image.bounds.width `
+            -Height $image.bounds.height `
+            -Source 'Packaged content selection region'
+        if ($image.hasImage -ne $true -or
+            $image.alignmentStatus -notin @('aligned', 'image-only')) {
+            throw "Packaged content selection contract failed: $($image | ConvertTo-Json -Compress)"
         }
         $imageFocusDeadline = [DateTime]::UtcNow.AddSeconds(5)
         while (-not [ZommiWindowsAcceptanceNative]::Foreground($window) -and
@@ -1533,7 +1537,7 @@ function Invoke-PackagedApplicationAcceptance {
             Start-Sleep -Milliseconds 50
         }
         if (-not [ZommiWindowsAcceptanceNative]::Foreground($window)) {
-            throw 'Alt+Shift+A did not restore and focus the packaged taskbar window.'
+            throw 'Alt+A did not restore and focus the packaged taskbar window.'
         }
 
         Start-Sleep -Milliseconds 300
@@ -1562,11 +1566,11 @@ function Invoke-PackagedApplicationAcceptance {
 
         return @{
             contextAttached = $true
-            contextApplication = $context.application
-            contextWindowTitle = $context.windowTitle
+            contextApplication = $context.items[0].application
+            contextWindowTitle = $context.items[0].windowTitle
             imageCancelled = $true
-            imageDimensions = @($image.width, $image.height)
-            imagePointerContext = $true
+            imageDimensions = @($image.bounds.width, $image.bounds.height)
+            imagePointerContext = ($image.alignmentStatus -eq 'aligned')
             taskbarBounds = @($taskbarBounds)
             physicalBounds = @($physicalBounds)
             draggedBounds = @($draggedBounds)

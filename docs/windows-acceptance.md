@@ -42,8 +42,8 @@ so saved user size preferences cannot change the normal-window test baseline.
 It checks stable normal/expanded taskbar
 window bounds, taskbar minimize/restore behavior, real operating-system shortcut
 registration, injected
-`Alt+A`/`Alt+Shift+A` activation, context attachment, image cancellation,
-image-plus-pointer pairing, and the adjacent Flutter/Rust/single-helper process
+`Alt+A` activation, confirmed content attachment, selection cancellation,
+and image-region alignment, and the adjacent Flutter/Rust/single-helper process
 topology. Run it from an interactive desktop PowerShell; a process launched
 through WSL interop does not inherit an authoritative screen device context.
 The native context fixture runs its own message loop and sets its thread DPI
@@ -82,27 +82,30 @@ delivery; they are still not physical keyboard evidence.
 6. With reduced motion enabled, verify working state remains visually distinct
    without continuous animation.
 
-## Structured context (`Alt+A`)
+## Content selection (`Alt+A`)
 
-1. Put the pointer over a browser or native control and press `Alt+A`.
-2. Verify capture finishes before Zommi shows/focuses and the window does not
-   jump to the pointer.
-3. Confirm exactly one context chip appears and its preview shows the intended
-   selection/window/URL/pointer evidence without confidence metadata.
+1. Press `Alt+A` and confirm the same picker opens as the **Select content** button.
+2. Click an outlined browser or native control; confirm its attachment appears
+   only after selection and the chat returns without jumping to the pointer.
+3. Confirm the preview shows the intended selection/window/URL evidence.
 4. Repeat on a second surface and confirm chips accumulate with unique labels.
-5. Exercise selected browser text, files, a grid cell/range, and PowerPoint
-   shape/text where those providers are installed.
+5. Minimize Zommi, invoke `Alt+A`, then cancel. Verify no attachment is added and
+   chat returns to the foreground with the composer ready.
+6. Invoke `Alt+A` and drag a region. Verify the image, dimensions, preview,
+   removal, and aligned context (or explicit image-only result).
+7. Verify `Alt+Shift+A` is not registered and the footer has no shortcut legend.
 
-## Explicit image (`Alt+Shift+A`)
+## Chat controls
 
-1. Minimize Zommi, press `Alt+Shift+A`, and confirm the selector appears without
-   waiting for a slow UIA capture.
-2. Cancel once and verify no attachment is added and the chat is restored,
-   foreground, and ready for composer input.
-3. Select a region and verify one image chip, dimensions, preview, removal, and
-   pointer-context pairing.
-4. Treat blank/different GPU-composited Chrome pixels as a documented fidelity
-   limitation, not a gesture or attachment failure.
+1. Click the session-sidebar button: it slides in from the left and narrows the
+   chat area. Moving the pointer, editing the draft, and choosing a chat leave it
+   open. Click the button again to hide it.
+2. Verify keyboard activation and Escape, and repeat with reduced motion.
+3. At Standard, Wide, and the minimum window size, check that Select content
+   and Send/Stop remain vertically centered for one to five input lines.
+4. Open Workspace beside the model, browse/apply a folder, then switch sessions
+   and verify workspace isolation. Model settings contains model/reasoning and
+   supported profile controls, with no Workspace row.
 
 ## Select content: overlapping items and image links
 

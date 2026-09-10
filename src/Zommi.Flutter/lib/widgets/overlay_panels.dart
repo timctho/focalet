@@ -41,109 +41,97 @@ class ZommiOverlayPanelSurface extends StatelessWidget {
 }
 
 class SessionSidebar extends StatelessWidget {
-  const SessionSidebar({
-    required this.controller,
-    required this.onPointerEnter,
-    required this.onPointerExit,
-    super.key,
-  });
+  const SessionSidebar({required this.controller, super.key});
 
   final ZommiController controller;
-  final VoidCallback onPointerEnter;
-  final VoidCallback onPointerExit;
 
   @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => onPointerEnter(),
-      onExit: (_) => onPointerExit(),
-      child: Semantics(
-        container: true,
-        label: 'Chat sessions',
-        child: Material(
-          key: const ValueKey('session-sidebar'),
-          color: const Color(0xf6f6f8fc),
-          elevation: 14,
-          borderRadius: BorderRadius.circular(18),
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
-                child: Row(
-                  children: [
-                    const Expanded(
-                      child: Text(
-                        'Chats',
-                        style: TextStyle(fontWeight: FontWeight.w700),
-                      ),
+    return Semantics(
+      container: true,
+      label: 'Chat sessions',
+      child: Material(
+        key: const ValueKey('session-sidebar'),
+        color: const Color(0xf6f6f8fc),
+        elevation: 0,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Chats',
+                      style: TextStyle(fontWeight: FontWeight.w700),
                     ),
-                    if (controller.sessionCreationSupported)
-                      IconButton(
-                        key: const ValueKey('new-session'),
-                        tooltip: 'Create new chat',
-                        onPressed: controller.sessionBusy
-                            ? null
-                            : () => unawaited(controller.createSession()),
-                        icon: const Icon(Icons.add_rounded),
-                      ),
-                  ],
-                ),
+                  ),
+                  if (controller.sessionCreationSupported)
+                    IconButton(
+                      key: const ValueKey('new-session'),
+                      tooltip: 'Create new chat',
+                      onPressed: controller.sessionBusy
+                          ? null
+                          : () => unawaited(controller.createSession()),
+                      icon: const Icon(Icons.add_rounded),
+                    ),
+                ],
               ),
-              Expanded(
-                child: controller.sessions.isEmpty
-                    ? const Center(
-                        child: Padding(
-                          padding: EdgeInsets.all(18),
-                          child: Text(
-                            'No provider-owned chats are available.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: Color(0xff737887)),
-                          ),
+            ),
+            Expanded(
+              child: controller.sessions.isEmpty
+                  ? const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(18),
+                        child: Text(
+                          'No provider-owned chats are available.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Color(0xff737887)),
                         ),
-                      )
-                    : ListView.builder(
-                        key: const ValueKey('session-list'),
-                        padding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
-                        itemCount: controller.sessions.length,
-                        itemBuilder: (context, index) {
-                          final session = controller.sessions[index];
-                          final presence = controller.presenceFor(session.id);
-                          final selected =
-                              session.id == controller.activeSessionId;
-                          return Semantics(
-                            selected: selected,
-                            label: '${session.title}, ${presence.name} session',
-                            child: ListTile(
-                              key: ValueKey('session-${session.id}'),
-                              dense: true,
-                              visualDensity: const VisualDensity(vertical: -3),
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                              ),
-                              selected: selected,
-                              selectedTileColor: const Color(0xffebe9f7),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              leading: _SessionStatusIcon(presence: presence),
-                              title: Text(
-                                session.title,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 11),
-                              ),
-                              onTap: controller.sessionBusy
-                                  ? null
-                                  : () => unawaited(
-                                      controller.switchSession(session.id),
-                                    ),
-                            ),
-                          );
-                        },
                       ),
-              ),
-            ],
-          ),
+                    )
+                  : ListView.builder(
+                      key: const ValueKey('session-list'),
+                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
+                      itemCount: controller.sessions.length,
+                      itemBuilder: (context, index) {
+                        final session = controller.sessions[index];
+                        final presence = controller.presenceFor(session.id);
+                        final selected =
+                            session.id == controller.activeSessionId;
+                        return Semantics(
+                          selected: selected,
+                          label: '${session.title}, ${presence.name} session',
+                          child: ListTile(
+                            key: ValueKey('session-${session.id}'),
+                            dense: true,
+                            visualDensity: const VisualDensity(vertical: -3),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                            ),
+                            selected: selected,
+                            selectedTileColor: const Color(0xffebe9f7),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            leading: _SessionStatusIcon(presence: presence),
+                            title: Text(
+                              session.title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 11),
+                            ),
+                            onTap: controller.sessionBusy
+                                ? null
+                                : () => unawaited(
+                                    controller.switchSession(session.id),
+                                  ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
         ),
       ),
     );
@@ -732,29 +720,29 @@ String _runtimeStatus(String value) => switch (value.toLowerCase()) {
   _ => 'Detected',
 };
 
-enum _SessionSettingsPage { workspace, model, profile }
+enum _ModelSettingsPage { model, profile }
 
-class SessionSettingsPanel extends StatefulWidget {
-  const SessionSettingsPanel({required this.controller, super.key});
+class ModelSettingsPanel extends StatefulWidget {
+  const ModelSettingsPanel({required this.controller, super.key});
 
   final ZommiController controller;
 
   @override
-  State<SessionSettingsPanel> createState() => _SessionSettingsPanelState();
+  State<ModelSettingsPanel> createState() => _ModelSettingsPanelState();
 }
 
-class _SessionSettingsPanelState extends State<SessionSettingsPanel> {
-  _SessionSettingsPage? _page;
+class _ModelSettingsPanelState extends State<ModelSettingsPanel> {
+  _ModelSettingsPage? _page;
   late int _overviewEpoch = widget.controller.sessionSettingsOverviewEpoch;
 
-  void _setPage(_SessionSettingsPage? page) {
+  void _setPage(_ModelSettingsPage? page) {
     if (_page == page) return;
     setState(() => _page = page);
     widget.controller.setSessionSettingsDetailOpen(page != null);
   }
 
   @override
-  void didUpdateWidget(covariant SessionSettingsPanel oldWidget) {
+  void didUpdateWidget(covariant ModelSettingsPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
     final nextEpoch = widget.controller.sessionSettingsOverviewEpoch;
     if (_overviewEpoch != nextEpoch) {
@@ -766,17 +754,12 @@ class _SessionSettingsPanelState extends State<SessionSettingsPanel> {
   @override
   Widget build(BuildContext context) {
     final detail = switch (_page) {
-      _SessionSettingsPage.workspace => WorkspacePanel(
-        key: const ValueKey('workspace-panel'),
-        controller: widget.controller,
-        onBack: () => _setPage(null),
-      ),
-      _SessionSettingsPage.model => ModelPanel(
+      _ModelSettingsPage.model => ModelPanel(
         key: const ValueKey('model-panel'),
         controller: widget.controller,
         onBack: () => _setPage(null),
       ),
-      _SessionSettingsPage.profile => ProfilePanel(
+      _ModelSettingsPage.profile => ProfilePanel(
         key: const ValueKey('profile-panel'),
         controller: widget.controller,
         onBack: () => _setPage(null),
@@ -799,7 +782,7 @@ class _SessionSettingsPanelState extends State<SessionSettingsPanel> {
       curve: Curves.easeOutCubic,
       alignment: Alignment.topLeft,
       child: SizedBox(
-        key: const ValueKey('session-settings-panel'),
+        key: const ValueKey('model-settings-panel'),
         width: detail == null ? 286 : 390,
         child: AnimatedSwitcher(
           duration: const Duration(milliseconds: 190),
@@ -832,8 +815,8 @@ class _SettingsOverview extends StatelessWidget {
   });
 
   final ZommiController controller;
-  final _SessionSettingsPage? selected;
-  final ValueChanged<_SessionSettingsPage> onSelected;
+  final _ModelSettingsPage? selected;
+  final ValueChanged<_ModelSettingsPage> onSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -848,7 +831,7 @@ class _SettingsOverview extends StatelessWidget {
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 8),
               child: Text(
-                'Session settings',
+                'Model settings',
                 style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
               ),
             ),
@@ -865,22 +848,13 @@ class _SettingsOverview extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             _SettingsRow(
-              key: const ValueKey('settings-workspace'),
-              icon: Icons.folder_outlined,
-              label: 'Workspace',
-              value: controller.workspaceSummary,
-              selected: selected == _SessionSettingsPage.workspace,
-              onTap: () => onSelected(_SessionSettingsPage.workspace),
-            ),
-            const SizedBox(height: 5),
-            _SettingsRow(
               key: const ValueKey('settings-model'),
               icon: Icons.auto_awesome_outlined,
               label: 'Model / reasoning',
               value: controller.modelSummary,
-              selected: selected == _SessionSettingsPage.model,
+              selected: selected == _ModelSettingsPage.model,
               enabled: controller.modelSelectionSupported,
-              onTap: () => onSelected(_SessionSettingsPage.model),
+              onTap: () => onSelected(_ModelSettingsPage.model),
             ),
             if (controller.profileSelectionSupported) ...[
               const SizedBox(height: 5),
@@ -889,8 +863,8 @@ class _SettingsOverview extends StatelessWidget {
                 icon: Icons.person_outline_rounded,
                 label: 'Hermes profile',
                 value: controller.profileSummary,
-                selected: selected == _SessionSettingsPage.profile,
-                onTap: () => onSelected(_SessionSettingsPage.profile),
+                selected: selected == _ModelSettingsPage.profile,
+                onTap: () => onSelected(_ModelSettingsPage.profile),
               ),
             ],
             if (controller.sessionSettingsBusy)
@@ -1214,6 +1188,7 @@ class _WorkspacePanelState extends State<WorkspacePanel> {
     return _SettingsDetailShell(
       title: 'Workspace',
       onBack: widget.onBack,
+      closeButton: true,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
         child: Column(
@@ -1363,12 +1338,14 @@ class _SettingsDetailShell extends StatelessWidget {
     required this.onBack,
     required this.child,
     this.height = 390,
+    this.closeButton = false,
   });
 
   final String title;
   final VoidCallback onBack;
   final Widget child;
   final double height;
+  final bool closeButton;
 
   @override
   Widget build(BuildContext context) {
@@ -1383,9 +1360,16 @@ class _SettingsDetailShell extends StatelessWidget {
               children: [
                 IconButton(
                   key: const ValueKey('settings-back'),
-                  tooltip: 'Back to session settings',
+                  tooltip: closeButton
+                      ? 'Close workspace'
+                      : 'Back to model settings',
                   onPressed: onBack,
-                  icon: const Icon(Icons.arrow_back_rounded, size: 17),
+                  icon: Icon(
+                    closeButton
+                        ? Icons.close_rounded
+                        : Icons.arrow_back_rounded,
+                    size: 17,
+                  ),
                 ),
                 Text(
                   title,

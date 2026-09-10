@@ -189,8 +189,8 @@ class ReleasePackageTests(unittest.TestCase):
             "native-max-restore: ok (rapid commands retain the last requested placement)",
             "Packaged taskbar window did not minimize",
             "Packaged taskbar window did not restore",
-            "Could not minimize Zommi before the Alt+Shift+A restore gate",
-            "Cancelled Alt+Shift+A did not restore, show, and focus the minimized packaged taskbar window",
+            "Could not minimize Zommi before the Alt+A restore gate",
+            "Cancelled Alt+A did not restore, show, and focus the minimized packaged taskbar window",
             "minimizedImageShortcutRestored = $true",
             "Packaged taskbar window unexpectedly remained always-on-top",
         ):
