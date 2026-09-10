@@ -20,6 +20,7 @@ pub const BROKER_OPERATIONS: &[&str] = &[
     "runtime.refreshTargets",
     "runtime.getStatus",
     "session.list",
+    "session.catalog",
     "session.create",
     "session.open",
     "session.read",

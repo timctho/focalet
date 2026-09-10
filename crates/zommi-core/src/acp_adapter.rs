@@ -36,6 +36,7 @@ pub struct AcpConfig {
     pub command: RuntimeCommand,
     pub cwd: PathBuf,
     pub preferred_session_id: Option<String>,
+    pub list_only: bool,
 }
 
 pub struct AcpTurnRequest<'a> {
@@ -173,14 +174,21 @@ impl AcpAdapter {
             }
         }));
 
-        if let Err(error) = adapter.initialize(config.preferred_session_id).await {
+        if let Err(error) = adapter
+            .initialize(config.preferred_session_id, config.list_only)
+            .await
+        {
             adapter.shutdown().await;
             return Err(error);
         }
         Ok(adapter)
     }
 
-    async fn initialize(&self, preferred_session_id: Option<String>) -> Result<(), CodexError> {
+    async fn initialize(
+        &self,
+        preferred_session_id: Option<String>,
+        list_only: bool,
+    ) -> Result<(), CodexError> {
         let initialized = self
             .inner
             .request(
@@ -243,6 +251,9 @@ impl AcpAdapter {
                     self.inner.target.display_name
                 ),
             ));
+        }
+        if list_only {
+            return Ok(());
         }
         self.load_sessions().await?;
         let can_load = self

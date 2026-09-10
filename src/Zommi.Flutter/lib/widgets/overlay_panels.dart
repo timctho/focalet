@@ -183,6 +183,30 @@ class SessionSidebar extends StatelessWidget {
                 ],
               ),
             ),
+            if (controller.sessionCatalogLoading)
+              const LinearProgressIndicator(
+                key: ValueKey('session-catalog-loading'),
+                minHeight: 2,
+              ),
+            if (controller.sessionCatalogError case final error?)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(error, style: const TextStyle(fontSize: 11)),
+                    ),
+                    IconButton(
+                      key: const ValueKey('retry-session-catalog'),
+                      tooltip: 'Retry loading chats',
+                      onPressed: controller.sessionCatalogLoading
+                          ? null
+                          : () => unawaited(controller.refreshSessionCatalog()),
+                      icon: const Icon(Icons.refresh_rounded, size: 16),
+                    ),
+                  ],
+                ),
+              ),
             Expanded(
               child: controller.sessions.isEmpty
                   ? const Center(

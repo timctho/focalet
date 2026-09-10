@@ -44,6 +44,8 @@ Electron, Node module, or `.mjs` payload.
   picker for new chats;
 - chats ordered by latest response across runtimes, with the runtime bound when
   creating each chat;
+- existing chats from discovered runtimes load in the background at startup,
+  without creating a new chat or changing the selected session;
 - compact workspace and model menus anchored below their controls, with settings,
   minimize, and close at the right;
 - readable A/B attachments, bounded previews and in-place selection adjustment;

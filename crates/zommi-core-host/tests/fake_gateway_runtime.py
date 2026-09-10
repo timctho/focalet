@@ -535,7 +535,8 @@ def handle_connection(connection: socket.socket, mode: str) -> None:
                     return
                 params = parse_qs(urlsplit(request_line.split()[1]).query)
                 profile = params.get("profile", ["default"])[0]
-                write_log({"method": "http.sessions", "params": params})
+                write_log({"method": "http.sessions", "params": params, "pid": os.getpid()})
+                time.sleep(float(os.environ.get("ZOMMI_FAKE_CATALOG_DELAY", "0")))
                 payload = {"sessions": [{
                     "id": "hermes-coder-session" if profile == "coder" else "hermes-stored-session",
                     "title": f"Saved Hermes {profile} chat",
