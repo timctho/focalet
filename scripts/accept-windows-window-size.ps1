@@ -327,7 +327,15 @@ try {
     $null = [ZommiWindowSizeAccess]::Sample($window, 1)
     [ZommiWindowsAcceptanceNative]::Restore($window)
     $view = [ZommiWindowSizeAccess]::FindWindowEx($window, [IntPtr]::Zero, [NullString]::Value, [NullString]::Value)
+    # Alt+A opens the content picker. Cancel it before measuring size controls,
+    # leaving the composer empty and using the real return-to-chat focus path.
     [ZommiWindowsAcceptanceNative]::SendAltA($false)
+    $selector = Wait-ForPackagedSelector -CaptureExecutable (Join-Path $PackageDirectory 'native/Zommi.Capture.exe')
+    if (-not [ZommiWindowsAcceptanceNative]::CancelSelection($selector)) {
+        throw 'Could not cancel content selection before the size-control gate.'
+    }
+    $selection = Wait-ForAcceptanceEvent -Path $log -Name 'selection.content'
+    if ($selection.Event.count -ne 0) { throw 'Size-control setup unexpectedly attached content.' }
     Wait-SizeCondition -Description 'foreground' -Condition { [ZommiWindowsAcceptanceNative]::Foreground($window) }
     $background = [ZommiSizeBackground]::new($window, [ZommiWindowsAcceptanceNative]::WorkArea($window))
     Click-SizeControl 'App settings'
