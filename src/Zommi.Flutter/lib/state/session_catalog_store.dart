@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 
+const sessionCatalogRetention = Duration(days: 7);
+
 /// Rebuildable sidebar metadata. Transcripts and runtime credentials stay with
 /// their providers; cached runtime labels are never connection configuration.
 final class SessionCatalogSnapshot {
@@ -13,6 +15,7 @@ final class SessionCatalogSnapshot {
     this.syncedAt = const {},
     this.attemptedAt = const {},
     this.usedAt = const {},
+    this.protectedSessions = const {},
   });
 
   final List<RuntimeTarget> runtimes;
@@ -20,6 +23,27 @@ final class SessionCatalogSnapshot {
   final Map<String, DateTime> syncedAt;
   final Map<String, DateTime> attemptedAt;
   final Map<String, DateTime> usedAt;
+  final Set<(String, String)> protectedSessions;
+
+  SessionCatalogSnapshot retained(DateTime now) {
+    final cutoff = now.toUtc().subtract(sessionCatalogRetention);
+    return SessionCatalogSnapshot(
+      runtimes: runtimes,
+      sessions: [
+        for (final session in sessions)
+          if (protectedSessions.contains((
+                session.runtimeTargetId,
+                session.id,
+              )) ||
+              (session.activityTime?.isBefore(cutoff) == false))
+            session,
+      ],
+      syncedAt: syncedAt,
+      attemptedAt: attemptedAt,
+      usedAt: usedAt,
+      protectedSessions: protectedSessions,
+    );
+  }
 
   Map<String, Object?> toJson() => {
     'schemaVersion': 1,

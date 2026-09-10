@@ -8,16 +8,22 @@ import 'package:zommi_flutter/zommi_app.dart';
 import 'test_support.dart';
 import 'session_runtime_test.dart' show hermes, multiRuntimeCore;
 
-const savedHermesChats = [
+final savedHermesChats = [
   {
     'id': 'hermes-old',
     'title': 'Earlier Hermes work',
-    'updatedAt': '2026-09-01T00:00:00Z',
+    'updatedAt': DateTime.now()
+        .toUtc()
+        .subtract(const Duration(days: 8))
+        .toIso8601String(),
   },
   {
     'id': 'hermes-recent',
     'title': 'Recent Hermes work',
-    'updatedAt': '2026-09-09T00:00:00Z',
+    'updatedAt': DateTime.now()
+        .toUtc()
+        .subtract(const Duration(days: 1))
+        .toIso8601String(),
   },
 ];
 
@@ -30,6 +36,10 @@ void main() {
     await tester.pumpWidget(ZommiApp(core: core, desktop: FakeDesktopBridge()));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
+    await tester.pumpAndSettle();
+    expect(find.text('Earlier Hermes work'), findsNothing);
+    expect(find.text('Recent Hermes work'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('load-older-sessions')));
     await tester.pumpAndSettle();
     expect(find.text('Earlier Hermes work'), findsOneWidget);
     expect(find.text('Recent Hermes work'), findsOneWidget);

@@ -21,6 +21,7 @@ dependencies:
   tray_manager: ^0.5.3
   url_launcher: ^6.3.2
   window_manager: ^0.5.2
+  sqlite3: ^3.5.2
 
 dev_dependencies:
   flutter_test:
@@ -30,6 +31,15 @@ dev_dependencies:
 dependency_overrides:
   hotkey_manager_linux:
     path: ../../third_party/hotkey_manager_linux
+
+# Use OS SQLite on Windows/macOS; Linux packaging includes the build host's
+# library to preserve its glibc baseline (the upstream prebuilt requires 2.33).
+hooks:
+  user_defines:
+    sqlite3:
+      source: system
+      name: sqlite3
+      name_windows: winsqlite3
 
 flutter:
   uses-material-design: true

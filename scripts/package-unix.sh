@@ -43,12 +43,14 @@ bundle_linux_runtime_libraries() {
     libayatana-indicator3.so.7
     libdbusmenu-glib.so.4
     libdbusmenu-gtk3.so.4
+    libsqlite3.so.0
   )
   mkdir -p "$output_directory"
   for soname in "${required_libraries[@]}"; do
     source_path=$(resolve_linux_runtime_library "$soname")
     cp -L "$source_path" "$output_directory/$soname"
   done
+  ln -sf libsqlite3.so.0 "$output_directory/libsqlite3.so"
 }
 machine_architecture=$(uname -m)
 case "$machine_architecture" in

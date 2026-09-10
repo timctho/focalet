@@ -47,6 +47,7 @@ class SessionSidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final sessions = controller.visibleSessions;
     return Semantics(
       container: true,
       label: 'Chat sessions',
@@ -210,12 +211,12 @@ class SessionSidebar extends StatelessWidget {
                 ),
               ),
             Expanded(
-              child: controller.sessions.isEmpty
+              child: sessions.isEmpty
                   ? const Center(
                       child: Padding(
                         padding: EdgeInsets.all(18),
                         child: Text(
-                          'No provider-owned chats are available.',
+                          'No recent chats are available.',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: Color(0xff737887)),
                         ),
@@ -224,9 +225,9 @@ class SessionSidebar extends StatelessWidget {
                   : ListView.builder(
                       key: const ValueKey('session-list'),
                       padding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
-                      itemCount: controller.sessions.length,
+                      itemCount: sessions.length,
                       itemBuilder: (context, index) {
-                        final session = controller.sessions[index];
+                        final session = sessions[index];
                         final runtime = controller.runtimeForSession(session);
                         final presence = controller.presenceFor(
                           session.id,
@@ -300,6 +301,15 @@ class SessionSidebar extends StatelessWidget {
                       },
                     ),
             ),
+            if (!controller.showingOlderSessions)
+              TextButton(
+                key: const ValueKey('load-older-sessions'),
+                onPressed:
+                    controller.starting || controller.sessionCatalogLoading
+                    ? null
+                    : () => unawaited(controller.loadOlderSessions()),
+                child: const Text('Load older chats'),
+              ),
           ],
         ),
       ),

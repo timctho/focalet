@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/state/session_catalog_store.dart';
+import 'package:zommi_flutter/state/sqlite_session_catalog_store.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/zommi_app.dart';
@@ -38,12 +39,13 @@ final class MemoryCatalogStore implements SessionCatalogStore {
 }
 
 SessionCatalogSnapshot cached({
+  DateTime? activity,
   DateTime? synced,
   DateTime? attempted,
   DateTime? used,
 }) => SessionCatalogSnapshot(
   runtimes: [hermes],
-  sessions: [saved],
+  sessions: [saved.copyWith(updatedAt: activity?.toIso8601String())],
   syncedAt: {hermes.id: synced ?? now},
   attemptedAt: {hermes.id: ?attempted},
   usedAt: {hermes.id: ?used},
@@ -133,7 +135,12 @@ void main() {
     (tester) async {
       final gate = Completer<void>();
       final core = multiRuntimeCore()..initializeGate = gate.future;
-      final store = MemoryCatalogStore(cached(synced: DateTime.now().toUtc()));
+      final store = MemoryCatalogStore(
+        cached(
+          synced: DateTime.now().toUtc(),
+          activity: DateTime.now().toUtc(),
+        ),
+      );
       await tester.pumpWidget(
         ZommiApp(
           core: core,
@@ -170,12 +177,17 @@ void main() {
       final path = '${directory.path}/catalog.json';
       final first = multiRuntimeCore()
         ..sessionsByRuntime[hermes.id] = [
-          {'id': saved.id, 'title': saved.title, 'cwd': saved.cwd},
+          {
+            'id': saved.id,
+            'title': saved.title,
+            'cwd': saved.cwd,
+            'updatedAt': saved.updatedAt,
+          },
         ];
       final controller = ZommiController(
         core: first,
         desktop: FakeDesktopBridge(),
-        sessionCatalogStore: FileSessionCatalogStore(path),
+        sessionCatalogStore: SqliteSessionCatalogStore(path, clock: () => now),
         clock: () => now,
       );
       await controller.initialize();
@@ -186,7 +198,7 @@ void main() {
       final restarted = ZommiController(
         core: second,
         desktop: FakeDesktopBridge(),
-        sessionCatalogStore: FileSessionCatalogStore(path),
+        sessionCatalogStore: SqliteSessionCatalogStore(path, clock: () => now),
         clock: () => now,
       );
       addTearDown(restarted.close);
@@ -427,7 +439,10 @@ void main() {
       'zommi-large-catalog-',
     );
     addTearDown(() => directory.delete(recursive: true));
-    final store = FileSessionCatalogStore('${directory.path}/catalog.json');
+    final store = SqliteSessionCatalogStore(
+      '${directory.path}/catalog.sqlite',
+      clock: () => now,
+    );
     final targets = [
       for (var index = 0; index < 100; index++)
         RuntimeTarget(

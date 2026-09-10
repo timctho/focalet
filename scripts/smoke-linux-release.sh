@@ -44,7 +44,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-"$application" >"$runtime_log" 2>&1 &
+XDG_STATE_HOME="$temporary_directory/state" "$application" >"$runtime_log" 2>&1 &
 application_pid=$!
 core_executable=$(readlink -f "$core_host")
 startup_deadline=$((SECONDS + 20))
@@ -83,6 +83,18 @@ if grep -Eiq 'Unhandled Exception|MissingPluginException|ERROR:flutter/runtime' 
   sed -n '1,200p' "$runtime_log" >&2
   echo 'Flutter reported an unhandled startup exception.' >&2
   exit 1
+fi
+
+if [[ "${ZOMMI_VERIFY_SQLITE_CACHE:-0}" == 1 ]]; then
+  python3 - "$temporary_directory/state/zommi/session-catalog.sqlite" <<'PY'
+import pathlib, sqlite3, sys
+path = pathlib.Path(sys.argv[1])
+assert path.is_file(), "Packaged Flutter did not initialize its SQLite cache"
+with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as db:
+    assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert db.execute("PRAGMA user_version").fetchone()[0] == 1
+    db.execute("SELECT runtime_target_id, id FROM sessions LIMIT 1").fetchall()
+PY
 fi
 
 kill -TERM "$application_pid"

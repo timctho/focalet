@@ -69,12 +69,31 @@ active-window metadata, so that context is visibly degraded. See
 Browser connection, selection gestures and alignment limits are described in
 [docs/browser-context.md](docs/browser-context.md).
 
-The sidebar keeps a rebuildable `session-catalog.json` beside the session binding
-in the platform's Zommi application state directory. It stores runtime labels,
-session IDs, titles, workspaces, profiles, last activity, and sync/use timestamps;
-transcripts and credentials remain with the runtimes. Writes are coalesced and
-replace complete snapshots with a recovery backup. Failed or partial listings
-retain known chats.
+The sidebar keeps a rebuildable `session-catalog.sqlite` in Zommi's application
+state directory (`%APPDATA%\Zommi` on Windows, `$XDG_STATE_HOME/zommi` or
+`~/.local/state/zommi` on Linux, `~/Library/Application Support/Zommi` on macOS).
+It stores runtime labels, session IDs, titles, workspaces, profiles, last activity,
+and sync/use timestamps; transcripts and credentials remain with the runtimes.
+The primary key is `(runtime_target_id, id)`. Coalesced writes run in a background
+isolate and transactionally update changed rows. Failed or partial listings retain
+known metadata within the retention window.
+
+Session metadata is retained for seven days since last activity, with exceptions
+for the currently selected or running chats. Expiry runs on load, save, and hourly
+while the app is open; refresh does not re-cache expired rows. Provider rows with
+no valid timestamp can appear during the current run, but are only persisted when
+selected or running. **Load older chats** in Chats reads provider listings on
+demand; selecting an old chat keeps it available while open. No provider history
+is deleted. Runtime labels and sync timestamps remain independent of session
+expiry, so eviction does not trigger unnecessary runtime launches.
+
+The first SQLite open imports a valid legacy `session-catalog.json` or its backup,
+applies the retention window, and removes the JSON files after committing. A
+corrupt SQLite cache can be rebuilt; a database with a newer schema is left alone.
+Windows and macOS use OS SQLite. Linux packages include the build host's SQLite
+library to preserve the supported glibc baseline.
+For direct `flutter test` on Linux, install `libsqlite3-dev` (CI supplies the
+equivalent linker alias without requiring a system installation).
 
 The app restores its selected runtime as before, while other catalogs start
 refreshing five seconds after initialization (or when Chats is opened). A shared

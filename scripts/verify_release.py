@@ -20,6 +20,8 @@ LINUX_RUNTIME_LIBRARIES = (
     "lib/libayatana-indicator3.so.7",
     "lib/libdbusmenu-glib.so.4",
     "lib/libdbusmenu-gtk3.so.4",
+    "lib/libsqlite3.so.0",
+    "lib/libsqlite3.so",
 )
 
 
