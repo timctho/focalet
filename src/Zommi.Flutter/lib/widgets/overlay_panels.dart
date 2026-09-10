@@ -113,7 +113,7 @@ class SessionSidebar extends StatelessWidget {
                             children: [
                               RuntimeLogo(
                                 runtimeId: target.runtimeId,
-                                size: 20,
+                                size: 16,
                               ),
                               const SizedBox(width: 10),
                               Expanded(
@@ -215,7 +215,6 @@ class SessionSidebar extends StatelessWidget {
                                       'session-runtime-${session.runtimeTargetId}-${session.id}',
                                     ),
                                     runtimeId: runtime?.runtimeId ?? '',
-                                    size: 16,
                                   ),
                                 ),
                               ],

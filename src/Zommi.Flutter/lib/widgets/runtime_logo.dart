@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 class RuntimeLogo extends StatelessWidget {
-  const RuntimeLogo({required this.runtimeId, this.size = 18, super.key});
+  const RuntimeLogo({required this.runtimeId, this.size = 14, super.key});
 
   final String runtimeId;
   final double size;
