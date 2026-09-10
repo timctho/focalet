@@ -1639,8 +1639,17 @@ final class ZommiController extends ChangeNotifier {
     _notify();
   }
 
-  void setTurnActivityExpanded(ConversationTurn turn, bool expanded) {
-    turn.activityExpanded = expanded;
+  void setTurnActivityExpanded(
+    ConversationTurn turn,
+    bool expanded, {
+    String? groupId,
+  }) {
+    if (groupId == null) {
+      turn.activityExpanded = expanded;
+      turn.activityGroupExpansion.clear();
+    } else {
+      turn.activityGroupExpansion[groupId] = expanded;
+    }
     _notify();
   }
 
@@ -1759,6 +1768,7 @@ final class ZommiController extends ChangeNotifier {
         }
         for (final turn in _turnsBySession[sessionKey] ?? const []) {
           turn.activityExpanded = false;
+          turn.activityGroupExpansion.clear();
           for (final block in turn.blocks) {
             if (block.isActivity) {
               block.lifecycle = TranscriptLifecycle.completed;
@@ -1817,7 +1827,7 @@ final class ZommiController extends ChangeNotifier {
     final lifecycle = _lifecycle(event.payload['lifecycle']?.toString());
     final nativeItemId = event.payload['itemId']?.toString() ?? '';
     final incomingText = event.payload['text']?.toString() ?? '';
-    if (kind == TranscriptKind.assistant && incomingText.isNotEmpty) {
+    if (kind.isMessage && incomingText.isNotEmpty) {
       _recordSessionActivity(runtimeTargetId, sessionId);
     }
     final sourceMatch = nativeItemId.isEmpty
@@ -1843,9 +1853,7 @@ final class ZommiController extends ChangeNotifier {
     // Store every delta, but avoid notifying the entire UI (and auto-following)
     // when none of that visible state changes. Opening the group reads the
     // latest stored content, including deltas received while it was folded.
-    final foldedActivity =
-        !turn.activityExpanded &&
-        (kind == TranscriptKind.thinking || kind == TranscriptKind.tool);
+    final foldedActivity = !turn.hasExpandedActivity && kind.isFoldedActivity;
     final previousHeader = block == null
         ? null
         : (
@@ -2296,11 +2304,15 @@ ConversationTurn mergeConversationTurn(
   ConversationTurn secondary,
 ) {
   final blocks = List<TranscriptBlock>.of(primary.blocks);
+  // Match each rekeyed snapshot once so repeated messages remain separate.
+  final matchedIndexes = <int>{};
   for (final candidate in secondary.blocks) {
-    final match = _matchingTranscriptBlock(blocks, candidate);
+    final match = _matchingTranscriptBlock(blocks, candidate, matchedIndexes);
     if (match < 0) {
+      matchedIndexes.add(blocks.length);
       blocks.add(candidate);
     } else {
+      matchedIndexes.add(match);
       blocks[match] = mergeTranscriptBlocks(blocks[match], candidate);
     }
   }
@@ -2310,6 +2322,7 @@ ConversationTurn mergeConversationTurn(
     userText: primary.userText,
     inlineUserText: primary.inlineUserText,
     activityExpanded: primary.activityExpanded,
+    activityGroupExpansion: primary.activityGroupExpansion,
     contextTokens: primary.contextTokens.isEmpty
         ? secondary.contextTokens
         : primary.contextTokens,
@@ -2323,19 +2336,24 @@ ConversationTurn mergeConversationTurn(
 int _matchingTranscriptBlock(
   List<TranscriptBlock> blocks,
   TranscriptBlock candidate,
+  Set<int> matchedIndexes,
 ) {
   final identityMatch = blocks.indexWhere(
     (block) => block.kind == candidate.kind && block.id == candidate.id,
   );
   if (identityMatch >= 0) return identityMatch;
   if (candidate.text.trim().isEmpty) return -1;
-  return blocks.indexWhere(
-    (block) =>
-        block.kind == candidate.kind &&
+  for (var index = 0; index < blocks.length; index++) {
+    if (matchedIndexes.contains(index)) continue;
+    final block = blocks[index];
+    if (block.kind == candidate.kind &&
         (candidate.kind == TranscriptKind.assistant
             ? transcriptTextSnapshotsOverlap(block.text, candidate.text)
-            : block.text.trim() == candidate.text.trim()),
-  );
+            : block.text.trim() == candidate.text.trim())) {
+      return index;
+    }
+  }
+  return -1;
 }
 
 TranscriptBlock? _latestIncompleteBlock(
@@ -2428,6 +2446,7 @@ String _formatEffort(String value) => value.isEmpty
 
 TranscriptKind _transcriptKind(String? value) => switch (value?.toLowerCase()) {
   'assistant' => TranscriptKind.assistant,
+  'commentary' => TranscriptKind.commentary,
   'thinking' => TranscriptKind.thinking,
   'plan' => TranscriptKind.plan,
   'tool' || 'tooloutput' => TranscriptKind.tool,
@@ -2441,7 +2460,7 @@ TranscriptLifecycle _lifecycle(String? value) => switch (value?.toLowerCase()) {
 };
 
 String _kindTitle(TranscriptKind kind) => switch (kind) {
-  TranscriptKind.assistant => 'Agent',
+  TranscriptKind.assistant || TranscriptKind.commentary => 'Agent',
   TranscriptKind.thinking => 'Thinking',
   TranscriptKind.plan => 'Plan',
   TranscriptKind.tool => 'Tool',

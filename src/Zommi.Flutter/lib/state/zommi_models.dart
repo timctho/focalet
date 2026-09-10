@@ -2,7 +2,17 @@ import 'dart:convert';
 
 enum SessionPresence { active, running, unread, done }
 
-enum TranscriptKind { assistant, thinking, plan, tool, error }
+enum TranscriptKind {
+  assistant,
+  commentary,
+  thinking,
+  plan,
+  tool,
+  error;
+
+  bool get isMessage => this == assistant || this == commentary;
+  bool get isFoldedActivity => this == thinking || this == tool;
+}
 
 enum TranscriptLifecycle { started, delta, completed }
 
@@ -271,7 +281,7 @@ final class TranscriptBlock {
   bool expanded;
   final List<ArtifactPreview> artifacts;
 
-  bool get isActivity => kind != TranscriptKind.assistant;
+  bool get isActivity => !kind.isMessage;
   bool get completed => lifecycle == TranscriptLifecycle.completed;
 }
 
@@ -282,10 +292,12 @@ final class ConversationTurn {
     String? inlineUserText,
     this.number = 0,
     this.activityExpanded = false,
+    Map<String, bool> activityGroupExpansion = const {},
     List<String> contextTokens = const [],
     List<ContextAttachment> attachments = const [],
     List<TranscriptBlock> blocks = const [],
   }) : inlineUserText = inlineUserText ?? userText,
+       activityGroupExpansion = Map.of(activityGroupExpansion),
        contextTokens = List<String>.of(contextTokens),
        attachments = List<ContextAttachment>.of(attachments),
        blocks = List<TranscriptBlock>.of(blocks);
@@ -295,6 +307,11 @@ final class ConversationTurn {
   final String userText;
   final String inlineUserText;
   bool activityExpanded;
+  final Map<String, bool> activityGroupExpansion;
+  bool get hasExpandedActivity =>
+      activityExpanded || activityGroupExpansion.containsValue(true);
+  bool isActivityGroupExpanded(String id) =>
+      activityGroupExpansion[id] ?? activityExpanded;
   final List<String> contextTokens;
   final List<ContextAttachment> attachments;
   final List<TranscriptBlock> blocks;

@@ -847,7 +847,7 @@ final class FlutterDesktopBridge
         Menu(
           items: [
             MenuItem(key: 'open', label: 'Open Zommi'),
-            MenuItem(key: 'capture', label: 'Select content (Alt+A)'),
+            MenuItem(key: 'capture', label: 'Select (Alt+A)'),
             MenuItem.separator(),
             MenuItem(key: 'exit', label: 'Exit Zommi'),
           ],

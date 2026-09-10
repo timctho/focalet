@@ -64,7 +64,7 @@ void main() {
     final group = tester.widget<ThinkingActivityGroup>(
       find.byType(ThinkingActivityGroup),
     );
-    final toggle = find.byKey(ValueKey('thinking-toggle-${group.turn.id}'));
+    final toggle = find.byKey(ValueKey('thinking-toggle-${group.id}'));
     await tester.ensureVisible(toggle);
     await tester.tap(toggle);
     await tester.pump();
@@ -190,7 +190,9 @@ void main() {
     await _pumpTurn(tester, controller, turn);
     expect(find.byType(MarkdownBody), findsOneWidget);
     final clock = Stopwatch()..start();
-    await tester.tap(find.byKey(const ValueKey('thinking-toggle-long-turn')));
+    await tester.tap(
+      find.byKey(const ValueKey('thinking-toggle-long-turn-step-0')),
+    );
     await tester.pump();
     expect(clock.elapsed, lessThan(const Duration(seconds: 2)));
     expect(find.byType(MarkdownBody).evaluate().length, lessThan(25));
@@ -204,7 +206,9 @@ void main() {
     }
     expect(find.text('Live update 39'), findsOneWidget);
     expect(find.byType(MarkdownBody).evaluate().length, lessThan(25));
-    await tester.tap(find.byKey(const ValueKey('thinking-toggle-long-turn')));
+    await tester.tap(
+      find.byKey(const ValueKey('thinking-toggle-long-turn-step-0')),
+    );
     await tester.pump();
     expect(activityList, findsNothing);
     expect(tester.takeException(), isNull);

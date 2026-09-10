@@ -639,7 +639,7 @@ void main() {
           1,
           'item.update',
           payload: const {
-            'kind': 'thinking',
+            'kind': 'commentary',
             'lifecycle': 'delta',
             'text': 'Reading context',
             'itemId': 'live-thinking',
@@ -678,11 +678,12 @@ void main() {
 
       await controller.selectRuntime('runtime-pi');
       await controller.selectRuntime('runtime-codex');
-      final thinking = controller.turns.last.blocks.where(
-        (block) => block.kind == TranscriptKind.thinking,
-      );
-      expect(thinking, hasLength(2));
-      expect(thinking.map((block) => block.text), const [
+      final blocks = controller.turns.last.blocks;
+      expect(blocks.map((block) => block.kind), const [
+        TranscriptKind.commentary,
+        TranscriptKind.thinking,
+      ]);
+      expect(blocks.map((block) => block.text), const [
         'Reading context',
         'Comparing the selected page',
       ]);

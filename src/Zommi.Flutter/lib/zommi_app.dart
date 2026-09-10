@@ -771,18 +771,22 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              TextButton.icon(
+              FilledButton.tonalIcon(
                 key: const ValueKey('select-content'),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  minimumSize: const Size(0, 36),
+                  shape: const StadiumBorder(),
+                ),
                 onPressed: _controller.selectingContent
                     ? null
                     : () => unawaited(_controller.addPointerContext()),
                 icon: const Icon(Icons.ads_click_rounded, size: 18),
                 label: Text(
-                  _controller.selectingContent
-                      ? 'Selecting…'
-                      : 'Select content',
+                  _controller.selectingContent ? 'Selecting…' : 'Select',
                 ),
               ),
+              const SizedBox(width: 8),
               Expanded(
                 child: TextField(
                   key: const ValueKey('zommi-composer'),
@@ -800,7 +804,7 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                   keyboardType: TextInputType.multiline,
                   textInputAction: TextInputAction.newline,
                   textAlignVertical: TextAlignVertical.center,
-                  style: topBarAndChatTextStyle,
+                  style: chatTextStyleOf(context),
                   decoration: const InputDecoration(
                     hintText: 'Ask your agent',
                     border: InputBorder.none,
