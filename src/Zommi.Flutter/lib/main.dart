@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/diagnostics/scroll_performance.dart';
-import 'package:zommi_flutter/state/session_catalog_store.dart';
+import 'package:zommi_flutter/state/sqlite_session_catalog_store.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 import 'package:zommi_flutter/zommi_app.dart';
 
@@ -20,7 +20,7 @@ Future<void> main() async {
       desktop: desktop,
       initialPreferences: preferences,
       preferencesStore: preferencesStore,
-      sessionCatalogStore: FileSessionCatalogStore.platform(),
+      sessionCatalogStore: SqliteSessionCatalogStore.platform(),
       catalogStartupDelay: const Duration(seconds: 5),
     ),
   );

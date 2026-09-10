@@ -70,6 +70,13 @@ jobs:
         run: |
           dart format --output=none --set-exit-if-changed lib test
           flutter analyze --no-pub
+          # The self-hosted image has the SQLite runtime, but no -dev linker
+          # symlink. Native release packaging provides this same alias.
+          sqlite_library=$(ldconfig -p | awk '$1 == "libsqlite3.so.0" {print $NF; exit}')
+          test -f "$sqlite_library"
+          mkdir -p "$RUNNER_TEMP/zommi-sqlite"
+          ln -sf "$sqlite_library" "$RUNNER_TEMP/zommi-sqlite/libsqlite3.so"
+          export LD_LIBRARY_PATH="$RUNNER_TEMP/zommi-sqlite${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           flutter test --no-pub
 
       - name: Test release package contracts
@@ -116,6 +123,7 @@ jobs:
       - name: Build and verify Linux release
         env:
           ZOMMI_LINUX_STARTUP_SMOKE: '1'
+          ZOMMI_VERIFY_SQLITE_CACHE: '1'
         run: bash scripts/package-linux-self-hosted.sh
 
       - name: Accept Linux X11 shortcuts and capture UX
@@ -196,7 +204,7 @@ jobs:
       - name: Test Windows session metadata persistence
         shell: pwsh
         working-directory: src/Zommi.Flutter
-        run: flutter test test/session_catalog_cache_test.dart
+        run: flutter test test/session_catalog_cache_test.dart test/sqlite_session_catalog_test.dart
 
       - name: Verify local .NET capture publisher
         shell: pwsh

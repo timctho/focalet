@@ -488,6 +488,7 @@ def run_case(
     environment["GDK_BACKEND"] = "x11"
     environment["LIBGL_ALWAYS_SOFTWARE"] = "1"
     environment["ZOMMI_ACCEPTANCE_LOG"] = str(trace)
+    environment["XDG_STATE_HOME"] = str(temporary / f"{name}-state")
     with runtime_log.open("w", encoding="utf-8") as output:
         process = subprocess.Popen(
             [str(package / "zommi")],

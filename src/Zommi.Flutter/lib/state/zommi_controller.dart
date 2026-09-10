@@ -57,6 +57,7 @@ final class ZommiController extends ChangeNotifier {
   int _catalogWorkerCount = 0;
   Timer? _catalogStartupTimer;
   Timer? _catalogSaveTimer;
+  Timer? _catalogRetentionTimer;
   Future<void>? _catalogSave;
   bool _catalogRestored = false;
   final Set<String> _catalogLoading = {};
@@ -94,6 +95,7 @@ final class ZommiController extends ChangeNotifier {
   bool transitionTargetExpanded = true;
   bool transitionTargetLarge = false;
   bool sessionPanelOpen = false;
+  bool showingOlderSessions = false;
   bool runtimeSetupPanelOpen = false;
   bool modelPanelOpen = false;
   bool workspacePanelOpen = false;
@@ -165,6 +167,24 @@ final class ZommiController extends ChangeNotifier {
       visibleRuntimeTargets.any(canCreateSession);
 
   bool get sessionCatalogLoading => _catalogLoading.isNotEmpty;
+
+  List<SessionSummary> get visibleSessions {
+    if (showingOlderSessions) return sessions;
+    final cutoff = _clock().toUtc().subtract(sessionCatalogRetention);
+    return sessions.where((session) {
+      final key = _sessionKey(session.runtimeTargetId, session.id);
+      return key == _activeSessionKey ||
+          _activeTurns.containsKey(key) ||
+          session.activityTime?.isBefore(cutoff) != true;
+    }).toList();
+  }
+
+  Future<void> loadOlderSessions() async {
+    if (_closed || starting) return;
+    showingOlderSessions = true;
+    _notify();
+    await refreshSessionCatalog(force: true);
+  }
 
   String? get sessionCatalogError {
     final names = visibleRuntimeTargets
@@ -372,6 +392,12 @@ final class ZommiController extends ChangeNotifier {
 
   void _scheduleStartupCatalogRefresh() {
     if (_closed) return;
+    if (sessionCatalogStore is! NoopSessionCatalogStore) {
+      _catalogRetentionTimer = Timer.periodic(const Duration(hours: 1), (_) {
+        _scheduleCatalogSave();
+        _notify();
+      });
+    }
     if (catalogStartupDelay == Duration.zero) {
       unawaited(refreshSessionCatalog());
     } else {
@@ -503,7 +529,15 @@ final class ZommiController extends ChangeNotifier {
       syncedAt: Map.of(_catalogSyncedAt),
       attemptedAt: Map.of(_catalogAttemptedAt),
       usedAt: Map.of(_catalogUsedAt),
-    );
+      protectedSessions: {
+        for (final session in sessions)
+          if (_isActiveSession(session.runtimeTargetId, session.id) ||
+              _activeTurns.containsKey(
+                _sessionKey(session.runtimeTargetId, session.id),
+              ))
+            (session.runtimeTargetId, session.id),
+      },
+    ).retained(_clock());
     final write = (_catalogSave ?? Future<void>.value())
         .then((_) => sessionCatalogStore.save(snapshot))
         .catchError((Object _) {});
@@ -1672,6 +1706,7 @@ final class ZommiController extends ChangeNotifier {
         if (turnId != null && turnId.isNotEmpty) {
           _activeTurns[sessionKey] = turnId;
         }
+        _scheduleCatalogSave();
         if (_isActiveSession(event.runtimeTargetId, sessionId)) {
           _setStatus('$activeRuntimeName is responding…');
         }
@@ -1714,6 +1749,7 @@ final class ZommiController extends ChangeNotifier {
         _activeTurns.remove(sessionKey);
         _interruptingSessions.remove(sessionKey);
         _cancelRequestedSessions.remove(sessionKey);
+        _scheduleCatalogSave();
         if (!_isActiveSession(event.runtimeTargetId, sessionId)) {
           _unreadSessions.add(sessionKey);
         }
@@ -2216,6 +2252,7 @@ final class ZommiController extends ChangeNotifier {
     if (_closed) return;
     _closed = true;
     _catalogStartupTimer?.cancel();
+    _catalogRetentionTimer?.cancel();
     for (final (_, completion) in _catalogQueue) {
       completion.complete();
     }
