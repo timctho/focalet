@@ -40,6 +40,8 @@ final class ZommiController extends ChangeNotifier {
   final Map<String, SessionSettings> _sessionSettings = {};
   final Map<String, List<Map<String, Object?>>> _modelCatalogs = {};
   final Map<String, String> _runtimeTargetAliases = {};
+  final Map<String, RuntimeTarget> _knownRuntimes = {};
+  final Map<String, Set<String>> _runtimeCapabilities = {};
 
   StreamSubscription<CoreEvent>? _coreEvents;
   StreamSubscription<DesktopInvocation>? _desktopEvents;
@@ -139,11 +141,23 @@ final class ZommiController extends ChangeNotifier {
       activeRuntime == null || capabilities.contains('input.image.v1');
 
   bool get sessionNavigationSupported =>
-      capabilities.contains('session.list.v1') ||
-      capabilities.contains('session.resume.v1');
+      sessions.isNotEmpty || visibleRuntimeTargets.isNotEmpty;
 
   bool get sessionCreationSupported =>
-      capabilities.contains('session.create.v1');
+      visibleRuntimeTargets.any(canCreateSession);
+
+  bool canCreateSession(RuntimeTarget target) =>
+      (_runtimeCapabilities[target.id] ?? target.capabilityHints.toSet())
+          .contains('session.create.v1');
+
+  RuntimeTarget? runtimeForSession(SessionSummary session) =>
+      _runtimeTarget(session.runtimeTargetId);
+
+  RuntimeTarget? _runtimeTarget(String id) =>
+      runtimeTargets.cast<RuntimeTarget?>().firstWhere(
+        (target) => target?.id == id,
+        orElse: () => _knownRuntimes[id],
+      );
 
   bool get modelSelectionSupported =>
       capabilities.contains('model.select.v1') && models.isNotEmpty;
@@ -321,7 +335,8 @@ final class ZommiController extends ChangeNotifier {
     final selectingActiveRuntime = activeRuntime?.id == targetId;
     final activeRuntimeUnavailable =
         selectingActiveRuntime && activeRuntime?.status == 'unavailable';
-    if (runtimeBusy || (selectingActiveRuntime && !activeRuntimeUnavailable)) {
+    if (runtimeBusy || sessionBusy || sessionSettingsBusy || submitting) return;
+    if (selectingActiveRuntime && !activeRuntimeUnavailable) {
       closeTransientPanels();
       return;
     }
@@ -464,38 +479,13 @@ final class ZommiController extends ChangeNotifier {
   Future<void> _connectRuntime(String targetId, {String? coreVersion}) async {
     _rememberActiveSessionSettings();
     final connection = await core.connectRuntime(runtimeTargetId: targetId);
-    activeRuntime = runtimeTargets.cast<RuntimeTarget?>().firstWhere(
-      (target) => target?.id == connection.runtimeTargetId,
-      orElse: () => null,
-    );
-    activeSessionId = connection.sessionId;
-    capabilities = {
-      ...?activeRuntime?.capabilityHints,
-      ...connection.capabilities,
-    };
-    if (connection.models.isNotEmpty) {
-      _modelCatalogs[connection.runtimeTargetId] = List.of(connection.models);
-    }
-    models
-      ..clear()
-      ..addAll(
-        connection.models.isNotEmpty
-            ? connection.models
-            : _modelCatalogs[connection.runtimeTargetId] ?? const [],
-      );
-    sessions
-      ..clear()
-      ..addAll(_sessionSummaries(connection.sessions));
-    _ensureSession(connection.sessionId);
-    _hydrateProfiles(connection);
+    _activateConnection(connection);
     if (capabilities.contains('session.list.v1')) {
       try {
         final values = await core.listSessions(
           runtimeTargetId: connection.runtimeTargetId,
         );
-        sessions
-          ..clear()
-          ..addAll(_sessionSummaries(values));
+        _mergeSessions(connection.runtimeTargetId, values);
         _ensureSession(connection.sessionId);
       } on Object {
         // The exact connection remains usable when optional listing fails.
@@ -538,85 +528,155 @@ final class ZommiController extends ChangeNotifier {
     _notify();
   }
 
-  Future<void> createSession() async {
-    final runtimeTargetId = activeRuntime?.id;
-    if (runtimeTargetId == null || sessionBusy || !sessionCreationSupported) {
+  Future<void> createSession({String? runtimeTargetId}) async {
+    final targetId = runtimeTargetId ?? activeRuntime?.id;
+    final target = targetId == null ? null : _runtimeTarget(targetId);
+    if (target == null ||
+        sessionBusy ||
+        runtimeBusy ||
+        sessionSettingsBusy ||
+        submitting ||
+        !canCreateSession(target)) {
       return;
     }
     sessionBusy = true;
+    final changingRuntime = activeRuntime?.id != target.id;
+    switchingRuntimeId = changingRuntime ? target.id : null;
+    _rememberActiveSessionSettings();
+    final inherited = changingRuntime ? null : activeSessionSettings;
     _notify();
     try {
-      final inherited = activeSessionSettings;
+      RuntimeConnection? initialConnection;
+      if (changingRuntime || activeRuntime?.status == 'unavailable') {
+        initialConnection = await core.connectRuntime(
+          runtimeTargetId: target.id,
+        );
+        if (!{
+          ...target.capabilityHints,
+          ...initialConnection.capabilities,
+        }.contains('session.create.v1')) {
+          throw const CoreProtocolException(
+            'unsupported-capability',
+            'This agent cannot create chats.',
+          );
+        }
+      }
       final connection = await core.createSession(
-        runtimeTargetId: runtimeTargetId,
-        model: selectedModel.isEmpty ? null : selectedModel,
-        effort: selectedEffort.isEmpty ? null : selectedEffort,
-        cwd: selectedWorkspace.isEmpty ? null : selectedWorkspace,
-        profile: selectedProfile.isEmpty ? null : selectedProfile,
+        runtimeTargetId: target.id,
+        model: _nonEmpty(inherited?.model),
+        effort: _nonEmpty(inherited?.effort),
+        cwd: _nonEmpty(inherited?.workspace),
+        profile: _nonEmpty(inherited?.profile),
       );
+      if (initialConnection != null) _cacheConnection(initialConnection);
       await _applySessionConnection(connection, inherited: inherited);
       _setStatus('New chat ready');
     } on Object catch (error) {
       _setStatus('Could not create chat · $error', warning: true);
     } finally {
       sessionBusy = false;
+      switchingRuntimeId = null;
       _notify();
     }
   }
 
-  Future<void> switchSession(String sessionId) async {
-    final runtimeTargetId = activeRuntime?.id;
-    if (runtimeTargetId == null ||
+  Future<void> switchSession(
+    String sessionId, {
+    String? runtimeTargetId,
+  }) async {
+    final targetId = runtimeTargetId ?? activeRuntime?.id;
+    if (targetId == null ||
         sessionBusy ||
-        sessionId == activeSessionId) {
-      _notify();
+        runtimeBusy ||
+        sessionSettingsBusy ||
+        submitting ||
+        _isActiveSession(targetId, sessionId)) {
       return;
     }
     sessionBusy = true;
+    final changingRuntime = activeRuntime?.id != targetId;
+    switchingRuntimeId = changingRuntime ? targetId : null;
     _rememberActiveSessionSettings();
+    final targetSettings = _settingsForSession(targetId, sessionId);
     _notify();
     try {
-      final targetSettings = _settingsForSession(runtimeTargetId, sessionId);
+      RuntimeConnection? initialConnection;
+      if (changingRuntime || activeRuntime?.status == 'unavailable') {
+        initialConnection = await core.connectRuntime(
+          runtimeTargetId: targetId,
+          preferredSessionId: sessionId,
+          cwd: _nonEmpty(targetSettings.workspace),
+        );
+      }
       final connection = await core.openSession(
-        runtimeTargetId: runtimeTargetId,
+        runtimeTargetId: targetId,
         sessionId: sessionId,
-        cwd: targetSettings.workspace.isEmpty ? null : targetSettings.workspace,
-        profile: targetSettings.profile.isEmpty ? null : targetSettings.profile,
+        cwd: _nonEmpty(targetSettings.workspace),
+        profile: _nonEmpty(targetSettings.profile),
       );
+      if (initialConnection != null) _cacheConnection(initialConnection);
       await _applySessionConnection(connection);
       _setStatus('Chat switched');
     } on Object catch (error) {
       _setStatus('Could not switch chat · $error', warning: true);
     } finally {
       sessionBusy = false;
+      switchingRuntimeId = null;
       _notify();
     }
+  }
+
+  static String? _nonEmpty(String? value) =>
+      value == null || value.isEmpty ? null : value;
+
+  void _cacheConnection(RuntimeConnection connection) {
+    final target = _runtimeTarget(connection.runtimeTargetId);
+    if (target != null) _knownRuntimes[target.id] = target;
+    _runtimeCapabilities[connection.runtimeTargetId] = {
+      ...?_runtimeCapabilities[connection.runtimeTargetId],
+      ...?target?.capabilityHints,
+      ...connection.capabilities,
+    };
+    if (connection.models.isNotEmpty) {
+      _modelCatalogs[connection.runtimeTargetId] = List.of(connection.models);
+    }
+    _mergeSessions(connection.runtimeTargetId, connection.sessions);
+  }
+
+  void _activateConnection(RuntimeConnection connection) {
+    final changingRuntime = activeRuntime?.id != connection.runtimeTargetId;
+    _cacheConnection(connection);
+    activeRuntime = _runtimeTarget(connection.runtimeTargetId);
+    activeSessionId = connection.sessionId;
+    capabilities = _runtimeCapabilities[connection.runtimeTargetId] ?? {};
+    models
+      ..clear()
+      ..addAll(_modelCatalogs[connection.runtimeTargetId] ?? const []);
+    if (changingRuntime) {
+      selectedModel = '';
+      selectedEffort = '';
+      selectedWorkspace = '';
+      selectedProfile = '';
+      profiles = [];
+    }
+    if (!sessionSettingsBusy) {
+      approval = null;
+      question = null;
+      previewArtifact = null;
+      modelPanelOpen = false;
+      workspacePanelOpen = false;
+      sessionSettingsDetailOpen = false;
+    }
+    _unreadSessions.remove(_activeSessionKey);
+    _ensureSession(connection.sessionId);
+    _hydrateProfiles(connection);
   }
 
   Future<void> _applySessionConnection(
     RuntimeConnection connection, {
     SessionSettings? inherited,
   }) async {
-    activeSessionId = connection.sessionId;
-    _unreadSessions.remove(
-      _sessionKey(connection.runtimeTargetId, connection.sessionId),
-    );
-    capabilities = {...capabilities, ...connection.capabilities};
-    if (connection.models.isNotEmpty) {
-      _modelCatalogs[connection.runtimeTargetId] = List.of(connection.models);
-      models
-        ..clear()
-        ..addAll(connection.models);
-    } else if (models.isEmpty) {
-      models.addAll(_modelCatalogs[connection.runtimeTargetId] ?? const []);
-    }
-    if (connection.sessions.isNotEmpty) {
-      sessions
-        ..clear()
-        ..addAll(_sessionSummaries(connection.sessions));
-    }
-    _ensureSession(connection.sessionId);
-    _hydrateProfiles(connection);
+    _activateConnection(connection);
     _hydrateSessionSettingsFromSummaries(connection.runtimeTargetId);
     final key = _sessionKey(connection.runtimeTargetId, connection.sessionId);
     if (inherited != null) _sessionSettings[key] = inherited;
@@ -634,7 +694,13 @@ final class ZommiController extends ChangeNotifier {
     final text = message.trim();
     final runtimeTargetId = activeRuntime?.id;
     final sessionId = activeSessionId;
-    if (text.isEmpty || submitting || selectingContent) return;
+    if (text.isEmpty ||
+        submitting ||
+        selectingContent ||
+        sessionBusy ||
+        runtimeBusy) {
+      return;
+    }
     if (runtimeTargetId == null || sessionId == null) {
       _setStatus(
         'No agent session is ready. Choose or refresh an agent.',
@@ -975,6 +1041,7 @@ final class ZommiController extends ChangeNotifier {
   }
 
   void setModel(String value) {
+    if (sessionBusy || runtimeBusy) return;
     selectedModel = value;
     final efforts = effortsForModel(_selectedModel());
     if (efforts.isNotEmpty && !efforts.contains(selectedEffort)) {
@@ -987,6 +1054,7 @@ final class ZommiController extends ChangeNotifier {
   }
 
   void setEffort(String value) {
+    if (sessionBusy || runtimeBusy) return;
     selectedEffort = value;
     _rememberActiveSessionSettings();
     _notify();
@@ -1007,7 +1075,11 @@ final class ZommiController extends ChangeNotifier {
   Future<bool> setWorkspace(String value) async {
     final runtime = activeRuntime;
     final sessionId = activeSessionId;
-    if (runtime == null || sessionId == null || sessionSettingsBusy) {
+    if (runtime == null ||
+        sessionId == null ||
+        sessionSettingsBusy ||
+        sessionBusy ||
+        runtimeBusy) {
       return false;
     }
     final normalized = normalizeWorkspacePath(value, runtime.executionHost);
@@ -1071,6 +1143,8 @@ final class ZommiController extends ChangeNotifier {
     if (runtime == null ||
         sessionId == null ||
         sessionSettingsBusy ||
+        sessionBusy ||
+        runtimeBusy ||
         profile.isEmpty ||
         profile == selectedProfile) {
       return;
@@ -1314,6 +1388,8 @@ final class ZommiController extends ChangeNotifier {
 
   Future<void> hideWindow() => desktop.hide();
 
+  Future<void> closeWindow() => desktop.closeWindow();
+
   Future<void> startDragging() => desktop.startDragging();
 
   Future<void> copyText(String value) => desktop.copyText(value);
@@ -1333,13 +1409,15 @@ final class ZommiController extends ChangeNotifier {
     }
   }
 
-  SessionPresence presenceFor(String sessionId) {
-    final runtimeTargetId = activeRuntime?.id;
+  SessionPresence presenceFor(String sessionId, {String? runtimeTargetId}) {
+    runtimeTargetId ??= activeRuntime?.id;
     if (runtimeTargetId == null) return SessionPresence.done;
     final sessionKey = _sessionKey(runtimeTargetId, sessionId);
     if (_activeTurns.containsKey(sessionKey)) return SessionPresence.running;
     if (_unreadSessions.contains(sessionKey)) return SessionPresence.unread;
-    if (sessionId == activeSessionId) return SessionPresence.active;
+    if (_isActiveSession(runtimeTargetId, sessionId)) {
+      return SessionPresence.active;
+    }
     return SessionPresence.done;
   }
 
@@ -1605,33 +1683,67 @@ final class ZommiController extends ChangeNotifier {
   }
 
   void _ensureSession(String sessionId) {
-    if (sessionId.isEmpty) return;
-    if (!sessions.any((session) => session.id == sessionId)) {
+    final runtimeTargetId = activeRuntime?.id;
+    if (sessionId.isEmpty || runtimeTargetId == null) return;
+    if (!sessions.any(
+      (session) =>
+          session.id == sessionId && session.runtimeTargetId == runtimeTargetId,
+    )) {
       sessions.insert(
         0,
-        SessionSummary(id: sessionId, title: 'New $activeRuntimeName chat'),
+        SessionSummary(
+          id: sessionId,
+          runtimeTargetId: runtimeTargetId,
+          title: 'New $activeRuntimeName chat',
+        ),
       );
     }
-    final runtimeTargetId = activeRuntime?.id;
-    if (runtimeTargetId != null) {
-      _turnsBySession.putIfAbsent(
-        _sessionKey(runtimeTargetId, sessionId),
-        () => [],
+    _turnsBySession.putIfAbsent(
+      _sessionKey(runtimeTargetId, sessionId),
+      () => [],
+    );
+  }
+
+  void _mergeSessions(
+    String runtimeTargetId,
+    List<Map<String, Object?>> values,
+  ) {
+    for (final value in values) {
+      final session = SessionSummary.fromJson(
+        value,
+        runtimeTargetId: runtimeTargetId,
       );
+      if (session.id.isEmpty) continue;
+      final index = sessions.indexWhere(
+        (existing) =>
+            existing.runtimeTargetId == runtimeTargetId &&
+            existing.id == session.id,
+      );
+      if (index < 0) {
+        sessions.add(session);
+      } else {
+        sessions[index] = session;
+      }
     }
   }
 
-  List<SessionSummary> _sessionSummaries(List<Map<String, Object?>> values) =>
-      values
-          .map(SessionSummary.fromJson)
-          .where((session) => session.id.isNotEmpty)
-          .toList(growable: false);
-
   void _updateSessionTitle(String sessionId, String message) {
-    final index = sessions.indexWhere((session) => session.id == sessionId);
+    final runtimeTargetId = activeRuntime?.id;
+    if (runtimeTargetId == null) return;
+    final index = sessions.indexWhere(
+      (session) =>
+          session.id == sessionId && session.runtimeTargetId == runtimeTargetId,
+    );
     final title = compactSessionTitle(message);
     if (index < 0) {
-      sessions.insert(0, SessionSummary(id: sessionId, title: title));
+      sessions.insert(
+        0,
+        SessionSummary(
+          id: sessionId,
+          runtimeTargetId: runtimeTargetId,
+          title: title,
+        ),
+      );
     } else if (sessions[index].title.startsWith('New ')) {
       sessions[index] = sessions[index].copyWith(title: title);
     }
@@ -1720,7 +1832,10 @@ final class ZommiController extends ChangeNotifier {
   }
 
   void _hydrateSessionSettingsFromSummaries(String runtimeTargetId) {
-    for (final session in sessions) {
+    for (final session in sessions.where(
+      (s) => s.runtimeTargetId == runtimeTargetId,
+    )) {
+      if (_isActiveSession(runtimeTargetId, session.id)) continue;
       final key = _sessionKey(runtimeTargetId, session.id);
       _sessionSettings.putIfAbsent(
         key,
@@ -1741,21 +1856,26 @@ final class ZommiController extends ChangeNotifier {
     final saved = _sessionSettings[_sessionKey(runtimeTargetId, sessionId)];
     if (saved != null) return saved;
     final summary = sessions.cast<SessionSummary?>().firstWhere(
-      (session) => session?.id == sessionId,
+      (session) =>
+          session?.id == sessionId &&
+          session?.runtimeTargetId == runtimeTargetId,
       orElse: () => null,
     );
+    final sameRuntime = runtimeTargetId == activeRuntime?.id;
     return SessionSettings(
-      workspace: summary?.cwd ?? selectedWorkspace,
-      model: selectedModel,
-      effort: selectedEffort,
-      profile: summary?.profile ?? selectedProfile,
+      workspace: summary?.cwd ?? (sameRuntime ? selectedWorkspace : ''),
+      model: sameRuntime ? selectedModel : '',
+      effort: sameRuntime ? selectedEffort : '',
+      profile: summary?.profile ?? (sameRuntime ? selectedProfile : ''),
     );
   }
 
   void _restoreSessionSettings(RuntimeConnection connection) {
     final key = _sessionKey(connection.runtimeTargetId, connection.sessionId);
     final summary = sessions.cast<SessionSummary?>().firstWhere(
-      (session) => session?.id == connection.sessionId,
+      (session) =>
+          session?.id == connection.sessionId &&
+          session?.runtimeTargetId == connection.runtimeTargetId,
       orElse: () => null,
     );
     final saved = _sessionSettings[key];

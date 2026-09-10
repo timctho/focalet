@@ -505,7 +505,9 @@ void main() {
       expect(sessionPanelSize.width, (surfaceSize.width * .32).clamp(200, 260));
       expect(sessionPanelBounds.right, lessThanOrEqualTo(composerBounds.left));
       expect(sessionPanelBounds.overlaps(composerBounds), isFalse);
-      await tester.tap(find.byKey(const ValueKey('session-session-2')));
+      await tester.tap(
+        find.byKey(const ValueKey('session-runtime-codex-session-2')),
+      );
       await tester.pumpAndSettle();
       expect(core.activeSessionId, 'session-2');
       expect(find.textContaining('Fixture Pro · High'), findsOneWidget);
@@ -1675,7 +1677,7 @@ void main() {
       await tester.pump();
       await tester.pump(sessionSidebarDuration);
       expect(
-        find.bySemanticsLabel('Secondary chat, running session'),
+        find.bySemanticsLabel('Secondary chat, Codex, running session'),
         findsOneWidget,
       );
 
@@ -1690,11 +1692,13 @@ void main() {
       );
       await tester.pump();
       expect(
-        find.bySemanticsLabel('Secondary chat, unread session'),
+        find.bySemanticsLabel('Secondary chat, Codex, unread session'),
         findsOneWidget,
       );
 
-      await tester.tap(find.byKey(const ValueKey('session-session-2')));
+      await tester.tap(
+        find.byKey(const ValueKey('session-runtime-codex-session-2')),
+      );
       await tester.pumpAndSettle();
       core.emit(
         _event(

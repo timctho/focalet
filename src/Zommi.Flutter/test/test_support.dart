@@ -29,8 +29,14 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
   Future<void>? initializeGate;
   Future<void>? connectGate;
   Future<void>? startTurnGate;
+  Future<void>? createSessionGate;
+  bool createSessionFails = false;
+  bool openSessionFails = false;
+  final List<Map<String, Object?>> createdSessions = [];
+  final List<(String, String)> openedSessions = [];
   final Set<String> missingWorkspaces = {};
   final Map<String, String> activeSessionsByRuntime = {};
+  final Map<String, String> activeProfilesByRuntime = {};
   final Map<String, Map<String, Object?>> historyBySession = {};
   final Map<String, List<Map<String, Object?>>> modelCatalogByRuntime = {};
   final List<Map<String, Object?>> configuredOverrides = [
@@ -282,6 +288,21 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
     String? cwd,
     String? profile,
   }) async {
+    createdSessions.add({
+      'runtimeTargetId': runtimeTargetId,
+      'model': model,
+      'effort': effort,
+      'cwd': cwd,
+      'profile': profile,
+    });
+    if (createSessionGate case final gate?) await gate;
+    if (createSessionFails) {
+      throw const CoreProtocolException(
+        'runtime-unavailable',
+        'Agent unavailable',
+      );
+    }
+    activeTargetId = runtimeTargetId;
     activeSessionId = 'created-session';
     activeSessionsByRuntime[runtimeTargetId] = activeSessionId;
     return _connection();
@@ -294,6 +315,14 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
     String? cwd,
     String? profile,
   }) async {
+    openedSessions.add((runtimeTargetId, sessionId));
+    if (openSessionFails) {
+      throw const CoreProtocolException(
+        'session-unavailable',
+        'Chat unavailable',
+      );
+    }
+    activeTargetId = runtimeTargetId;
     activeSessionId = sessionId;
     activeSessionsByRuntime[runtimeTargetId] = sessionId;
     return _connection();
@@ -320,7 +349,9 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
     }
     if (activeTargetId == 'runtime-hermes' &&
         profile != null &&
-        profile.isNotEmpty) {
+        profile.isNotEmpty &&
+        profile != (activeProfilesByRuntime[runtimeTargetId] ?? 'default')) {
+      activeProfilesByRuntime[runtimeTargetId] = profile;
       activeSessionId = 'hermes-$profile-session';
       activeSessionsByRuntime[runtimeTargetId] = activeSessionId;
     }
@@ -528,6 +559,11 @@ final class FakeDesktopBridge implements DesktopBridge, BrowserCaptureSettings {
   @override
   Future<void> hide() async {
     calls.add('hide');
+  }
+
+  @override
+  Future<void> closeWindow() async {
+    calls.add('closeWindow');
   }
 
   @override
