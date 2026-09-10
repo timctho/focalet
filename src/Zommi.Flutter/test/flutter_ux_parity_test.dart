@@ -1062,6 +1062,15 @@ void main() {
 
       expect(find.byKey(const ValueKey('runtime-panel')), findsNothing);
       expect(find.byKey(const ValueKey('runtime-setup-panel')), findsOneWidget);
+      // Asset decoding is real I/O; pumpAndSettle alone can capture the sidebar
+      // before its logos load when this golden runs in isolation.
+      await tester.runAsync(
+        () => precacheImage(
+          const AssetImage('assets/runtime_icons/codex.png'),
+          tester.element(find.byType(ZommiApp)),
+        ),
+      );
+      await tester.pumpAndSettle();
       await expectLater(
         find.byKey(const ValueKey('runtime-setup-panel')),
         matchesGoldenFile('goldens/runtime_setup_panel.png'),
