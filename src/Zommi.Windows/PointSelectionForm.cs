@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace Zommi.Windows;
 
-internal sealed class PointSelectionForm : Form
+internal class PointSelectionForm : Form
 {
     private static readonly nint TopMostWindow = new(-1);
     private const int ExtendedStyleTopMost = 0x00000008;
@@ -222,7 +222,7 @@ internal sealed class PointSelectionForm : Form
         }
     }
 
-    private void GrantForeground()
+    protected void GrantForeground()
     {
         if (returnProcessId != 0) AllowSetForegroundWindow(returnProcessId);
     }

@@ -30,6 +30,7 @@ final class ZommiController extends ChangeNotifier {
   final List<ContextAttachment> attachments = [];
   Map<String, Object?> runtimeSettings = {};
   final Map<String, List<ConversationTurn>> _turnsBySession = {};
+  final Map<String, int> _transcriptRevisions = {};
   final Map<String, String> _activeTurns = {};
   final Set<String> _unreadSessions = {};
   final Set<String> _cancelRequestedSessions = {};
@@ -61,6 +62,8 @@ final class ZommiController extends ChangeNotifier {
   bool sessionBusy = false;
   bool sessionSettingsBusy = false;
   bool submitting = false;
+  bool selectingContent = false;
+  int _attachmentSequence = 0;
   bool expanded = true;
   WindowSizeSetting windowSize;
   bool get largePanel => windowSize == WindowSizeSetting.wide;
@@ -73,6 +76,7 @@ final class ZommiController extends ChangeNotifier {
   bool runtimePanelOpen = false;
   bool runtimeSetupPanelOpen = false;
   bool modelPanelOpen = false;
+  bool workspacePanelOpen = false;
   bool appSettingsPanelOpen = false;
   bool sessionSettingsDetailOpen = false;
   bool contextShortcutRegistered = false;
@@ -98,6 +102,18 @@ final class ZommiController extends ChangeNotifier {
 
   List<ConversationTurn> get turns =>
       _turnsBySession[_activeSessionKey] ?? const [];
+
+  /// Visible content changes only; folded activity deltas, folding UI and
+  /// unrelated sessions must not make the transcript follow a new message.
+  int get transcriptRevision => _transcriptRevisions[_activeSessionKey] ?? 0;
+
+  void _transcriptChanged(String sessionKey) {
+    _transcriptRevisions.update(
+      sessionKey,
+      (value) => value + 1,
+      ifAbsent: () => 1,
+    );
+  }
 
   String? get activeTurnId => _activeTurns[_activeSessionKey];
 
@@ -514,6 +530,7 @@ final class ZommiController extends ChangeNotifier {
         cached,
         preserveCached: _activeTurns.containsKey(sessionKey),
       );
+      _transcriptChanged(sessionKey);
     } on Object catch (error) {
       _turnsBySession.putIfAbsent(sessionKey, () => []);
       _setStatus('History unavailable · $error', warning: true);
@@ -552,7 +569,6 @@ final class ZommiController extends ChangeNotifier {
     if (runtimeTargetId == null ||
         sessionBusy ||
         sessionId == activeSessionId) {
-      sessionPanelOpen = false;
       _notify();
       return;
     }
@@ -569,7 +585,6 @@ final class ZommiController extends ChangeNotifier {
       );
       await _applySessionConnection(connection);
       _setStatus('Chat switched');
-      sessionPanelOpen = false;
     } on Object catch (error) {
       _setStatus('Could not switch chat · $error', warning: true);
     } finally {
@@ -619,7 +634,7 @@ final class ZommiController extends ChangeNotifier {
     final text = message.trim();
     final runtimeTargetId = activeRuntime?.id;
     final sessionId = activeSessionId;
-    if (text.isEmpty || submitting) return;
+    if (text.isEmpty || submitting || selectingContent) return;
     if (runtimeTargetId == null || sessionId == null) {
       _setStatus(
         'No agent session is ready. Choose or refresh an agent.',
@@ -631,6 +646,7 @@ final class ZommiController extends ChangeNotifier {
     if (_activeTurns.containsKey(sessionKey)) return;
     final sendingAttachments = _orderedAttachments(attachmentOrder);
     attachments.clear();
+    _attachmentSequence = 0;
     previewAttachment = null;
     final operationId =
         'flutter:${DateTime.now().microsecondsSinceEpoch}:${++_localTurnSequence}';
@@ -646,6 +662,7 @@ final class ZommiController extends ChangeNotifier {
       attachments: sendingAttachments,
     );
     _turnsBySession.putIfAbsent(sessionKey, () => []).add(localTurn);
+    _transcriptChanged(sessionKey);
     _activeTurns[sessionKey] = operationId;
     _updateSessionTitle(sessionId, text);
     submitting = true;
@@ -701,6 +718,7 @@ final class ZommiController extends ChangeNotifier {
         ),
       );
       _setStatus('Core request failed · $error', warning: true);
+      _transcriptChanged(sessionKey);
     } finally {
       submitting = false;
       _notify();
@@ -784,33 +802,74 @@ final class ZommiController extends ChangeNotifier {
     }
   }
 
-  Future<void> addPointerContext() async {
-    var attachmentAdded = false;
+  Future<void> addPointerContext({String? replacingId}) async {
+    if (selectingContent) return;
+    selectingContent = true;
+    previewAttachment = null;
+    _notify();
     try {
-      final attachment = await desktop.selectPointerContext();
-      if (attachment != null) {
-        addAttachment(attachment);
-        attachmentAdded = true;
-        _setStatus('Context attached');
-      } else {
+      final selected = await desktop.selectPointerContext();
+      final prepared = <ContextAttachment>[];
+      for (var attachment in selected) {
+        if (attachment.hasImage && !imageInputSupported) {
+          if (mapValue(attachment.snapshot?['region'])['status'] ==
+              'image-only') {
+            _setStatus(
+              'This selection needs an agent that accepts images.',
+              warning: true,
+            );
+            return;
+          }
+          attachment = ContextAttachment(
+            id: attachment.id,
+            token: attachment.token,
+            snapshot: attachment.snapshot,
+            previewText: attachment.previewText,
+            bounds: attachment.bounds,
+          );
+        }
+        prepared.add(attachment);
+      }
+      if (prepared.isNotEmpty) {
+        if (replacingId != null) {
+          final index = attachments.indexWhere(
+            (item) => item.id == replacingId,
+          );
+          if (index < 0) return;
+          final previous = attachments[index];
+          final attachment = prepared.removeAt(0);
+          attachments[index] = ContextAttachment(
+            id: previous.id,
+            token: previous.token,
+            snapshot: attachment.snapshot,
+            previewText: attachment.previewText,
+            imageDataUrl: attachment.imageDataUrl,
+            bounds: attachment.bounds,
+          );
+        }
+        for (final attachment in prepared) {
+          attachments.add(attachment.withToken(_attachmentToken()));
+        }
         _setStatus(
-          'No accessible context was exposed under the pointer',
-          warning: true,
+          selected.length > 1
+              ? '${selected.length} selections attached'
+              : replacingId == null
+              ? 'Content attached'
+              : 'Selection updated',
         );
       }
     } on Object catch (error) {
-      _setStatus('Context capture failed · $error', warning: true);
+      _setStatus('Selection failed · $error', warning: true);
     } finally {
-      if (!attachmentAdded) {
-        focusComposerEpoch++;
-        _notify();
-      }
+      selectingContent = false;
+      focusComposerEpoch++;
+      _notify();
       await desktop.showPanel();
     }
   }
 
   void addAttachment(ContextAttachment attachment) {
-    attachments.add(attachment.withToken(_attachmentToken(attachment)));
+    attachments.add(attachment.withToken(_attachmentToken()));
     previewAttachment = null;
     focusComposerEpoch++;
     _notify();
@@ -822,33 +881,15 @@ final class ZommiController extends ChangeNotifier {
     _notify();
   }
 
-  String _attachmentToken(ContextAttachment attachment) {
-    var label = 'image';
-    final snapshot = attachment.snapshot;
-    if (!attachment.hasImage && snapshot != null) {
-      final locator = mapValue(snapshot['locator']);
-      if (locator['kind']?.toString().toLowerCase() == 'url') {
-        final uri = Uri.tryParse(locator['value']?.toString() ?? '');
-        label =
-            uri?.host.replaceFirst(
-              RegExp(r'^www\.', caseSensitive: false),
-              '',
-            ) ??
-            '';
-        if (label.isEmpty) label = 'context';
-      } else {
-        label = (snapshot['application']?.toString() ?? 'context')
-            .toLowerCase()
-            .replaceAll(RegExp(r'\s+'), '-');
-      }
+  String _attachmentToken() {
+    var index = ++_attachmentSequence;
+    var label = '';
+    while (index > 0) {
+      index--;
+      label = String.fromCharCode(65 + index % 26) + label;
+      index ~/= 26;
     }
-    if (label.length > 30) label = label.substring(0, 30);
-    final used = attachments.map((item) => item.token).toSet();
-    var token = '[$label]';
-    for (var suffix = 2; used.contains(token); suffix++) {
-      token = '[$label $suffix]';
-    }
-    return token;
+    return '[$label]';
   }
 
   void showAttachmentPreview(ContextAttachment attachment) {
@@ -1069,6 +1110,7 @@ final class ZommiController extends ChangeNotifier {
     if (sessionPanelOpen) {
       runtimePanelOpen = false;
       modelPanelOpen = false;
+      workspacePanelOpen = false;
       sessionSettingsDetailOpen = false;
       appSettingsPanelOpen = false;
     }
@@ -1078,9 +1120,9 @@ final class ZommiController extends ChangeNotifier {
   void toggleRuntimePanel() {
     runtimePanelOpen = !runtimePanelOpen;
     if (runtimePanelOpen) {
-      sessionPanelOpen = false;
       runtimeSetupPanelOpen = false;
       modelPanelOpen = false;
+      workspacePanelOpen = false;
       sessionSettingsDetailOpen = false;
       appSettingsPanelOpen = false;
     }
@@ -1090,9 +1132,9 @@ final class ZommiController extends ChangeNotifier {
   void toggleRuntimeSetupPanel([bool? open]) {
     runtimeSetupPanelOpen = open ?? !runtimeSetupPanelOpen;
     if (runtimeSetupPanelOpen) {
-      sessionPanelOpen = false;
       runtimePanelOpen = false;
       modelPanelOpen = false;
+      workspacePanelOpen = false;
       sessionSettingsDetailOpen = false;
       appSettingsPanelOpen = false;
     }
@@ -1109,12 +1151,30 @@ final class ZommiController extends ChangeNotifier {
       }
     } else {
       modelPanelOpen = true;
+      workspacePanelOpen = false;
       sessionSettingsDetailOpen = false;
-      sessionPanelOpen = false;
       runtimePanelOpen = false;
       runtimeSetupPanelOpen = false;
       appSettingsPanelOpen = false;
     }
+    _notify();
+  }
+
+  void toggleWorkspacePanel() {
+    workspacePanelOpen = !workspacePanelOpen;
+    if (workspacePanelOpen) {
+      runtimePanelOpen = false;
+      runtimeSetupPanelOpen = false;
+      modelPanelOpen = false;
+      sessionSettingsDetailOpen = false;
+      appSettingsPanelOpen = false;
+    }
+    _notify();
+  }
+
+  void dismissWorkspacePanel() {
+    if (!workspacePanelOpen) return;
+    workspacePanelOpen = false;
     _notify();
   }
 
@@ -1123,6 +1183,7 @@ final class ZommiController extends ChangeNotifier {
     runtimePanelOpen = false;
     runtimeSetupPanelOpen = false;
     modelPanelOpen = false;
+    workspacePanelOpen = false;
     sessionSettingsDetailOpen = false;
     appSettingsPanelOpen = false;
     _notify();
@@ -1131,10 +1192,10 @@ final class ZommiController extends ChangeNotifier {
   void toggleAppSettingsPanel() {
     appSettingsPanelOpen = !appSettingsPanelOpen;
     if (appSettingsPanelOpen) {
-      sessionPanelOpen = false;
       runtimePanelOpen = false;
       runtimeSetupPanelOpen = false;
       modelPanelOpen = false;
+      workspacePanelOpen = false;
       sessionSettingsDetailOpen = false;
     }
     _notify();
@@ -1293,6 +1354,10 @@ final class ZommiController extends ChangeNotifier {
   }
 
   Future<void> _handleDesktopInvocation(DesktopInvocation invocation) async {
+    if (invocation.kind == DesktopInvocationKind.selectContent) {
+      await addPointerContext();
+      return;
+    }
     if (invocation.kind == DesktopInvocationKind.captureStarted) {
       _setStatus(invocation.message ?? 'Capturing context…');
       await setExpanded(true);
@@ -1405,6 +1470,7 @@ final class ZommiController extends ChangeNotifier {
             }
           }
         }
+        _transcriptChanged(sessionKey);
         if (_isActiveSession(event.runtimeTargetId, sessionId)) {
           _setStatus(switch (statusValue.toLowerCase()) {
             'completed' => '$activeRuntimeName reply complete',
@@ -1474,6 +1540,19 @@ final class ZommiController extends ChangeNotifier {
         : sourceMatch == null
         ? nativeItemId
         : '$nativeItemId:${event.sequence}';
+    // The folded header only displays presence, tool count and completion.
+    // Store every delta, but avoid notifying the entire UI (and auto-following)
+    // when none of that visible state changes. Opening the group reads the
+    // latest stored content, including deltas received while it was folded.
+    final foldedActivity =
+        !turn.activityExpanded &&
+        (kind == TranscriptKind.thinking || kind == TranscriptKind.tool);
+    final previousHeader = block == null
+        ? null
+        : (
+            block.completed,
+            block.text.trim().isNotEmpty || block.artifacts.isNotEmpty,
+          );
     if (block == null) {
       block = TranscriptBlock(
         id: blockId,
@@ -1506,9 +1585,22 @@ final class ZommiController extends ChangeNotifier {
         block.artifacts.add(artifact);
       }
     }
+    final backgroundStarted =
+        !_isActiveSession(runtimeTargetId, sessionId) &&
+        !_activeTurns.containsKey(sessionKey);
     if (!_isActiveSession(runtimeTargetId, sessionId)) {
       _activeTurns.putIfAbsent(sessionKey, () => event.turnId ?? 'running');
     }
+    if (foldedActivity &&
+        previousHeader ==
+            (
+              block.completed,
+              block.text.trim().isNotEmpty || block.artifacts.isNotEmpty,
+            )) {
+      if (backgroundStarted) _notify();
+      return;
+    }
+    _transcriptChanged(sessionKey);
     _notify();
   }
 

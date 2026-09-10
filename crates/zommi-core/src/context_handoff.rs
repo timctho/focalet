@@ -60,6 +60,9 @@ pub fn compact_accessibility_tree(tree: &Value) -> Value {
 
 fn format_snapshot(snapshot: &Value, index: usize, total: usize) -> String {
     let mut lines = Vec::new();
+    if let Some(label) = non_empty_field(snapshot, "contextLabel") {
+        lines.push(format!("User reference [{}]:", clean_text(&label, 40)));
+    }
     if total > 1 {
         lines.push(format!("Context {} of {total}:", index + 1));
     }
@@ -74,12 +77,57 @@ fn format_snapshot(snapshot: &Value, index: usize, total: usize) -> String {
     for (field, label) in [
         ("source", "Observation source"),
         ("region", "Image region alignment and coordinate mapping"),
+        (
+            "spatialContext",
+            "Table location around the crop (context, not a claim that the whole cell was selected)",
+        ),
     ] {
         if let Some(value) = snapshot.get(field).filter(|value| value.is_object()) {
             lines.push(format!(
                 "{label}: {}",
                 serde_json::to_string(value).unwrap_or_default()
             ));
+        }
+    }
+    if snapshot.get("spatialContext").is_some() {
+        lines.push("Table rowIndex and columnIndex are raw provider grid coordinates. dataRowNumber, when present, is the one-based data row normalized against the verified firstDataRowIndex; providers can include headers or report a nonzero first data index. Use columnHeaders for the visible column name; do not infer a row number from screen Y alone.".into());
+    }
+    if let Some(region) = snapshot.get("region").filter(|value| value.is_object()) {
+        for field in ["snapshotId", "observedAtUtc", "expiresAtUtc"] {
+            if let Some(value) = non_empty_field(snapshot, field) {
+                lines.push(format!("{field}: {}", clean_text(&value, 100)));
+            }
+        }
+        if let (Some(screen), Some(image)) = (
+            region.get("screenBounds"),
+            region
+                .get("mapping")
+                .and_then(|mapping| mapping.get("imageBounds")),
+        ) {
+            let values = [
+                screen.get("x"),
+                screen.get("y"),
+                screen.get("width"),
+                screen.get("height"),
+                image.get("x"),
+                image.get("y"),
+                image.get("width"),
+                image.get("height"),
+            ];
+            let values: Option<Vec<f64>> = values
+                .into_iter()
+                .map(|value| value.and_then(Value::as_f64))
+                .collect();
+            if let Some(v) = values.filter(|v| {
+                v.iter().all(|value| value.is_finite())
+                    && v[2] > 0.0
+                    && v[3] > 0.0
+                    && v[6] > 0.0
+                    && v[7] > 0.0
+            }) {
+                lines.push(format!("Image pixels map to desktop physical pixels: screenX = {} + (imageX - {}) * {}; screenY = {} + (imageY - {}) * {}.", v[0], v[4], v[2] / v[6], v[1], v[5], v[3] / v[7]));
+                lines.push("These coordinates describe the captured frame. Obtain fresh window state before acting if the window, scroll position or content has changed.".into());
+            }
         }
     }
     lines.push(format!("Surface: {surface_kind} in {application}"));
@@ -453,6 +501,25 @@ mod tests {
     use super::{build_context_handoff, compact_accessibility_tree};
 
     #[test]
+    fn user_reference_labels_keep_their_image_mapping_after_replacement() {
+        let handoff = build_context_handoff(
+            "Compare B and C",
+            &[
+                json!({"contextLabel": "B", "imageIndex": 1, "region": {"status": "image-only"}}),
+                json!({"contextLabel": "C", "selection": ["Selected comment"]}),
+            ],
+            1,
+        );
+        let b = handoff.find("User reference [B]:").unwrap();
+        let image = handoff
+            .find("Attached image 1 corresponds to this context.")
+            .unwrap();
+        let c = handoff.find("User reference [C]:").unwrap();
+        assert!(b < image && image < c);
+        assert!(handoff.contains("Selected comment"));
+    }
+
+    #[test]
     fn browser_handoff_preserves_selection_identity_and_image_mapping() {
         let original = "first  line\n  第二行\tvalue";
         let dom = json!({"mode": "capture", "selectedText": [original]});
@@ -493,8 +560,56 @@ mod tests {
     }
 
     #[test]
+    fn image_only_native_app_preserves_location_and_scaled_image_coordinates() {
+        let handoff = build_context_handoff(
+            "this field",
+            &[json!({
+                "surfaceKind": "Image region", "application": "Redis Insight", "imageIndex": 1,
+                "snapshotId": "frame-123", "observedAtUtc": "2026-09-08T18:00:00Z",
+                "expiresAtUtc": "2026-09-08T18:00:30Z",
+                "source": {"provider": "windows-screen-region", "nativeWindowId": "42", "processId": 100,
+                    "windowBounds": {"x": -900, "y": 20, "width": 800, "height": 600}},
+                "region": {"status": "image-only", "reason": "No accessible text",
+                    "screenBounds": {"x": -800, "y": 100, "width": 600, "height": 320},
+                    "mapping": {"coordinateSpace": "desktop-physical-pixels",
+                        "imageBounds": {"x": 0, "y": 0, "width": 300, "height": 160}}}
+            })],
+            1,
+        );
+        assert!(handoff.contains("screenX = -800 + (imageX - 0) * 2"));
+        assert!(handoff.contains("screenY = 100 + (imageY - 0) * 2"));
+        assert!(handoff.contains("snapshotId: frame-123"));
+        assert!(handoff.contains("2026-09-08T18:00:30Z"));
+        assert!(handoff.contains("Redis Insight") && handoff.contains("windowBounds"));
+        assert!(!handoff.contains("Mouse pointer:"));
+        assert!(!handoff.contains("PRIMARY SURFACE SELECTION"));
+    }
+
+    #[test]
     fn returns_trimmed_user_message_without_context() {
         assert_eq!(build_context_handoff("  hello  ", &[], 0), "hello");
+    }
+
+    #[test]
+    fn partial_cell_location_and_batch_image_references_reach_the_agent() {
+        let snapshots = [1, 3].map(|row| json!({
+            "contextLabel": if row == 1 { "A" } else { "B" },
+            "imageIndex": if row == 1 { 1 } else { 2 },
+            "region": {"status": "image-only"},
+            "spatialContext": {"cells": [{"rowIndex": row, "columnIndex": 1,
+                "firstDataRowIndex": 1, "dataRowNumber": row, "columnHeaders": ["Database Alias"]}]}
+        }));
+        let handoff = build_context_handoff("which rows?", &snapshots, 2);
+        assert!(
+            handoff.contains("Attached image 1 corresponds")
+                && handoff.contains("Attached image 2 corresponds")
+        );
+        assert!(handoff.contains("\"dataRowNumber\":1") && handoff.contains("\"dataRowNumber\":3"));
+        assert!(
+            handoff.contains("Database Alias") && handoff.contains("verified firstDataRowIndex")
+        );
+        assert!(handoff.contains("not a claim that the whole cell was selected"));
+        assert!(!handoff.contains("PRIMARY SURFACE SELECTION"));
     }
 
     #[test]

@@ -25,6 +25,63 @@ final class ContextAttachment {
 
   bool get hasImage => imageDataUrl?.isNotEmpty == true;
 
+  String get reference => token.replaceAll(RegExp(r'[\[\]]'), '');
+
+  String get sourceTitle =>
+      snapshot?['windowTitle']?.toString() ??
+      snapshot?['application']?.toString() ??
+      'Selected content';
+
+  String get excerpt {
+    final selection = snapshot?['selection'];
+    if (selection is List && selection.isNotEmpty) {
+      return _compactExcerpt(
+        selection.map((value) => value.toString()).join(' '),
+      );
+    }
+    final dom = snapshot?['dom'];
+    final elements = dom is Map ? dom['elements'] : null;
+    final selected = snapshot?['selectionElements'];
+    final tree = snapshot?['accessibilityTree'];
+    final spatial = snapshot?['spatialContext'];
+    final cells = spatial is Map ? spatial['cells'] : null;
+    String? location;
+    if (cells is List && cells.isNotEmpty && cells.first is Map) {
+      final cell = cells.first as Map;
+      final headers = cell['columnHeaders'];
+      final column = headers is List ? headers.join(' / ') : '';
+      final row = cell['dataRowNumber'];
+      if (column.isNotEmpty) {
+        location = row is num ? '$column · row $row' : column;
+      }
+    }
+    String? firstText(Object? items) {
+      if (items is! List) return null;
+      for (final item in items.whereType<Map>()) {
+        for (final key in ['text', 'value', 'name', 'label', 'href']) {
+          final value = item[key]?.toString().trim();
+          if (value != null && value.isNotEmpty) return value;
+        }
+        final child = firstText(item['children']);
+        if (child != null) return child;
+      }
+      return null;
+    }
+
+    return _compactExcerpt(
+      firstText(elements) ??
+          firstText(selected) ??
+          firstText(tree is Map ? tree['roots'] : null) ??
+          location ??
+          (hasImage ? 'Selected image' : sourceTitle),
+    );
+  }
+
+  static String _compactExcerpt(String value) {
+    final text = value.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return text.length <= 160 ? text : '${text.substring(0, 160)}…';
+  }
+
   ContextAttachment withToken(String value) => ContextAttachment(
     id: id,
     token: value,
@@ -42,12 +99,11 @@ List<Map<String, Object?>> contextHandoffSnapshots(
   final snapshots = <Map<String, Object?>>[];
   for (final attachment in attachments) {
     if (attachment.hasImage) imageIndex++;
-    if (attachment.snapshot case final snapshot?) {
-      snapshots.add({
-        ...snapshot,
-        if (attachment.hasImage) 'imageIndex': imageIndex,
-      });
-    }
+    snapshots.add({
+      ...?attachment.snapshot,
+      if (attachment.reference.isNotEmpty) 'contextLabel': attachment.reference,
+      if (attachment.hasImage) 'imageIndex': imageIndex,
+    });
   }
   return snapshots;
 }

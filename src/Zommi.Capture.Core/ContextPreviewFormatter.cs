@@ -28,7 +28,17 @@ public static class ContextPreviewFormatter
     {
         if (snapshot.Region is { } region)
         {
-            builder.AppendLine(region.Status == "aligned" ? "Image with text from the selected region" : $"Image only — {region.Reason}");
+            builder.AppendLine(region.Status == "aligned" ? "Image with text from the selected region" :
+                region.Mapping is not null ? $"Image with screen location — {region.Reason}" : $"Image only — {region.Reason}");
+        }
+        if (snapshot.SpatialContext is { } spatial)
+        {
+            foreach (var cell in spatial.Cells)
+            {
+                var column = cell.ColumnHeaders.Count > 0 ? string.Join(" / ", cell.ColumnHeaders.Select(value => Clean(value, 120))) : $"column index {cell.ColumnIndex}";
+                var row = cell.DataRowNumber is { } number ? $"data row {number}" : $"grid row index {cell.RowIndex} (zero-based)";
+                builder.AppendLine($"Location: {column} · {row} (cell surrounding the selection)");
+            }
         }
         if (snapshot.Selection.Count > 0 || snapshot.SelectionElements.Count > 0)
         {
@@ -68,12 +78,14 @@ public static class ContextPreviewFormatter
 
         if (snapshot.Dom is { } dom)
         {
+            var shownLinks = new HashSet<string>(StringComparer.Ordinal);
             builder.AppendLine(dom.Mode == "region" ? "Inside the image region:" : "Selected browser content:");
             foreach (var element in dom.Elements)
             {
                 builder.AppendLine($"{element.Role}: {element.Text}");
                 if (!string.IsNullOrEmpty(element.Value)) builder.AppendLine(element.Value);
                 if (!string.IsNullOrEmpty(element.Label)) builder.AppendLine($"Label: {element.Label}");
+                if (!string.IsNullOrEmpty(element.Href) && shownLinks.Add(element.Href)) builder.AppendLine($"Link: {Clean(element.Href, 4_000)}");
             }
             if (dom.Nearby is { } nearby) builder.AppendLine($"Nearby content:\n{nearby.Text}");
             if (dom.Truncated) builder.AppendLine("Some content was omitted; choose a smaller range for complete text.");

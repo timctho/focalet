@@ -116,7 +116,7 @@ void main() {
     await pumpMarkdown(singleLine);
     await tester.pump();
     final responseCopy = find.byKey(ValueKey('copy-${singleLine.hashCode}'));
-    final layout = find.byKey(ValueKey('copy-layout-${singleLine.hashCode}'));
+    final layout = find.byKey(const ValueKey('copy-layout'));
     final responseCopyRect = tester.getRect(responseCopy);
     final layoutRect = tester.getRect(layout);
     final singleLineMarkdown = tester.getRect(find.byType(MarkdownBody));
@@ -286,9 +286,9 @@ void main() {
         find.byKey(const ValueKey('zommi-composer')),
         'hey i own ',
       );
-      await _selectImageFromComposerMenu(tester);
+      await _selectImageFromComposer(tester, desktop);
       await tester.pumpAndSettle();
-      expect(desktop.calls, contains('selectImage:false'));
+      expect(desktop.calls, contains('selectPointerContext'));
       expect(
         find.byKey(const ValueKey('inline-image-image-1')),
         findsOneWidget,
@@ -302,7 +302,7 @@ void main() {
         token: '',
         imageDataUrl: _onePixelPng,
       );
-      await _selectImageFromComposerMenu(tester);
+      await _selectImageFromComposer(tester, desktop);
       await tester.pumpAndSettle();
       expect(
         find.byKey(const ValueKey('inline-image-image-2')),
@@ -311,7 +311,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('send-message')));
       await tester.pump();
       expect(core.lastMessage, "hey i own and i'd like to consider to buy");
-      expect(core.lastSnapshots, hasLength(1));
+      expect(core.lastSnapshots, hasLength(2));
       expect(core.lastImages, [_onePixelPng, _onePixelPng]);
       expect(find.byType(InlineAttachmentMessage), findsOneWidget);
       expect(
@@ -364,7 +364,7 @@ void main() {
     },
   );
 
-  testWidgets('composer plus menu captures pointer context and offers image', (
+  testWidgets('one visible content entry captures without a mode menu', (
     tester,
   ) async {
     final desktop = FakeDesktopBridge()
@@ -375,31 +375,7 @@ void main() {
       desktop: desktop,
     );
 
-    final composerBounds = tester.getRect(
-      find.byKey(const ValueKey('message-composer-shell')),
-    );
-    await tester.tap(find.byKey(const ValueKey('composer-attachment-menu')));
-    await tester.pump();
-    final menu = find.byKey(const ValueKey('composer-attachment-menu-surface'));
-    expect(tester.widget<ZommiOverlayPanelSurface>(menu).width, 286);
-    final startingTop = tester.getTopLeft(menu).dy;
-    await tester.pump(const Duration(milliseconds: 90));
-    final movingTop = tester.getTopLeft(menu).dy;
-    await tester.pumpAndSettle();
-    final menuBounds = tester.getRect(menu);
-    expect(movingTop, lessThan(startingTop));
-    expect(menuBounds.bottom, lessThanOrEqualTo(composerBounds.top));
-    final menuMaterial = tester.widget<Material>(
-      find.descendant(of: menu, matching: find.byType(Material)).first,
-    );
-    expect(menuMaterial.surfaceTintColor, Colors.transparent);
-    expect(menuMaterial.shadowColor, zommiOverlayPanelShadowColor);
-    expect(find.text('Click to capture context'), findsOneWidget);
-    expect(find.text('Select image'), findsOneWidget);
-    expect(find.text('Alt+A'), findsOneWidget);
-    expect(find.text('Alt+Shift+A'), findsOneWidget);
-
-    await tester.tap(find.byKey(const ValueKey('capture-pointer-context')));
+    await tester.tap(find.byKey(const ValueKey('select-content')));
     await tester.pumpAndSettle();
     expect(
       desktop.calls,
@@ -468,7 +444,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('model-summary')));
       await tester.pumpAndSettle();
       expect(
-        find.byKey(const ValueKey('session-settings-panel')),
+        find.byKey(const ValueKey('model-settings-panel')),
         findsOneWidget,
       );
       await tester.tap(find.byKey(const ValueKey('settings-model')));
@@ -526,76 +502,80 @@ void main() {
       final composerBounds = tester.getRect(
         find.byKey(const ValueKey('message-composer-shell')),
       );
-      expect(sessionPanelSize.width, surfaceSize.width / 2);
-      expect(sessionPanelBounds.bottom, lessThanOrEqualTo(composerBounds.top));
+      expect(sessionPanelSize.width, (surfaceSize.width * .32).clamp(200, 260));
+      expect(sessionPanelBounds.right, lessThanOrEqualTo(composerBounds.left));
       expect(sessionPanelBounds.overlaps(composerBounds), isFalse);
       await tester.tap(find.byKey(const ValueKey('session-session-2')));
       await tester.pumpAndSettle();
       expect(core.activeSessionId, 'session-2');
       expect(find.textContaining('Fixture Pro · High'), findsOneWidget);
+      expect(find.byKey(const ValueKey('session-sidebar')), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'runtime and model overlays dismiss on outside click while sessions stay open',
+    (tester) async {
+      final core = RichFakeCore()..historyCount = 0;
+      await _pumpApp(tester, core: core, desktop: FakeDesktopBridge());
+      await _expand(tester);
+      final composer = find.byKey(const ValueKey('zommi-composer'));
+
+      await tester.tap(find.byKey(const ValueKey('runtime-summary')));
+      await tester.pump();
+      final runtimePanel = find.byKey(const ValueKey('runtime-panel'));
+      expect(runtimePanel, findsOneWidget);
+      final runtimeButtonBounds = tester.getRect(
+        find.byKey(const ValueKey('runtime-summary')),
+      );
+      final runtimePanelBounds = tester.getRect(runtimePanel);
+      expect(runtimePanelBounds.left, closeTo(runtimeButtonBounds.left, 0.1));
+      expect(
+        runtimePanelBounds.top,
+        closeTo(runtimeButtonBounds.bottom + 6, 0.1),
+      );
+      await tester.tap(composer);
+      await tester.pump();
+      expect(find.byKey(const ValueKey('runtime-panel')), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('model-summary')));
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('model-settings-panel')),
+        findsOneWidget,
+      );
+      final settingsButtonBounds = tester.getRect(
+        find.byKey(const ValueKey('model-summary')),
+      );
+      final settingsPanelBounds = tester.getRect(
+        find.byKey(const ValueKey('model-settings-panel')),
+      );
+      expect(settingsPanelBounds.left, closeTo(settingsButtonBounds.left, 0.1));
+      expect(
+        settingsPanelBounds.top,
+        closeTo(settingsButtonBounds.bottom + 6, 0.1),
+      );
+      await tester.tap(composer);
+      await tester.pump();
+      expect(find.byKey(const ValueKey('model-settings-panel')), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('session-sidebar')), findsOneWidget);
+      final composerBounds = tester.getRect(composer);
+      await tester.tapAt(
+        Offset(composerBounds.right - 12, composerBounds.center.dy),
+      );
+      await tester.pump();
+      expect(find.byKey(const ValueKey('session-sidebar')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
+      await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('session-sidebar')), findsNothing);
     },
   );
 
-  testWidgets('runtime, model, and session overlays dismiss on outside click', (
-    tester,
-  ) async {
-    final core = RichFakeCore()..historyCount = 0;
-    await _pumpApp(tester, core: core, desktop: FakeDesktopBridge());
-    await _expand(tester);
-    final composer = find.byKey(const ValueKey('zommi-composer'));
-
-    await tester.tap(find.byKey(const ValueKey('runtime-summary')));
-    await tester.pump();
-    final runtimePanel = find.byKey(const ValueKey('runtime-panel'));
-    expect(runtimePanel, findsOneWidget);
-    final runtimeButtonBounds = tester.getRect(
-      find.byKey(const ValueKey('runtime-summary')),
-    );
-    final runtimePanelBounds = tester.getRect(runtimePanel);
-    expect(runtimePanelBounds.left, closeTo(runtimeButtonBounds.left, 0.1));
-    expect(
-      runtimePanelBounds.top,
-      closeTo(runtimeButtonBounds.bottom + 6, 0.1),
-    );
-    await tester.tap(composer);
-    await tester.pump();
-    expect(find.byKey(const ValueKey('runtime-panel')), findsNothing);
-
-    await tester.tap(find.byKey(const ValueKey('model-summary')));
-    await tester.pump();
-    expect(
-      find.byKey(const ValueKey('session-settings-panel')),
-      findsOneWidget,
-    );
-    final settingsButtonBounds = tester.getRect(
-      find.byKey(const ValueKey('model-summary')),
-    );
-    final settingsPanelBounds = tester.getRect(
-      find.byKey(const ValueKey('session-settings-panel')),
-    );
-    expect(settingsPanelBounds.left, closeTo(settingsButtonBounds.left, 0.1));
-    expect(
-      settingsPanelBounds.top,
-      closeTo(settingsButtonBounds.bottom + 6, 0.1),
-    );
-    await tester.tap(composer);
-    await tester.pump();
-    expect(find.byKey(const ValueKey('session-settings-panel')), findsNothing);
-
-    await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
-    await tester.pump();
-    expect(find.byKey(const ValueKey('session-sidebar')), findsOneWidget);
-    final composerBounds = tester.getRect(composer);
-    await tester.tapAt(
-      Offset(composerBounds.right - 12, composerBounds.center.dy),
-    );
-    await tester.pump();
-    expect(find.byKey(const ValueKey('session-sidebar')), findsNothing);
-  });
-
   testWidgets(
-    'session settings navigates into editors and applies Hermes values',
+    'separate workspace and model settings apply per-chat Hermes values',
     (tester) async {
       const hermes = RuntimeTarget(
         id: 'runtime-hermes',
@@ -623,33 +603,27 @@ void main() {
 
       await tester.tap(find.byKey(const ValueKey('model-summary')));
       await tester.pumpAndSettle();
-      final settings = find.byKey(const ValueKey('session-settings-panel'));
+      final settings = find.byKey(const ValueKey('model-settings-panel'));
       expect(settings, findsOneWidget);
-      expect(tester.getSize(settings).width, 286);
-      expect(tester.getSize(settings).height, lessThan(390));
-      expect(
-        tester
-            .widget<Material>(
-              find
-                  .ancestor(
-                    of: find.byKey(const ValueKey('settings-workspace')),
-                    matching: find.byType(Material),
-                  )
-                  .first,
-            )
-            .clipBehavior,
-        Clip.antiAlias,
-      );
-      expect(find.byKey(const ValueKey('settings-workspace')), findsOneWidget);
+      expect(find.text('Model settings'), findsOneWidget);
+      expect(find.text('Session settings'), findsNothing);
+      expect(find.byKey(const ValueKey('settings-workspace')), findsNothing);
       expect(find.byKey(const ValueKey('settings-model')), findsOneWidget);
       expect(find.byKey(const ValueKey('settings-profile')), findsOneWidget);
+      expect(tester.getSize(settings).width, 286);
+      expect(tester.getSize(settings).height, lessThan(390));
 
-      await tester.tap(find.byKey(const ValueKey('settings-workspace')));
+      final workspace = find.byKey(const ValueKey('workspace-summary'));
+      final model = find.byKey(const ValueKey('model-summary'));
+      expect(tester.getCenter(workspace).dy, tester.getCenter(model).dy);
+      expect(
+        tester.getRect(workspace).left,
+        greaterThan(tester.getRect(model).right),
+      );
+      await tester.tap(workspace);
       await tester.pumpAndSettle();
+      expect(settings, findsNothing);
       expect(find.byKey(const ValueKey('workspace-panel')), findsOneWidget);
-      expect(find.byKey(const ValueKey('settings-workspace')), findsNothing);
-      expect(tester.getSize(settings).width, 390);
-
       await tester.enterText(
         find.byKey(const ValueKey('workspace-path')),
         '/workspace/missing',
@@ -658,15 +632,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining('Folder does not exist'), findsOneWidget);
       expect(core.lastCwd, '/workspace/missing');
-
-      await tester.tap(find.byKey(const ValueKey('model-summary')));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('workspace-panel')), findsNothing);
-      expect(find.byKey(const ValueKey('settings-workspace')), findsOneWidget);
-      expect(settings, findsOneWidget);
-      expect(tester.getSize(settings).width, 286);
-      await tester.tap(find.byKey(const ValueKey('settings-workspace')));
-      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('workspace-panel')), findsOneWidget);
 
       await tester.tap(find.byKey(const ValueKey('browse-workspace')));
       await tester.pumpAndSettle();
@@ -682,14 +648,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(core.lastCwd, '/workspace/new');
       expect(find.byKey(const ValueKey('workspace-panel')), findsNothing);
-      expect(find.byKey(const ValueKey('settings-workspace')), findsOneWidget);
-      expect(settings, findsOneWidget);
-      expect(tester.getSize(settings).width, 286);
-
-      await tester.tap(find.byKey(const ValueKey('model-summary')));
-      await tester.pumpAndSettle();
+      expect(
+        find.descendant(of: workspace, matching: find.text('new')),
+        findsOneWidget,
+      );
       expect(settings, findsNothing);
-      await tester.tap(find.byKey(const ValueKey('model-summary')));
+      await tester.tap(model);
       await tester.pumpAndSettle();
       expect(settings, findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('settings-profile')));
@@ -1709,6 +1673,7 @@ void main() {
 
       await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
       await tester.pump();
+      await tester.pump(sessionSidebarDuration);
       expect(
         find.bySemanticsLabel('Secondary chat, running session'),
         findsOneWidget,
@@ -1766,10 +1731,12 @@ Future<void> _expand(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
-Future<void> _selectImageFromComposerMenu(WidgetTester tester) async {
-  await tester.tap(find.byKey(const ValueKey('composer-attachment-menu')));
-  await tester.pumpAndSettle();
-  await tester.tap(find.byKey(const ValueKey('select-image-context')));
+Future<void> _selectImageFromComposer(
+  WidgetTester tester,
+  FakeDesktopBridge desktop,
+) async {
+  desktop.nextContext = desktop.nextImage;
+  await tester.tap(find.byKey(const ValueKey('select-content')));
 }
 
 void _appendComposerText(WidgetTester tester, String value) {

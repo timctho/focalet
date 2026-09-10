@@ -15,6 +15,11 @@ internal static class Program
             return AcceptanceProbe.BrowserBinding(args[1]);
         }
 
+        if (args.Length == 2 && args[0] == "--acceptance-region")
+        {
+            return AcceptanceProbe.Region(args[1]);
+        }
+
         if (args.Contains("--acceptance-capture-once", StringComparer.OrdinalIgnoreCase))
         {
             return AcceptanceProbe.CaptureOnce();

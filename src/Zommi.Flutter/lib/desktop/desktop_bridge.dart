@@ -41,7 +41,14 @@ Rect pixelAlignedSurfaceBounds(Rect bounds, double scale) => Rect.fromLTRB(
   (bounds.bottom * scale).round() / scale,
 );
 
-enum DesktopInvocationKind { open, captureStarted, context, image, status }
+enum DesktopInvocationKind {
+  open,
+  selectContent,
+  captureStarted,
+  context,
+  image,
+  status,
+}
 
 final class DesktopInvocation {
   const DesktopInvocation({
@@ -106,6 +113,11 @@ final class FileDesktopAcceptanceRecorder implements DesktopAcceptanceRecorder {
   }
 }
 
+abstract interface class BrowserCaptureSettings {
+  bool get supportsBrowserPageDetails;
+  void setBrowserPageDetails(bool enabled);
+}
+
 abstract interface class DesktopBridge {
   Stream<DesktopInvocation> get invocations;
 
@@ -113,7 +125,7 @@ abstract interface class DesktopBridge {
 
   Future<ContextAttachment?> captureContext({bool hidePanel = false});
 
-  Future<ContextAttachment?> selectPointerContext();
+  Future<List<ContextAttachment>> selectPointerContext();
 
   Future<ContextAttachment?> selectImageContext({
     bool includePointerContext = false,
@@ -165,7 +177,7 @@ final class NoopDesktopBridge implements DesktopBridge {
       null;
 
   @override
-  Future<ContextAttachment?> selectPointerContext() async => null;
+  Future<List<ContextAttachment>> selectPointerContext() async => const [];
 
   @override
   Future<ContextAttachment?> selectImageContext({
@@ -220,7 +232,7 @@ final class NoopDesktopBridge implements DesktopBridge {
 
 final class FlutterDesktopBridge
     with WindowListener, TrayListener, WidgetsBindingObserver
-    implements DesktopBridge {
+    implements DesktopBridge, BrowserCaptureSettings {
   FlutterDesktopBridge({
     CaptureProvider? captureProvider,
     DesktopAcceptanceRecorder? acceptanceRecorder,
@@ -267,8 +279,19 @@ final class FlutterDesktopBridge
     return FlutterDesktopBridge();
   }
 
+  @override
+  bool get supportsBrowserPageDetails =>
+      _captureProvider is BrowserCaptureSettings;
+
+  @override
+  void setBrowserPageDetails(bool enabled) {
+    final provider = _captureProvider;
+    if (provider case final BrowserCaptureSettings settings) {
+      settings.setBrowserPageDetails(enabled);
+    }
+  }
+
   final CaptureProvider _captureProvider;
-  bool _invocationPending = false;
   final WaylandPortalShortcutClient _waylandPortalShortcutClient;
   final bool _useWaylandPortals;
   final DesktopAcceptanceRecorder? _acceptanceRecorder;
@@ -279,18 +302,12 @@ final class FlutterDesktopBridge
     modifiers: const [HotKeyModifier.alt],
     scope: HotKeyScope.system,
   );
-  final HotKey _imageHotKey = HotKey(
-    key: PhysicalKeyboardKey.keyA,
-    modifiers: const [HotKeyModifier.alt, HotKeyModifier.shift],
-    scope: HotKeyScope.system,
-  );
   bool _initialized = false;
   bool _surfacePositionInitialized = false;
   int _surfaceTransitionEpoch = 0;
   Future<void> _surfaceResizeQueue = Future<void>.value();
   Offset? _surfaceAnchor;
   bool _nativeContextRegistered = false;
-  bool _nativeImageRegistered = false;
   DesktopReadiness _readiness = const DesktopReadiness();
   StreamSubscription<String>? _portalShortcutSubscription;
   String? _trayIconPath;
@@ -317,20 +334,16 @@ final class FlutterDesktopBridge
     }
 
     var contextRegistered = false;
-    var imageRegistered = false;
     if (_useWaylandPortals) {
       try {
         final registration = await registerWaylandPortalShortcuts(
           _waylandPortalShortcutClient,
-          onContext: () =>
-              unawaited(invokeShortcut(DesktopInvocationKind.context)),
-          onImage: () => unawaited(invokeShortcut(DesktopInvocationKind.image)),
+          onContext: () => unawaited(invokeContentSelection()),
           onError: (error) =>
               _emitWarning('Wayland global shortcuts stopped: $error'),
         );
         _portalShortcutSubscription = registration.subscription;
         contextRegistered = registration.readiness.contextShortcut;
-        imageRegistered = registration.readiness.imageShortcut;
       } on Object catch (error) {
         _emitWarning('Wayland global shortcuts are unavailable: $error');
       }
@@ -338,139 +351,30 @@ final class FlutterDesktopBridge
       try {
         await hotKeyManager.register(
           _contextHotKey,
-          keyDownHandler: (_) =>
-              unawaited(invokeShortcut(DesktopInvocationKind.context)),
+          keyDownHandler: (_) => unawaited(invokeContentSelection()),
         );
         contextRegistered = true;
         _nativeContextRegistered = true;
       } on Object catch (error) {
         _emitWarning('Alt+A could not be registered: $error');
       }
-      try {
-        await hotKeyManager.register(
-          _imageHotKey,
-          keyDownHandler: (_) =>
-              unawaited(invokeShortcut(DesktopInvocationKind.image)),
-        );
-        imageRegistered = true;
-        _nativeImageRegistered = true;
-      } on Object catch (error) {
-        _emitWarning('Alt+Shift+A could not be registered: $error');
-      }
     }
     await _configureTray();
     await _recordAcceptance('desktop.ready', {
       'contextShortcut': contextRegistered,
-      'imageShortcut': imageRegistered,
+      'imageShortcut': false,
     });
-    _readiness = DesktopReadiness(
-      contextShortcut: contextRegistered,
-      imageShortcut: imageRegistered,
-    );
+    _readiness = DesktopReadiness(contextShortcut: contextRegistered);
     return _readiness;
   }
 
-  Future<void> invokeShortcut(DesktopInvocationKind kind) => switch (kind) {
-    DesktopInvocationKind.context => _captureAndEmit(),
-    DesktopInvocationKind.image => _selectImageAndEmit(),
-    _ => Future.error(
-      ArgumentError.value(kind, 'kind', 'Not a capture shortcut'),
-    ),
-  };
-
-  Future<void> _captureAndEmit() async {
-    if (_invocationPending) return;
-    _invocationPending = true;
-    final clock = Stopwatch()..start();
-    try {
-      final attachment = await _capturePointerContext(
-        onReady: () {
-          if (_invocations.isClosed) return;
-          unawaited(
-            _recordAcceptance('shortcut.context.ready', {
-              'elapsedMilliseconds': clock.elapsedMilliseconds,
-            }),
-          );
-          _invocations.add(
-            const DesktopInvocation(
-              kind: DesktopInvocationKind.captureStarted,
-              message: 'Capturing context…',
-            ),
-          );
-        },
-      );
-      await _recordAcceptance('shortcut.context', {
-        'elapsedMilliseconds': clock.elapsedMilliseconds,
-        'attached': attachment != null,
-        'application': attachment?.snapshot?['application'],
-        'windowTitle': attachment?.snapshot?['windowTitle'],
-      });
-      _invocations.add(
-        DesktopInvocation(
-          kind: DesktopInvocationKind.context,
-          attachment: attachment,
-          message: attachment == null
-              ? 'No accessible context was exposed under the pointer'
-              : 'Context attached',
-          warning: attachment == null,
-        ),
-      );
-    } on Object catch (error) {
-      await _recordAcceptance('shortcut.context.failed', {
-        'error': error.toString(),
-      });
-      _invocations.add(
-        DesktopInvocation(
-          kind: DesktopInvocationKind.context,
-          message: 'Context capture failed: $error',
-          warning: true,
-        ),
-      );
-    } finally {
-      _invocationPending = false;
-    }
-  }
-
-  Future<void> _selectImageAndEmit() async {
-    if (_invocationPending) return;
-    _invocationPending = true;
-    final clock = Stopwatch()..start();
-    try {
-      final attachment = await selectImageContext(includePointerContext: true);
-      final invocation = imageSelectionInvocation(attachment);
-      if (attachment == null) {
-        await _recordAcceptance('shortcut.image.cancelled', const {});
-        _invocations.add(invocation);
-        return;
-      }
-      await _recordAcceptance('shortcut.image', {
-        'elapsedMilliseconds': clock.elapsedMilliseconds,
-        'attached': true,
-        'hasImage': attachment.imageDataUrl?.isNotEmpty == true,
-        'hasAlignedContext':
-            _nullableMap(attachment.snapshot?['region'])?['status'] ==
-            'aligned',
-        'alignmentStatus': _nullableMap(
-          attachment.snapshot?['region'],
-        )?['status'],
-        'width': attachment.bounds?['width'],
-        'height': attachment.bounds?['height'],
-      });
-      _invocations.add(invocation);
-    } on Object catch (error) {
-      await _recordAcceptance('shortcut.image.failed', {
-        'error': error.toString(),
-      });
-      _invocations.add(
-        DesktopInvocation(
-          kind: DesktopInvocationKind.image,
-          message: 'Image selection failed: $error',
-          warning: true,
-        ),
-      );
-    } finally {
-      _invocationPending = false;
-    }
+  Future<void> invokeContentSelection() async {
+    if (_invocations.isClosed) return;
+    // The controller shares selection, cancellation and single-flight handling
+    // with the composer button, including ordered multi-selection batches.
+    _invocations.add(
+      const DesktopInvocation(kind: DesktopInvocationKind.selectContent),
+    );
   }
 
   void _emitWarning(String message) {
@@ -516,7 +420,7 @@ final class FlutterDesktopBridge
   }
 
   @override
-  Future<ContextAttachment?> selectPointerContext() async {
+  Future<List<ContextAttachment>> selectPointerContext() async {
     final wasVisible = await windowManager.isVisible();
     final wasMinimized = await windowManager.isMinimized();
     await windowManager.hide();
@@ -525,14 +429,35 @@ final class FlutterDesktopBridge
       // so selecting context from the composer cannot feel like an immediate,
       // invisible capture of the old pointer position.
       await Future<void>.delayed(const Duration(milliseconds: 90));
-      final result = await _captureProvider.selectContext();
-      if (result?.snapshot == null) return null;
-      return ContextAttachment(
-        id: _nextAttachmentId(),
-        token: '',
-        snapshot: result!.snapshot,
-        previewText: result.previewText,
-      );
+      final selected = await _captureProvider.selectContext();
+      final attachments = <ContextAttachment>[
+        for (final result in selected)
+          if (result.image case final image?)
+            imageAttachmentFromSelection(image, _nextAttachmentId())
+          else if (result.snapshot != null)
+            ContextAttachment(
+              id: _nextAttachmentId(),
+              token: '',
+              snapshot: result.snapshot,
+              previewText: result.previewText,
+            ),
+      ];
+      await _recordAcceptance('selection.content', {
+        'count': attachments.length,
+        'items': [
+          for (final attachment in attachments)
+            {
+              'bounds': attachment.bounds,
+              'hasImage': attachment.hasImage,
+              'windowTitle': attachment.snapshot?['windowTitle'],
+              'application': attachment.snapshot?['application'],
+              'alignmentStatus': mapValue(
+                attachment.snapshot?['region'],
+              )['status'],
+            },
+        ],
+      });
+      return attachments;
     } finally {
       await _restorePanelAfterCapture(
         wasVisible: wasVisible,
@@ -914,11 +839,7 @@ final class FlutterDesktopBridge
         Menu(
           items: [
             MenuItem(key: 'open', label: 'Open Zommi'),
-            MenuItem(key: 'capture', label: 'Capture context (Alt+A)'),
-            MenuItem(
-              key: 'image',
-              label: 'Select image + pointer context (Alt+Shift+A)',
-            ),
+            MenuItem(key: 'capture', label: 'Select content (Alt+A)'),
             MenuItem.separator(),
             MenuItem(key: 'exit', label: 'Exit Zommi'),
           ],
@@ -951,9 +872,7 @@ final class FlutterDesktopBridge
       case 'open':
         onTrayIconMouseDown();
       case 'capture':
-        unawaited(invokeShortcut(DesktopInvocationKind.context));
-      case 'image':
-        unawaited(invokeShortcut(DesktopInvocationKind.image));
+        unawaited(invokeContentSelection());
       case 'exit':
         unawaited(windowManager.destroy());
     }
@@ -992,9 +911,6 @@ final class FlutterDesktopBridge
     await _waylandPortalShortcutClient.close();
     if (_nativeContextRegistered) {
       await hotKeyManager.unregister(_contextHotKey);
-    }
-    if (_nativeImageRegistered) {
-      await hotKeyManager.unregister(_imageHotKey);
     }
     await trayManager.destroy();
     await _captureProvider.close();
@@ -1180,15 +1096,12 @@ final class WaylandPortalShortcutRegistration {
 Future<WaylandPortalShortcutRegistration> registerWaylandPortalShortcuts(
   WaylandPortalShortcutClient client, {
   required void Function() onContext,
-  required void Function() onImage,
   required void Function(Object error) onError,
 }) async {
   final subscription = client.activations.listen((shortcut) {
     switch (shortcut) {
       case 'context':
         onContext();
-      case 'image':
-        onImage();
     }
   }, onError: onError);
   try {
@@ -1250,7 +1163,7 @@ final class ProcessWaylandPortalShortcutClient
               );
             } else if (message?['event'] == 'activated') {
               final shortcut = message?['shortcutId']?.toString();
-              if (shortcut == 'context' || shortcut == 'image') {
+              if (shortcut == 'context') {
                 _activations.add(shortcut!);
               }
             }
@@ -1307,7 +1220,7 @@ abstract interface class CaptureProvider {
 
   Future<CaptureResult> capture({Offset? point, void Function()? onReady});
 
-  Future<CaptureResult?> selectContext();
+  Future<List<CaptureResult>> selectContext();
 
   Future<ImageSelection?> selectImage();
 
@@ -1315,7 +1228,9 @@ abstract interface class CaptureProvider {
 }
 
 final class CaptureResult {
-  const CaptureResult({this.snapshot, this.previewText = ''});
+  const CaptureResult({this.snapshot, this.previewText = '', this.image});
+
+  final ImageSelection? image;
 
   final Map<String, Object?>? snapshot;
   final String previewText;
@@ -1352,22 +1267,24 @@ ContextAttachment imageAttachmentFromSelection(
   }
 
   final hasMapping =
-      selected.snapshot?['source'] is Map &&
       sameBounds(capturedRegion?['screenBounds']) &&
       sameBounds(selected.alignment?['screenBounds']) &&
       selected.alignment?['mapping'] is Map;
   final aligned =
       hasMapping &&
+      selected.snapshot?['source'] is Map &&
       selected.alignment?['status'] == 'aligned' &&
       capturedRegion?['status'] == 'aligned';
-  final knownImageSource =
+  final imageOnlyGeometry =
       hasMapping &&
       selected.alignment?['status'] == 'image-only' &&
       capturedRegion?['status'] == 'image-only';
+  final knownImageSource =
+      imageOnlyGeometry && selected.snapshot?['source'] is Map;
   final reason =
       selected.alignment?['reason']?.toString() ??
       'No aligned text was exposed for this region.';
-  final region = aligned || knownImageSource
+  final region = aligned || imageOnlyGeometry
       ? selected.alignment!
       : <String, Object?>{
           'status': 'image-only',
@@ -1375,20 +1292,31 @@ ContextAttachment imageAttachmentFromSelection(
           if (selected.bounds != null) 'screenBounds': selected.bounds,
         };
   final now = DateTime.now().toUtc();
+  final metadata = imageOnlyGeometry
+      ? (selected.snapshot ?? const <String, Object?>{})
+      : const <String, Object?>{};
   final snapshot = aligned
       ? selected.snapshot!
       : <String, Object?>{
-          'snapshotId': id,
-          'observedAtUtc': now.toIso8601String(),
-          'expiresAtUtc': now
-              .add(const Duration(seconds: 30))
-              .toIso8601String(),
+          'snapshotId': metadata['snapshotId'] ?? id,
+          'observedAtUtc': metadata['observedAtUtc'] ?? now.toIso8601String(),
+          'expiresAtUtc':
+              metadata['expiresAtUtc'] ??
+              now.add(const Duration(seconds: 30)).toIso8601String(),
           'surfaceKind': 'Image region',
-          'application': 'Screen',
+          'application': knownImageSource
+              ? (metadata['application'] ?? 'Screen')
+              : 'Screen',
           'region': region,
           'limitation': reason,
           if (knownImageSource)
-            for (final field in ['source', 'locator', 'windowTitle'])
+            for (final field in [
+              'source',
+              'locator',
+              'windowTitle',
+              'processName',
+              'spatialContext',
+            ])
               if (selected.snapshot!.containsKey(field))
                 field: selected.snapshot![field],
         };
@@ -1396,11 +1324,11 @@ ContextAttachment imageAttachmentFromSelection(
     id: id,
     token: '',
     snapshot: snapshot,
-    previewText: aligned || knownImageSource
+    previewText: aligned || imageOnlyGeometry
         ? selected.previewText ??
               (aligned
                   ? 'Image with text from the selected region'
-                  : 'Image only — $reason')
+                  : 'Image with screen location — $reason')
         : 'Image only — $reason',
     imageDataUrl: selected.dataUrl,
     bounds: selected.bounds,
@@ -1415,29 +1343,42 @@ CaptureProvider platformCaptureProvider() => Platform.isWindows
       )
     : PortableCaptureProvider();
 
-final class WindowsCaptureProvider implements CaptureProvider {
-  WindowsCaptureProvider({
+final class WindowsCaptureProvider
+    implements CaptureProvider, BrowserCaptureSettings {
+  bool _browserPageDetails = true;
+  @override
+  bool get supportsBrowserPageDetails => true;
+  @override
+  void setBrowserPageDetails(bool enabled) => _browserPageDetails = enabled;
+
+  factory WindowsCaptureProvider({
     String? executablePath,
     NativeCaptureClient? captureClient,
     NativeCaptureClient? selectorClient,
-  }) : _captureClient =
-           captureClient ??
-           ProcessNativeCaptureClient(executablePath ?? _nativeHostPath()),
-       _selectorClient =
-           selectorClient ??
-           ProcessNativeCaptureClient(executablePath ?? _nativeHostPath());
+  }) {
+    final shared =
+        captureClient ??
+        selectorClient ??
+        ProcessNativeCaptureClient(executablePath ?? _nativeHostPath());
+    return WindowsCaptureProvider._(
+      captureClient ?? shared,
+      selectorClient ?? shared,
+    );
+  }
+
+  WindowsCaptureProvider._(this._captureClient, this._selectorClient);
 
   final NativeCaptureClient _captureClient;
   final NativeCaptureClient _selectorClient;
 
   @override
   Future<void> initialize() async {
-    // The native host handles requests synchronously. Keep image selection on
-    // a separate prewarmed process so slow UIA capture cannot delay the region
-    // selector that the user is already trying to drag.
+    // The shared host has independent UI and accessibility workers.
+    // One process keeps one browser authorization across both entry points.
     await Future.wait([
       _captureClient.request('ping'),
-      _selectorClient.request('ping'),
+      if (!identical(_captureClient, _selectorClient))
+        _selectorClient.request('ping'),
     ]);
   }
 
@@ -1449,6 +1390,7 @@ final class WindowsCaptureProvider implements CaptureProvider {
     final response = await _captureClient.request(
       'capture',
       parameters: {
+        'browserPageDetails': _browserPageDetails,
         if (point != null)
           'point': {'x': point.dx.round(), 'y': point.dy.round()},
       },
@@ -1461,19 +1403,43 @@ final class WindowsCaptureProvider implements CaptureProvider {
   }
 
   @override
-  Future<CaptureResult?> selectContext() async {
+  Future<List<CaptureResult>> selectContext() async {
     final response = await _selectorClient.request(
-      'selectContext',
-      parameters: {'returnProcessId': pid},
+      'selectContent',
+      parameters: {
+        'returnProcessId': pid,
+        'browserPageDetails': _browserPageDetails,
+      },
     );
     if (response['errorMessage'] case final String message
         when message.isNotEmpty) {
       throw StateError(message);
     }
-    if (response['cancelled'] == true) return null;
+    if (response['cancelled'] == true) return const [];
+    final selections = response['selections'];
+    return [
+      for (final item in selections is List ? selections : [response])
+        _contentSelectionResult(
+          _nullableMap(item) ??
+              (throw const FormatException('Invalid content selection')),
+        ),
+    ];
+  }
+
+  CaptureResult _contentSelectionResult(Map<String, Object?> response) {
+    final dataUrl = response['dataUrl']?.toString() ?? '';
     return CaptureResult(
       snapshot: _nullableMap(response['snapshot']),
       previewText: response['previewText']?.toString() ?? '',
+      image: dataUrl.isNotEmpty
+          ? ImageSelection(
+              dataUrl: dataUrl,
+              bounds: _nullableMap(response['bounds']),
+              snapshot: _nullableMap(response['snapshot']),
+              alignment: _nullableMap(response['alignment']),
+              previewText: response['previewText']?.toString(),
+            )
+          : null,
     );
   }
 
@@ -1481,7 +1447,10 @@ final class WindowsCaptureProvider implements CaptureProvider {
   Future<ImageSelection?> selectImage() async {
     final response = await _selectorClient.request(
       'selectImage',
-      parameters: {'returnProcessId': pid},
+      parameters: {
+        'returnProcessId': pid,
+        'browserPageDetails': _browserPageDetails,
+      },
     );
     if (response['cancelled'] == true) return null;
     final dataUrl = response['dataUrl']?.toString() ?? '';
@@ -1497,7 +1466,10 @@ final class WindowsCaptureProvider implements CaptureProvider {
 
   @override
   Future<void> close() async {
-    await Future.wait([_captureClient.close(), _selectorClient.close()]);
+    await Future.wait([
+      _captureClient.close(),
+      if (!identical(_captureClient, _selectorClient)) _selectorClient.close(),
+    ]);
   }
 }
 
@@ -1550,17 +1522,17 @@ final class LinuxCaptureProvider implements CaptureProvider {
   );
 
   @override
-  Future<CaptureResult?> selectContext() async {
+  Future<List<CaptureResult>> selectContext() async {
     if (_useWaylandPortals) {
       // Wayland does not expose an unrestricted global pointer grab. Preserve
       // the portal's explicit foreground-context authority on that platform.
-      return capture();
+      return [await capture()];
     }
     final response = await _request([
       'point-context',
     ], const Duration(minutes: 5));
-    if (response['cancelled'] == true) return null;
-    return _portableResultFromLinuxResponse(response);
+    if (response['cancelled'] == true) return const [];
+    return [_portableResultFromLinuxResponse(response)];
   }
 
   @override
@@ -1638,7 +1610,7 @@ final class PortableCaptureProvider implements CaptureProvider {
   }
 
   @override
-  Future<CaptureResult?> selectContext() => capture();
+  Future<List<CaptureResult>> selectContext() async => [await capture()];
 
   Future<CaptureResult> _captureMac() async {
     const script = '''
@@ -1812,7 +1784,9 @@ final class ProcessNativeCaptureClient implements NativeCaptureClient {
     _pending[id] = completer;
     if (onReady != null) _ready[id] = onReady;
     final response = completer.future.timeout(
-      method == 'selectContext' || method == 'selectImage'
+      method == 'selectContent' ||
+              method == 'selectContext' ||
+              method == 'selectImage'
           ? selectionTimeout
           : captureTimeout,
       onTimeout: () {

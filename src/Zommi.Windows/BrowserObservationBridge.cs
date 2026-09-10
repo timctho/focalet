@@ -11,8 +11,19 @@ namespace Zommi.Windows;
 
 internal sealed class BrowserObservationBridge : IDisposable
 {
-    private static readonly BrowserConnectionPool Connections = new();
-    internal static void CloseConnections() => Connections.Dispose();
+    private static BrowserConnectionPool Connections = new();
+    private static readonly object ConnectionSettings = new();
+    private static bool pageDetailsEnabled = true;
+    internal static void SetPageDetailsEnabled(bool enabled)
+    {
+        lock (ConnectionSettings)
+        {
+            if (enabled == pageDetailsEnabled) return;
+            pageDetailsEnabled = enabled;
+            if (!enabled) { Connections.Dispose(); Connections = new(); }
+        }
+    }
+    internal static void CloseConnections() { lock (ConnectionSettings) Connections.Dispose(); }
 
     private readonly nint window;
     private readonly int processId;
@@ -33,24 +44,32 @@ internal sealed class BrowserObservationBridge : IDisposable
 
     public static BrowserObservationBridge? TryOpen(nint window, Action<string>? diagnostic = null)
     {
+        BrowserConnectionPool connections;
+        lock (ConnectionSettings)
+        {
+            if (!pageDetailsEnabled) return null;
+            connections = Connections;
+        }
         var processId = NativeCaptureWindow.ProcessId(window);
         if (processId == 0) return null;
+        string processName;
         try
         {
             using var process = Process.GetProcessById(processId);
-            if (process.ProcessName.ToLowerInvariant() is not ("chrome" or "msedge" or "brave" or "opera")) return null;
+            processName = process.ProcessName.ToLowerInvariant();
+            if (processName is not ("chrome" or "msedge" or "brave" or "opera")) return null;
         }
         catch (ArgumentException) { return null; }
         // Leave time for the first Chrome authorization; subsequent captures reuse the socket.
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        foreach (var endpoint in Endpoints())
+        foreach (var endpoint in Endpoints(processName))
         {
             BrowserDomSession? session = null;
             try
             {
-                session = Connections.OpenAsync(endpoint, processId,
+                session = connections.OpenAsync(endpoint, processId,
                     title => NativeCaptureWindow.IsUniqueBrowserWindow(window, processId, title), timeout.Token).GetAwaiter().GetResult();
-                if (session is null) { diagnostic?.Invoke("No unique visible tab matched the native browser process and window."); continue; }
+                if (session is null) { diagnostic?.Invoke($"No unique visible tab matched native HWND {window}, PID {processId}, title {NativeCaptureWindow.Title(window)}."); continue; }
                 var stamp = session.StampAsync(timeout.Token).GetAwaiter().GetResult();
                 var viewport = ReadViewport(window, stamp, diagnostic);
                 if (viewport is null || !GeometryMatches(viewport, stamp))
@@ -138,13 +157,14 @@ internal sealed class BrowserObservationBridge : IDisposable
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
         var stamp = Validate(timeout.Token);
         if (!viewport.Contains(ToRectangle(region))) throw new InvalidOperationException("The region crosses the browser viewport.");
-        var image = session.CaptureImageAsync(new CaptureRectangle(
-            (region.X - viewport.X) * stamp.Width / viewport.Width,
-            (region.Y - viewport.Y) * stamp.Height / viewport.Height,
-            region.Width * stamp.Width / viewport.Width,
-            region.Height * stamp.Height / viewport.Height), timeout.Token).GetAwaiter().GetResult();
-        Validate(timeout.Token);
-        return image;
+        // The picker has left the desktop. Copy the visible physical pixels
+        // without Chrome's screenshot command temporarily changing its surface.
+        if (NativeCaptureWindow.ForRegion(region) != window)
+            throw new InvalidOperationException("The selected browser region is covered.");
+        var pixels = ScreenCapture.CapturePng(region);
+        if (Validate(timeout.Token) != stamp || NativeCaptureWindow.ForRegion(region) != window)
+            throw new InvalidOperationException("The page changed while capturing the image.");
+        return new BrowserRegionImage(pixels, region.Width, region.Height, stamp);
     }
 
     public ContextSnapshot Snapshot(BrowserDomObservation observation, ContextSnapshot? fallback = null, Rectangle? region = null)
@@ -181,6 +201,7 @@ internal sealed class BrowserObservationBridge : IDisposable
             {
                 Provider = selection.IncludesNativeSelection || useNativeTarget ? "browser-dom+windows-uia" : "browser-dom", NativeWindowId = window.ToString(CultureInfo.InvariantCulture),
                 ProcessId = processId, BrowserWindowId = session.WindowId, TabId = session.TabId,
+                WindowBounds = NativeCaptureWindow.Bounds(window),
                 FrameId = session.FrameId, DocumentId = $"{session.LoaderId}:{observation.Stamp.DocumentId}",
             },
             Dom = observation.Context, Confidence = "high", Limitation = observation.Limitation,
@@ -238,13 +259,26 @@ internal sealed class BrowserObservationBridge : IDisposable
         return documents.Length == 1 ? documents[0] : null;
     }
 
-    internal static IEnumerable<Uri> Endpoints()
+    internal static IEnumerable<Uri> Endpoints(string processName)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var configured = Environment.GetEnvironmentVariable("ZOMMI_BROWSER_CDP_ENDPOINT");
-        if (Uri.TryCreate(configured, UriKind.Absolute, out var explicitEndpoint) && seen.Add(explicitEndpoint.AbsoluteUri)) yield return explicitEndpoint;
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            if (Uri.TryCreate(configured, UriKind.Absolute, out var explicitEndpoint)) yield return explicitEndpoint;
+            // An explicitly configured browser must never fall through to
+            // another profile and prompt for unrelated browser access.
+            yield break;
+        }
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        foreach (var relative in new[] { "Google/Chrome/User Data", "Microsoft/Edge/User Data", "BraveSoftware/Brave-Browser/User Data" })
+        var directories = processName switch
+        {
+            "chrome" => new[] { "Google/Chrome/User Data" },
+            "msedge" => ["Microsoft/Edge/User Data"],
+            "brave" => ["BraveSoftware/Brave-Browser/User Data"],
+            _ => [],
+        };
+        foreach (var relative in directories)
         {
             string[] lines;
             try { lines = File.ReadAllLines(Path.Combine(local, relative, "DevToolsActivePort")); }
@@ -258,7 +292,7 @@ internal sealed class BrowserObservationBridge : IDisposable
         }
     }
 
-    internal static bool IsUnavailable(Exception exception) => exception is OperationCanceledException or IOException or
+    internal static bool IsUnavailable(Exception exception) => exception is OperationCanceledException or TimeoutException or IOException or
         WebSocketException or HttpRequestException or InvalidOperationException or System.Text.Json.JsonException or
         COMException or FlaUI.Core.Exceptions.ElementNotAvailableException or ArgumentException or KeyNotFoundException or FormatException;
     internal static CaptureRectangle ToRectangle(Rectangle rectangle) => new(rectangle.X, rectangle.Y, rectangle.Width, rectangle.Height);
@@ -268,6 +302,22 @@ internal sealed class BrowserObservationBridge : IDisposable
 
 internal static class NativeCaptureWindow
 {
+    public static nint BeneathOverlay(Point point, uint excludedProcessId)
+    {
+        nint result = 0;
+        EnumWindows((window, _) =>
+        {
+            var process = ProcessId(window);
+            if (!IsWindowVisible(window) || IsIconic(window) || process == Environment.ProcessId || process == excludedProcessId)
+                return true;
+            if (DwmGetWindowAttribute(window, 14, out int cloaked, sizeof(int)) == 0 && cloaked != 0) return true;
+            var bounds = VisibleBounds(window);
+            if (point.X < bounds.X || point.X >= bounds.Right || point.Y < bounds.Y || point.Y >= bounds.Bottom) return true;
+            result = window;
+            return false;
+        }, 0);
+        return result;
+    }
     public static int ProcessId(nint window) { GetWindowThreadProcessId(window, out var id); return checked((int)id); }
     public static string Title(nint window)
     {
@@ -275,6 +325,21 @@ internal static class NativeCaptureWindow
     }
     public static CaptureRectangle Bounds(nint window) => GetWindowRect(window, out var bounds)
         ? new(bounds.Left, bounds.Top, bounds.Right - bounds.Left, bounds.Bottom - bounds.Top) : new(0, 0, 0, 0);
+    public static CaptureRectangle VisibleBounds(nint window) =>
+        DwmGetWindowAttribute(window, 9, out WindowRect bounds, Marshal.SizeOf<WindowRect>()) == 0 &&
+        bounds.Right > bounds.Left && bounds.Bottom > bounds.Top
+            ? new(bounds.Left, bounds.Top, bounds.Right - bounds.Left, bounds.Bottom - bounds.Top)
+            : Bounds(window);
+    public static Rectangle CaptureBounds(nint window)
+    {
+        var bounds = VisibleBounds(window);
+        var visible = Rectangle.Intersect(Rectangle.FromLTRB((int)bounds.X, (int)bounds.Y,
+            (int)bounds.Right, (int)bounds.Bottom), SystemInformation.VirtualScreen);
+        // Snapped/maximized frames can extend a few pixels under the taskbar.
+        // Preserve multi-monitor windows; coverage is still checked afterwards.
+        var screen = Screen.AllScreens.FirstOrDefault(screen => screen.Bounds.Contains(visible));
+        return screen is null ? visible : Rectangle.Intersect(visible, screen.WorkingArea);
+    }
     public static nint At(Point point) => GetAncestor(WindowFromPoint(point), 2);
     public static void Activate(nint window) { BringWindowToTop(window); SetForegroundWindow(window); }
     public static IReadOnlyList<CaptureRectangle> RenderViewBounds(nint window)
@@ -315,10 +380,13 @@ internal static class NativeCaptureWindow
         nint result = 0;
         EnumWindows((window, _) =>
         {
-            if (!IsWindowVisible(window) || ProcessId(window) == Environment.ProcessId) return true;
-            var bounds = Bounds(window);
+            if (!IsWindowVisible(window) || IsIconic(window) || ProcessId(window) == Environment.ProcessId) return true;
+            if (DwmGetWindowAttribute(window, 14, out int cloaked, sizeof(int)) == 0 && cloaked != 0) return true;
+            var bounds = VisibleBounds(window);
             if (!bounds.Intersects(area)) return true;
             if (bounds.Contains(area)) result = window;
+            else if (Environment.GetEnvironmentVariable("ZOMMI_CAPTURE_DIAGNOSTICS") == "1")
+                Console.Error.WriteLine($"Region coverage: intersecting HWND={window}, PID={ProcessId(window)}, frame={bounds}, region={area}");
             return false;
         }, 0);
         return result;
@@ -330,6 +398,9 @@ internal static class NativeCaptureWindow
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(nint parent, EnumWindowCallback callback, nint parameter);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(nint window, StringBuilder text, int count);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
+    [DllImport("user32.dll")] private static extern bool IsIconic(nint window);
+    [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(nint window, int attribute, out int value, int size);
+    [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(nint window, int attribute, out WindowRect value, int size);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(nint window, StringBuilder text, int count);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(nint window, out WindowRect bounds);

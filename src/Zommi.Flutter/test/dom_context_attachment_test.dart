@@ -34,6 +34,45 @@ void main() {
       ],
     },
   };
+  test('a partial cell crop keeps verified row context without claiming whole-cell selected text', () {
+    final spatial = {
+      'cells': [
+        {
+          'rowIndex': 1,
+          'columnIndex': 1,
+          'firstDataRowIndex': 1,
+          'dataRowNumber': 1,
+          'columnHeaders': ['Database Alias'],
+        },
+      ],
+    };
+    final geometry = {...alignment, 'status': 'image-only'};
+    ImageSelection selection(Map<String, Object?> selectedBounds) =>
+        ImageSelection(
+          dataUrl: 'data:image/png;base64,YQ==',
+          bounds: selectedBounds,
+          alignment: geometry,
+          snapshot: {
+            ...snapshot,
+            'region': geometry,
+            'spatialContext': spatial,
+            'selection': ['Not fully enclosed'],
+          },
+        );
+    final attachment = imageAttachmentFromSelection(selection(bounds), 'cell');
+    expect(attachment.snapshot?['spatialContext'], spatial);
+    expect(attachment.snapshot?['selection'], isNull);
+    expect(attachment.excerpt, 'Database Alias · row 1');
+    expect(
+      contextHandoffSnapshots([attachment]).single['spatialContext'],
+      spatial,
+    );
+    final mismatched = imageAttachmentFromSelection(
+      selection({...bounds, 'x': 100}),
+      'changed',
+    );
+    expect(mismatched.snapshot?['spatialContext'], isNull);
+  });
   test(
     'an aligned image retains its exact region, source and coordinate mapping',
     () {
@@ -70,6 +109,49 @@ void main() {
       containsPair('status', 'image-only'),
     );
   });
+  test(
+    'a linked image without text keeps its URL in the preview and handoff',
+    () {
+      final linked = {
+        ...snapshot,
+        'dom': {
+          'mode': 'region',
+          'elements': [
+            {
+              'role': 'img',
+              'text': '',
+              'href': 'https://shop.example/products/a',
+            },
+            {
+              'role': 'img',
+              'text': '',
+              'href': 'https://shop.example/products/b',
+            },
+          ],
+        },
+      };
+      final attachment = imageAttachmentFromSelection(
+        ImageSelection(
+          dataUrl: 'data:image/png;base64,YQ==',
+          bounds: bounds,
+          snapshot: linked,
+          alignment: alignment,
+          previewText: 'Link: https://shop.example/products/a',
+        ),
+        'linked-images',
+      );
+      expect(attachment.excerpt, 'https://shop.example/products/a');
+      expect(
+        attachment.previewText,
+        contains('https://shop.example/products/a'),
+      );
+      expect(
+        contextHandoffSnapshots([attachment]).single['dom'],
+        linked['dom'],
+      );
+      expect(contextHandoffSnapshots([attachment]).single['imageIndex'], 1);
+    },
+  );
   test('an image-only canvas retains verified source geometry but no inferred text', () {
     final imageOnly = {
       ...alignment,
@@ -93,7 +175,35 @@ void main() {
     expect(attachment.snapshot?['region'], imageOnly);
     expect(attachment.snapshot?['dom'], isNull);
     expect(attachment.snapshot?['selection'], isNull);
-    expect(attachment.previewText, startsWith('Image only'));
+    expect(attachment.previewText, startsWith('Image with screen location'));
+  });
+  test('desktop pixels preserve mapping and observation time even without a single source window', () {
+    final geometry = {
+      ...alignment,
+      'status': 'image-only',
+      'reason': 'Spans windows',
+    };
+    final attachment = imageAttachmentFromSelection(
+      ImageSelection(
+        dataUrl: 'data:image/png;base64,YQ==',
+        bounds: bounds,
+        alignment: geometry,
+        snapshot: {
+          'snapshotId': 'captured-frame',
+          'observedAtUtc': '2026-09-08T18:00:00Z',
+          'expiresAtUtc': '2026-09-08T18:00:30Z',
+          'region': geometry,
+        },
+      ),
+      'attachment-id',
+    );
+    final handoff = contextHandoffSnapshots([attachment]).single;
+    expect(handoff['region'], geometry);
+    expect(handoff['snapshotId'], 'captured-frame');
+    expect(handoff['observedAtUtc'], '2026-09-08T18:00:00Z');
+    expect(handoff['imageIndex'], 1);
+    expect(handoff['source'], isNull);
+    expect(handoff['dom'], isNull);
   });
   test('legacy pointer snapshots are never presented as image-region text', () {
     final attachment = imageAttachmentFromSelection(

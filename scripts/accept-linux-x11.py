@@ -499,7 +499,7 @@ def run_case(
         )
     try:
         ready = wait_until("desktop readiness trace", lambda: event(trace, "desktop.ready"))
-        if not ready.get("contextShortcut") or not ready.get("imageShortcut"):
+        if not ready.get("contextShortcut") or ready.get("imageShortcut"):
             raise RuntimeError(f"Global shortcut registration was not ready: {ready}")
         zommi = wait_until("the Zommi X11 window", x11.find_zommi_window)
 
@@ -526,6 +526,8 @@ def run_case(
             time.sleep(0.15)
             if selection_action == "cancel":
                 x11.send_key(0xFF1B)
+            elif selection_action == "click":
+                x11.click_point((100, 100))
             elif selection_action == "drag":
                 x11.drag_region((100, 100), (140, 130))
             else:
@@ -594,11 +596,11 @@ def run_acceptance(package: Path) -> int:
                 temporary,
                 "context",
                 shortcut_shift=False,
-                selection_action=None,
-                expected_event="shortcut.context",
+                selection_action="click",
+                expected_event="selection.content",
                 expect_focused=True,
             )
-            if context.get("windowTitle") != fixture_title or not context.get("attached"):
+            if context.get("count") != 1 or context["items"][0].get("windowTitle") != fixture_title:
                 raise RuntimeError(f"Alt+A did not preserve the focused context title: {context}")
 
             pointed = select_point_context(capture, x11, fixture)
@@ -612,46 +614,24 @@ def run_acceptance(package: Path) -> int:
                 x11,
                 fixture,
                 temporary,
-                "image-cancel",
-                shortcut_shift=True,
+                "content-cancel",
+                shortcut_shift=False,
                 selection_action="cancel",
-                expected_event="shortcut.image.cancelled",
+                expected_event="selection.content",
                 expect_focused=True,
             )
 
-            image = run_case(
-                package,
-                x11,
-                fixture,
-                temporary,
-                "image-success",
-                shortcut_shift=True,
-                selection_action="drag",
-                expected_event="shortcut.image",
-                expect_focused=True,
-            )
-            expected_image = {
-                "attached": True,
-                "hasImage": True,
-                "hasAlignedContext": False,
-                "alignmentStatus": "image-only",
-                "width": 40,
-                "height": 30,
-            }
-            for key, value in expected_image.items():
-                if image.get(key) != value:
-                    raise RuntimeError(f"Alt+Shift+A image contract failed: {image}")
+            if cancelled.get("count") != 0:
+                raise RuntimeError(f"Cancelled content selection attached an item: {cancelled}")
 
             print(
                 json.dumps(
                     {
                         "x11ContextShortcut": True,
-                        "contextTitle": context["windowTitle"],
+                        "contextTitle": context["items"][0]["windowTitle"],
                         "pointContextTitle": pointed["windowTitle"],
-                        "imageCancelRestoredFocusedTaskbar": bool(cancelled),
-                        "imageShortcut": True,
-                        "imageDimensions": [image["width"], image["height"]],
-                        "alignmentStatus": image["alignmentStatus"],
+                        "contentCancelRestoredFocusedTaskbar": bool(cancelled),
+                        "imageShortcut": False,
                     },
                     separators=(",", ":"),
                 )

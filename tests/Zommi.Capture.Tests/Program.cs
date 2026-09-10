@@ -8,6 +8,10 @@ var tests = new (string Name, Action Body)[]
     ("Visible text stays bounded", VisibleTextStaysBounded),
     ("Browser enrichment preserves native object selections", BrowserEnrichmentPreservesObjectSelections),
     ("DOM text remains exact and explicit picks discard ambient selection", DomSelectionPriority),
+    ("Image links remain readable in the context preview", ImageLinkPreview),
+    ("Card previews show each URL once and retain every caption", CardLinkPreview),
+    ("Image-only previews explain retained screen location", ImageLocationPreview),
+    ("Partial cell previews show the verified data row and column", CellLocationPreview),
 };
 
 var failures = new List<string>();
@@ -27,6 +31,75 @@ foreach (var test in tests)
 
 Console.WriteLine($"{tests.Length - failures.Count}/{tests.Length} capture contracts passed");
 return failures.Count == 0 ? 0 : 1;
+
+static void CellLocationPreview()
+{
+    var preview = ContextPreviewFormatter.Format(Snapshot() with
+    {
+        SpatialContext = new RegionSpatialContext { Cells = [new RegionCellContext
+        {
+            Bounds = new(402, 479, 306, 73), TableBounds = new(341, 395, 1799, 373),
+            Relation = "contains-selection-center", RowIndex = 1, ColumnIndex = 1,
+            DataRowNumber = 1, FirstDataRowIndex = 1, ColumnHeaders = ["Database Alias"],
+        }] },
+    });
+    Contains(preview, "Location: Database Alias · data row 1");
+    Contains(preview, "cell surrounding the selection");
+}
+
+static void ImageLocationPreview()
+{
+    var bounds = new CaptureRectangle(-400, 100, 180, 65);
+    var preview = ContextPreviewFormatter.Format(Snapshot() with
+    {
+        SurfaceKind = "Image region", Application = "Redis Insight", WindowTitle = "Redis databases",
+        IndicatedTarget = null, VisibleText = [],
+        Region = new RegionAlignment
+        {
+            Status = "image-only", Reason = "No accessible text", ScreenBounds = bounds,
+            Mapping = new CaptureMapping { CoordinateSpace = "desktop-physical-pixels", ScreenBounds = bounds,
+                ViewportBounds = bounds, ImageBounds = new CaptureRectangle(0, 0, 180, 65) },
+        },
+    });
+    Contains(preview, "Image with screen location");
+    Contains(preview, "Redis databases");
+    NotContains(preview, "Mouse pointer:");
+}
+
+static void CardLinkPreview()
+{
+    var preview = ContextPreviewFormatter.Format(Snapshot() with
+    {
+        Dom = new DomContext
+        {
+            Mode = "region", Elements = Enumerable.Range(1, 12).SelectMany(index => new[]
+            {
+                new DomElementContext { Role = "img", Text = "", Href = $"https://cards.example/{index}", Bounds = new CaptureRectangle(0, 0, 40, 40) },
+                new DomElementContext { Role = "text", Text = $"Card {index} caption", Href = $"https://cards.example/{index}", Bounds = new CaptureRectangle(0, 40, 40, 20) },
+            }).ToArray(),
+        },
+    });
+    var links = preview.Split('\n').Where(line => line.StartsWith("Link: ", StringComparison.Ordinal)).ToArray();
+    True(links.Length == 12 && links.Distinct().Count() == 12, "Repeated card elements hid or duplicated a card URL.");
+    foreach (var index in Enumerable.Range(1, 12)) Contains(preview, $"Card {index} caption");
+}
+
+static void ImageLinkPreview()
+{
+    var preview = ContextPreviewFormatter.Format(Snapshot() with
+    {
+        Dom = new DomContext
+        {
+            Mode = "region", Elements = [new DomElementContext
+            {
+                Role = "img", Text = "", Href = "https://shop.example/product?color=blue\u202e",
+                Bounds = new CaptureRectangle(1, 2, 30, 40),
+            }],
+        },
+    });
+    Contains(preview, "Link: https://shop.example/product?color=blue");
+    NotContains(preview, "\u202e");
+}
 
 static void SelectionStaysPrimaryAndSanitized()
 {

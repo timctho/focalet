@@ -52,7 +52,7 @@ void main() {
       'CaptureMode.region',
       'skipTaskbar: false',
       'windowManager.minimize()',
-      'DesktopInvocationKind.captureStarted',
+      'DesktopInvocationKind.selectContent',
       "'--capture-host'",
       'Zommi.Capture.exe',
       "'selectImage',",
@@ -248,9 +248,15 @@ void main() {
       ]) {
         expect(source, contains(contract));
       }
+      // Adapter diagnostics use DXGI, but retained-frame capture stays on CPU.
+      final handoff = source.substring(
+        source.indexOf('bool FlutterWindow::BeginSurfaceHandoff('),
+        source.indexOf('void FlutterWindow::CompleteSurfaceHandoff('),
+      );
+      expect(handoff, isNot(contains('IDXGI')));
+      expect(source, isNot(contains('AcquireNextFrame(')));
       for (final forbidden in [
         'D3D11CreateDevice',
-        'IDXGI',
         'DWMWA_CLOAK',
         'AC_SRC_ALPHA',
         'DwmFlush',
@@ -440,9 +446,9 @@ void main() {
       linuxAcceptance,
       allOf(
         contains('XTestFakeKeyEvent'),
-        contains('shortcut.image.cancelled'),
+        contains('selection.content'),
         contains('ZOMMI_X11_CONTEXT_FIXTURE'),
-        contains('alignmentStatus'),
+        contains('contentCancelRestoredFocusedTaskbar'),
       ),
     );
   });

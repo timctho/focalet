@@ -27,25 +27,30 @@ enum ZommiThemeColor {
 final class AppPreferences {
   const AppPreferences({
     this.chatFontSize = 13,
+    this.browserPageDetails = true,
     this.themeColor = ZommiThemeColor.violet,
     this.windowSize = WindowSizeSetting.standard,
   });
 
+  final bool browserPageDetails;
   final double chatFontSize;
   final ZommiThemeColor themeColor;
   final WindowSizeSetting windowSize;
 
   AppPreferences copyWith({
+    bool? browserPageDetails,
     double? chatFontSize,
     ZommiThemeColor? themeColor,
     WindowSizeSetting? windowSize,
   }) => AppPreferences(
+    browserPageDetails: browserPageDetails ?? this.browserPageDetails,
     chatFontSize: chatFontSize ?? this.chatFontSize,
     themeColor: themeColor ?? this.themeColor,
     windowSize: windowSize ?? this.windowSize,
   );
 
   Map<String, Object?> toJson() => {
+    'browserPageDetails': browserPageDetails,
     'chatFontSize': chatFontSize,
     'themeColor': themeColor.id,
     'windowSize': windowSize.name,
@@ -55,6 +60,7 @@ final class AppPreferences {
     final rawFontSize = value['chatFontSize'];
     final fontSize = rawFontSize is num ? rawFontSize.toDouble() : 13.0;
     return AppPreferences(
+      browserPageDetails: value['browserPageDetails'] != false,
       chatFontSize: fontSize.clamp(12, 15).toDouble(),
       themeColor: ZommiThemeColor.fromId(value['themeColor']?.toString()),
       windowSize: WindowSizeSetting.values.firstWhere(
@@ -69,12 +75,14 @@ final class AppPreferences {
   @override
   bool operator ==(Object other) =>
       other is AppPreferences &&
+      other.browserPageDetails == browserPageDetails &&
       other.chatFontSize == chatFontSize &&
       other.themeColor == themeColor &&
       other.windowSize == windowSize;
 
   @override
-  int get hashCode => Object.hash(chatFontSize, themeColor, windowSize);
+  int get hashCode =>
+      Object.hash(browserPageDetails, chatFontSize, themeColor, windowSize);
 }
 
 abstract interface class AppPreferencesStore {

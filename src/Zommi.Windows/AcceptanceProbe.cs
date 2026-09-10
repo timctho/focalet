@@ -4,6 +4,26 @@ namespace Zommi.Windows;
 
 internal static class AcceptanceProbe
 {
+    public static int Region(string value)
+    {
+        ApplicationConfiguration.Initialize();
+        var parts = value.Split(',');
+        if (parts.Length != 4 || parts.Any(part => !int.TryParse(part, out _))) return 2;
+        var coordinates = parts.Select(int.Parse).ToArray();
+        if (coordinates[2] < 4 || coordinates[3] < 4) return 2;
+        try
+        {
+            var result = RegionContextCapture.Capture(new Rectangle(coordinates[0], coordinates[1], coordinates[2], coordinates[3]));
+            Console.WriteLine(JsonSerializer.Serialize(new
+            {
+                result.Bounds, result.Snapshot, result.Alignment, result.Png,
+                PreviewText = result.Snapshot is null ? result.Alignment?.Reason : Zommi.Capture.ContextPreviewFormatter.Format(result.Snapshot),
+            }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+            return 0;
+        }
+        catch (Exception exception) { Console.Error.WriteLine(exception); return 1; }
+    }
+
     public static int BrowserBinding(string value)
     {
         ApplicationConfiguration.Initialize();

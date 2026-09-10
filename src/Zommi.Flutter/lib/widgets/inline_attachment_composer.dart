@@ -16,6 +16,7 @@ final class InlineAttachmentTextController extends TextEditingController {
     required this.onAttachmentRemoved,
     this.onAttachmentEnter,
     this.onAttachmentExit,
+    this.onAttachmentAdjust,
   }) {
     _previousText = text;
     addListener(_handleTextChanged);
@@ -24,6 +25,7 @@ final class InlineAttachmentTextController extends TextEditingController {
   final ValueChanged<ContextAttachment> onAttachmentRemoved;
   final AttachmentHoverCallback? onAttachmentEnter;
   final ValueChanged<ContextAttachment>? onAttachmentExit;
+  final ValueChanged<ContextAttachment>? onAttachmentAdjust;
   final List<ContextAttachment> _attachments = [];
   late String _previousText;
   bool _mutating = false;
@@ -163,6 +165,9 @@ final class InlineAttachmentTextController extends TextEditingController {
         key: ValueKey('composer-inline-tile-${attachment.id}'),
         attachment: attachment,
         onDelete: () => onAttachmentRemoved(attachment),
+        onAdjust: onAttachmentAdjust == null
+            ? null
+            : () => onAttachmentAdjust!(attachment),
         onEnter: onAttachmentEnter == null
             ? null
             : (anchor) => onAttachmentEnter!(attachment, anchor),
@@ -270,6 +275,7 @@ class InlineAttachmentTile extends StatefulWidget {
   const InlineAttachmentTile({
     required this.attachment,
     this.onDelete,
+    this.onAdjust,
     this.onEnter,
     this.onExit,
     super.key,
@@ -277,6 +283,7 @@ class InlineAttachmentTile extends StatefulWidget {
 
   final ContextAttachment attachment;
   final VoidCallback? onDelete;
+  final VoidCallback? onAdjust;
   final ValueChanged<BuildContext>? onEnter;
   final VoidCallback? onExit;
 
@@ -292,9 +299,6 @@ class _InlineAttachmentTileState extends State<InlineAttachmentTile> {
     final attachment = widget.attachment;
     final keyPrefix = widget.onDelete == null ? 'sent-inline' : 'inline';
     final image = _imageBytes(attachment.imageDataUrl);
-    final label = attachment.token
-        .replaceFirst('[', '')
-        .replaceFirst(RegExp(r'\]$'), '');
     return MouseRegion(
       onEnter: (_) {
         setState(() => _hovered = true);
@@ -305,18 +309,12 @@ class _InlineAttachmentTileState extends State<InlineAttachmentTile> {
         widget.onExit?.call();
       },
       child: Semantics(
-        image: attachment.hasImage,
-        label: attachment.hasImage
-            ? 'Inline image attachment'
-            : 'Inline context attachment $label',
+        label: '${attachment.reference}: ${attachment.excerpt}',
         child: Container(
           key: ValueKey('$keyPrefix-attachment-${attachment.id}'),
-          width: attachment.hasImage ? 46 : null,
-          height: 28,
-          constraints: attachment.hasImage
-              ? null
-              : const BoxConstraints(minWidth: 36, maxWidth: 120),
-          clipBehavior: Clip.antiAlias,
+          height: 34,
+          constraints: const BoxConstraints(maxWidth: 290),
+          padding: const EdgeInsets.only(left: 6, right: 2),
           decoration: BoxDecoration(
             color: const Color(0xffeceaf8),
             borderRadius: BorderRadius.circular(8),
@@ -326,59 +324,72 @@ class _InlineAttachmentTileState extends State<InlineAttachmentTile> {
                   : const Color(0xffd8d4ed),
             ),
           ),
-          child: Stack(
-            fit: StackFit.passthrough,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              if (image != null)
-                Image.memory(
-                  image,
-                  key: ValueKey('$keyPrefix-image-${attachment.id}'),
-                  fit: BoxFit.cover,
-                  gaplessPlayback: true,
-                  errorBuilder: (_, _, _) =>
-                      const Icon(Icons.broken_image_outlined, size: 15),
-                )
-              else
-                Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    7,
-                    4,
-                    widget.onDelete == null ? 7 : 18,
-                    4,
-                  ),
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Color(0xff625989),
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                    ),
+              Text(
+                attachment.reference,
+                style: const TextStyle(
+                  color: Color(0xff625989),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(width: 6),
+              if (image != null) ...[
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: Image.memory(
+                    image,
+                    key: ValueKey('$keyPrefix-image-${attachment.id}'),
+                    width: 36,
+                    height: 26,
+                    fit: BoxFit.cover,
+                    gaplessPlayback: true,
+                    errorBuilder: (_, _, _) =>
+                        const Icon(Icons.broken_image_outlined, size: 15),
                   ),
                 ),
-              if (widget.onDelete != null)
-                Positioned(
-                  right: 1,
-                  top: 1,
-                  child: Tooltip(
-                    message: attachment.hasImage
-                        ? 'Remove image attachment'
-                        : 'Remove context attachment',
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: widget.onDelete,
-                      child: Container(
-                        width: 14,
-                        height: 14,
-                        decoration: const BoxDecoration(
-                          color: Color(0xb3ffffff),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Icons.close_rounded, size: 11),
+                const SizedBox(width: 6),
+              ],
+              Flexible(
+                child: Tooltip(
+                  message: attachment.sourceTitle,
+                  child: GestureDetector(
+                    onTap: () => widget.onEnter?.call(context),
+                    child: Text(
+                      attachment.excerpt,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xff272b38),
+                        fontSize: 11,
                       ),
                     ),
                   ),
+                ),
+              ),
+              if (widget.onAdjust != null)
+                TextButton(
+                  key: ValueKey('adjust-attachment-${attachment.id}'),
+                  onPressed: widget.onAdjust,
+                  style: TextButton.styleFrom(
+                    minimumSize: const Size(44, 30),
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('Adjust', style: TextStyle(fontSize: 10.5)),
+                ),
+              if (widget.onDelete != null)
+                IconButton(
+                  tooltip: 'Remove ${attachment.reference}',
+                  onPressed: widget.onDelete,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 26,
+                    height: 30,
+                  ),
+                  padding: EdgeInsets.zero,
+                  icon: const Icon(Icons.close_rounded, size: 13),
                 ),
             ],
           ),

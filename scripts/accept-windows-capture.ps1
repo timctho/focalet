@@ -5,6 +5,8 @@ param(
 
     [switch] $NonVisualOnly,
 
+    [switch] $NativeOnly,
+
     [switch] $HelpersOnly,
 
     [string] $ResultPath
@@ -23,6 +25,35 @@ public static class ZommiWindowsAcceptanceNative
 
     [DllImport("user32.dll")]
     private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr state);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumChildWindows(IntPtr parent, EnumWindowsProc callback, IntPtr state);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowEnabled(IntPtr window);
+
+    private static IntPtr FindEnabledButton(IntPtr parent, string name)
+    {
+        var found = IntPtr.Zero;
+        EnumChildWindows(parent, (window, state) => {
+            var text = new StringBuilder(256);
+            GetWindowText(window, text, text.Capacity);
+            if (text.ToString() != name || !IsWindowVisible(window) || !IsWindowEnabled(window)) return true;
+            found = window;
+            return false;
+        }, IntPtr.Zero);
+        return found;
+    }
+
+    public static bool NamedButtonEnabled(IntPtr parent, string name) => FindEnabledButton(parent, name) != IntPtr.Zero;
+
+    public static bool ClickNamedButton(IntPtr parent, string name)
+    {
+        var found = FindEnabledButton(parent, name);
+        if (found == IntPtr.Zero) return false;
+        SendMessage(found, 0x00F5, IntPtr.Zero, IntPtr.Zero);
+        return true;
+    }
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
@@ -415,7 +446,10 @@ public static class ZommiWindowsAcceptanceNative
         return GetForegroundWindow() == window;
     }
 
-    public static IntPtr CreateCompetingTopMost(int x, int y, int width, int height)
+    public static IntPtr CreateCompetingTopMost(int x, int y, int width, int height) =>
+        CreateCompetingTopMost(x, y, width, height, IntPtr.Zero);
+
+    public static IntPtr CreateCompetingTopMost(int x, int y, int width, int height, IntPtr owner)
     {
         const int topMost = 0x00000008;
         const int toolWindow = 0x00000080;
@@ -426,14 +460,15 @@ public static class ZommiWindowsAcceptanceNative
         const uint showWindow = 0x0040;
         var window = CreateWindowEx(
             topMost | toolWindow | noActivate,
-            "STATIC",
+            // WindowFromPoint skips STATIC controls; use a hit-testable cover.
+            "BUTTON",
             "Zommi acceptance competing topmost",
             popup | visible,
             x,
             y,
             width,
             height,
-            IntPtr.Zero,
+            owner,
             IntPtr.Zero,
             IntPtr.Zero,
             IntPtr.Zero);
@@ -449,6 +484,18 @@ public static class ZommiWindowsAcceptanceNative
                 noActivatePosition | showWindow);
         }
         return window;
+    }
+
+    public static IntPtr CreateCoveringWindow(IntPtr source)
+    {
+        var previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
+        try
+        {
+            // An owned popup stays above its source when closing the selector
+            // reactivates that source. An unrelated topmost window can fall behind it.
+            return CreateCompetingTopMost(330, 300, 90, 60, source);
+        }
+        finally { SetThreadDpiAwarenessContext(previous); }
     }
 
     public static bool IsWindowAtPoint(IntPtr window, int x, int y)
@@ -585,6 +632,73 @@ public static class ZommiWindowsAcceptanceNative
         return true;
     }
 
+    public static long BeginSelectionDrag(IntPtr window, int startX, int startY, int endX, int endY)
+    {
+        var previousDpi = SetThreadDpiAwarenessContext(new IntPtr(-4));
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var bounds = PhysicalBounds(window);
+            SetCursorPos(startX, startY);
+            SendMessage(window, 0x0201, new IntPtr(1), Point(startX - bounds[0], startY - bounds[1]));
+            SetCursorPos(endX, endY);
+            SendMessage(window, 0x0200, new IntPtr(1), Point(endX - bounds[0], endY - bounds[1]));
+            return timer.ElapsedMilliseconds;
+        }
+        finally { if (previousDpi != IntPtr.Zero) SetThreadDpiAwarenessContext(previousDpi); }
+    }
+
+    public static void EndSelectionDrag(IntPtr window, int x, int y)
+    {
+        var previousDpi = SetThreadDpiAwarenessContext(new IntPtr(-4));
+        try
+        {
+            var bounds = PhysicalBounds(window);
+            SendMessage(window, 0x0202, IntPtr.Zero, Point(x - bounds[0], y - bounds[1]));
+        }
+        finally { if (previousDpi != IntPtr.Zero) SetThreadDpiAwarenessContext(previousDpi); }
+    }
+
+    public static void DragPhysicalSelection(IntPtr window, int startX, int startY, int endX, int endY)
+    {
+        BeginSelectionDrag(window, startX, startY, endX, endY);
+        System.Threading.Thread.Sleep(100);
+        EndSelectionDrag(window, endX, endY);
+    }
+
+    [DllImport("gdi32.dll")]
+    private static extern uint GetPixel(IntPtr deviceContext, int x, int y);
+
+    // Actual painted outline, not just HWND/focus or a queued mouse event.
+    public static bool HasSelectionEdge(int x, int y, bool queued = false)
+    {
+        var previousDpi = SetThreadDpiAwarenessContext(new IntPtr(-4));
+        var dc = GetDC(IntPtr.Zero);
+        var memory = CreateCompatibleDC(dc);
+        var bitmap = CreateCompatibleBitmap(dc, 6, 1);
+        var previous = SelectObject(memory, bitmap);
+        try
+        {
+            // GetPixel on the desktop DC can omit layered windows. Read the
+            // composited pixels, including the translucent selection overlay.
+            if (!BitBlt(memory, 0, 0, 6, 1, dc, x, y, 0x40CC0020)) return false;
+            var edge = GetPixel(memory, 0, 0);
+            var outside = GetPixel(memory, 5, 0);
+            if (queued) return edge != 0xffffffff &&
+                ((edge >> 16) & 255) > (edge & 255) + 35 && ((edge >> 8) & 255) > (edge & 255) + 20;
+            return edge != 0xffffffff && outside != 0xffffffff &&
+                (edge & 255) > (outside & 255) + 80;
+        }
+        finally
+        {
+            SelectObject(memory, previous);
+            DeleteObject(bitmap);
+            DeleteDC(memory);
+            ReleaseDC(IntPtr.Zero, dc);
+            if (previousDpi != IntPtr.Zero) SetThreadDpiAwarenessContext(previousDpi);
+        }
+    }
+
     public static bool ClickSelection(IntPtr window, int x, int y)
     {
         var bounds = PhysicalBounds(window);
@@ -718,7 +832,7 @@ function Wait-ForPackagedSelector {
         foreach ($helper in $helpers) {
             $window = [ZommiWindowsAcceptanceNative]::FindWindow(
                 $helper.ProcessId,
-                'Zommi image selection'
+                'Zommi content selection'
             )
             if ($window -ne [IntPtr]::Zero) {
                 $lastWindow = $window
@@ -839,6 +953,10 @@ function Invoke-CaptureRequest {
         if (-not $process.HasExited) {
             $process.Kill()
             $process.WaitForExit()
+        }
+        $diagnostic = $process.StandardError.ReadToEnd()
+        if (-not [string]::IsNullOrWhiteSpace($diagnostic)) {
+            Write-Host "capture-helper diagnostics: $diagnostic"
         }
         $process.Dispose()
     }
@@ -1175,8 +1293,8 @@ function Invoke-PackagedApplicationAcceptance {
         $readyResult = Wait-ForAcceptanceEvent -Path $acceptanceLog -Name 'desktop.ready'
         $ready = $readyResult.Event
         $eventCount = $readyResult.Count
-        if ($ready.contextShortcut -ne $true -or $ready.imageShortcut -ne $true) {
-            throw "Packaged shortcuts were not both registered: $($ready | ConvertTo-Json -Compress)"
+        if ($ready.contextShortcut -ne $true -or $ready.imageShortcut -eq $true) {
+            throw "Expected only the Alt+A content shortcut to be registered: $($ready | ConvertTo-Json -Compress)"
         }
 
         $taskbarBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
@@ -1307,14 +1425,18 @@ function Invoke-PackagedApplicationAcceptance {
             throw 'Could not place the pointer for packaged context capture.'
         }
         [ZommiWindowsAcceptanceNative]::SendAltA($false)
+        $selector = Wait-ForPackagedSelector -CaptureExecutable $CaptureExecutable
+        if (-not [ZommiWindowsAcceptanceNative]::ClickSelection($selector, 300, 300)) {
+            throw 'Could not confirm the packaged content selection.'
+        }
         $contextResult = Wait-ForAcceptanceEvent `
             -Path $acceptanceLog `
-            -Name 'shortcut.context' `
+            -Name 'selection.content' `
             -After $eventCount
         $context = $contextResult.Event
         $eventCount = $contextResult.Count
-        if ($context.attached -ne $true) {
-            throw "Packaged context shortcut did not attach context: $($context | ConvertTo-Json -Compress)"
+        if ($context.count -lt 1) {
+            throw "Packaged content shortcut did not attach a selection: $($context | ConvertTo-Json -Compress)"
         }
         $contextFocusDeadline = [DateTime]::UtcNow.AddSeconds(5)
         while (-not [ZommiWindowsAcceptanceNative]::Foreground($window) -and
@@ -1336,10 +1458,10 @@ function Invoke-PackagedApplicationAcceptance {
             Start-Sleep -Milliseconds 50
         }
         if (-not [ZommiWindowsAcceptanceNative]::Minimized($window)) {
-            throw 'Could not minimize Zommi before the Alt+Shift+A restore gate.'
+            throw 'Could not minimize Zommi before the Alt+A restore gate.'
         }
 
-        [ZommiWindowsAcceptanceNative]::SendAltA($true)
+        [ZommiWindowsAcceptanceNative]::SendAltA($false)
         $selector = Wait-ForPackagedSelector -CaptureExecutable $CaptureExecutable
         $selectorBounds = [ZommiWindowsAcceptanceNative]::Bounds($selector)
         $probeX = $selectorBounds[0] + 40
@@ -1371,9 +1493,10 @@ function Invoke-PackagedApplicationAcceptance {
         }
         $cancelResult = Wait-ForAcceptanceEvent `
             -Path $acceptanceLog `
-            -Name 'shortcut.image.cancelled' `
+            -Name 'selection.content' `
             -After $eventCount
         $eventCount = $cancelResult.Count
+        if ($cancelResult.Event.count -ne 0) { throw 'Cancelled selection attached content.' }
         $cancelFocusDeadline = [DateTime]::UtcNow.AddSeconds(5)
         while (([ZommiWindowsAcceptanceNative]::Minimized($window) -or
                 -not [ZommiWindowsAcceptanceNative]::Visible($window) -or
@@ -1384,41 +1507,29 @@ function Invoke-PackagedApplicationAcceptance {
         if ([ZommiWindowsAcceptanceNative]::Minimized($window) -or
             -not [ZommiWindowsAcceptanceNative]::Visible($window) -or
             -not [ZommiWindowsAcceptanceNative]::Foreground($window)) {
-            throw 'Cancelled Alt+Shift+A did not restore, show, and focus the minimized packaged taskbar window.'
+            throw 'Cancelled Alt+A did not restore, show, and focus the minimized packaged taskbar window.'
         }
 
-        [ZommiWindowsAcceptanceNative]::SendAltA($true)
+        [ZommiWindowsAcceptanceNative]::SendAltA($false)
         $selector = Wait-ForPackagedSelector -CaptureExecutable $CaptureExecutable
         if (-not [ZommiWindowsAcceptanceNative]::TopMost($selector) -or
             -not [ZommiWindowsAcceptanceNative]::Foreground($selector)) {
             throw 'Packaged image selector lost its topmost foreground state.'
         }
-        $dpi = [double][ZommiWindowsAcceptanceNative]::WindowDpi($selector)
-        $logicalWidth = [int][Math]::Max(4, [Math]::Round(40 * 96 / $dpi))
-        $logicalHeight = [int][Math]::Max(4, [Math]::Round(30 * 96 / $dpi))
-        if (-not [ZommiWindowsAcceptanceNative]::DragSelection(
-            $selector,
-            100,
-            100,
-            100 + $logicalWidth,
-            100 + $logicalHeight
-        )) {
-            throw 'Could not drag the packaged application region selector.'
-        }
+        [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector, 100, 100, 140, 130)
         $imageResult = Wait-ForAcceptanceEvent `
             -Path $acceptanceLog `
-            -Name 'shortcut.image' `
+            -Name 'selection.content' `
             -After $eventCount
-        $image = $imageResult.Event
+        if ($imageResult.Event.count -ne 1) { throw 'Region selection did not attach one item.' }
+        $image = $imageResult.Event.items[0]
         Assert-ProbeRegionSize `
-            -Width $image.width `
-            -Height $image.height `
-            -Source 'Packaged image shortcut'
-        if ($image.attached -ne $true -or
-            $image.hasImage -ne $true -or
-            $image.alignmentStatus -notin @('aligned', 'image-only') -or
-            $image.hasAlignedContext -ne ($image.alignmentStatus -eq 'aligned')) {
-            throw "Packaged image shortcut contract failed: $($image | ConvertTo-Json -Compress)"
+            -Width $image.bounds.width `
+            -Height $image.bounds.height `
+            -Source 'Packaged content selection region'
+        if ($image.hasImage -ne $true -or
+            $image.alignmentStatus -notin @('aligned', 'image-only')) {
+            throw "Packaged content selection contract failed: $($image | ConvertTo-Json -Compress)"
         }
         $imageFocusDeadline = [DateTime]::UtcNow.AddSeconds(5)
         while (-not [ZommiWindowsAcceptanceNative]::Foreground($window) -and
@@ -1426,7 +1537,7 @@ function Invoke-PackagedApplicationAcceptance {
             Start-Sleep -Milliseconds 50
         }
         if (-not [ZommiWindowsAcceptanceNative]::Foreground($window)) {
-            throw 'Alt+Shift+A did not restore and focus the packaged taskbar window.'
+            throw 'Alt+A did not restore and focus the packaged taskbar window.'
         }
 
         Start-Sleep -Milliseconds 300
@@ -1449,17 +1560,17 @@ function Invoke-PackagedApplicationAcceptance {
         })
         if ($applicationCoreProcesses.Count -ne 1 -or
             $proxyCoreProcesses.Count -lt 1 -or
-            $captureProcesses.Count -ne 2) {
+            $captureProcesses.Count -ne 1) {
             throw "Unexpected packaged process topology: $($processes | Select-Object Name,ProcessId,ExecutablePath | ConvertTo-Json -Compress)"
         }
 
         return @{
             contextAttached = $true
-            contextApplication = $context.application
-            contextWindowTitle = $context.windowTitle
+            contextApplication = $context.items[0].application
+            contextWindowTitle = $context.items[0].windowTitle
             imageCancelled = $true
-            imageDimensions = @($image.width, $image.height)
-            imagePointerContext = $true
+            imageDimensions = @($image.bounds.width, $image.bounds.height)
+            imagePointerContext = ($image.alignmentStatus -eq 'aligned')
             taskbarBounds = @($taskbarBounds)
             physicalBounds = @($physicalBounds)
             draggedBounds = @($draggedBounds)
@@ -1579,6 +1690,14 @@ if ($cancelled.cancelled -ne $true) {
 }
 Write-Host 'region-cancel: ok'
 
+$contentCancelled = Invoke-CaptureRequest -Executable $capture -Method 'selectContent' -Interact {
+    param($process)
+    $window = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi content selection'
+    if (-not [ZommiWindowsAcceptanceNative]::CancelSelection($window)) { throw 'Could not cancel unified selection.' }
+}
+if ($contentCancelled.cancelled -ne $true) { throw 'Unified selection did not preserve cancellation.' }
+Write-Host 'content-cancel: ok'
+
 if ($NonVisualOnly) {
     Write-AcceptanceResult -Result @{
         captureHelper = $capture
@@ -1636,6 +1755,10 @@ $pointContext = Invoke-CaptureRequest -Executable $capture -Method 'selectContex
         throw 'Could not click the context point selector.'
     }
     $scope = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi context scope'
+    $scopeDeadline = [DateTime]::UtcNow.AddSeconds(5)
+    while (-not [ZommiWindowsAcceptanceNative]::Foreground($scope) -and [DateTime]::UtcNow -lt $scopeDeadline) {
+        Start-Sleep -Milliseconds 50
+    }
     if (-not [ZommiWindowsAcceptanceNative]::Foreground($scope)) {
         throw 'The selected element scope was not visible and focused.'
     }
@@ -1652,25 +1775,214 @@ $scopeJson = $pointContext.snapshot.accessibilityTree | ConvertTo-Json -Depth 20
 if ($pointContext.snapshot.selectionElements[0].name -ne 'Native comment' -or
     $scopeJson -notmatch 'Selected native line' -or
     $scopeJson -notmatch 'Parent includes this second line') {
-    throw 'Context scope did not expand, shrink and confirm the intended native parent.'
+    throw "Context scope did not expand, shrink and confirm the intended native parent. Selected=$($pointContext.snapshot.selectionElements[0].name); truncated=$($pointContext.snapshot.accessibilityTree.truncated); firstLine=$($scopeJson -match 'Selected native line'); secondLine=$($scopeJson -match 'Parent includes this second line')."
 }
 Write-Host 'point-context: ok (crosshair, click, parent and smaller scope)'
 
-$selected = Invoke-CaptureRequest -Executable $capture -Method 'selectImage' -Interact {
-    param($process)
-    $window = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi image selection'
-    $dpi = [double][ZommiWindowsAcceptanceNative]::WindowDpi($window)
-    $logicalWidth = [int][Math]::Max(4, [Math]::Round(40 * 96 / $dpi))
-    $logicalHeight = [int][Math]::Max(4, [Math]::Round(30 * 96 / $dpi))
-    if (-not [ZommiWindowsAcceptanceNative]::DragSelection(
-        $window,
-        100,
-        100,
-        100 + $logicalWidth,
-        100 + $logicalHeight
-    )) {
-        throw 'Could not post the region drag to the selector.'
+$contentFixture = [ZommiContextFixture]::new()
+$contentTimings = @{}
+$contentGestures = @('click', 'parent', 'window', 'window-covered', 'drag', 'hover-small', 'quick-small', 'quick-return', 'overlap-front', 'overlap-refresh', 'drag-context', 'drag-partial', 'drag-empty', 'thin-then-drag', 'drag-busy')
+try {
+    foreach ($gesture in $contentGestures) {
+        $script:contentCoverWindow = [IntPtr]::Zero
+        try {
+        $content = Invoke-CaptureRequest -Executable $capture -Method 'selectContent' -Interact {
+            param($process)
+            $window = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi content selection'
+            [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(220, 220) | Out-Null
+            $readyDeadline = [DateTime]::UtcNow.AddSeconds(5)
+            while ((-not [ZommiWindowsAcceptanceNative]::Foreground($window) -or
+                    -not [ZommiWindowsAcceptanceNative]::IsOwnedWindowAtPoint($window, 220, 220)) -and
+                   [DateTime]::UtcNow -lt $readyDeadline) {
+                Start-Sleep -Milliseconds 50
+            }
+            if (-not [ZommiWindowsAcceptanceNative]::IsOwnedWindowAtPoint($window, 220, 220)) {
+                throw 'Unified selector did not acquire pointer ownership.'
+            }
+            # HWND/focus precede the WinForms message loop being ready. Wait for
+            # the initial async outline before driving an individual gesture.
+            $outlineDeadline = [DateTime]::UtcNow.AddSeconds(5)
+            while (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($window, 'Larger') -and
+                   [DateTime]::UtcNow -lt $outlineDeadline) {
+                Start-Sleep -Milliseconds 25
+            }
+            if (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($window, 'Larger')) {
+                throw 'The fixture line outline did not become ready for selection.'
+            }
+            if ($gesture -in @('parent', 'window', 'window-covered')) {
+                if ($gesture -eq 'window-covered') {
+                    $script:contentCoverWindow = [ZommiWindowsAcceptanceNative]::CreateCoveringWindow($contentFixture.Window)
+                    if ($script:contentCoverWindow -eq [IntPtr]::Zero) { throw 'Could not create the covering window.' }
+                }
+                $button = if ($gesture -eq 'parent') { 'Larger' } else { 'Whole window' }
+                $deadline = [DateTime]::UtcNow.AddSeconds(8)
+                do {
+                    $clicked = [ZommiWindowsAcceptanceNative]::ClickNamedButton($window, $button)
+                    if ($clicked) { break }
+                    Start-Sleep -Milliseconds 100
+                } while ([DateTime]::UtcNow -lt $deadline)
+                if (-not $clicked) { throw "Unified selector did not expose an enabled $button button." }
+                if ($gesture -eq 'parent') {
+                    if (-not [ZommiWindowsAcceptanceNative]::ClickNamedButton($window, 'Smaller') -or
+                        -not [ZommiWindowsAcceptanceNative]::ClickNamedButton($window, 'Larger')) {
+                        throw 'Unified selector could not shrink and expand using visible buttons.'
+                    }
+                    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+                }
+            } elseif ($gesture -eq 'click') {
+                if (-not [ZommiWindowsAcceptanceNative]::ClickSelection($window, 220, 220)) { throw 'Unified object click failed.' }
+            } elseif ($gesture -eq 'quick-return') {
+                # Leave a previously observed point while its provider is busy,
+                # then immediately click back there before the new lookup ends.
+                $contentFixture.PauseProvider(400)
+                [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(565, 395) | Out-Null
+                Start-Sleep -Milliseconds 70
+                [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(220, 220) | Out-Null
+                if (-not [ZommiWindowsAcceptanceNative]::ClickSelection($window, 220, 220)) { throw 'Quick return click failed.' }
+            } elseif ($gesture -in @('overlap-front', 'overlap-refresh')) {
+                [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(220, 460) | Out-Null
+                $overlapDeadline = [DateTime]::UtcNow.AddSeconds(3)
+                while (-not [ZommiWindowsAcceptanceNative]::HasSelectionEdge(295, 460) -and [DateTime]::UtcNow -lt $overlapDeadline) {
+                    Start-Sleep -Milliseconds 15
+                }
+                if (-not [ZommiWindowsAcceptanceNative]::HasSelectionEdge(295, 460)) { throw 'The topmost overlapping item was not outlined.' }
+                if ($gesture -eq 'overlap-refresh') {
+                    $contentFixture.BringBackToFront()
+                    $refreshWatch = [Diagnostics.Stopwatch]::StartNew()
+                    $overlapDeadline = [DateTime]::UtcNow.AddSeconds(3)
+                    while (-not [ZommiWindowsAcceptanceNative]::HasSelectionEdge(340, 460) -and [DateTime]::UtcNow -lt $overlapDeadline) {
+                        Start-Sleep -Milliseconds 15
+                    }
+                    $contentTimings.stationaryOverlapRefreshMilliseconds = $refreshWatch.ElapsedMilliseconds
+                    if (-not [ZommiWindowsAcceptanceNative]::HasSelectionEdge(340, 460)) { throw 'A stationary pointer retained the old stacking order.' }
+                }
+                if (-not [ZommiWindowsAcceptanceNative]::ClickSelection($window, 220, 460)) { throw 'Overlapping item click failed.' }
+            } elseif ($gesture -in @('hover-small', 'quick-small')) {
+                # First settle over the empty part of the parent, then enter an
+                # 18px child inside that same outline (formerly sticky forever).
+                [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(565, 395) | Out-Null
+                $parentDeadline = [DateTime]::UtcNow.AddSeconds(5)
+                while (-not [ZommiWindowsAcceptanceNative]::HasSelectionEdge(580, 395) -and [DateTime]::UtcNow -lt $parentDeadline) {
+                    Start-Sleep -Milliseconds 15
+                }
+                if (-not [ZommiWindowsAcceptanceNative]::HasSelectionEdge(580, 395)) { throw 'Parent outline did not paint.' }
+                $hoverWatch = [Diagnostics.Stopwatch]::StartNew()
+                [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(519, 364) | Out-Null
+                if ($gesture -eq 'hover-small') {
+                    $smallDeadline = [DateTime]::UtcNow.AddSeconds(2)
+                    while (-not [ZommiWindowsAcceptanceNative]::HasSelectionEdge(528, 364) -and [DateTime]::UtcNow -lt $smallDeadline) {
+                        Start-Sleep -Milliseconds 10
+                    }
+                    $contentTimings.smallItemHoverMilliseconds = $hoverWatch.ElapsedMilliseconds
+                    if (-not [ZommiWindowsAcceptanceNative]::HasSelectionEdge(528, 364)) { throw 'Hover remained on the parent instead of the small child.' }
+                }
+                if (-not [ZommiWindowsAcceptanceNative]::ClickSelection($window, 519, 364)) { throw 'Small object click failed.' }
+            } elseif ($gesture -eq 'drag-empty') {
+                [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($window, 555, 430, 615, 470)
+            } elseif ($gesture -in @('drag-context', 'drag-partial', 'thin-then-drag', 'drag-busy')) {
+                if ($gesture -eq 'drag-busy') {
+                    $contentFixture.PauseProvider(1200)
+                    [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(300, 285) | Out-Null
+                    Start-Sleep -Milliseconds 60
+                    $latency = [ZommiWindowsAcceptanceNative]::BeginSelectionDrag($window, 175, 195, 535, 315)
+                    $contentTimings.busyProviderDragInputMilliseconds = $latency
+                    if ($latency -gt 200) { throw "Drag input waited ${latency}ms for the busy source provider." }
+                    $paintDeadline = [DateTime]::UtcNow.AddMilliseconds(250)
+                    while (-not [ZommiWindowsAcceptanceNative]::HasSelectionEdge(535, 300) -and [DateTime]::UtcNow -lt $paintDeadline) {
+                        Start-Sleep -Milliseconds 10
+                    }
+                    if (-not [ZommiWindowsAcceptanceNative]::HasSelectionEdge(535, 300)) { throw 'Drag outline did not paint while the source provider was busy.' }
+                    Start-Sleep -Milliseconds 1250
+                    [ZommiWindowsAcceptanceNative]::EndSelectionDrag($window, 535, 315)
+                } else {
+                    if ($gesture -eq 'thin-then-drag') {
+                        [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($window, 220, 220, 300, 222)
+                    }
+                    $startY = if ($gesture -eq 'drag-partial') { 210 } else { 195 }
+                    [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($window, 175, $startY, 535, 315)
+                }
+            } else {
+                [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($window, 590, 435, 630, 465)
+            }
+        }
+        if ($gesture -eq 'window-covered' -and
+            -not [ZommiWindowsAcceptanceNative]::IsOwnedWindowAtPoint($script:contentCoverWindow, 375, 330)) {
+            throw 'The covering fixture did not remain above the source window.'
+        }
+        } finally {
+            if ($script:contentCoverWindow -ne [IntPtr]::Zero) {
+                [ZommiWindowsAcceptanceNative]::CloseCompetingWindow($script:contentCoverWindow)
+            }
+        }
+        if ($gesture -eq 'window-covered') {
+            if ($content.cancelled -ne $true -or $content.errorMessage -notmatch 'covered' -or $content.dataUrl) {
+                throw 'Whole-window selection accepted pixels covered by a different window.'
+            }
+            Write-Host 'content-window-covered: ok'
+            continue
+        }
+        if ($content.cancelled -eq $true -or $content.dataUrl -notlike 'data:image/png;base64,*') {
+            throw "Unified $gesture did not produce a previewable attachment: $($content.errorMessage)"
+        }
+        $text = $content.snapshot | ConvertTo-Json -Depth 30 -Compress
+        if ($gesture -in @('click', 'quick-return') -and ($text -notmatch 'Selected native line' -or $text -match 'Parent includes this second line')) {
+            throw 'Unified object click did not capture only the outlined line.'
+        }
+        if ($gesture -in @('parent', 'window') -and
+            ($text -notmatch 'Selected native line' -or $text -notmatch 'Parent includes this second line')) {
+            throw "Unified $gesture did not include both visible lines."
+        }
+        if ($gesture -eq 'window' -and ($content.bounds.width -ne 500 -or $content.bounds.height -ne 360)) {
+            throw 'Whole-window selection did not match the source window bounds.'
+        }
+        if ($gesture -eq 'overlap-front' -and ($content.bounds.x -ne 185 -or $content.bounds.y -ne 440 -or
+            $content.bounds.width -ne 110 -or $content.bounds.height -ne 35 -or $text -notmatch 'Front overlap item')) {
+            throw 'The overlapping click did not capture the front item bounds and context.'
+        }
+        if ($gesture -eq 'overlap-refresh' -and ($content.bounds.x -ne 160 -or $content.bounds.y -ne 430 -or
+            $content.bounds.width -ne 180 -or $content.bounds.height -ne 55 -or $text -notmatch 'Back overlap item')) {
+            throw 'The overlapping click did not follow the changed stacking order.'
+        }
+        if ($gesture -in @('hover-small', 'quick-small') -and
+            ($content.bounds.width -ne 18 -or $content.bounds.height -ne 18 -or
+             $text -notmatch 'Tiny add item' -or $text -match 'Tiny remove item|Selected native line')) {
+            throw "Unified $gesture did not capture exactly the small child."
+        }
+        if ($gesture -in @('drag-context', 'thin-then-drag', 'drag-busy') -and
+            ($text -notmatch 'Selected native line' -or $text -notmatch 'Parent includes this second line' -or
+             $text -match 'Tiny add item|Tiny remove item' -or $content.alignment.status -ne 'aligned' -or
+             $content.bounds.x -ne 175 -or $content.bounds.y -ne 195 -or
+             $content.bounds.width -ne 360 -or $content.bounds.height -ne 120)) {
+            throw "Unified $gesture did not include precisely the enclosed elements and aligned image."
+        }
+        if ($gesture -eq 'drag-partial' -and
+            ($text -match 'Selected native line' -or $text -notmatch 'Parent includes this second line')) {
+            throw 'A partially enclosed element leaked text outside the selected image.'
+        }
+        if ($gesture -eq 'drag-empty' -and
+            ($null -eq $content.snapshot -or $content.alignment.status -ne 'image-only' -or
+             $content.alignment.mapping.coordinateSpace -ne 'desktop-physical-pixels' -or
+             $content.alignment.mapping.imageBounds.width -ne $content.bounds.width -or
+             $content.alignment.mapping.imageBounds.height -ne $content.bounds.height -or
+             $content.snapshot.source.nativeWindowId -ne $contentFixture.Window.ToString() -or
+             $content.previewText -notmatch 'No complete accessible text or named object')) {
+            throw 'An empty area did not explain its image-only result.'
+        }
+        Write-Host "content-${gesture}: ok"
     }
+} finally {
+    $contentFixture.Dispose()
+}
+
+$imageFixture = [ZommiContextFixture]::new()
+try {
+    $selected = Invoke-CaptureRequest -Executable $capture -Method 'selectImage' -Interact {
+        param($process)
+        $window = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi image selection'
+        [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($window, 200, 200, 240, 230)
+    }
+} finally {
+    $imageFixture.Dispose()
 }
 if ($selected.cancelled -eq $true) {
     throw "Region selector cancelled the scripted selection: $($selected.errorMessage)"
@@ -1700,9 +2012,11 @@ if ($width -ne $selected.bounds.width -or $height -ne $selected.bounds.height) {
     throw "PNG dimensions ${width}x${height} do not match the reported bounds $($selected.bounds.width)x$($selected.bounds.height)."
 }
 
-$applicationResult = Invoke-PackagedApplicationAcceptance `
-    -Package $package `
-    -CaptureExecutable $capture
+$multiContent = & (Join-Path $PSScriptRoot 'accept-windows-multi-content.ps1') -CaptureHost $capture
+
+$applicationResult = if (-not $NativeOnly) {
+    Invoke-PackagedApplicationAcceptance -Package $package -CaptureExecutable $capture
+} else { $null }
 
 Write-AcceptanceResult -Result @{
     captureHelper = $capture
@@ -1710,6 +2024,10 @@ Write-AcceptanceResult -Result @{
     windowOwnership = $true
     cancellation = $true
     pointContext = $true
+    unifiedContent = @('cancel') + $contentGestures
+    contentSelectionTimings = $contentTimings
+    multiContent = $multiContent.cases
+    independentSelector = $multiContent.independentSelector
     selectedBounds = @($selected.bounds.x, $selected.bounds.y, $selected.bounds.width, $selected.bounds.height)
     pngDimensions = @($width, $height)
     pngBytes = $png.Length

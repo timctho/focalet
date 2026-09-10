@@ -67,15 +67,15 @@ internal sealed class ForegroundContextCapture : IDisposable
 
     public void Dispose() => automation.Dispose();
 
-    public IReadOnlyList<ContextScopeChoice> ScopeChoices(Point point)
+    public IReadOnlyList<ContextScopeChoice> ScopeChoices(Point point, nint targetWindow = 0)
     {
         var choices = new List<ContextScopeChoice>();
         try
         {
-            var window = NativeCaptureWindow.At(point);
+            var window = targetWindow == 0 ? NativeCaptureWindow.At(point) : targetWindow;
             if (window == 0) return choices;
             var root = automation.FromHandle(window);
-            var element = automation.FromPoint(point);
+            var element = targetWindow == 0 ? automation.FromPoint(point) : ElementWithin(root, point);
             var title = NativeCaptureWindow.Title(window);
             for (var depth = 0; element is not null && depth < 10 && IsWithinWindow(element, root); depth++)
             {
@@ -119,6 +119,24 @@ internal sealed class ForegroundContextCapture : IDisposable
         }
         catch (Exception exception) when (BrowserObservationBridge.IsUnavailable(exception)) { }
         return choices;
+    }
+
+    // Resolve within the external window while our selection overlay owns the
+    // mouse. Desktop FromPoint would otherwise return the overlay itself.
+    private static AutomationElement ElementWithin(AutomationElement root, Point point)
+    {
+        var element = root;
+        var started = Stopwatch.GetTimestamp();
+        for (var depth = 0; depth < 24 && Stopwatch.GetElapsedTime(started).TotalMilliseconds < 120; depth++)
+        {
+            var child = element.FindAllChildren().Take(128).FirstOrDefault(candidate =>
+                !candidate.Properties.IsOffscreen.ValueOrDefault &&
+                candidate.Properties.BoundingRectangle.ValueOrDefault.Contains(point));
+            if (child is null) break;
+            element = child;
+            if (element.Properties.IsPassword.ValueOrDefault) break;
+        }
+        return element;
     }
 
     public CaptureResult Capture(DateTimeOffset nowUtc, Action? onTargetResolved = null)

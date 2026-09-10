@@ -7,10 +7,20 @@ namespace Zommi.Capture;
 public sealed class BrowserConnectionPool : IDisposable
 {
     private readonly SemaphoreSlim gate = new(1, 1);
+    private readonly SemaphoreSlim bindings = new(1, 1);
     private readonly Dictionary<Uri, CdpConnection> connections = [];
+    private readonly Dictionary<Uri, DateTimeOffset> retryAfter = [];
     private bool disposed;
 
     public async Task<BrowserDomSession?> OpenAsync(Uri endpoint, int processId,
+        Func<string, bool> matchesNativeWindow, CancellationToken cancellationToken)
+    {
+        await bindings.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { return await BindAsync(endpoint, processId, matchesNativeWindow, cancellationToken).ConfigureAwait(false); }
+        finally { bindings.Release(); }
+    }
+
+    private async Task<BrowserDomSession?> BindAsync(Uri endpoint, int processId,
         Func<string, bool> matchesNativeWindow, CancellationToken cancellationToken)
     {
         for (var attempt = 0; ; attempt++)
@@ -43,7 +53,18 @@ public sealed class BrowserConnectionPool : IDisposable
                 entry.Value.Dispose();
             }
             if (connections.TryGetValue(endpoint, out var existing)) return (existing, true);
-            var connection = await CdpConnection.ConnectAsync(endpoint, cancellationToken).ConfigureAwait(false);
+            if (retryAfter.TryGetValue(endpoint, out var retry) && retry > DateTimeOffset.UtcNow)
+                throw new InvalidOperationException("Browser access is unavailable. Retrying is paused briefly after a failed connection.");
+            CdpConnection connection;
+            try { connection = await CdpConnection.ConnectAsync(endpoint, cancellationToken).ConfigureAwait(false); }
+            catch (Exception exception) when (exception is OperationCanceledException or WebSocketException or IOException or HttpRequestException)
+            {
+                // A declined/expired Chrome prompt must not be repeated for
+                // every remaining item in a batch or every quick retry.
+                retryAfter[endpoint] = DateTimeOffset.UtcNow.AddMinutes(1);
+                throw;
+            }
+            retryAfter.Remove(endpoint);
             connections.Add(endpoint, connection);
             return (connection, false);
         }
@@ -65,6 +86,7 @@ public sealed class BrowserConnectionPool : IDisposable
             disposed = true;
             foreach (var connection in connections.Values) connection.Dispose();
             connections.Clear();
+            retryAfter.Clear();
         }
         finally { gate.Release(); }
     }

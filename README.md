@@ -38,11 +38,10 @@ Electron, Node module, or `.mjs` payload.
 
 - bottom-center quiet orb with a visible working state and 500 ms delayed
   collapse;
-- `Alt+A` selection-first context without moving the window to the pointer;
-- browser DOM capture through an available local Chromium connection on Windows;
-- context selection outlines with parent/smaller scope adjustment;
-- `Alt+Shift+A` explicit image-region selection with aligned text when available;
-- cumulative context chips and bounded previews;
+- `Alt+A` or **Select content** opens the same content picker; click an object,
+  drag a region, or use Ctrl to accumulate selections on Windows;
+- a button-controlled sliding chat sidebar, with workspace beside model settings;
+- readable A/B attachments, bounded previews and in-place selection adjustment;
 - exact runtime, model, reasoning, and provider-owned session selection;
 - paged history, concurrent background turns, running/unread state, and exact
   interruption;
@@ -51,11 +50,9 @@ Electron, Node module, or `.mjs` payload.
 - accessible names, keyboard actions, reduced motion, and visible degraded
   states.
 
-Capture fidelity is not a migration gate. Windows `Alt+A` still uses the rich
-UIA provider and enriches connected Chromium pages with DOM content. Windows
-`Alt+Shift+A` uses a compositor crop for regions inside a connected browser
-viewport and native desktop capture elsewhere. GPU-composited pixels can differ
-or be blank on the native desktop path.
+Windows selection uses UIA and enriches connected Chromium pages with DOM
+content. Selected image regions use native desktop capture; GPU-composited
+pixels can differ or be blank on that path.
 macOS uses its platform selector. Linux packages one Rust helper: X11 provides
 active-window metadata and direct region capture, while Wayland uses the global-
 shortcuts and area-screenshot portals. Standard Wayland portals do not expose

@@ -9,6 +9,134 @@ import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 
 void main() {
+  testWidgets(
+    'desktop registers only Alt+A and removes that registration on close',
+    (tester) async {
+      await tester.runAsync(() async {
+        const hotkey = MethodChannel('dev.leanflutter.plugins/hotkey_manager');
+        const hotkeyEvents = MethodChannel(
+          'dev.leanflutter.plugins/hotkey_manager_event',
+        );
+        const window = MethodChannel('window_manager');
+        const native = MethodChannel('zommi/window_animation');
+        const tray = MethodChannel('tray_manager');
+        final calls = <MethodCall>[];
+        final messenger = tester.binding.defaultBinaryMessenger;
+        for (final channel in [hotkeyEvents, window, tray]) {
+          messenger.setMockMethodCallHandler(
+            channel,
+            (call) async => call.method == 'isMinimized' ? false : null,
+          );
+        }
+        messenger.setMockMethodCallHandler(hotkey, (call) async {
+          calls.add(call);
+          return null;
+        });
+        messenger.setMockMethodCallHandler(
+          native,
+          (call) async => call.method == 'getSurfaceGeometry'
+              ? {
+                  'bounds': [0, 0, 720, 620],
+                  'workArea': [0, 0, 1920, 1080],
+                  'scale': 1.0,
+                  'maximized': false,
+                }
+              : true,
+        );
+        addTearDown(() {
+          for (final channel in [hotkey, hotkeyEvents, window, native, tray]) {
+            messenger.setMockMethodCallHandler(channel, null);
+          }
+        });
+        final client = _FakeNativeCaptureClient(onRequest: (_) async => {});
+        final bridge = FlutterDesktopBridge(
+          useNativeSurface: true,
+          useWaylandPortals: false,
+          captureProvider: WindowsCaptureProvider(
+            captureClient: client,
+            selectorClient: client,
+          ),
+        );
+        final ready = await bridge.initialize().timeout(
+          const Duration(seconds: 15),
+        );
+        expect(ready.contextShortcut, isTrue);
+        expect(ready.imageShortcut, isFalse);
+        final registration = calls
+            .where((call) => call.method == 'register')
+            .single;
+        final parameters = registration.arguments as Map;
+        expect(parameters['modifiers'], ['alt']);
+        expect(
+          (parameters['key'] as Map)['usageCode'],
+          PhysicalKeyboardKey.keyA.usbHidUsage,
+        );
+        await bridge.close();
+        expect(
+          calls.where((call) => call.method == 'unregister').single.arguments,
+          parameters,
+        );
+      });
+    },
+  );
+
+  test(
+    'Windows selection batches preserve each image and its own coordinates',
+    () async {
+      final client = _FakeNativeCaptureClient(
+        onRequest: (_) async => {
+          'cancelled': false,
+          'selections': [
+            for (final index in [1, 2])
+              {
+                'dataUrl': 'data:image/png;base64,$index',
+                'bounds': {'x': index * 100},
+                'snapshot': {'windowTitle': 'Window $index'},
+                'alignment': {'status': 'image-only'},
+              },
+          ],
+        },
+      );
+      final provider = WindowsCaptureProvider(
+        captureClient: client,
+        selectorClient: client,
+      );
+      final results = await provider.selectContext();
+      expect(results.map((item) => item.image?.dataUrl), [
+        'data:image/png;base64,1',
+        'data:image/png;base64,2',
+      ]);
+      expect(results.map((item) => item.image?.bounds?['x']), [100, 200]);
+      expect(results.map((item) => item.snapshot?['windowTitle']), [
+        'Window 1',
+        'Window 2',
+      ]);
+    },
+  );
+  test('disabling webpage details reaches both native helpers for every capture gesture', () async {
+    final ordinary = _FakeNativeCaptureClient(onRequest: (_) async => {});
+    final selector = _FakeNativeCaptureClient(
+      onRequest: (_) async => {'cancelled': true},
+    );
+    final provider = WindowsCaptureProvider(
+      captureClient: ordinary,
+      selectorClient: selector,
+    );
+    provider.setBrowserPageDetails(false);
+    await provider.capture();
+    await provider.selectContext();
+    await provider.selectImage();
+    for (final parameters in [
+      ...ordinary.requestParameters,
+      ...selector.requestParameters,
+    ]) {
+      expect(parameters['browserPageDetails'], isFalse);
+    }
+    provider.setBrowserPageDetails(true);
+    await provider.capture();
+    expect(ordinary.requestParameters.last['browserPageDetails'], isTrue);
+    await provider.close();
+  });
   testWidgets('native resize feedback reports the actual physical viewport', (
     tester,
   ) async {
@@ -380,7 +508,7 @@ void main() {
       DesktopInvocationKind.image,
     ]) {
       testWidgets(
-        'Windows $kind captures physical pointer coordinates at $pixelRatio DPI',
+        'Windows $kind capture API uses the intended coordinates at $pixelRatio DPI',
         (tester) async {
           tester.view.devicePixelRatio = pixelRatio;
           addTearDown(tester.view.resetDevicePixelRatio);
@@ -412,7 +540,11 @@ void main() {
               selectorClient: selector,
             ),
           );
-          await bridge.invokeShortcut(kind);
+          if (kind == DesktopInvocationKind.context) {
+            await bridge.captureContext();
+          } else {
+            await bridge.selectImageContext();
+          }
           if (kind == DesktopInvocationKind.context) {
             expect(capture.requestParameters.single['point'], {
               'x': (-320 * pixelRatio).round(),
@@ -483,40 +615,24 @@ void main() {
     );
   }
 
-  testWidgets(
-    'rapid shortcuts coalesce without queueing another native capture',
-    (tester) async {
-      _mockCursor(tester);
-      final captured = Completer<Map<String, Object?>>();
+  test(
+    'Alt+A requests the same content selection used by the composer',
+    () async {
       final captureClient = _FakeNativeCaptureClient(
-        onRequest: (_) => captured.future,
-      );
-      final selectorClient = _FakeNativeCaptureClient(
         onRequest: (_) async => {},
       );
       final bridge = FlutterDesktopBridge(
         captureProvider: WindowsCaptureProvider(
           captureClient: captureClient,
-          selectorClient: selectorClient,
+          selectorClient: captureClient,
         ),
       );
       final events = <DesktopInvocation>[];
       final subscription = bridge.invocations.listen(events.add);
       addTearDown(subscription.cancel);
-      final first = bridge.invokeShortcut(DesktopInvocationKind.context);
-      await tester.pump();
-      await bridge.invokeShortcut(DesktopInvocationKind.context);
-      await bridge.invokeShortcut(DesktopInvocationKind.image);
-      expect(captureClient.requests, ['capture']);
-      expect(selectorClient.requests, isEmpty);
-      expect(events.single.kind, DesktopInvocationKind.captureStarted);
-      captured.complete({
-        'snapshot': {'application': 'Source'},
-      });
-      await tester.pump();
-      await first;
-      await tester.pump();
-      expect(events.last.attachment?.snapshot?['application'], 'Source');
+      await bridge.invokeContentSelection();
+      expect(events.single.kind, DesktopInvocationKind.selectContent);
+      expect(captureClient.requests, isEmpty);
     },
   );
 
@@ -744,6 +860,37 @@ void main() {
     },
   );
 
+  test('Windows text and selection share one host without waiting for text completion', () async {
+    final pending = Completer<Map<String, Object?>>();
+    final shared = _FakeNativeCaptureClient(
+      onRequest: (method) => method == 'capture'
+          ? pending.future
+          : Future.value(<String, Object?>{'cancelled': true}),
+    );
+    final provider = WindowsCaptureProvider(captureClient: shared);
+    await provider.initialize();
+    expect(shared.requests, ['ping']);
+    final capture = provider.capture();
+    expect(
+      await provider.selectContext().timeout(const Duration(milliseconds: 100)),
+      isEmpty,
+    );
+    expect(
+      await provider.selectImage().timeout(const Duration(milliseconds: 100)),
+      isNull,
+    );
+    expect(shared.requests, [
+      'ping',
+      'capture',
+      'selectContent',
+      'selectImage',
+    ]);
+    pending.complete(<String, Object?>{});
+    await capture;
+    await provider.close();
+    expect(shared.closed, isTrue);
+  });
+
   test(
     'Windows region selection is not queued behind slow UIA capture',
     () async {
@@ -755,10 +902,17 @@ void main() {
       );
       final selectorClient = _FakeNativeCaptureClient(
         onRequest: (method) async => switch (method) {
-          'selectContext' => <String, Object?>{
+          'selectContent' => <String, Object?>{
             'cancelled': false,
             'snapshot': <String, Object?>{'application': 'clicked-window'},
             'previewText': 'Clicked window context',
+            'dataUrl': 'data:image/png;base64,YQ==',
+            'bounds': <String, Object?>{
+              'x': -200,
+              'y': 120,
+              'width': 350,
+              'height': 40,
+            },
           },
           'selectImage' => <String, Object?>{
             'cancelled': false,
@@ -785,13 +939,18 @@ void main() {
       final selectedContext = await provider.selectContext().timeout(
         const Duration(milliseconds: 100),
       );
-      expect(selectorClient.requests, ['selectContext']);
-      expect(selectedContext?.snapshot?['application'], 'clicked-window');
+      expect(selectorClient.requests, ['selectContent']);
+      expect(selectedContext.single.snapshot?['application'], 'clicked-window');
+      expect(
+        selectedContext.single.image?.dataUrl,
+        'data:image/png;base64,YQ==',
+      );
+      expect(selectedContext.single.image?.bounds?['x'], -200);
 
       final image = await provider.selectImage().timeout(
         const Duration(milliseconds: 100),
       );
-      expect(selectorClient.requests, ['selectContext', 'selectImage']);
+      expect(selectorClient.requests, ['selectContent', 'selectImage']);
       expect(image?.bounds?['width'], 3);
 
       captureResult.complete(<String, Object?>{'snapshot': null});
@@ -845,7 +1004,7 @@ void main() {
       expect(context.snapshot?['windowTitle'], 'Fixture window');
 
       final selectedContext = await provider.selectContext();
-      expect(selectedContext?.snapshot?['application'], 'fixture-app');
+      expect(selectedContext.single.snapshot?['application'], 'fixture-app');
 
       final image = await provider.selectImage();
       expect(image?.dataUrl, 'data:image/png;base64,AQID');
@@ -935,26 +1094,23 @@ void main() {
   });
 
   test(
-    'Wayland portal shortcut activations keep exact gesture identity',
+    'Wayland portal only activates the content selection shortcut',
     () async {
       final client = _FakeWaylandPortalShortcutClient();
       var contextInvocations = 0;
-      var imageInvocations = 0;
       final errors = <Object>[];
       final registration = await registerWaylandPortalShortcuts(
         client,
         onContext: () => contextInvocations += 1,
-        onImage: () => imageInvocations += 1,
         onError: errors.add,
       );
       expect(registration.readiness.contextShortcut, isTrue);
-      expect(registration.readiness.imageShortcut, isTrue);
+      expect(registration.readiness.imageShortcut, isFalse);
 
       client.emit('context');
       client.emit('image');
       client.emit('unknown');
       expect(contextInvocations, 1);
-      expect(imageInvocations, 1);
       expect(errors, isEmpty);
 
       await registration.subscription.cancel();
@@ -971,7 +1127,7 @@ void main() {
       addTearDown(() => directory.delete(recursive: true));
       final script = File('${directory.path}/portal-fixture.sh');
       await script.writeAsString('''
-printf '%s\n' '{"event":"ready","contextShortcut":true,"imageShortcut":true}'
+printf '%s\n' '{"event":"ready","contextShortcut":true,"imageShortcut":false}'
 printf '%s\n' '{"event":"activated","shortcutId":"context"}'
 printf '%s\n' '{"event":"activated","shortcutId":"image"}'
 while read -r line; do :; done
@@ -980,12 +1136,12 @@ while read -r line; do :; done
         '/bin/sh',
         argumentsBeforeCommand: [script.path],
       );
-      final activations = client.activations.take(2).toList();
+      final activations = client.activations.take(1).toList();
 
       final readiness = await client.initialize();
       expect(readiness.contextShortcut, isTrue);
-      expect(readiness.imageShortcut, isTrue);
-      expect(await activations, ['context', 'image']);
+      expect(readiness.imageShortcut, isFalse);
+      expect(await activations, ['context']);
       await client.close();
     },
   );
@@ -1084,7 +1240,7 @@ final class _FakeWaylandPortalShortcutClient
 
   @override
   Future<DesktopReadiness> initialize() async =>
-      const DesktopReadiness(contextShortcut: true, imageShortcut: true);
+      const DesktopReadiness(contextShortcut: true);
 
   @override
   Future<void> close() => _controller.close();

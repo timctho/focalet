@@ -443,12 +443,18 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
   }
 }
 
-final class FakeDesktopBridge implements DesktopBridge {
+final class FakeDesktopBridge implements DesktopBridge, BrowserCaptureSettings {
+  @override
+  bool supportsBrowserPageDetails = false;
+  bool browserPageDetails = true;
+  @override
+  void setBrowserPageDetails(bool enabled) => browserPageDetails = enabled;
   final StreamController<DesktopInvocation> _invocations =
       StreamController<DesktopInvocation>.broadcast(sync: true);
   final List<String> calls = [];
   final List<bool> surfaceAnimations = [];
   ContextAttachment? nextContext;
+  List<ContextAttachment>? nextSelections;
   ContextAttachment? nextImage;
   String? copiedText;
   String? copiedImage;
@@ -458,6 +464,7 @@ final class FakeDesktopBridge implements DesktopBridge {
   bool closed = false;
   Future<DesktopReadiness>? initializeGate;
   Future<void>? surfaceGate;
+  Future<ContextAttachment?>? selectionGate;
   bool pointerWithinSurface = false;
 
   @override
@@ -479,9 +486,11 @@ final class FakeDesktopBridge implements DesktopBridge {
   }
 
   @override
-  Future<ContextAttachment?> selectPointerContext() async {
+  Future<List<ContextAttachment>> selectPointerContext() async {
     calls.add('selectPointerContext');
-    return nextContext;
+    if (nextSelections case final selected?) return selected;
+    final selected = await (selectionGate ?? Future.value(nextContext));
+    return selected == null ? [] : [selected];
   }
 
   @override

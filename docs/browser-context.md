@@ -1,16 +1,66 @@
 # Browser context selection
 
 On Windows, Zommi can enrich accessible context with DOM content from a local
-Chromium debugging connection. `Alt+A` captures the original text selection,
-the pointed element and nearby content. It does not attach pixels.
+Chromium debugging connection. Press `Alt+A` or use **Select content** beside
+the composer to open the same Windows content picker.
+Point at content to see its accessible outline, then click to attach it. Drag
+anywhere to choose a rectangle instead. The visible **Larger**, **Smaller** and
+**Whole window** controls change the scope without needing another shortcut.
+Up/Down and Enter remain available. Escape cancels and returns to the draft.
+If an application exposes no usable object, the picker asks you to drag a region.
 
-Use the composer's context picker to click content, inspect its outline, and
-adjust the scope. In a connected browser, move the pointer to another element,
-press Up to select a parent or Down to return to a smaller element, then click
-or press Enter to attach. Escape cancels. Other Windows applications use an
-accessible-element outline with the same parent/smaller/confirm keys.
+Hold **Ctrl** while clicking or dragging to collect several selections. Numbered
+outlines stay on screen when Ctrl is released. Continue selecting, then press
+**Enter** to attach them in order (up to 16); **Escape** discards the whole batch.
+Each attachment retains its own image, context and coordinates. Repeating an
+identical selection does not add another attachment.
 
-`Alt+Shift+A` selects an image region. Text is collected from the final region,
+Dragging starts immediately, including over an outlined item. Hover lookup runs
+on a separate thread and keeps only the newest pointer position. Ordinary hover
+can move from a container into its small children; only a scope you explicitly
+expand stays pinned while the pointer remains inside it. The toolbar stays at
+the top of the starting screen instead of chasing the outline.
+
+This first version uses Windows accessibility for the interactive outlines;
+the final rectangle goes through the existing DOM/UIA region capture pipeline.
+Every explicit selection includes an image and aligned text when available.
+Free rectangles automatically collect the readable elements they fully enclose,
+including multiple elements. Partially clipped UIA elements and DOM text lines
+are omitted. Canvas/custom-drawn content, an unconfirmed source window, or a
+changing document can produce **Image only** with an explanation in the preview.
+Whole-window capture brings the explicitly chosen window forward and includes
+its visible desktop portion. Moved sources and covering owned dialogs are
+rejected. It is a single snapshot, not a continuing screen share.
+Other platforms retain their existing selection providers.
+
+Windows captures without accessible text show **Image with screen location**
+and retain the physical screen rectangle and actual image dimensions. A stable source also includes the app/window title, HWND,
+process ID and window bounds. A region spanning multiple windows keeps its
+screen mapping without guessing one source. The agent receives the capture ID,
+time and image-to-screen formula. These coordinates describe that frame; the
+agent must observe again after a window, scroll or content change before acting.
+This supplies location even when a custom UI exposes no accessible text.
+
+When a crop intersects an accessible table cell, separate spatial context carries
+its column header, raw grid indices and, when the first data row can be verified,
+the one-based data row number. This can identify a partial Redis cell without
+claiming that its complete text is inside the image. Providers without grid
+semantics retain coordinates without an invented row number.
+
+Enclosed images and text retain their own wrapping link's URL, including cards
+that use background thumbnails. The preview lists each URL once. Region bounds
+allow one physical pixel of rounding difference. Viewport scrolling does not
+clip against the body's scrolled border box; actual nested overflow still excludes
+hidden rows and partially clipped items.
+
+Attachments show a stable A/B reference and a readable excerpt or image preview.
+**Adjust** replaces that attachment in place, preserving its reference and the
+typed question. Cancellation or a capture failure preserves the old attachment.
+References are included in the agent handoff beside the corresponding image
+index. Removed references are not reused within the same draft. Image markup
+and arrows are not included in this first version.
+
+Drag in **Select content** to select an image region. Text is collected from the final region,
 not from the location of the pointer before dragging. The preview says **Image
 only** when structural data cannot be aligned. A text context can still be
 attached separately. Each image and its associated context retains an image
@@ -25,20 +75,40 @@ change its profile. For a browser that exposes a different local debugging
 port, launch Zommi with `ZOMMI_BROWSER_CDP_ENDPOINT=http://127.0.0.1:9222`
 (substitute the port supplied by that browser). A loopback browser WebSocket
 endpoint is also accepted. Remote endpoints and credentials in URLs are
-rejected.
+rejected. An explicit endpoint is exclusive; failed binding does not try another
+profile. Automatic discovery only considers the selected browser family.
 
-Each native capture helper keeps its browser connection open for later captures.
-Closing a capture removes its page observers, selection outline and tab session;
-the next capture binds the current native window, tab and document again over the
-same browser connection. Reloading or switching tabs does not require a new
-browser connection. An interrupted connection is discarded and reconnected once.
-The first connection allows up to 20 seconds for Chrome's authorization dialog.
+Text, content selection and image selection share one native helper and one
+browser connection per endpoint. Separate UI and accessibility workers keep the selector
+responsive while text accessibility capture is busy. Browser tab attachments
+stay open between captures; each capture still binds the current native window,
+tab and document, and removes its own page observers and selection outline.
+Reloading and switching tabs rebind without a new browser connection.
 
-Chrome controls authorization for a new connection. The text-capture and selector
-helpers are separate processes, so each may request authorization on first use.
-Restarting Chrome or Zommi, or revoking/disconnecting browser access, may require
-another confirmation. This does not change connections owned by an agent's
-separate Chrome MCP server.
+An observation timeout leaves the authorized connection open and discards its
+late reply. A real disconnect reconnects once. The first connection allows up to
+20 seconds for Chrome's authorization dialog. A failed connection pauses fresh
+attempts for one minute so a rejected prompt is not repeated for each item.
+Turning Full webpage details off and on clears this connection state.
+
+Chrome controls authorization for a new connection. Restarting Chrome or Zommi,
+or revoking/disconnecting browser access, can require another confirmation.
+Connections owned by an agent's separate Chrome MCP server are independent.
+
+In **App settings**, turn off **Full webpage details** to stop Zommi using a
+debugging connection from the next capture. This applies to Alt+A, Select content
+and image selection, and closes previously retained Zommi browser connections
+when the helper handles its next capture. Images, physical coordinates and
+Windows accessibility remain available; DOM text and image/product URLs may be
+missing. The preference persists and is on by default. It does not change
+connections made by the agent's separate browser tools.
+
+Reading page context does not inherently require debugging permission. This
+implementation uses CDP, so Chrome authorizes a debugging connection even for
+read-only capture. A future extension could use `activeTab` and `scripting`
+without `debugger`, after the user invokes sharing in the browser. That requires
+an installed extension and browser activation; Zommi's global shortcut alone
+does not grant `activeTab`. No such extension is included in this build.
 
 Without an available connection, Windows accessibility capture remains usable.
 The DOM implementation currently runs in the Windows native capture helper;
@@ -59,9 +129,10 @@ Its dimensions must agree with the browser's CSS viewport. Unsupported or
 ambiguous geometry does not receive DOM coordinates. Image capture records the
 physical region, image size and CSS viewport mapping, including negative desktop
 coordinates. Viewport movement, document mutations, scroll changes and window
-changes invalidate alignment. DOM text is read before requesting a compositor
-crop from that same browser tab, and checked again afterward. The PNG's actual
-dimensions are retained in the image mapping. UIA fallback compares the enclosed accessible elements
+changes invalidate alignment. On Windows, DOM text is read before copying the selected physical screen
+pixels, then checked again afterward along with window coverage. This avoids
+Chrome compositor screenshot commands and their visible surface changes. The
+PNG dimensions are retained in the image mapping. UIA fallback compares the enclosed accessible elements
 on both sides of the image capture.
 
 ## Coverage and limits
@@ -105,6 +176,7 @@ For the packaged Windows browser gate, run
 `./scripts/accept-windows-browser.ps1 -PackageDirectory ./artifacts/zommi-windows-x64`.
 It uses a temporary Chromium profile, verifies the native window/viewport binding
 with the packaged helper, and records the helper's SHA-256 beside the test
-results. The packaged gate also counts browser WebSocket handshakes across three fresh
-captures. The browser observer is released after capture; a disconnected client
+results. The packaged gate also counts browser WebSocket handshakes and target
+attachments across three fresh captures, checks that native crops issue no
+Chrome screenshot commands, and exercises delayed replies and declined connections. The browser observer is released after capture; a disconnected client
 also loses its browser observation lease after 30 seconds.
