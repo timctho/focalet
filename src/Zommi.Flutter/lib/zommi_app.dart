@@ -156,11 +156,9 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
   final ScrollController _composerScroll = ScrollController();
   late final ZommiController _controller;
   final Object _workspaceTapGroup = Object();
-  final Object _runtimeTapGroup = Object();
   final Object _runtimeSetupTapGroup = Object();
   final Object _modelTapGroup = Object();
   final Object _appSettingsTapGroup = Object();
-  final LayerLink _runtimePanelLink = LayerLink();
   final LayerLink _settingsPanelLink = LayerLink();
   final LayerLink _workspacePanelLink = LayerLink();
   final LayerLink _appSettingsPanelLink = LayerLink();
@@ -334,8 +332,7 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
     if (event.logicalKey == LogicalKeyboardKey.escape) {
       if (_controller.previewArtifact != null) {
         _controller.closeArtifact();
-      } else if (_controller.runtimePanelOpen ||
-          _controller.runtimeSetupPanelOpen ||
+      } else if (_controller.runtimeSetupPanelOpen ||
           _controller.modelPanelOpen ||
           _controller.workspacePanelOpen ||
           _controller.appSettingsPanelOpen ||
@@ -538,22 +535,6 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                     ),
                   ),
                 ),
-            if (_controller.runtimePanelOpen)
-              Positioned(
-                left: 0,
-                top: 0,
-                child: CompositedTransformFollower(
-                  link: _runtimePanelLink,
-                  showWhenUnlinked: false,
-                  targetAnchor: Alignment.bottomLeft,
-                  followerAnchor: Alignment.topLeft,
-                  offset: const Offset(0, 6),
-                  child: TapRegion(
-                    groupId: _runtimeTapGroup,
-                    child: RuntimePanel(controller: _controller),
-                  ),
-                ),
-              ),
             if (_controller.modelPanelOpen)
               Positioned(
                 left: 0,
@@ -577,8 +558,8 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                 child: CompositedTransformFollower(
                   link: _workspacePanelLink,
                   showWhenUnlinked: false,
-                  targetAnchor: Alignment.bottomRight,
-                  followerAnchor: Alignment.topRight,
+                  targetAnchor: Alignment.bottomLeft,
+                  followerAnchor: Alignment.topLeft,
                   offset: const Offset(0, 6),
                   child: TapRegion(
                     groupId: _workspaceTapGroup,
@@ -680,23 +661,6 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
               Expanded(
                 child: Row(
                   children: [
-                    Flexible(
-                      child: TapRegion(
-                        groupId: _runtimeTapGroup,
-                        onTapOutside: (_) => _controller.dismissRuntimePanel(),
-                        child: CompositedTransformTarget(
-                          link: _runtimePanelLink,
-                          child: _SummaryButton(
-                            key: const ValueKey('runtime-summary'),
-                            label: _controller.runtimeSummary,
-                            semanticLabel: 'Choose agent runtime',
-                            warning: _controller.statusWarning,
-                            loading: _controller.runtimeBusy,
-                            onPressed: _controller.toggleRuntimePanel,
-                          ),
-                        ),
-                      ),
-                    ),
                     if (_controller.sessionSettingsSupported) ...[
                       const SizedBox(width: 5),
                       Flexible(
@@ -1008,8 +972,6 @@ class _SummaryButton extends StatelessWidget {
     required this.label,
     required this.semanticLabel,
     required this.onPressed,
-    this.warning = false,
-    this.loading = false,
     this.icon,
     super.key,
   });
@@ -1017,8 +979,6 @@ class _SummaryButton extends StatelessWidget {
   final String label;
   final String semanticLabel;
   final VoidCallback onPressed;
-  final bool warning;
-  final bool loading;
   final IconData? icon;
 
   @override
@@ -1036,22 +996,14 @@ class _SummaryButton extends StatelessWidget {
         ),
         icon: AnimatedSwitcher(
           duration: const Duration(milliseconds: 160),
-          child: loading
-              ? const SizedBox.square(
-                  key: ValueKey('runtime-loading-indicator'),
-                  dimension: 14,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : icon != null
+          child: icon != null
               ? Icon(icon, size: 15)
               : Container(
                   key: const ValueKey('runtime-status-dot'),
                   width: 7,
                   height: 7,
                   decoration: BoxDecoration(
-                    color: warning
-                        ? const Color(0xffcf805f)
-                        : const Color(0xff66a27b),
+                    color: const Color(0xff66a27b),
                     shape: BoxShape.circle,
                   ),
                 ),

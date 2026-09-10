@@ -42,7 +42,10 @@ Electron, Node module, or `.mjs` payload.
   drag a region, or use Ctrl to accumulate selections on Windows;
 - a sliding chat sidebar with mixed-runtime sessions, runtime logos, and a runtime
   picker for new chats;
-- compact workspace and model menus, with settings, minimize, and close at the right;
+- chats ordered by latest response across runtimes, with the runtime bound when
+  creating each chat;
+- compact workspace and model menus anchored below their controls, with settings,
+  minimize, and close at the right;
 - readable A/B attachments, bounded previews and in-place selection adjustment;
 - exact runtime, model, reasoning, and provider-owned session selection;
 - paged history, concurrent background turns, running/unread state, and exact

@@ -39,6 +39,7 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
   final Map<String, String> activeProfilesByRuntime = {};
   final Map<String, Map<String, Object?>> historyBySession = {};
   final Map<String, List<Map<String, Object?>>> modelCatalogByRuntime = {};
+  final Map<String, List<Map<String, Object?>>> sessionsByRuntime = {};
   final List<Map<String, Object?>> configuredOverrides = [
     {
       'id': 'override-existing',
@@ -269,11 +270,13 @@ final class RichFakeCore implements CoreBridge, RuntimeConfigurationBridge {
         : const {'activeModel': 'fixture-pro', 'activeEffort': 'high'},
   );
 
-  List<Map<String, Object?>> _sessions() => [
-    {'id': activeSessionId, 'name': 'Primary work'},
-    {'id': 'session-2', 'preview': 'Secondary chat'},
-    {'id': 'session-3', 'preview': 'Finished chat'},
-  ];
+  List<Map<String, Object?>> _sessions() =>
+      sessionsByRuntime[activeTargetId] ??
+      [
+        {'id': activeSessionId, 'name': 'Primary work'},
+        {'id': 'session-2', 'preview': 'Secondary chat'},
+        {'id': 'session-3', 'preview': 'Finished chat'},
+      ];
 
   @override
   Future<List<Map<String, Object?>>> listSessions({

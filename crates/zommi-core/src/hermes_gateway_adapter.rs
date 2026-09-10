@@ -60,6 +60,8 @@ pub struct HermesGatewayAdapter {
 
 struct Inner {
     target: RuntimeTarget,
+    port: u16,
+    session_token: String,
     writer: Mutex<GatewayWriter>,
     pending: Mutex<HashMap<String, PendingRequest>>,
     state: Mutex<State>,
@@ -214,6 +216,8 @@ impl HermesGatewayAdapter {
         let adapter = Self {
             inner: Arc::new(Inner {
                 target: config.target,
+                port,
+                session_token,
                 writer: Mutex::new(writer),
                 pending: Mutex::new(HashMap::new()),
                 state: Mutex::new(State {
@@ -729,6 +733,36 @@ impl HermesGatewayAdapter {
             .await;
     }
 
+    async fn load_recent_sessions(&self, profile: &str) -> Result<Value, CodexError> {
+        let mut sessions = Vec::new();
+        for offset in [0, 100] {
+            let query = url::form_urlencoded::Serializer::new(String::new())
+                .append_pair("profile", profile)
+                .append_pair("limit", "100")
+                .append_pair("offset", &offset.to_string())
+                .append_pair("order", "recent")
+                .append_pair("exclude_sources", "kanban,tool")
+                .finish();
+            let response = read_http_json(
+                self.inner.port,
+                &format!("/api/sessions?{query}"),
+                Some(&self.inner.session_token),
+            )
+            .await?;
+            let page = response
+                .get("sessions")
+                .and_then(Value::as_array)
+                .ok_or_else(|| {
+                    gateway_error("invalid-response", "Hermes session list is unavailable.")
+                })?;
+            sessions.extend(page.iter().cloned());
+            if page.len() < 100 {
+                break;
+            }
+        }
+        Ok(json!({"sessions": sessions}))
+    }
+
     async fn load_sessions(&self) -> Result<Vec<Value>, CodexError> {
         let profile_names = {
             let state = self.inner.state.lock().await;
@@ -746,10 +780,16 @@ impl HermesGatewayAdapter {
         };
         let mut sessions = Vec::new();
         for profile in profile_names {
-            let result = self
-                .inner
-                .request("session.list", json!({"limit": 200, "profile": profile}))
-                .await?;
+            // The WebSocket list omits last_active on older Hermes versions.
+            // The authenticated REST list retains recency for resumed chats.
+            let result = match self.load_recent_sessions(&profile).await {
+                Ok(result) => result,
+                Err(_) => {
+                    self.inner
+                        .request("session.list", json!({"limit": 200, "profile": profile}))
+                        .await?
+                }
+            };
             sessions.extend(
                 result
                     .get("sessions")
@@ -762,20 +802,23 @@ impl HermesGatewayAdapter {
                             "id": id,
                             "name": session.get("title"),
                             "preview": session.get("preview").or_else(|| session.get("title")).and_then(Value::as_str).unwrap_or("Hermes session"),
-                            "updatedAt": session.get("started_at").and_then(Value::as_i64).unwrap_or_default(),
+                            "updatedAt": session.get("last_active").and_then(Value::as_f64)
+                                .or_else(|| session.get("started_at").and_then(Value::as_f64))
+                                .unwrap_or_default(),
                             "messageCount": session.get("message_count").and_then(Value::as_u64).unwrap_or_default(),
                             "profile": profile
                         }))
                     }),
             );
         }
-        sessions.sort_by_key(|session| {
-            std::cmp::Reverse(
+        sessions.sort_by(|a, b| {
+            let timestamp = |session: &Value| {
                 session
                     .get("updatedAt")
-                    .and_then(Value::as_i64)
-                    .unwrap_or_default(),
-            )
+                    .and_then(Value::as_f64)
+                    .unwrap_or_default()
+            };
+            timestamp(b).total_cmp(&timestamp(a))
         });
         let (current, current_profile, current_cwd) = {
             let state = self.inner.state.lock().await;

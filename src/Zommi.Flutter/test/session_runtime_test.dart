@@ -40,6 +40,119 @@ RichFakeCore multiRuntimeCore() => RichFakeCore()
 
 void main() {
   test(
+    'sessions sort by recency across runtimes and timestamp formats',
+    () async {
+      final core = multiRuntimeCore()
+        ..sessionsByRuntime['runtime-codex'] = [
+          {'id': 'session-2', 'updatedAt': '2026-09-01T08:00:00Z'},
+          {
+            'id': 'session-1',
+            'updatedAt':
+                DateTime.utc(2026, 9, 3).millisecondsSinceEpoch ~/ 1000,
+          },
+        ]
+        ..sessionsByRuntime[hermes.id] = [
+          {'id': 'session-2', 'updatedAt': 'unknown'},
+          {
+            'id': 'session-1',
+            'updatedAt': DateTime.utc(2026, 9, 2).millisecondsSinceEpoch,
+          },
+        ];
+      final controller = ZommiController(
+        core: core,
+        desktop: FakeDesktopBridge(),
+      );
+      addTearDown(controller.close);
+      await controller.initialize();
+      await controller.selectRuntime(hermes.id);
+      List<(String, String)> order() => controller.sessions
+          .map((session) => (session.runtimeTargetId, session.id))
+          .toList();
+      final initialOrder = [
+        ('runtime-codex', 'session-1'),
+        (hermes.id, 'session-1'),
+        ('runtime-codex', 'session-2'),
+        (hermes.id, 'session-2'),
+      ];
+      expect(order(), initialOrder);
+      await controller.switchSession(
+        'session-2',
+        runtimeTargetId: 'runtime-codex',
+      );
+      expect(
+        order(),
+        initialOrder,
+        reason: 'Opening an older chat is not a new response',
+      );
+      core.emit(
+        const CoreEvent(
+          name: 'item.update',
+          sequence: 1,
+          runtimeTargetId: 'runtime-hermes',
+          sessionId: 'session-2',
+          turnId: 'hermes-reply',
+          payload: {
+            'kind': 'assistant',
+            'text': 'New response',
+            'lifecycle': 'streaming',
+          },
+        ),
+      );
+      expect(order().first, (hermes.id, 'session-2'));
+      core.emit(
+        const CoreEvent(
+          name: 'turn.completed',
+          sequence: 2,
+          runtimeTargetId: 'runtime-hermes',
+          sessionId: 'session-2',
+          turnId: 'hermes-reply',
+          payload: {'status': 'completed'},
+        ),
+      );
+      await controller.switchSession('session-1', runtimeTargetId: hermes.id);
+      expect(order().first, (
+        hermes.id,
+        'session-2',
+      ), reason: 'Stale provider timestamps cannot undo a new reply');
+      await controller.createSession(runtimeTargetId: 'runtime-codex');
+      expect(order().first, ('runtime-codex', 'created-session'));
+    },
+  );
+
+  test(
+    'missing and equal response times retain their existing order',
+    () async {
+      final core = multiRuntimeCore()
+        ..sessionsByRuntime['runtime-codex'] = [
+          {'id': 'session-1', 'updatedAt': 'not-a-date'},
+          {'id': 'session-2', 'updatedAt': '2026-09-01T00:00:00Z'},
+          {
+            'id': 'session-3',
+            'updatedAt':
+                DateTime.utc(2026, 9, 1).millisecondsSinceEpoch ~/ 1000,
+          },
+        ];
+      final controller = ZommiController(
+        core: core,
+        desktop: FakeDesktopBridge(),
+      );
+      addTearDown(controller.close);
+      await controller.initialize();
+      expect(controller.sessions.map((session) => session.id), [
+        'session-2',
+        'session-3',
+        'session-1',
+      ]);
+      await controller.switchSession('session-3');
+      expect(controller.sessions.map((session) => session.id), [
+        'session-2',
+        'session-3',
+        'session-1',
+      ]);
+    },
+  );
+
+  test(
     'new chats bind their runtime and restore independent settings',
     () async {
       final core = multiRuntimeCore();
@@ -258,6 +371,8 @@ void main() {
         ZommiApp(core: core, desktop: FakeDesktopBridge()),
       );
       await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('runtime-summary')), findsNothing);
+      expect(find.bySemanticsLabel('Choose agent runtime'), findsNothing);
       await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
       await tester.pumpAndSettle();
       final add = find.byKey(const ValueKey('new-session'));

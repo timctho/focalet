@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
@@ -70,10 +69,7 @@ class SessionSidebar extends StatelessWidget {
                   PopupMenuButton<String>(
                     key: const ValueKey('new-session'),
                     tooltip: 'Create new chat',
-                    enabled:
-                        !controller.sessionBusy &&
-                        !controller.runtimeBusy &&
-                        controller.sessionCreationSupported,
+                    enabled: !controller.sessionBusy && !controller.runtimeBusy,
                     position: PopupMenuPosition.under,
                     color: zommiOverlayPanelColor,
                     surfaceTintColor: Colors.transparent,
@@ -88,9 +84,23 @@ class SessionSidebar extends StatelessWidget {
                       minWidth: 250,
                       maxWidth: 320,
                     ),
-                    onSelected: (id) => unawaited(
-                      controller.createSession(runtimeTargetId: id),
-                    ),
+                    onSelected: (id) {
+                      if (id == 'action:refresh') {
+                        unawaited(controller.refreshRuntimes());
+                      } else if (id == 'action:setup') {
+                        controller.toggleRuntimeSetupPanel(true);
+                      } else if (id.startsWith('sign-in:')) {
+                        unawaited(
+                          controller.openRuntimeSignIn(
+                            runtimeTargetId: id.substring('sign-in:'.length),
+                          ),
+                        );
+                      } else {
+                        unawaited(
+                          controller.createSession(runtimeTargetId: id),
+                        );
+                      }
+                    },
                     itemBuilder: (context) => [
                       const PopupMenuItem<String>(
                         enabled: false,
@@ -142,8 +152,33 @@ class SessionSidebar extends StatelessWidget {
                             ],
                           ),
                         ),
+                      const PopupMenuDivider(),
+                      for (final target in controller.visibleRuntimeTargets)
+                        if (target.status == 'sign-in-required')
+                          PopupMenuItem<String>(
+                            key: ValueKey('runtime-sign-in-${target.id}'),
+                            value: 'sign-in:${target.id}',
+                            child: Text('Sign in to ${target.displayName}'),
+                          ),
+                      const PopupMenuItem<String>(
+                        key: ValueKey('refresh-runtimes'),
+                        value: 'action:refresh',
+                        child: Text('Refresh agents'),
+                      ),
+                      if (controller.runtimeOverridesSupported)
+                        const PopupMenuItem<String>(
+                          key: ValueKey('open-runtime-setup'),
+                          value: 'action:setup',
+                          child: Text('Agent setup'),
+                        ),
                     ],
-                    icon: const Icon(Icons.add_rounded, size: 20),
+                    icon: controller.sessionBusy || controller.runtimeBusy
+                        ? const SizedBox.square(
+                            key: ValueKey('session-loading-indicator'),
+                            dimension: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.add_rounded, size: 20),
                   ),
                 ],
               ),
@@ -274,165 +309,6 @@ class _SessionStatusIcon extends StatelessWidget {
         color: Color(0xff8b909d),
       ),
     };
-  }
-}
-
-class RuntimePanel extends StatelessWidget {
-  const RuntimePanel({required this.controller, super.key});
-
-  final ZommiController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    final targets = controller.visibleRuntimeTargets;
-    return Semantics(
-      container: true,
-      label: 'Choose agent runtime',
-      child: Material(
-        key: const ValueKey('runtime-panel'),
-        color: const Color(0xfaf7f9fd),
-        elevation: 18,
-        borderRadius: BorderRadius.circular(18),
-        child: SizedBox(
-          width: 420,
-          height: 410,
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(18, 12, 8, 8),
-                child: Row(
-                  children: [
-                    const Expanded(
-                      child: Text(
-                        'Agent runtime',
-                        style: TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                    ),
-                    IconButton(
-                      key: const ValueKey('refresh-runtimes'),
-                      tooltip: 'Refresh agent runtimes',
-                      onPressed: controller.runtimeBusy
-                          ? null
-                          : () => unawaited(controller.refreshRuntimes()),
-                      icon: const Icon(Icons.refresh_rounded),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: ListView(
-                  key: const ValueKey('runtime-list'),
-                  padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
-                  children: [
-                    if (targets.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.all(24),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              'No supported agent found',
-                              style: TextStyle(fontWeight: FontWeight.w700),
-                            ),
-                            SizedBox(height: 6),
-                            Text(
-                              'Install a supported CLI, refresh, or add its location below.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: Color(0xff737887)),
-                            ),
-                          ],
-                        ),
-                      ),
-                    for (final target in targets)
-                      _RuntimeTargetTile(
-                        controller: controller,
-                        target: target,
-                      ),
-                    if (controller.activeRuntime?.status == 'sign-in-required')
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(2, 4, 2, 8),
-                        child: SizedBox(
-                          width: double.infinity,
-                          child: FilledButton.tonal(
-                            key: const ValueKey('runtime-sign-in'),
-                            onPressed: () =>
-                                unawaited(controller.openRuntimeSignIn()),
-                            child: Text(
-                              'Open ${controller.activeRuntimeName} sign-in',
-                            ),
-                          ),
-                        ),
-                      ),
-                    const Divider(height: 1),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(4, 10, 4, 2),
-                      child: SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          key: const ValueKey('open-runtime-setup'),
-                          onPressed: controller.runtimeOverridesSupported
-                              ? () => controller.toggleRuntimeSetupPanel(true)
-                              : null,
-                          icon: const Icon(Icons.tune_rounded, size: 16),
-                          label: const Text('Advanced agent runtime setup'),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _RuntimeTargetTile extends StatelessWidget {
-  const _RuntimeTargetTile({required this.controller, required this.target});
-
-  final ZommiController controller;
-  final RuntimeTarget target;
-
-  @override
-  Widget build(BuildContext context) {
-    final selected = target.id == controller.activeRuntime?.id;
-    final host =
-        target.executionHost['displayName']?.toString() ??
-        target.executionHost['name']?.toString() ??
-        'Local';
-    return Semantics(
-      selected: selected,
-      label:
-          '${target.displayName}, ${target.protocolName}, $host, ${target.status}',
-      child: ListTile(
-        key: ValueKey('runtime-${target.id}'),
-        dense: true,
-        visualDensity: const VisualDensity(vertical: -3),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 10),
-        selected: selected,
-        selectedTileColor: const Color(0xffebe9f7),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        leading: _RuntimeStatusDot(status: target.status),
-        title: Text(target.displayName, style: const TextStyle(fontSize: 11.5)),
-        subtitle: Text(
-          '${target.protocolName} · $host',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 10),
-        ),
-        trailing: Text(
-          target.adapterId == 'pty-compatibility'
-              ? 'Compatible'
-              : _runtimeStatus(target.status),
-          style: const TextStyle(fontSize: 10, color: Color(0xff747988)),
-        ),
-        onTap: controller.runtimeBusy || controller.sessionBusy
-            ? null
-            : () => unawaited(controller.selectRuntime(target.id)),
-      ),
-    );
   }
 }
 
@@ -799,34 +675,6 @@ String runtimeAdapterDisplayName(
         )?['displayName']
         ?.toString() ??
     adapterId;
-
-class _RuntimeStatusDot extends StatelessWidget {
-  const _RuntimeStatusDot({required this.status});
-
-  final String status;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = switch (status.toLowerCase()) {
-      'ready' || 'detected' => const Color(0xff63a078),
-      'sign-in-required' => const Color(0xffd19750),
-      'degraded' => const Color(0xffc27a62),
-      _ => const Color(0xff9297a4),
-    };
-    return Container(
-      width: 9,
-      height: 9,
-      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-    );
-  }
-}
-
-String _runtimeStatus(String value) => switch (value.toLowerCase()) {
-  'sign-in-required' => 'Sign-in required',
-  'unreachable' => 'Unavailable',
-  'ready' => 'Ready',
-  _ => 'Detected',
-};
 
 enum _ModelSettingsPage { model, profile }
 

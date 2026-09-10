@@ -6,6 +6,41 @@ import 'package:zommi_flutter/core/core_bridge.dart';
 
 void main() {
   test(
+    'Hermes falls back to legacy session listing when REST is unavailable',
+    () async {
+      final temporary = await Directory.systemTemp.createTemp(
+        'zommi-hermes-legacy-',
+      );
+      addTearDown(() => temporary.delete(recursive: true));
+      final bridge = ProcessCoreBridge(
+        executablePath: _coreHostPath(),
+        environment: {
+          'ZOMMI_HERMES_COMMAND': await _findPython(),
+          'ZOMMI_HERMES_GATEWAY_ARGS_JSON': jsonEncode([
+            _fixturePath().path,
+            '--mode',
+            'hermes',
+          ]),
+          'ZOMMI_CORE_STATE_PATH': '${temporary.path}/binding.json',
+          'ZOMMI_FAKE_HERMES_LEGACY_SESSION_LIST': '1',
+        },
+      );
+      addTearDown(bridge.close);
+      await bridge.initialize();
+      final discovery = await bridge.discoverRuntimeTargets();
+      final target = discovery.targets.singleWhere(
+        (target) => target.adapterId == 'hermes-gateway',
+      );
+      final connection = await bridge.connectRuntime(
+        runtimeTargetId: target.id,
+        cwd: temporary.path,
+      );
+      expect(connection.sessions, isNotEmpty);
+      expect(connection.sessions.first['updatedAt'], 12);
+    },
+  );
+
+  test(
     'Hermes Gateway runs exact sessions and lifecycle over WebSocket',
     () async {
       final fixture = _fixturePath();
@@ -45,6 +80,8 @@ void main() {
       expect(connection.sessionId, 'hermes-stored-session');
       expect(connection.protocolVersion, 1);
       expect(connection.runtimeVersion, '0.20.0');
+      expect(connection.sessions.first['updatedAt'], 50.5);
+      expect(connection.sessions.first['profile'], 'coder');
       expect(
         connection.capabilities,
         containsAll(<String>[
@@ -208,6 +245,14 @@ void main() {
       expect((await unknown).turnId, accepted.turnId);
 
       final requests = await _readRequests(requestLog);
+      expect(
+        requests.where((request) => request['method'] == 'http.sessions'),
+        isNotEmpty,
+      );
+      final listing = requests.firstWhere(
+        (request) => request['method'] == 'http.sessions',
+      );
+      expect((listing['params'] as Map)['order'], ['recent']);
       expect(
         requests
             .where((request) => request['method'] == 'session.create')

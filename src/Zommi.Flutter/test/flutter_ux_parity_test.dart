@@ -418,20 +418,20 @@ void main() {
       await _pumpApp(tester, core: core, desktop: desktop);
       await _expand(tester);
 
-      await tester.tap(find.byKey(const ValueKey('runtime-summary')));
+      await _openNewChatMenu(tester);
       await tester.pumpAndSettle();
       expect(find.text('Codex app-server · Linux'), findsOneWidget);
       expect(find.text('Pi RPC · WSL · Ubuntu'), findsOneWidget);
-      expect(find.text('Compatible'), findsOneWidget);
+      expect(find.text('New chats unavailable'), findsOneWidget);
       expect(find.text('Not detected'), findsNothing);
 
       final switchGate = Completer<void>();
       core.connectGate = switchGate.future;
-      await tester.tap(find.byKey(const ValueKey('runtime-runtime-pi')));
+      await tester.tap(find.byKey(const ValueKey('create-session-runtime-pi')));
       await tester.pump();
       expect(find.byKey(const ValueKey('runtime-panel')), findsNothing);
       expect(
-        find.byKey(const ValueKey('runtime-loading-indicator')),
+        find.byKey(const ValueKey('session-loading-indicator')),
         findsOneWidget,
       );
       expect(find.byKey(const ValueKey('loading-status')), findsNothing);
@@ -439,7 +439,7 @@ void main() {
       switchGate.complete();
       await tester.pumpAndSettle();
       expect(core.activeTargetId, 'runtime-pi');
-      expect(find.textContaining('Pi 9.8.7 ready'), findsOneWidget);
+      expect(find.text('New chat ready'), findsOneWidget);
 
       await tester.tap(find.byKey(const ValueKey('model-summary')));
       await tester.pumpAndSettle();
@@ -487,8 +487,13 @@ void main() {
       await tester.pump();
       expect(find.textContaining('Fixture Mini · Medium'), findsWidgets);
 
-      await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
+      await tester.tap(find.byKey(const ValueKey('zommi-composer')));
       await tester.pumpAndSettle();
+
+      if (find.byKey(const ValueKey('session-sidebar')).evaluate().isEmpty) {
+        await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
+        await tester.pumpAndSettle();
+      }
       expect(find.byKey(const ValueKey('session-sidebar')), findsOneWidget);
       final sessionPanelSize = tester.getSize(
         find.byKey(const ValueKey('session-sidebar')),
@@ -516,29 +521,21 @@ void main() {
   );
 
   testWidgets(
-    'runtime and model overlays dismiss on outside click while sessions stay open',
+    'creation and model menus dismiss on outside click while sessions stay open',
     (tester) async {
       final core = RichFakeCore()..historyCount = 0;
       await _pumpApp(tester, core: core, desktop: FakeDesktopBridge());
       await _expand(tester);
       final composer = find.byKey(const ValueKey('zommi-composer'));
 
-      await tester.tap(find.byKey(const ValueKey('runtime-summary')));
+      await _openNewChatMenu(tester);
       await tester.pump();
-      final runtimePanel = find.byKey(const ValueKey('runtime-panel'));
-      expect(runtimePanel, findsOneWidget);
-      final runtimeButtonBounds = tester.getRect(
-        find.byKey(const ValueKey('runtime-summary')),
+      expect(find.text('New chat with'), findsOneWidget);
+      await tester.tapAt(
+        tester.getBottomRight(composer) - const Offset(10, 10),
       );
-      final runtimePanelBounds = tester.getRect(runtimePanel);
-      expect(runtimePanelBounds.left, closeTo(runtimeButtonBounds.left, 0.1));
-      expect(
-        runtimePanelBounds.top,
-        closeTo(runtimeButtonBounds.bottom + 6, 0.1),
-      );
-      await tester.tap(composer);
-      await tester.pump();
-      expect(find.byKey(const ValueKey('runtime-panel')), findsNothing);
+      await tester.pumpAndSettle();
+      expect(find.text('New chat with'), findsNothing);
 
       await tester.tap(find.byKey(const ValueKey('model-summary')));
       await tester.pump();
@@ -561,8 +558,10 @@ void main() {
       await tester.pump();
       expect(find.byKey(const ValueKey('model-settings-panel')), findsNothing);
 
-      await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
-      await tester.pumpAndSettle();
+      if (find.byKey(const ValueKey('session-sidebar')).evaluate().isEmpty) {
+        await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
+        await tester.pumpAndSettle();
+      }
       expect(find.byKey(const ValueKey('session-sidebar')), findsOneWidget);
       final composerBounds = tester.getRect(composer);
       await tester.tapAt(
@@ -678,6 +677,7 @@ void main() {
       adapterId: 'hermes-acp',
       displayName: 'Hermes',
       protocolName: 'ACP',
+      capabilityHints: RichFakeCore.capabilities,
       executablePath: '/usr/bin/hermes',
       executionHost: {
         'id': 'native:linux',
@@ -691,6 +691,7 @@ void main() {
       adapterId: 'hermes-gateway',
       displayName: 'Hermes',
       protocolName: 'Gateway',
+      capabilityHints: RichFakeCore.capabilities,
       executablePath: '/usr/bin/hermes',
       executionHost: {
         'id': 'native:linux',
@@ -703,15 +704,15 @@ void main() {
     await _pumpApp(tester, core: core, desktop: FakeDesktopBridge());
     await _expand(tester);
 
-    await tester.tap(find.byKey(const ValueKey('runtime-summary')));
+    await _openNewChatMenu(tester);
     await tester.pumpAndSettle();
 
     expect(
-      find.byKey(const ValueKey('runtime-runtime-hermes-acp')),
+      find.byKey(const ValueKey('create-session-runtime-hermes-acp')),
       findsOneWidget,
     );
     expect(
-      find.byKey(const ValueKey('runtime-runtime-hermes-gateway')),
+      find.byKey(const ValueKey('create-session-runtime-hermes-gateway')),
       findsOneWidget,
     );
     expect(find.text('ACP · Linux'), findsOneWidget);
@@ -744,14 +745,14 @@ void main() {
     await _expand(tester);
     expect(find.byKey(const ValueKey('model-summary')), findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('runtime-summary')));
+    await _openNewChatMenu(tester);
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('runtime-runtime-pi')));
+    await tester.tap(find.byKey(const ValueKey('create-session-runtime-pi')));
     await tester.pumpAndSettle();
     core.modelCatalogByRuntime[hermes.id] = const [];
-    await tester.tap(find.byKey(const ValueKey('runtime-summary')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('runtime-runtime-hermes')));
+    await tester.tap(
+      find.byKey(const ValueKey('session-runtime-hermes-session-1')),
+    );
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('model-summary')), findsOneWidget);
@@ -961,7 +962,7 @@ void main() {
         tester
             .widget<TextButton>(
               find.descendant(
-                of: find.byKey(const ValueKey('runtime-summary')),
+                of: find.byKey(const ValueKey('model-summary')),
                 matching: find.byType(TextButton),
               ),
             )
@@ -1054,7 +1055,7 @@ void main() {
         ..nextRuntimeExecutable = '/custom/codex';
       await _pumpApp(tester, core: core, desktop: desktop);
       await _expand(tester);
-      await tester.tap(find.byKey(const ValueKey('runtime-summary')));
+      await _openNewChatMenu(tester);
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('open-runtime-setup')));
       await tester.pumpAndSettle();
@@ -1116,9 +1117,11 @@ void main() {
     await _pumpApp(tester, core: core, desktop: desktop);
     await _expand(tester);
     expect(find.text('Codex sign-in required'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('runtime-summary')));
+    await _openNewChatMenu(tester);
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('runtime-sign-in')));
+    await tester.tap(
+      find.byKey(const ValueKey('runtime-sign-in-runtime-codex')),
+    );
     await tester.pump();
     expect(desktop.calls, contains('signIn:runtime-codex'));
   });
@@ -1416,9 +1419,7 @@ void main() {
       expect(
         tester.getTopLeft(viewer).dy,
         greaterThanOrEqualTo(
-          tester
-              .getBottomLeft(find.byKey(const ValueKey('runtime-summary')))
-              .dy,
+          tester.getBottomLeft(find.byKey(const ValueKey('model-summary'))).dy,
         ),
       );
       await tester.tap(find.byTooltip('Close artifact preview'));
@@ -1785,3 +1786,12 @@ CoreEvent _event(
   clientOperationId: 'flutter:test',
   payload: payload,
 );
+
+Future<void> _openNewChatMenu(WidgetTester tester) async {
+  if (find.byKey(const ValueKey('session-sidebar')).evaluate().isEmpty) {
+    await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
+    await tester.pumpAndSettle();
+  }
+  await tester.tap(find.byKey(const ValueKey('new-session')));
+  await tester.pumpAndSettle();
+}
