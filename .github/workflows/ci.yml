@@ -223,6 +223,7 @@ jobs:
       - name: Build and verify Windows release
         shell: pwsh
         env:
+          ZOMMI_NUGET_SOURCE: https://api.nuget.org/v3/index.json
           ZOMMI_WINDOWS_SIGNING_THUMBPRINT: ${{ secrets.ZOMMI_WINDOWS_SIGNING_THUMBPRINT }}
         run: ./scripts/package-windows.ps1 -Runtime win-x64
 

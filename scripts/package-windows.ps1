@@ -127,7 +127,14 @@ if (-not $SkipBuild) {
     if (Test-Path -LiteralPath $captureOutput) {
         Remove-Item -LiteralPath $captureOutput -Recurse -Force
     }
+    # Keep runner-level disabled sources from silently removing the repository
+    # feed, while allowing managed hosts to select their approved feed proxy.
+    $nuGetArguments = @('--configfile', (Join-Path $repositoryRoot 'NuGet.config'))
+    if (-not [string]::IsNullOrWhiteSpace($env:ZOMMI_NUGET_SOURCE)) {
+        $nuGetArguments += @('--source', $env:ZOMMI_NUGET_SOURCE)
+    }
     dotnet publish (Join-Path $repositoryRoot 'src/Zommi.Windows/Zommi.Windows.csproj') `
+        @nuGetArguments `
         --configuration Release `
         --runtime $Runtime `
         --self-contained true `
