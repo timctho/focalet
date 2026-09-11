@@ -426,6 +426,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn goal_mutation_prevents_empty_chat_replacement_and_replay_on_recovery() {
+        let fixture = Fixture::new();
+        let (runtime, mut events) = fixture.connect().await;
+        let session_id = {
+            let adapter = runtime.ready().await.unwrap();
+            let id = adapter.active_session_id().await.unwrap();
+            adapter.goal_command(&id, &serde_json::json!({
+                "action": "set", "objective": "Finish this goal", "model": "goal-model", "effort": "high"
+            })).await.unwrap();
+            id
+        };
+        fixture.mark("reject-resume", "1");
+        fixture.mark("exit-pid", fixture.pids()[0]);
+        timeout(Duration::from_secs(5), async {
+            while fixture.pids().len() < 3 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(fixture.count("thread/start"), 1);
+        fs::remove_file(fixture.0.join("reject-resume")).unwrap();
+        event(&mut events, "runtime.recovered").await;
+        let connection = runtime.ready().await.unwrap().connection().await.unwrap();
+        assert_eq!(connection.session_id, session_id);
+        assert_eq!(connection.session_metadata["activeModel"], "goal-model");
+        assert_eq!(connection.session_metadata["activeEffort"], "high");
+        assert_eq!(fixture.count("thread/goal/set"), 1);
+        assert_eq!(fixture.count("turn/start"), 0);
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
     async fn closing_during_restart_cancels_startup_and_never_respawns() {
         let fixture = Fixture::new();
         let (runtime, _events) = fixture.connect().await;

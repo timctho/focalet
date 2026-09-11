@@ -13,6 +13,7 @@ import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 import 'package:zommi_flutter/theme/zommi_typography.dart';
 import 'package:zommi_flutter/widgets/context_preview_layout.dart';
+import 'package:zommi_flutter/widgets/command_result.dart';
 import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
 import 'package:zommi_flutter/widgets/overlay_panels.dart';
 import 'package:zommi_flutter/widgets/runtime_logo.dart';
@@ -164,6 +165,7 @@ class ZommiShell extends StatefulWidget {
 class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
   late final InlineAttachmentTextController _composer;
   String? _composerSessionKey;
+  int _lastCommandComposerEpoch = 0;
   bool _restoringComposer = false;
   final FocusNode _composerFocus = FocusNode(debugLabel: 'Zommi composer');
   final ScrollController _composerScroll = ScrollController();
@@ -208,18 +210,26 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
 
   void _onComposerChanged() {
     if (!_restoringComposer) {
+      final previous = _controller.composerValue.text.trim();
+      final wasCommand = _controller.isCodexCommand(previous);
       _controller.updateComposerValue(
         _composer.value,
         attachmentOrder: _composer.inlineAttachments
             .map((attachment) => attachment.id)
             .toList(),
       );
+      if (wasCommand != _controller.isCodexCommand(_composer.messageText) ||
+          (previous == '/') != (_composer.messageText.trim() == '/')) {
+        setState(() {});
+      }
     }
   }
 
   void _onControllerChanged() {
     if (!mounted) return;
-    if (_composerSessionKey != _controller.composerSessionKey) {
+    if (_composerSessionKey != _controller.composerSessionKey ||
+        _lastCommandComposerEpoch != _controller.commandComposerEpoch) {
+      _lastCommandComposerEpoch = _controller.commandComposerEpoch;
       _composerSessionKey = _controller.composerSessionKey;
       _restoringComposer = true;
       try {
@@ -339,12 +349,13 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
 
   void _submit() {
     final text = _composer.messageText;
+    final isCommand = _controller.isCodexCommand(text);
     if (text.isEmpty ||
         _controller.submitting ||
         _controller.sessionBusy ||
         _controller.runtimeBusy ||
         _controller.selectingContent ||
-        _controller.turnActive ||
+        (_controller.turnActive && !isCommand) ||
         _controller.activeRuntime == null ||
         _controller.activeSessionId == null) {
       return;
@@ -356,7 +367,7 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
           .map((attachment) => attachment.id)
           .toList(growable: false),
     );
-    _composer.clearAfterSubmit();
+    if (!isCommand) _composer.clearAfterSubmit();
     unawaited(submission);
   }
 
@@ -387,7 +398,8 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
     }
     if (event.logicalKey == LogicalKeyboardKey.enter &&
         !HardwareKeyboard.instance.isShiftPressed &&
-        !_controller.turnActive) {
+        (!_controller.turnActive ||
+            _controller.isCodexCommand(_composer.messageText))) {
       _submit();
       return KeyEventResult.handled;
     }
@@ -536,6 +548,12 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                                 ],
                               ),
                             ),
+                            if (_controller.commandResult case final result?)
+                              CommandResult(
+                                key: const ValueKey('command-result'),
+                                text: result,
+                                onClose: _controller.dismissCommandResult,
+                              ),
                             _buildComposer(),
                             if (_controller.activeSessionId != null)
                               Semantics(
@@ -850,7 +868,8 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                 ),
               ),
               const SizedBox(width: 5),
-              if (_controller.turnActive)
+              if (_controller.turnActive &&
+                  !_controller.isCodexCommand(_composer.messageText))
                 Semantics(
                   label: 'Stop active turn',
                   button: true,

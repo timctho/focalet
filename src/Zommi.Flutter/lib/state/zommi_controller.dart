@@ -11,6 +11,8 @@ import 'package:zommi_flutter/state/session_catalog_store.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 
+part 'codex_commands.dart';
+
 const int historyPageSize = 18;
 const int sessionPageSize = 12;
 
@@ -130,6 +132,11 @@ final class ZommiController extends ChangeNotifier {
   ContextAttachment? previewAttachment;
   ArtifactPreview? previewArtifact;
   bool resolvingPrompt = false;
+  String? commandOutput;
+  int commandComposerEpoch = 0;
+  bool goalPanelOpen = false;
+  final Map<String, Map<String, Object?>?> _goalsBySession = {};
+  final Map<String, int> _goalRevisions = {};
   bool _closed = false;
   int _localTurnSequence = 0;
   int _surfaceTransitionEpoch = 0;
@@ -990,6 +997,10 @@ final class ZommiController extends ChangeNotifier {
         previousKey !=
         _sessionKey(connection.runtimeTargetId, connection.sessionId);
     if (changingSession) _saveSessionDraft();
+    if (changingSession) {
+      commandOutput = null;
+      goalPanelOpen = false;
+    }
     _dismissedSessions.remove((
       connection.runtimeTargetId,
       connection.sessionId,
@@ -1036,6 +1047,7 @@ final class ZommiController extends ChangeNotifier {
     _restoreSessionSettings(connection);
     _rememberActiveSessionSettings();
     await _readActiveHistory();
+    await _refreshGoal();
     focusComposerEpoch++;
   }
 
@@ -1062,6 +1074,7 @@ final class ZommiController extends ChangeNotifier {
       return;
     }
     final sessionKey = _sessionKey(runtimeTargetId, sessionId);
+    if (await _submitCodexCommand(text)) return;
     if (_activeTurns.containsKey(sessionKey)) return;
     _newSessions.remove(sessionKey);
     composerValue = TextEditingValue.empty;
@@ -1803,6 +1816,14 @@ final class ZommiController extends ChangeNotifier {
     if (event.sequence > 0) _lastSequences[sequenceKey] = event.sequence;
     final sessionId = event.sessionId ?? activeSessionId;
     switch (event.name) {
+      case 'goal.updated':
+        if (sessionId == null) return;
+        final key = _sessionKey(event.runtimeTargetId, sessionId);
+        _goalRevisions[key] = (_goalRevisions[key] ?? 0) + 1;
+        final value = event.payload['goal'];
+        _goalsBySession[key] = value is Map ? mapValue(value) : null;
+        _notify();
+        return;
       case 'runtime.recovered':
         final connection = RuntimeConnection.fromJson(
           mapValue(event.payload['connection']),
@@ -1857,6 +1878,20 @@ final class ZommiController extends ChangeNotifier {
         final turnId = event.turnId;
         if (turnId != null && turnId.isNotEmpty) {
           _activeTurns[sessionKey] = turnId;
+          if (event.clientOperationId == null &&
+              _goalsBySession[sessionKey] != null) {
+            final turns = _turnsBySession.putIfAbsent(sessionKey, () => []);
+            if (!turns.any((turn) => turn.id == turnId)) {
+              turns.add(
+                ConversationTurn(
+                  id: turnId,
+                  number: turns.length + 1,
+                  userText: 'Continue goal',
+                ),
+              );
+              _transcriptChanged(sessionKey);
+            }
+          }
         }
         _scheduleCatalogSave();
         if (_isActiveSession(event.runtimeTargetId, sessionId)) {

@@ -69,6 +69,23 @@ active-window metadata, so that context is visibly degraded. See
 Browser connection, selection gestures and alignment limits are described in
 [docs/browser-context.md](docs/browser-context.md).
 
+In a Codex chat, type `/` or `/help` to see supported composer commands:
+
+- `/clear` (or `/new`) opens a fresh chat and retains the old chat in history.
+- `/goal <objective>` sets a persistent goal and starts Codex's goal work.
+- `/goal` shows the objective, status, and usage; `/goal edit` loads the objective
+  into the composer. `/goal pause`, `/goal resume`, and `/goal clear` control it.
+
+Goal controls use the selected Codex runtime's native goal and thread-settings
+APIs (verified with Codex 0.151). Codex owns continuation, completion, usage,
+and persistence. Its goals feature must be enabled in the runtime configuration.
+An unavailable API is reported in the chat. Commands are handled before sending
+model input; unknown Codex commands show help instead of becoming prompts.
+Goal objectives accept up to 4,000 Unicode characters. Send attached context as
+a normal message first, then set the goal. `/clear` pauses the old goal and waits
+for the current response to stop before opening the new chat; it preserves the
+previous transcript and goal for later resumption.
+
 The sidebar keeps a rebuildable `session-catalog.sqlite` in Zommi's application
 state directory (`%APPDATA%\Zommi` on Windows, `$XDG_STATE_HOME/zommi` or
 `~/.local/state/zommi` on Linux, `~/Library/Application Support/Zommi` on macOS).

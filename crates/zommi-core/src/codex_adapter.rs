@@ -329,7 +329,8 @@ impl CodexAdapter {
                         "name": "zommi",
                         "title": "Zommi Floating Chat",
                         "version": env!("CARGO_PKG_VERSION")
-                    }
+                    },
+                    "capabilities": {"experimentalApi": true}
                 }),
             )
             .await?;
@@ -462,6 +463,111 @@ impl CodexAdapter {
             .thread_id
             .clone()
             .ok_or_else(|| CodexError::new("runtime-failed", "Codex has no active session."))
+    }
+
+    pub async fn goal_command(
+        &self,
+        session_id: &str,
+        payload: &Value,
+    ) -> Result<Value, CodexError> {
+        if self.active_session_id().await? != session_id {
+            return Err(CodexError::new(
+                "identity-mismatch",
+                "The goal command must target the active Codex chat.",
+            ));
+        }
+        let action = payload.get("action").and_then(Value::as_str).unwrap_or("");
+        let mut params = json!({"threadId": session_id});
+        let method = match action {
+            "get" => "thread/goal/get",
+            "clear" => "thread/goal/clear",
+            "set" => {
+                let objective = payload
+                    .get("objective")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim();
+                if objective.is_empty() || objective.chars().count() > 4_000 {
+                    return Err(CodexError::new(
+                        "invalid-request",
+                        "A goal needs an objective of 1–4,000 characters.",
+                    ));
+                }
+                params["objective"] = json!(objective);
+                params["status"] = json!("active");
+                "thread/goal/set"
+            }
+            "pause" | "resume" => {
+                params["status"] = json!(if action == "pause" {
+                    "paused"
+                } else {
+                    "active"
+                });
+                "thread/goal/set"
+            }
+            _ => return Err(CodexError::new("invalid-request", "Unknown goal command.")),
+        };
+        if matches!(action, "set" | "resume") {
+            // Codex starts goal turns itself. Apply the selected chat settings
+            // first; never submit a second turn or run a client continuation loop.
+            let mut settings = json!({"threadId": session_id});
+            for key in ["model", "effort", "cwd"] {
+                if let Some(value) = payload
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())
+                {
+                    settings[key] = json!(value);
+                }
+            }
+            if settings.as_object().is_some_and(|s| s.len() > 1) {
+                self.inner
+                    .request("thread/settings/update", settings)
+                    .await?;
+                let mut state = self.inner.state.lock().await;
+                if let Some(model) = payload
+                    .get("model")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())
+                {
+                    state.active_model = Some(model.into());
+                }
+                if let Some(effort) = payload
+                    .get("effort")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())
+                {
+                    state.active_effort = Some(effort.into());
+                }
+                if let Some(cwd) = payload
+                    .get("cwd")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())
+                {
+                    state.active_cwd = Some(cwd.into());
+                }
+            }
+        }
+        if action == "set" {
+            // An unanswered mutation can still have persisted the goal. Never
+            // replace this chat with an empty one if a later resume fails.
+            self.inner
+                .state
+                .lock()
+                .await
+                .submitted_threads
+                .insert(session_id.into());
+        }
+        let result = self.inner.request(method, params).await?;
+        if result.get("goal").is_some_and(Value::is_object) {
+            self.inner
+                .state
+                .lock()
+                .await
+                .materialized_threads
+                .insert(session_id.into());
+        }
+        Ok(result)
     }
 
     pub fn target_id(&self) -> &str {
@@ -1086,6 +1192,26 @@ impl Inner {
     }
 
     async fn handle_notification(self: &Arc<Self>, method: &str, params: Value) {
+        if matches!(method, "thread/goal/updated" | "thread/goal/cleared") {
+            let thread_id = value_string(params.get("threadId"));
+            if !thread_id.is_empty() {
+                if params.get("goal").is_some_and(Value::is_object) {
+                    self.state
+                        .lock()
+                        .await
+                        .materialized_threads
+                        .insert(thread_id.clone());
+                }
+                self.emit(
+                    "goal.updated",
+                    Some(&thread_id),
+                    None,
+                    None,
+                    json!({"goal": params.get("goal").cloned().unwrap_or(Value::Null)}),
+                );
+            }
+            return;
+        }
         let mut state = self.state.lock().await;
         let thread_id = value_string(params.get("threadId"))
             .or_else_nonempty(state.thread_id.clone())

@@ -6,7 +6,61 @@ import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 
 final class RichFakeCore
-    implements CoreBridge, RuntimeConfigurationBridge, SessionCatalogBridge {
+    implements
+        CoreBridge,
+        RuntimeConfigurationBridge,
+        SessionCatalogBridge,
+        GoalControlBridge {
+  final Map<String, Map<String, Object?>> goals = {};
+  final List<Map<String, Object?>> goalCommands = [];
+  bool goalCommandFails = false;
+
+  @override
+  Future<Map<String, Object?>> goalCommand({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String action,
+    String? objective,
+    String? model,
+    String? effort,
+    String? cwd,
+  }) async {
+    goalCommands.add({
+      'sessionId': sessionId,
+      'action': action,
+      'objective': ?objective,
+      'model': ?model,
+      'effort': ?effort,
+      'cwd': ?cwd,
+    });
+    if (goalCommandFails) {
+      throw const CoreProtocolException(
+        'unsupported-method',
+        'Goals are unavailable.',
+      );
+    }
+    if (action == 'clear') goals.remove(sessionId);
+    if (action == 'set') {
+      goals[sessionId] = {
+        'threadId': sessionId,
+        'objective': objective!,
+        'status': 'active',
+        'tokensUsed': 0,
+        'timeUsedSeconds': 0,
+      };
+    }
+    if (action == 'pause' || action == 'resume') {
+      final goal = goals[sessionId];
+      if (goal == null) {
+        throw const CoreProtocolException('missing-goal', 'No goal set.');
+      }
+      goal['status'] = action == 'pause' ? 'paused' : 'active';
+    }
+    return {
+      'goal': goals[sessionId] == null ? null : {...goals[sessionId]!},
+    };
+  }
+
   final StreamController<CoreEvent> _events =
       StreamController<CoreEvent>.broadcast(sync: true);
   String activeTargetId = 'runtime-codex';
