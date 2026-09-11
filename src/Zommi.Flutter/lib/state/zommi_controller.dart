@@ -15,6 +15,7 @@ part 'codex_commands.dart';
 
 const int historyPageSize = 18;
 const int sessionPageSize = 12;
+const int composerHistoryLimit = 20;
 
 final class _SessionDraft {
   const _SessionDraft({
@@ -54,6 +55,10 @@ final class ZommiController extends ChangeNotifier {
   TextEditingValue composerValue = TextEditingValue.empty;
   List<String>? _composerAttachmentOrder;
   final Map<String, _SessionDraft> _drafts = {};
+  final Map<String, List<String>> _inputHistory = {};
+  final Map<String, List<QueuedMessage>> _messageQueues = {};
+  final Set<String> _pausedQueues = {};
+  final Set<String> _startingSessions = {};
   final Set<String> _newSessions = {};
   final Set<(String, String)> _dismissedSessions = {};
   Map<String, Object?> runtimeSettings = {};
@@ -63,7 +68,7 @@ final class ZommiController extends ChangeNotifier {
   final Set<String> _unreadSessions = {};
   final Set<String> _cancelRequestedSessions = {};
   final Set<String> _interruptingSessions = {};
-  final Set<String> _completedTurnIds = {};
+  final Map<String, String> _completedTurnIds = {};
   final Map<String, int> _lastSequences = {};
   final Map<String, SessionSettings> _sessionSettings = {};
   final Map<String, List<Map<String, Object?>>> _modelCatalogs = {};
@@ -103,7 +108,7 @@ final class ZommiController extends ChangeNotifier {
   bool runtimeOverrideBusy = false;
   bool sessionBusy = false;
   bool sessionSettingsBusy = false;
-  bool submitting = false;
+  bool get submitting => _startingSessions.isNotEmpty;
   bool selectingContent = false;
   int _attachmentSequence = 0;
   bool expanded = true;
@@ -150,6 +155,51 @@ final class ZommiController extends ChangeNotifier {
   }
 
   String? get composerSessionKey => _activeSessionKey;
+
+  /// Most recent first, including messages submitted during this app session.
+  List<String> get composerHistory {
+    final history = <String>[];
+    for (final text in [
+      ...?_inputHistory[_activeSessionKey]?.reversed,
+      ...turns.reversed.map((turn) => turn.userText),
+    ]) {
+      if (text.trim().isEmpty || history.contains(text)) continue;
+      history.add(text);
+      if (history.length == composerHistoryLimit) break;
+    }
+    return history;
+  }
+
+  List<QueuedMessage> get queuedMessages =>
+      List.unmodifiable(_messageQueues[_activeSessionKey] ?? const []);
+
+  bool get queuePaused => _pausedQueues.contains(_activeSessionKey);
+
+  void removeQueuedMessage(String id) {
+    _messageQueues[_activeSessionKey]?.removeWhere((item) => item.id == id);
+    _notify();
+  }
+
+  void resumeQueuedMessages() {
+    final key = _activeSessionKey;
+    if (key == null || sessionBusy || runtimeBusy) return;
+    _pausedQueues.remove(key);
+    _drainMessageQueue(key);
+    _notify();
+  }
+
+  void _drainMessageQueue(String sessionKey) {
+    final queue = _messageQueues[sessionKey];
+    if (_closed ||
+        queue == null ||
+        queue.isEmpty ||
+        _activeTurns.containsKey(sessionKey) ||
+        _startingSessions.contains(sessionKey) ||
+        _pausedQueues.contains(sessionKey)) {
+      return;
+    }
+    unawaited(_startMessage(queue.removeAt(0)));
+  }
 
   void updateComposerValue(
     TextEditingValue value, {
@@ -1082,11 +1132,7 @@ final class ZommiController extends ChangeNotifier {
     final text = message.trim();
     final runtimeTargetId = activeRuntime?.id;
     final sessionId = activeSessionId;
-    if (text.isEmpty ||
-        submitting ||
-        selectingContent ||
-        sessionBusy ||
-        runtimeBusy) {
+    if (text.isEmpty || selectingContent || sessionBusy || runtimeBusy) {
       return;
     }
     if (runtimeTargetId == null || sessionId == null) {
@@ -1097,8 +1143,10 @@ final class ZommiController extends ChangeNotifier {
       return;
     }
     final sessionKey = _sessionKey(runtimeTargetId, sessionId);
-    if (await _submitCodexCommand(text)) return;
-    if (_activeTurns.containsKey(sessionKey)) return;
+    if (isCodexCommand(text)) {
+      if (!submitting) await _submitCodexCommand(text);
+      return;
+    }
     _newSessions.remove(sessionKey);
     composerValue = TextEditingValue.empty;
     final sendingAttachments = _orderedAttachments(attachmentOrder);
@@ -1107,11 +1155,47 @@ final class ZommiController extends ChangeNotifier {
     previewAttachment = null;
     final operationId =
         'flutter:${DateTime.now().microsecondsSinceEpoch}:${++_localTurnSequence}';
+    final pendingMessage = QueuedMessage(
+      id: operationId,
+      runtimeTargetId: runtimeTargetId,
+      runtimeName: activeRuntimeName,
+      sessionId: sessionId,
+      text: text,
+      inlineText: inlineMessage ?? text,
+      attachments: sendingAttachments,
+      settings: activeSessionSettings,
+    );
+    final history = _inputHistory.putIfAbsent(sessionKey, () => []);
+    history.remove(text);
+    history.add(text);
+    if (history.length > composerHistoryLimit) history.removeAt(0);
+    _updateSessionTitle(sessionId, text);
+    if (_activeTurns.containsKey(sessionKey) ||
+        _startingSessions.contains(sessionKey) ||
+        (_messageQueues[sessionKey]?.isNotEmpty ?? false)) {
+      _messageQueues.putIfAbsent(sessionKey, () => []).add(pendingMessage);
+      _setStatus(
+        queuePaused ? 'Message queued · queue paused' : 'Message queued',
+      );
+      _drainMessageQueue(sessionKey);
+      return;
+    }
+    _pausedQueues.remove(sessionKey);
+    await _startMessage(pendingMessage);
+  }
+
+  Future<void> _startMessage(QueuedMessage message) async {
+    final runtimeTargetId = message.runtimeTargetId;
+    final sessionId = message.sessionId;
+    final sessionKey = _sessionKey(runtimeTargetId, sessionId);
+    final operationId = message.id;
+    final sendingAttachments = message.attachments;
+    final settings = message.settings;
     final localTurn = ConversationTurn(
       id: operationId,
       number: (_turnsBySession[sessionKey]?.length ?? 0) + 1,
-      userText: text,
-      inlineUserText: inlineMessage,
+      userText: message.text,
+      inlineUserText: message.inlineText,
       contextTokens: sendingAttachments
           .where((item) => !item.hasImage)
           .map((item) => item.token)
@@ -1121,30 +1205,36 @@ final class ZommiController extends ChangeNotifier {
     _turnsBySession.putIfAbsent(sessionKey, () => []).add(localTurn);
     _transcriptChanged(sessionKey);
     _activeTurns[sessionKey] = operationId;
-    _updateSessionTitle(sessionId, text);
-    submitting = true;
-    _setStatus('Starting $activeRuntimeName turn…');
+    _startingSessions.add(sessionKey);
+    if (_isActiveSession(runtimeTargetId, sessionId)) {
+      _setStatus('Starting ${message.runtimeName} turn…');
+    } else {
+      _notify();
+    }
     try {
       final receipt = await core.startTurn(
         runtimeTargetId: runtimeTargetId,
         sessionId: sessionId,
-        message: text,
+        message: message.text,
         snapshots: contextHandoffSnapshots(sendingAttachments),
         images: sendingAttachments
             .map((item) => item.imageDataUrl)
             .whereType<String>()
             .toList(growable: false),
         clientOperationId: operationId,
-        model: selectedModel.isEmpty ? null : selectedModel,
-        effort: selectedEffort.isEmpty ? null : selectedEffort,
-        cwd: selectedWorkspace.isEmpty ? null : selectedWorkspace,
-        profile: selectedProfile.isEmpty ? null : selectedProfile,
+        model: settings.model.isEmpty ? null : settings.model,
+        effort: settings.effort.isEmpty ? null : settings.effort,
+        cwd: settings.workspace.isEmpty ? null : settings.workspace,
+        profile: settings.profile.isEmpty ? null : settings.profile,
       );
+      if (!receipt.accepted) {
+        throw StateError('Agent did not accept the message');
+      }
       final completedIdentity = _turnIdentity(
         receipt.runtimeTargetId,
         receipt.turnId,
       );
-      if (!_completedTurnIds.contains(completedIdentity)) {
+      if (!_completedTurnIds.containsKey(completedIdentity)) {
         _activeTurns[sessionKey] = receipt.turnId;
         if (_isActiveSession(runtimeTargetId, sessionId)) {
           _setStatus('$activeRuntimeName is responding…');
@@ -1157,10 +1247,18 @@ final class ZommiController extends ChangeNotifier {
           );
         }
       } else {
+        if (_activeTurns[sessionKey] == operationId ||
+            _activeTurns[sessionKey] == receipt.turnId) {
+          _activeTurns.remove(sessionKey);
+        }
+        if (_completedTurnIds[completedIdentity] != 'completed') {
+          _pausedQueues.add(sessionKey);
+        }
         _cancelRequestedSessions.remove(sessionKey);
         _interruptingSessions.remove(sessionKey);
       }
     } on Object catch (error) {
+      _pausedQueues.add(sessionKey);
       _activeTurns.remove(sessionKey);
       _cancelRequestedSessions.remove(sessionKey);
       _interruptingSessions.remove(sessionKey);
@@ -1174,11 +1272,14 @@ final class ZommiController extends ChangeNotifier {
           expanded: true,
         ),
       );
-      _setStatus('Core request failed · $error', warning: true);
+      if (_isActiveSession(runtimeTargetId, sessionId)) {
+        _setStatus('Core request failed · $error', warning: true);
+      }
       _transcriptChanged(sessionKey);
     } finally {
-      submitting = false;
+      _startingSessions.remove(sessionKey);
       _notify();
+      _drainMessageQueue(sessionKey);
     }
   }
 
@@ -1207,6 +1308,7 @@ final class ZommiController extends ChangeNotifier {
     if (target == null || session == null || turn == null) return;
     final sessionKey = _sessionKey(target, session);
     if (_interruptingSessions.contains(sessionKey)) return;
+    _pausedQueues.add(sessionKey);
     _setStatus('Stopping $activeRuntimeName turn…');
     if (turn.startsWith('flutter:')) {
       _cancelRequestedSessions.add(sessionKey);
@@ -1899,6 +2001,12 @@ final class ZommiController extends ChangeNotifier {
         if (sessionId == null) return;
         final sessionKey = _sessionKey(event.runtimeTargetId, sessionId);
         final turnId = event.turnId;
+        if (turnId != null &&
+            _completedTurnIds.containsKey(
+              _turnIdentity(event.runtimeTargetId, turnId),
+            )) {
+          return;
+        }
         if (turnId != null && turnId.isNotEmpty) {
           _activeTurns[sessionKey] = turnId;
           if (event.clientOperationId == null &&
@@ -1952,18 +2060,36 @@ final class ZommiController extends ChangeNotifier {
         if (sessionId == null) return;
         final sessionKey = _sessionKey(event.runtimeTargetId, sessionId);
         final turnId = event.turnId;
+        // A late completion cannot release a newer queued follow-up.
+        final activeId = _activeTurns[sessionKey];
+        final completesActive =
+            activeId != null &&
+            (activeId == turnId || activeId == event.clientOperationId);
         if (turnId != null) {
+          final identity = _turnIdentity(event.runtimeTargetId, turnId);
+          if (_completedTurnIds.containsKey(identity)) return;
           if (_completedTurnIds.length >= 512) _completedTurnIds.clear();
-          _completedTurnIds.add(_turnIdentity(event.runtimeTargetId, turnId));
+          _completedTurnIds[identity] =
+              event.payload['status']?.toString().toLowerCase() ?? 'completed';
         }
-        _activeTurns.remove(sessionKey);
-        _interruptingSessions.remove(sessionKey);
-        _cancelRequestedSessions.remove(sessionKey);
+        if (activeId != null &&
+            !completesActive &&
+            !_startingSessions.contains(sessionKey)) {
+          return;
+        }
+        if (completesActive) {
+          _activeTurns.remove(sessionKey);
+          _interruptingSessions.remove(sessionKey);
+          _cancelRequestedSessions.remove(sessionKey);
+        }
         _scheduleCatalogSave();
         if (!_isActiveSession(event.runtimeTargetId, sessionId)) {
           _unreadSessions.add(sessionKey);
         }
         final statusValue = event.payload['status']?.toString() ?? 'completed';
+        if (completesActive && statusValue.toLowerCase() != 'completed') {
+          _pausedQueues.add(sessionKey);
+        }
         if (statusValue == 'unknown') {
           final sessionTurns =
               _turnsBySession[sessionKey] ?? const <ConversationTurn>[];
@@ -2018,6 +2144,7 @@ final class ZommiController extends ChangeNotifier {
           focusComposerEpoch++;
         }
         _notify();
+        if (completesActive) _drainMessageQueue(sessionKey);
         return;
     }
   }

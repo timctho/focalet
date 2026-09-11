@@ -285,6 +285,29 @@ final class TranscriptBlock {
   bool get completed => lifecycle == TranscriptLifecycle.completed;
 }
 
+/// A follow-up captured by Send, before its runtime turn starts.
+final class QueuedMessage {
+  QueuedMessage({
+    required this.id,
+    required this.runtimeTargetId,
+    required this.runtimeName,
+    required this.sessionId,
+    required this.text,
+    required this.inlineText,
+    required this.settings,
+    required List<ContextAttachment> attachments,
+  }) : attachments = List.unmodifiable(attachments);
+
+  final String id;
+  final String runtimeTargetId;
+  final String runtimeName;
+  final String sessionId;
+  final String text;
+  final String inlineText;
+  final SessionSettings settings;
+  final List<ContextAttachment> attachments;
+}
+
 final class ConversationTurn {
   ConversationTurn({
     required this.id,

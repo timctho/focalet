@@ -144,7 +144,8 @@ void main() {
 
     expect(find.text('streamed answer'), findsOneWidget);
     expect(find.byKey(const ValueKey('stop-turn')), findsOneWidget);
-    expect(find.byKey(const ValueKey('send-message')), findsNothing);
+    expect(find.byKey(const ValueKey('send-message')), findsOneWidget);
+    expect(find.byTooltip('Queue message (Enter)'), findsOneWidget);
     await tester.enterText(
       find.byKey(const ValueKey('zommi-composer')),
       'draft while streaming',

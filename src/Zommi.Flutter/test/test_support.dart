@@ -84,6 +84,10 @@ final class RichFakeCore
   Future<void>? initializeGate;
   Future<void>? connectGate;
   Future<void>? startTurnGate;
+  bool uniqueTurnIds = false;
+  bool startTurnFails = false;
+  bool startTurnAccepted = true;
+  final List<Map<String, Object?>> startedTurns = [];
   Future<void>? createSessionGate;
   Future<void>? openSessionGate;
   Future<void>? readSessionGate;
@@ -492,7 +496,24 @@ final class RichFakeCore
     String? cwd,
     String? profile,
   }) async {
+    final turnId = uniqueTurnIds
+        ? '$sessionId-live-turn-${startedTurns.length + 1}'
+        : '$sessionId-live-turn';
+    startedTurns.add({
+      'runtimeTargetId': runtimeTargetId,
+      'sessionId': sessionId,
+      'message': message,
+      'turnId': turnId,
+      'clientOperationId': clientOperationId,
+      'snapshots': snapshots,
+      'images': images,
+      'model': model,
+      'effort': effort,
+      'cwd': cwd,
+      'profile': profile,
+    });
     if (startTurnGate case final gate?) await gate;
+    if (startTurnFails) throw StateError('Start failed');
     lastMessage = message;
     lastModel = model;
     lastEffort = effort;
@@ -501,10 +522,10 @@ final class RichFakeCore
     lastSnapshots = snapshots;
     lastImages = images;
     return TurnReceipt(
-      accepted: true,
+      accepted: startTurnAccepted,
       runtimeTargetId: runtimeTargetId,
       sessionId: sessionId,
-      turnId: '$sessionId-live-turn',
+      turnId: turnId,
       clientOperationId: clientOperationId ?? 'client:test',
     );
   }
