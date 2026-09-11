@@ -324,8 +324,6 @@ void main() {
         ZommiApp(core: core, desktop: FakeDesktopBridge()),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
-      await tester.pumpAndSettle();
       expect(find.text('Earlier Hermes work'), findsNothing);
       expect(find.byKey(const ValueKey('load-older-sessions')), findsNothing);
       await tester.drag(

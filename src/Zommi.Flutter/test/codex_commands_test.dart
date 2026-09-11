@@ -187,7 +187,9 @@ void main() {
       Future<void> command(String text) async {
         await tester.enterText(composer, text);
         await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-        await tester.pumpAndSettle();
+        // A running session animates its status icon in the default sidebar.
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
       }
 
       await tester.enterText(composer, '/');

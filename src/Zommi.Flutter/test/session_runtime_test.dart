@@ -379,7 +379,6 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('runtime-summary')), findsNothing);
       expect(find.bySemanticsLabel('Choose agent runtime'), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
       await tester.pumpAndSettle();
       final add = find.byKey(const ValueKey('new-session'));
       await tester.tap(add);

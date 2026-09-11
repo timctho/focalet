@@ -67,12 +67,13 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
-    await tester.pump();
     expect(find.byKey(const ValueKey('session-sidebar')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
     await tester.pump();
     expect(find.byKey(const ValueKey('session-sidebar')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('session-sidebar')), findsOneWidget);
   });
 
   for (final size in [
@@ -95,6 +96,9 @@ void main() {
         final slide = find.byKey(const ValueKey('session-sidebar-slide'));
         final shell = find.byKey(const ValueKey('message-composer-shell'));
         final field = find.byKey(const ValueKey('zommi-composer'));
+        expect(sidebar, findsOneWidget);
+        await tester.tap(toggle);
+        await tester.pumpAndSettle();
         final fullComposer = tester.getRect(shell);
         final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
         addTearDown(mouse.removePointer);
@@ -178,6 +182,10 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('session-sidebar')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('session-sidebar')), findsNothing);
     final button = find.descendant(
       of: find.byKey(const ValueKey('toggle-sessions')),
       matching: find.byType(IconButton),

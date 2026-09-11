@@ -212,7 +212,7 @@ class _SessionSidebarState extends State<SessionSidebar> {
                   };
                   if (!_loadedForScroll &&
                       down &&
-                      notification.metrics.extentAfter < 120) {
+                      notification.metrics.extentAfter <= 1) {
                     _loadedForScroll = true;
                     unawaited(controller.loadMoreSessions());
                   }

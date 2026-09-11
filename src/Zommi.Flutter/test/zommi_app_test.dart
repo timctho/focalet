@@ -39,7 +39,13 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('send-message')));
     await tester.pump();
     expect(core.lastMessage, 'compare this');
-    expect(find.text('compare this'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('zommi-transcript')),
+        matching: find.text('compare this'),
+      ),
+      findsOneWidget,
+    );
 
     await tester.enterText(composer, 'draft while processing');
     final field = tester.widget<TextField>(composer);
@@ -89,7 +95,9 @@ void main() {
         clientOperationId: 'client:test',
       ),
     );
-    await tester.pumpAndSettle();
+    // The runtime stays active until completion, including its sidebar spinner.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
     expect(core.interruptedIdentity, (
       'runtime-codex',
       'thread-codex',
@@ -182,6 +190,13 @@ void main() {
     await tester.pumpWidget(ZommiApp(core: FakeCoreBridge()));
     await tester.pump();
     await _expand(tester);
+    await tester.runAsync(
+      () => precacheImage(
+        const AssetImage('assets/runtime_icons/codex.png'),
+        tester.element(find.byType(ZommiShell)),
+      ),
+    );
+    await tester.pumpAndSettle();
     await expectLater(
       find.byType(ZommiShell),
       matchesGoldenFile('goldens/zommi_shell_expanded.png'),

@@ -323,7 +323,6 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
 
   bool get _previewBlocked =>
       !_controller.expanded ||
-      _controller.sessionPanelOpen ||
       _controller.runtimeSetupPanelOpen ||
       _controller.approval != null ||
       _controller.question != null ||
