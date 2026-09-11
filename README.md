@@ -103,6 +103,10 @@ Failures have a persisted two-minute cooldown. Opening Chats checks freshness;
 **Refresh agents** and the catalog retry button bypass it. Opening a cached chat
 connects its exact runtime/session and reads canonical history on demand.
 
+If opening a saved Codex chat reports `no rollout found for thread id`, see
+[Repairing Codex history lookup](docs/codex-history-repair.md) for diagnosing
+different Codex homes and previewing a repair that preserves the original files.
+
 ## Native packages
 
 | Platform | Package | Entrypoint | Core |
