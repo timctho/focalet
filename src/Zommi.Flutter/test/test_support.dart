@@ -5,7 +5,7 @@ import 'package:zommi_flutter/desktop/artifact_loader.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 
-final class RichFakeCore
+class RichFakeCore
     implements
         CoreBridge,
         RuntimeConfigurationBridge,

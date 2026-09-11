@@ -127,6 +127,9 @@ for line in sys.stdin:
         empty_threads.add(fresh_id)
         result = {"thread": {"id": fresh_id, "turns": []}, "model": request.get("params", {}).get("model") or "fixture-default"}
     elif method == "thread/resume":
+        if control and (control / "busy-session").exists() and (control / "busy-session").read_text() == request['params']['threadId']:
+            send({'id': request_id, 'error': {'code': -32600, 'message': 'thread already has an active writer'}})
+            continue
         if os.environ.get("ZOMMI_FAKE_BUSY_RESUME") == "1" or (control and (control / "reject-resume").exists()):
             send(
                 {
@@ -139,6 +142,8 @@ for line in sys.stdin:
             )
             continue
         result = history(request["params"]["threadId"])
+        if control and (control / "wrong-resume-id").exists():
+            result['thread']['id'] = 'wrong-thread'
     elif method == "thread/read":
         result = history(request["params"]["threadId"])
         if control and request["params"]["threadId"] in submitted_threads:
