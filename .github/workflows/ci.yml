@@ -86,6 +86,7 @@ jobs:
           python3 -m py_compile scripts/assemble_release.py scripts/verify_release.py tests/test_release_package.py
           python3 tests/test_release_package.py -v
           python3 tests/test_linux_startup_smoke.py -v
+          python3 tests/test_codex_history_repair.py -v
           bash -n scripts/package-unix.sh scripts/package-linux-self-hosted.sh scripts/smoke-linux-release.sh
 
       - name: Build Windows capture helper
