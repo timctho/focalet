@@ -15,17 +15,15 @@ void main() {
     );
     addTearDown(() => temporary.delete(recursive: true));
     final log = File('${temporary.path}/requests.jsonl');
-    final python = await Process.run(Platform.isWindows ? 'where' : 'which', [
-      'python3',
-    ]);
+    // Windows may resolve python3 to the Microsoft Store execution alias.
+    // Use the installed interpreter, matching the other process fixtures.
+    final python = Platform.isWindows ? 'python' : 'python3';
     final bridge = ProcessCoreBridge(
       executablePath: File(
         '../../target/debug/zommi-core-host${Platform.isWindows ? '.exe' : ''}',
       ).absolute.path,
       environment: {
-        'ZOMMI_CODEX_COMMAND': python.exitCode == 0
-            ? python.stdout.toString().trim().split('\n').first.trim()
-            : 'python',
+        'ZOMMI_CODEX_COMMAND': python,
         'ZOMMI_CODEX_ARGS_JSON': jsonEncode([
           File('../../crates/zommi-core-host/tests/fake_codex_app_server.py')
               .absolute
@@ -46,6 +44,7 @@ void main() {
     );
     addTearDown(controller.close);
     await controller.initialize();
+    expect(controller.activeSessionId, isNotNull, reason: controller.status);
     return (controller, bridge, log);
   }
 
