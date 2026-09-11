@@ -116,6 +116,18 @@ abstract interface class SessionCatalogBridge {
   });
 }
 
+abstract interface class GoalControlBridge {
+  Future<Map<String, Object?>> goalCommand({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String action,
+    String? objective,
+    String? model,
+    String? effort,
+    String? cwd,
+  });
+}
+
 final class RuntimeTarget {
   const RuntimeTarget({
     required this.id,
@@ -317,7 +329,11 @@ final class CoreProtocolException implements Exception {
 }
 
 final class ProcessCoreBridge
-    implements CoreBridge, RuntimeConfigurationBridge, SessionCatalogBridge {
+    implements
+        CoreBridge,
+        RuntimeConfigurationBridge,
+        SessionCatalogBridge,
+        GoalControlBridge {
   ProcessCoreBridge({
     this.executablePath,
     this.requestTimeout = const Duration(seconds: 30),
@@ -527,6 +543,25 @@ final class ProcessCoreBridge
   }) => _request('session.read', <String, Object?>{
     'runtimeTargetId': runtimeTargetId,
     'sessionId': sessionId,
+  });
+
+  @override
+  Future<Map<String, Object?>> goalCommand({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String action,
+    String? objective,
+    String? model,
+    String? effort,
+    String? cwd,
+  }) => _request('session.goal', {
+    'runtimeTargetId': runtimeTargetId,
+    'sessionId': sessionId,
+    'action': action,
+    'objective': ?objective,
+    'model': ?model,
+    'effort': ?effort,
+    'cwd': ?cwd,
   });
 
   @override

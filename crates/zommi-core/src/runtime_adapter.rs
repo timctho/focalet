@@ -455,6 +455,27 @@ impl RuntimeAdapter {
         }
     }
 
+    pub async fn goal_command(
+        &self,
+        session_id: &str,
+        payload: &Value,
+    ) -> Result<Value, CodexError> {
+        match self {
+            Self::Codex(adapter) => {
+                adapter
+                    .ready()
+                    .await?
+                    .goal_command(session_id, payload)
+                    .await
+            }
+            _ => Err(CodexError {
+                code: "capability-unavailable".into(),
+                message: "Goal commands are available for Codex chats.".into(),
+                retryable: false,
+            }),
+        }
+    }
+
     pub async fn resolve_approval(
         &self,
         session_id: &str,

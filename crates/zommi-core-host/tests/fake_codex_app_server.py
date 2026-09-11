@@ -20,6 +20,7 @@ if control:
 rekey_completion = os.environ.get("ZOMMI_FAKE_REKEY_COMPLETION") == "1"
 fragments = ["Book", "keeper", " sees ", "1", "1", "1", ". 世界", "世界", "."] if rekey_completion else ["Rust-owned Codex reply"]
 completed_text = "".join(fragments)
+goals = {}
 history_count = int(os.environ.get("ZOMMI_FAKE_HISTORY_COUNT", "0"))
 request_delay = float(os.environ.get("ZOMMI_FAKE_REQUEST_DELAY_MS", "0")) / 1000
 write_lock = threading.Lock()
@@ -121,6 +122,8 @@ for line in sys.stdin:
     elif method == "thread/start":
         created_threads += 1
         fresh_id = f"fresh-{created_threads}" if control and (control / "unique-threads").exists() else fresh_thread_id
+        if os.environ.get("ZOMMI_FAKE_UNIQUE_THREADS") == "1" and created_threads > 1:
+            fresh_id += "-" + str(created_threads)
         empty_threads.add(fresh_id)
         result = {"thread": {"id": fresh_id, "turns": []}, "model": request.get("params", {}).get("model") or "fixture-default"}
     elif method == "thread/resume":
@@ -142,6 +145,31 @@ for line in sys.stdin:
             result["thread"]["turns"] = [{"id": turn_id, "status": "inProgress", "items": []}]
     elif method == "thread/name/set":
         result = {}
+    elif method == "thread/settings/update":
+        result = {}
+    elif method.startswith("thread/goal/"):
+        if os.environ.get("ZOMMI_FAKE_GOAL_UNSUPPORTED") == "1":
+            send({"id": request_id, "error": {"code": -32601, "message": "Goals are unavailable"}})
+            continue
+        params = request["params"]
+        goal_thread = params["threadId"]
+        if method == "thread/goal/clear":
+            goals.pop(goal_thread, None)
+        elif method == "thread/goal/set":
+            if "objective" in params:
+                goals[goal_thread] = {"threadId": goal_thread, "objective": params["objective"], "status": "active", "tokensUsed": 0, "timeUsedSeconds": 0}
+            if goal_thread not in goals:
+                send({"id": request_id, "error": {"code": -32600, "message": "No goal set"}})
+                continue
+            goals[goal_thread]["status"] = params.get("status", "active")
+        result = {"goal": goals.get(goal_thread)}
+        send({"id": request_id, "result": result})
+        if method != "thread/goal/get":
+            send({"method": "thread/goal/cleared" if method.endswith("clear") else "thread/goal/updated", "params": {"threadId": goal_thread, **result}})
+        if method == "thread/goal/set" and params.get("status") == "active" and os.environ.get("ZOMMI_FAKE_GOAL_TURNS") == "1":
+            send({"method": "turn/started", "params": {"threadId": goal_thread, "turn": {"id": turn_id, "status": "inProgress"}}})
+            send({"method": "item/completed", "params": {"threadId": goal_thread, "turnId": turn_id, "item": {"id": "goal-answer", "type": "agentMessage", "phase": "final", "text": "Working on the goal"}}})
+        continue
     elif method == "turn/start":
         empty_threads.discard(request["params"]["threadId"])
         submitted_threads.add(request["params"]["threadId"])
