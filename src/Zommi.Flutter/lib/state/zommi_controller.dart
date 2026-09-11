@@ -725,26 +725,39 @@ final class ZommiController extends ChangeNotifier {
     _setStatus('$activeRuntimeName${version == null ? '' : ' $version'} ready');
   }
 
-  Future<void> _readActiveHistory() async {
+  Future<void> _readActiveHistory({
+    Map<String, Object?>? history,
+    int? historyRevision,
+  }) async {
     final runtimeTargetId = activeRuntime?.id;
     final sessionId = activeSessionId;
     if (runtimeTargetId == null || sessionId == null) return;
     final sessionKey = _sessionKey(runtimeTargetId, sessionId);
+    final revisionBeforeRead =
+        historyRevision ?? _transcriptRevisions[sessionKey] ?? 0;
     if (!capabilities.contains('history.read.v1')) {
       _turnsBySession.putIfAbsent(sessionKey, () => []);
       return;
     }
     try {
-      final response = await core.readSession(
-        runtimeTargetId: runtimeTargetId,
-        sessionId: sessionId,
-      );
+      final inlineThread = mapValue(history?['thread']);
+      final response =
+          inlineThread['id'] == sessionId && inlineThread['turns'] is List
+          ? history!
+          : await core.readSession(
+              runtimeTargetId: runtimeTargetId,
+              sessionId: sessionId,
+            );
       final canonical = mapThreadHistory(response);
       final cached = _turnsBySession[sessionKey] ?? const <ConversationTurn>[];
+      final changedDuringRead =
+          (_transcriptRevisions[sessionKey] ?? 0) != revisionBeforeRead;
       _turnsBySession[sessionKey] = mergeSessionHistory(
         canonical,
         cached,
-        preserveCached: _activeTurns.containsKey(sessionKey),
+        preserveCached:
+            _activeTurns.containsKey(sessionKey) || changedDuringRead,
+        preferCachedUpdates: changedDuringRead,
       );
       _transcriptChanged(sessionKey);
     } on Object catch (error) {
@@ -829,6 +842,8 @@ final class ZommiController extends ChangeNotifier {
     switchingRuntimeId = changingRuntime ? targetId : null;
     _rememberActiveSessionSettings();
     final targetSettings = _settingsForSession(targetId, sessionId);
+    final historyRevision =
+        _transcriptRevisions[_sessionKey(targetId, sessionId)] ?? 0;
     _notify();
     try {
       RuntimeConnection? initialConnection;
@@ -846,7 +861,10 @@ final class ZommiController extends ChangeNotifier {
         profile: _nonEmpty(targetSettings.profile),
       );
       if (initialConnection != null) _cacheConnection(initialConnection);
-      await _applySessionConnection(connection);
+      await _applySessionConnection(
+        connection,
+        historyRevision: historyRevision,
+      );
       _setStatus('Chat switched');
     } on Object catch (error) {
       _setStatus('Could not switch chat · $error', warning: true);
@@ -872,9 +890,8 @@ final class ZommiController extends ChangeNotifier {
       _modelCatalogs[connection.runtimeTargetId] = List.of(connection.models);
     }
     _mergeSessions(connection.runtimeTargetId, connection.sessions);
-    if (connection.sessions.isNotEmpty) {
-      _markCatalogSynced(connection.runtimeTargetId);
-    }
+    // Connections can carry cached summaries. Only an explicit catalog/list
+    // response renews its TTL, so switching cannot starve catalog refreshes.
   }
 
   void _activateConnection(RuntimeConnection connection) {
@@ -911,6 +928,7 @@ final class ZommiController extends ChangeNotifier {
   Future<void> _applySessionConnection(
     RuntimeConnection connection, {
     SessionSettings? inherited,
+    int? historyRevision,
   }) async {
     _activateConnection(connection);
     _hydrateSessionSettingsFromSummaries(connection.runtimeTargetId);
@@ -918,7 +936,13 @@ final class ZommiController extends ChangeNotifier {
     if (inherited != null) _sessionSettings[key] = inherited;
     _restoreSessionSettings(connection);
     _rememberActiveSessionSettings();
-    await _readActiveHistory();
+    // Paint the selected chat's cached transcript while adapters without inline
+    // history finish reading. Sending stays disabled until the switch is done.
+    _notify();
+    await _readActiveHistory(
+      history: connection.history,
+      historyRevision: historyRevision,
+    );
     focusComposerEpoch++;
   }
 
@@ -2329,6 +2353,7 @@ List<ConversationTurn> mergeSessionHistory(
   List<ConversationTurn> canonical,
   List<ConversationTurn> cached, {
   required bool preserveCached,
+  bool preferCachedUpdates = false,
 }) {
   if (canonical.isEmpty) return List<ConversationTurn>.of(cached);
   if (cached.isEmpty) return List<ConversationTurn>.of(canonical);
@@ -2344,7 +2369,11 @@ List<ConversationTurn> mergeSessionHistory(
       merged.add(cachedTurn);
     } else {
       merged[index] = preserveCached
-          ? mergeConversationTurn(cachedTurn, merged[index])
+          ? mergeConversationTurn(
+              cachedTurn,
+              merged[index],
+              preferPrimaryBlocks: preferCachedUpdates,
+            )
           : mergeConversationTurn(merged[index], cachedTurn);
     }
   }
@@ -2353,8 +2382,9 @@ List<ConversationTurn> mergeSessionHistory(
 
 ConversationTurn mergeConversationTurn(
   ConversationTurn primary,
-  ConversationTurn secondary,
-) {
+  ConversationTurn secondary, {
+  bool preferPrimaryBlocks = false,
+}) {
   final blocks = List<TranscriptBlock>.of(primary.blocks);
   // Match each rekeyed snapshot once so repeated messages remain separate.
   final matchedIndexes = <int>{};
@@ -2365,7 +2395,11 @@ ConversationTurn mergeConversationTurn(
       blocks.add(candidate);
     } else {
       matchedIndexes.add(match);
-      blocks[match] = mergeTranscriptBlocks(blocks[match], candidate);
+      // Events received after the history request began are newer than its
+      // snapshot, including a final replacement of an earlier partial reply.
+      if (!preferPrimaryBlocks) {
+        blocks[match] = mergeTranscriptBlocks(blocks[match], candidate);
+      }
     }
   }
   return ConversationTurn(

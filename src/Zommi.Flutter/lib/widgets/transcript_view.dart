@@ -83,10 +83,13 @@ class _TranscriptPaneState extends State<TranscriptPane> {
     final turns = widget.controller.turns;
     final contentRevision = widget.controller.transcriptRevision;
     if (_knownSession !=
-        (
-          widget.controller.activeRuntime?.id,
-          widget.controller.activeSessionId,
-        )) {
+            (
+              widget.controller.activeRuntime?.id,
+              widget.controller.activeSessionId,
+            ) ||
+        (_knownTurnCount == 0 && turns.isNotEmpty)) {
+      // A cold session can be selected before its history arrives. Treat that
+      // first populated snapshot as a page, not an unbounded batch of new turns.
       _resetRange();
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToLatest());
       return;

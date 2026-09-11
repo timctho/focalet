@@ -7,6 +7,87 @@ import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 
 void main() {
+  test('Codex switches transfer only the selected history with one backend request', () async {
+    final temporary = await Directory.systemTemp.createTemp(
+      'zommi-switch-history-',
+    );
+    addTearDown(() => temporary.delete(recursive: true));
+    final requestLog = File('${temporary.path}/requests.jsonl');
+    final bridge = ProcessCoreBridge(
+      executablePath: File(
+        '../../target/debug/zommi-core-host${Platform.isWindows ? '.exe' : ''}',
+      ).absolute.path,
+      environment: {
+        'ZOMMI_CODEX_COMMAND': await _findPython(),
+        'ZOMMI_CODEX_ARGS_JSON': jsonEncode([
+          File('../../crates/zommi-core-host/tests/fake_codex_app_server.py')
+              .absolute
+              .path,
+        ]),
+        'ZOMMI_CORE_STATE_PATH': '${temporary.path}/binding.json',
+        'ZOMMI_RUNTIME_OVERRIDES_PATH': '${temporary.path}/overrides.json',
+        'ZOMMI_RUNTIME_DISCOVERY_CACHE_PATH':
+            '${temporary.path}/discovery.json',
+        'ZOMMI_FAKE_REQUEST_LOG': requestLog.path,
+        'ZOMMI_FAKE_HISTORY_COUNT': '60',
+      },
+    );
+    final controller = ZommiController(
+      core: bridge,
+      desktop: const NoopDesktopBridge(),
+      catalogStartupDelay: const Duration(days: 1),
+    );
+    addTearDown(controller.close);
+    await controller.initialize();
+    final codex = controller.runtimeTargets.firstWhere(
+      (target) =>
+          target.adapterId == 'codex-app-server' &&
+          target.executionHost['kind'] == 'native',
+    );
+    await controller.selectRuntime(codex.id);
+    final before = (await requestLog.readAsLines()).length;
+    for (final session in ['chat-a', 'chat-b', 'chat-c', 'chat-a']) {
+      await controller.switchSession(session);
+      expect(controller.activeSessionId, session, reason: controller.status);
+      expect(controller.turns, hasLength(60));
+      expect(controller.turns.first.id, '$session-turn-0');
+    }
+    final methods = (await requestLog.readAsLines())
+        .skip(before)
+        .map((line) => (jsonDecode(line) as Map)['method'])
+        .where(
+          (method) =>
+              ['thread/resume', 'thread/read', 'thread/list'].contains(method),
+        );
+    expect(methods, List.filled(4, 'thread/resume'));
+    final connection = await bridge.openSession(
+      runtimeTargetId: codex.id,
+      sessionId: 'chat-b',
+    );
+    expect(connection.history!['thread'], isA<Map>());
+    expect(
+      connection.sessions.every((session) => !session.containsKey('turns')),
+      isTrue,
+    );
+    expect(jsonEncode(connection.sessions).length, lessThan(2000));
+
+    // Running chats must use read, never resume (which could interrupt them).
+    await controller.switchSession('chat-c');
+    await controller.submit('hold-for-interrupt');
+    await controller.switchSession('chat-a');
+    final runningBefore = (await requestLog.readAsLines()).length;
+    await controller.switchSession('chat-c');
+    final runningMethods = (await requestLog.readAsLines())
+        .skip(runningBefore)
+        .map((line) => (jsonDecode(line) as Map)['method'])
+        .where(
+          (method) =>
+              ['thread/resume', 'thread/read', 'thread/list'].contains(method),
+        );
+    expect(runningMethods, ['thread/read']);
+    expect(controller.turnActive, isTrue);
+  });
+
   test('mixed Codex and Hermes chats route through the Rust host', () async {
     final temporary = await Directory.systemTemp.createTemp(
       'zommi-mixed-chats-',

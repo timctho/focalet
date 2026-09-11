@@ -31,6 +31,9 @@ final class RichFakeCore
   Future<void>? connectGate;
   Future<void>? startTurnGate;
   Future<void>? createSessionGate;
+  Future<void>? openSessionGate;
+  Future<void>? readSessionGate;
+  int readSessionCount = 0;
   bool createSessionFails = false;
   bool openSessionFails = false;
   final List<Map<String, Object?>> createdSessions = [];
@@ -39,6 +42,7 @@ final class RichFakeCore
   final Map<String, String> activeSessionsByRuntime = {};
   final Map<String, String> activeProfilesByRuntime = {};
   final Map<String, Map<String, Object?>> historyBySession = {};
+  final Map<String, Map<String, Object?>> openHistoryBySession = {};
   final Map<String, List<Map<String, Object?>>> modelCatalogByRuntime = {};
   final Map<String, List<Map<String, Object?>>> sessionsByRuntime = {};
   final List<String> catalogRequests = [];
@@ -244,35 +248,37 @@ final class RichFakeCore
     return _connection();
   }
 
-  RuntimeConnection _connection() => RuntimeConnection(
-    runtimeTargetId: activeTargetId,
-    sessionId: activeSessionId,
-    protocolVersion: 1,
-    runtimeVersion: '9.8.7',
-    models:
-        modelCatalogByRuntime[activeTargetId] ??
-        (activeTargetId == 'runtime-claude' ? const [] : models),
-    sessions: _sessions(),
-    capabilities: activeTargetId == 'runtime-claude'
-        ? const ['turn.stream.v1']
-        : capabilities,
-    sessionMetadata: activeTargetId == 'runtime-hermes'
-        ? const {
-            'activeModel': 'fixture-pro',
-            'activeEffort': 'high',
-            'cwd': '/workspace/hermes',
-            'profile': 'default',
-            'profiles': [
-              {'name': 'default', 'model': 'fixture-pro'},
-              {
-                'name': 'coder',
-                'model': 'fixture-pro',
-                'description': 'Coding profile',
-              },
-            ],
-          }
-        : const {'activeModel': 'fixture-pro', 'activeEffort': 'high'},
-  );
+  RuntimeConnection _connection({Map<String, Object?>? history}) =>
+      RuntimeConnection(
+        runtimeTargetId: activeTargetId,
+        sessionId: activeSessionId,
+        protocolVersion: 1,
+        runtimeVersion: '9.8.7',
+        history: history,
+        models:
+            modelCatalogByRuntime[activeTargetId] ??
+            (activeTargetId == 'runtime-claude' ? const [] : models),
+        sessions: _sessions(),
+        capabilities: activeTargetId == 'runtime-claude'
+            ? const ['turn.stream.v1']
+            : capabilities,
+        sessionMetadata: activeTargetId == 'runtime-hermes'
+            ? const {
+                'activeModel': 'fixture-pro',
+                'activeEffort': 'high',
+                'cwd': '/workspace/hermes',
+                'profile': 'default',
+                'profiles': [
+                  {'name': 'default', 'model': 'fixture-pro'},
+                  {
+                    'name': 'coder',
+                    'model': 'fixture-pro',
+                    'description': 'Coding profile',
+                  },
+                ],
+              }
+            : const {'activeModel': 'fixture-pro', 'activeEffort': 'high'},
+      );
 
   List<Map<String, Object?>> _sessions() =>
       sessionsByRuntime[activeTargetId] ??
@@ -338,6 +344,7 @@ final class RichFakeCore
     String? profile,
   }) async {
     openedSessions.add((runtimeTargetId, sessionId));
+    if (openSessionGate case final gate?) await gate;
     if (openSessionFails) {
       throw const CoreProtocolException(
         'session-unavailable',
@@ -347,7 +354,9 @@ final class RichFakeCore
     activeTargetId = runtimeTargetId;
     activeSessionId = sessionId;
     activeSessionsByRuntime[runtimeTargetId] = sessionId;
-    return _connection();
+    return _connection(
+      history: openHistoryBySession['$runtimeTargetId\u0000$sessionId'],
+    );
   }
 
   @override
@@ -384,34 +393,37 @@ final class RichFakeCore
   Future<Map<String, Object?>> readSession({
     required String runtimeTargetId,
     required String sessionId,
-  }) async =>
-      historyBySession['$runtimeTargetId\u0000$sessionId'] ??
-      {
-        'thread': {
-          'id': sessionId,
-          'cwd': '/workspace',
-          'turns': [
-            for (var index = 1; index <= historyCount; index++)
-              {
-                'id': '$sessionId-turn-$index',
-                'items': [
-                  {
-                    'type': 'userMessage',
-                    'content': [
-                      {'type': 'text', 'text': 'history user $index'},
-                    ],
-                  },
-                  {
-                    'id': '$sessionId-answer-$index',
-                    'type': 'agentMessage',
-                    'text': 'history answer $index',
-                    'status': 'completed',
-                  },
-                ],
-              },
-          ],
-        },
-      };
+  }) async {
+    readSessionCount++;
+    if (readSessionGate case final gate?) await gate;
+    return historyBySession['$runtimeTargetId\u0000$sessionId'] ??
+        {
+          'thread': {
+            'id': sessionId,
+            'cwd': '/workspace',
+            'turns': [
+              for (var index = 1; index <= historyCount; index++)
+                {
+                  'id': '$sessionId-turn-$index',
+                  'items': [
+                    {
+                      'type': 'userMessage',
+                      'content': [
+                        {'type': 'text', 'text': 'history user $index'},
+                      ],
+                    },
+                    {
+                      'id': '$sessionId-answer-$index',
+                      'type': 'agentMessage',
+                      'text': 'history answer $index',
+                      'status': 'completed',
+                    },
+                  ],
+                },
+            ],
+          },
+        };
+  }
 
   @override
   Future<TurnReceipt> startTurn({

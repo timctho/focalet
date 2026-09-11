@@ -20,6 +20,18 @@ if control:
 rekey_completion = os.environ.get("ZOMMI_FAKE_REKEY_COMPLETION") == "1"
 fragments = ["Book", "keeper", " sees ", "1", "1", "1", ". 世界", "世界", "."] if rekey_completion else ["Rust-owned Codex reply"]
 completed_text = "".join(fragments)
+history_count = int(os.environ.get("ZOMMI_FAKE_HISTORY_COUNT", "0"))
+request_delay = float(os.environ.get("ZOMMI_FAKE_REQUEST_DELAY_MS", "0")) / 1000
+
+
+def history(session_id):
+    return {"thread": {"id": session_id, "turns": [
+        {"id": f"{session_id}-turn-{index}", "items": [
+            {"type": "userMessage", "content": [{"type": "text", "text": f"Question {index}"}]},
+            {"id": f"answer-{index}", "type": "agentMessage", "text": "History response. " * 200},
+        ]}
+        for index in range(history_count)
+    ]}}
 
 
 def send(message):
@@ -63,6 +75,8 @@ for line in sys.stdin:
     method = request.get("method")
     if request_id is None:
         continue
+    if method in ("thread/resume", "thread/read", "thread/list"):
+        time.sleep(request_delay)
 
     if method == "initialize":
         if control and (control / "stall-initialize").exists():
@@ -99,9 +113,9 @@ for line in sys.stdin:
                 }
             )
             continue
-        result = {"thread": {"id": request["params"]["threadId"], "turns": []}}
+        result = history(request["params"]["threadId"])
     elif method == "thread/read":
-        result = {"thread": {"id": request["params"]["threadId"], "turns": []}}
+        result = history(request["params"]["threadId"])
     elif method == "thread/name/set":
         result = {}
     elif method == "turn/start":

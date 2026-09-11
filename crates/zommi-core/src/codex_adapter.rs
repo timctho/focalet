@@ -122,6 +122,9 @@ pub struct CodexConnection {
     pub models: Vec<Value>,
     pub sessions: Vec<Value>,
     pub session_metadata: Value,
+    /// Canonical history already returned by opening this session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -451,6 +454,7 @@ impl CodexAdapter {
             models: state.models.clone(),
             sessions: sorted_sessions(&state.sessions),
             session_metadata,
+            history: None,
         })
     }
 
@@ -568,7 +572,7 @@ impl CodexAdapter {
                     .is_some_and(|name| name.starts_with("Zommi · "))
                 || state.sessions.contains_key(&id);
             if is_zommi {
-                remember_session(&mut state.sessions, thread.clone());
+                remember_session(&mut state.sessions, thread);
             }
         }
         Ok(sorted_sessions(&state.sessions))
@@ -615,8 +619,13 @@ impl CodexAdapter {
                 .await?
         };
         self.set_active_thread(&result).await?;
-        self.list_sessions().await?;
-        self.connection().await
+        let mut connection = self.connection().await?;
+        // Resume/read already returns the selected transcript. Keep it out of
+        // the catalog and deliver it once instead of requiring another read.
+        if result.pointer("/thread/turns").is_some_and(Value::is_array) {
+            connection.history = Some(result);
+        }
+        Ok(connection)
     }
 
     pub async fn configure_session(
@@ -692,7 +701,7 @@ impl CodexAdapter {
                     .insert(session_id.into(), input.message.clone());
                 remember_session(
                     &mut state.sessions,
-                    json!({"id": session_id, "preview": input.message}),
+                    &json!({"id": session_id, "preview": input.message}),
                 );
             }
         }
@@ -871,7 +880,7 @@ impl CodexAdapter {
     }
 
     async fn set_active_thread(&self, result: &Value) -> Result<(), CodexError> {
-        let thread = result.get("thread").cloned().unwrap_or(Value::Null);
+        let thread = result.get("thread").unwrap_or(&Value::Null);
         let thread_id = thread
             .get("id")
             .and_then(Value::as_str)
@@ -1177,7 +1186,7 @@ impl Inner {
             if name.is_some() || preview.is_some() {
                 remember_session(
                     &mut state.sessions,
-                    json!({"id": thread_id, "name": name, "preview": preview}),
+                    &json!({"id": thread_id, "name": name, "preview": preview}),
                 );
             }
             let completed_status = params
@@ -1577,7 +1586,7 @@ fn describe_item(item: &Value, lifecycle: &str) -> String {
     }
 }
 
-fn remember_session(sessions: &mut HashMap<String, Value>, thread: Value) {
+fn remember_session(sessions: &mut HashMap<String, Value>, thread: &Value) {
     let id = value_string(thread.get("id"));
     if id.is_empty() {
         return;
@@ -1588,7 +1597,9 @@ fn remember_session(sessions: &mut HashMap<String, Value>, thread: Value) {
         .unwrap_or_default();
     if let Some(object) = thread.as_object() {
         for (key, value) in object {
-            if !value.is_null() {
+            // The catalog is sent with every connection. Retaining turns here
+            // resends every previously opened transcript on each chat switch.
+            if key != "turns" && !value.is_null() {
                 merged.insert(key.clone(), value.clone());
             }
         }
@@ -1700,8 +1711,30 @@ mod tests {
 
     use super::{
         AdapterState, agent_message_kind, build_session_name, codex_runtime_version,
-        completed_agent_source_id, parse_stream_update,
+        completed_agent_source_id, parse_stream_update, remember_session, sorted_sessions,
     };
+
+    #[test]
+    fn session_catalog_never_retains_transcripts() {
+        let mut sessions = HashMap::new();
+        for index in 0..10 {
+            remember_session(
+                &mut sessions,
+                &json!({
+                    "id": format!("chat-{index}"), "name": "Zommi · Saved chat",
+                    "cwd": "/workspace", "updatedAt": index,
+                    "turns": [{"id": "turn", "items": [{"text": "x".repeat(100_000)}]}]
+                }),
+            );
+        }
+        remember_session(&mut sessions, &json!({"id": "chat-0", "preview": "Latest"}));
+        let catalog = sorted_sessions(&sessions);
+        assert!(catalog.iter().all(|session| session.get("turns").is_none()));
+        assert!(serde_json::to_vec(&catalog).unwrap().len() < 2_000);
+        assert_eq!(sessions["chat-0"]["cwd"], "/workspace");
+        assert_eq!(sessions["chat-0"]["preview"], "Latest");
+        assert_eq!(catalog[0]["id"], "chat-9");
+    }
 
     #[test]
     fn commentary_stays_a_message_during_streaming_and_completion() {
