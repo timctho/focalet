@@ -49,11 +49,14 @@ class TranscriptPane extends StatefulWidget {
 }
 
 class _TranscriptPaneState extends State<TranscriptPane> {
-  final ScrollController _scroll = ScrollController();
+  final ScrollController _scroll = ScrollController(keepScrollOffset: false);
   final ValueNotifier<bool> _awayFromLatest = ValueNotifier(false);
   int _start = 0;
   bool _autoFollow = true;
   bool _loadScheduled = false;
+  bool _settlingSession = false;
+  bool _waitingForHistory = false;
+  int _rangeEpoch = 0;
   int _knownTurnCount = 0;
   int _knownContentRevision = 0;
   (String?, String?)? _knownSession;
@@ -74,7 +77,6 @@ class _TranscriptPaneState extends State<TranscriptPane> {
     super.initState();
     _resetRange();
     _scroll.addListener(_handleScroll);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToLatest());
   }
 
   @override
@@ -87,22 +89,28 @@ class _TranscriptPaneState extends State<TranscriptPane> {
               widget.controller.activeRuntime?.id,
               widget.controller.activeSessionId,
             ) ||
-        (_knownTurnCount == 0 && turns.isNotEmpty)) {
+        (_knownTurnCount == 0 && turns.isNotEmpty) ||
+        (_waitingForHistory && !_historyLoading)) {
       // A cold session can be selected before its history arrives. Treat that
       // first populated snapshot as a page, not an unbounded batch of new turns.
       _resetRange();
-      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToLatest());
       return;
     }
     if (turns.length < _knownTurnCount) _resetRange();
     _knownTurnCount = turns.length;
-    if (_knownContentRevision != contentRevision && _autoFollow) {
+    if (_knownContentRevision != contentRevision &&
+        _autoFollow &&
+        !_settlingSession) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToLatest());
     }
     _knownContentRevision = contentRevision;
   }
 
   void _resetRange() {
+    final epoch = ++_rangeEpoch;
+    _loadScheduled = false;
+    _waitingForHistory = _historyLoading;
+    _settlingSession = true;
     final count = widget.controller.turns.length;
     _start = math.max(0, count - historyPageSize);
     _knownTurnCount = count;
@@ -115,21 +123,51 @@ class _TranscriptPaneState extends State<TranscriptPane> {
     _retention.clear();
     _autoFollow = true;
     _awayFromLatest.value = false;
+    _settleSessionAtBottom(epoch);
+  }
+
+  bool get _historyLoading =>
+      widget.controller.sessionBusy ||
+      widget.controller.runtimeBusy ||
+      widget.controller.starting;
+
+  void _settleSessionAtBottom(int epoch) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || epoch != _rangeEpoch) return;
+      if (!_scroll.hasClients) {
+        _settlingSession = false;
+        return;
+      }
+      final position = _scroll.position;
+      // Lazy rows have estimated heights until laid out. Follow the changing
+      // extent across frames instead of stopping at the first estimate.
+      if ((position.maxScrollExtent - position.pixels).abs() <= 0.5) {
+        _settlingSession = false;
+        _autoFollow = true;
+        _awayFromLatest.value = false;
+        return;
+      }
+      _scroll.jumpTo(position.maxScrollExtent);
+      _settleSessionAtBottom(epoch);
+      WidgetsBinding.instance.scheduleFrame();
+    });
   }
 
   void _handleScroll() {
-    if (!_scroll.hasClients) return;
+    if (!_scroll.hasClients || _settlingSession) return;
     final position = _scroll.position;
     _autoFollow = position.maxScrollExtent - position.pixels <= 36;
     _awayFromLatest.value = !_autoFollow;
     if (position.pixels <= 96 && _start > 0 && !_loadScheduled) {
       _loadScheduled = true;
+      final epoch = _rangeEpoch;
       final oldExtent = position.maxScrollExtent;
       final oldPixels = position.pixels;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
+        if (!mounted || epoch != _rangeEpoch) return;
         setState(() => _start = math.max(0, _start - historyPageSize));
         WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || epoch != _rangeEpoch) return;
           _loadScheduled = false;
           if (!_scroll.hasClients) return;
           final added = _scroll.position.maxScrollExtent - oldExtent;
@@ -145,7 +183,7 @@ class _TranscriptPaneState extends State<TranscriptPane> {
   }
 
   void _scrollToLatest() {
-    if (!mounted || !_scroll.hasClients) return;
+    if (!mounted || !_scroll.hasClients || _settlingSession) return;
     _autoFollow = true;
     unawaited(
       _scroll.animateTo(

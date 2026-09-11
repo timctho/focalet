@@ -598,9 +598,11 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                                           onNotification: _closePreviewOnScroll,
                                           child: ScrollPerformanceBoundary(
                                             child: TranscriptPane(
-                                              key: ValueKey(
-                                                'transcript-${_controller.activeSessionId}',
-                                              ),
+                                              key: ValueKey((
+                                                'transcript',
+                                                _controller.activeRuntime?.id,
+                                                _controller.activeSessionId,
+                                              )),
                                               controller: _controller,
                                               onAttachmentEnter:
                                                   _showAttachmentPreview,
