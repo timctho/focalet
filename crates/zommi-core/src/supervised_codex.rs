@@ -125,6 +125,7 @@ fn recovery_error(message: &str) -> CodexError {
 }
 
 async fn monitor(weak: Weak<Inner>, policy: HealthPolicy) {
+    let mut next_session_refresh = Instant::now() + policy.retry_base;
     let mut next_probe = Instant::now() + policy.probe_interval;
     let mut retry_at = Instant::now();
     let mut probe_failures = 0;
@@ -141,6 +142,12 @@ async fn monitor(weak: Weak<Inner>, policy: HealthPolicy) {
             return;
         }
         let adapter = inner.adapter.read().await;
+        if adapter.is_running().await && Instant::now() >= next_session_refresh {
+            // A writer owned by another process is a session condition, not a
+            // dead runtime. Never restart unrelated active chats to acquire it.
+            let _ = adapter.refresh_read_only_session().await;
+            next_session_refresh = Instant::now() + policy.probe_interval;
+        }
         if adapter.is_running().await && Instant::now() >= next_probe {
             match adapter.health_check(policy.probe_timeout).await {
                 Ok(()) => {
@@ -350,6 +357,119 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn busy_saved_chat_opens_read_only_then_recovers_without_replacing_or_replaying() {
+        let fixture = Fixture::new();
+        fixture.mark("busy-session", "saved-chat");
+        let (runtime, mut events) = fixture.connect().await;
+        let connection = runtime
+            .ready()
+            .await
+            .unwrap()
+            .open_session("saved-chat")
+            .await
+            .unwrap();
+        assert_eq!(connection.session_id, "saved-chat");
+        assert_eq!(connection.session_metadata["readOnly"], true);
+        assert_eq!(connection.history.unwrap()["thread"]["id"], "saved-chat");
+        let adapter = runtime.ready().await.unwrap();
+        let error = adapter
+            .start_turn(CodexTurnRequest {
+                session_id: "saved-chat",
+                message: "keep draft",
+                snapshots: &[],
+                images: &[],
+                client_operation_id: "not-sent",
+                model: None,
+                effort: None,
+                cwd: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "session-busy");
+        assert_eq!(
+            adapter
+                .goal_command(
+                    "saved-chat",
+                    &json!({"action":"set", "objective":"not sent"})
+                )
+                .await
+                .unwrap_err()
+                .code,
+            "session-busy"
+        );
+        drop(adapter);
+        fs::remove_file(fixture.0.join("busy-session")).unwrap();
+        loop {
+            let refreshed = event(&mut events, "session.refreshed").await;
+            if refreshed.payload["connection"]["sessionMetadata"]["readOnly"] == false {
+                break;
+            }
+        }
+        assert_eq!(
+            runtime
+                .ready()
+                .await
+                .unwrap()
+                .active_session_id()
+                .await
+                .unwrap(),
+            "saved-chat"
+        );
+        assert_eq!(fixture.pids().len(), 1);
+        assert!(
+            !fixture
+                .requests()
+                .iter()
+                .any(|r| r["method"] == "turn/start" || r["method"] == "thread/goal/set")
+        );
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn locked_startup_keeps_the_preferred_chat_and_background_retry_cannot_steal_selection() {
+        let fixture = Fixture::new();
+        fixture.mark("busy-session", "saved-chat");
+        let mut config = fixture.config();
+        config.preferred_session_id = Some("saved-chat".into());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let adapter = CodexAdapter::connect(config, tx).await.unwrap();
+        assert_eq!(
+            adapter.connection().await.unwrap().session_metadata["readOnly"],
+            true
+        );
+        assert!(
+            !fixture
+                .requests()
+                .iter()
+                .any(|r| r["method"] == "thread/start")
+        );
+        adapter.open_session("another-chat").await.unwrap();
+        fs::remove_file(fixture.0.join("busy-session")).unwrap();
+        adapter.refresh_read_only_session().await.unwrap();
+        assert_eq!(adapter.active_session_id().await.unwrap(), "another-chat");
+        fixture.mark("wrong-resume-id", "1");
+        assert_eq!(
+            adapter.open_session("saved-chat").await.unwrap_err().code,
+            "identity-mismatch"
+        );
+        assert_eq!(adapter.active_session_id().await.unwrap(), "another-chat");
+        adapter.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn recovered_runtime_events_keep_increasing_sequences() {
+        let fixture = Fixture::new();
+        let (runtime, mut events) = fixture.connect().await;
+        hold_turn(&runtime, "/workspace").await;
+        let before = event(&mut events, "turn.started").await.sequence;
+        fixture.mark("exit-pid", fixture.pids()[0]);
+        let stopped = event(&mut events, "turn.completed").await.sequence;
+        let recovered = event(&mut events, "runtime.recovered").await.sequence;
+        assert!(stopped > before && recovered > stopped);
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
     async fn crashed_runtime_resumes_exact_chat_and_settings_without_replaying_turn() {
         let fixture = Fixture::new();
         let (runtime, mut events) = fixture.connect().await;
@@ -506,7 +626,7 @@ mod tests {
         let fixture = Fixture::new();
         let (runtime, mut events) = fixture.connect().await;
         hold_turn(&runtime, "/chosen/workspace").await;
-        fixture.mark("reject-resume", "1");
+        fixture.mark("reject-history", "1");
         fixture.mark("exit-pid", fixture.pids()[0]);
         timeout(Duration::from_secs(5), async {
             while fixture.pids().len() < 4 {
@@ -523,7 +643,7 @@ mod tests {
         assert!(starts[2] - starts[1] >= 0.05);
         assert!(starts[3] - starts[2] >= 0.10);
         assert_eq!(fixture.count("thread/start"), 1);
-        fs::remove_file(fixture.0.join("reject-resume")).unwrap();
+        fs::remove_file(fixture.0.join("reject-history")).unwrap();
         event(&mut events, "runtime.recovered").await;
         assert_eq!(
             runtime
@@ -551,7 +671,7 @@ mod tests {
             })).await.unwrap();
             id
         };
-        fixture.mark("reject-resume", "1");
+        fixture.mark("reject-history", "1");
         fixture.mark("exit-pid", fixture.pids()[0]);
         timeout(Duration::from_secs(5), async {
             while fixture.pids().len() < 3 {
@@ -561,7 +681,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(fixture.count("thread/start"), 1);
-        fs::remove_file(fixture.0.join("reject-resume")).unwrap();
+        fs::remove_file(fixture.0.join("reject-history")).unwrap();
         event(&mut events, "runtime.recovered").await;
         let connection = runtime.ready().await.unwrap().connection().await.unwrap();
         assert_eq!(connection.session_id, session_id);
