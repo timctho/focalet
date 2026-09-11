@@ -17,6 +17,7 @@ import 'package:zommi_flutter/widgets/context_preview_layout.dart';
 import 'package:zommi_flutter/widgets/command_result.dart';
 import 'package:zommi_flutter/widgets/codex_command_menu.dart';
 import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
+import 'package:zommi_flutter/widgets/message_history_navigation.dart';
 import 'package:zommi_flutter/widgets/overlay_panels.dart';
 import 'package:zommi_flutter/widgets/runtime_logo.dart';
 import 'package:zommi_flutter/widgets/transcript_view.dart';
@@ -92,6 +93,9 @@ class _ZommiAppState extends State<ZommiApp> {
       debugShowCheckedModeBanner: false,
       title: 'Zommi',
       theme: theme.copyWith(
+        textSelectionTheme: const TextSelectionThemeData(
+          selectionColor: chatSelectionColor,
+        ),
         textTheme: _compactTextTheme(theme.textTheme),
         visualDensity: VisualDensity.compact,
         extensions: [
@@ -171,6 +175,7 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
   int _selectedCommand = 0;
   String? _dismissedCommandText;
   bool _restoringComposer = false;
+  final MessageHistoryNavigation _history = MessageHistoryNavigation();
   final FocusNode _composerFocus = FocusNode(debugLabel: 'Zommi composer');
   final ScrollController _composerScroll = ScrollController();
   late final ZommiController _controller;
@@ -212,13 +217,14 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
           unawaited(_controller.addPointerContext(replacingId: attachment.id)),
     );
     _composer.addListener(_onComposerChanged);
-    _composerFocus.onKeyEvent = _handleCommandKey;
+    _composerFocus.onKeyEvent = _handleComposerKey;
     _composerFocus.addListener(_onComposerFocusChanged);
     _controller.addListener(_onControllerChanged);
     unawaited(_controller.initialize());
   }
 
   void _onComposerChanged() {
+    _history.textChanged(_composer.text);
     if (!_restoringComposer) {
       final previous = _controller.composerValue.text.trim();
       final wasCommand = _controller.isCodexCommand(previous);
@@ -243,6 +249,7 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
     if (_composerSessionKey != _controller.composerSessionKey ||
         _lastCommandComposerEpoch != _controller.commandComposerEpoch) {
       _lastCommandComposerEpoch = _controller.commandComposerEpoch;
+      _history.reset();
       _composerSessionKey = _controller.composerSessionKey;
       _restoringComposer = true;
       try {
@@ -364,18 +371,16 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
   void _submit() {
     final text = _composer.messageText;
     final isCommand = _controller.isCodexCommand(text);
-    if (isCommand &&
-        _composer.value.composing.isValid &&
+    if (_composer.value.composing.isValid &&
         !_composer.value.composing.isCollapsed) {
       return;
     }
     if (text.isEmpty ||
         _controller.sessionReadOnly ||
-        _controller.submitting ||
+        (_controller.submitting && isCommand) ||
         _controller.sessionBusy ||
         _controller.runtimeBusy ||
         _controller.selectingContent ||
-        (_controller.turnActive && !isCommand) ||
         _controller.activeRuntime == null ||
         _controller.activeSessionId == null) {
       return;
@@ -387,7 +392,11 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
           .map((attachment) => attachment.id)
           .toList(growable: false),
     );
-    if (!isCommand) _composer.clearAfterSubmit();
+    if (!isCommand) {
+      _composer.clearAfterSubmit();
+      _history.reset();
+    }
+    _composerFocus.requestFocus();
     unawaited(submission);
   }
 
@@ -416,10 +425,37 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
       }
       return KeyEventResult.handled;
     }
-    if (event.logicalKey == LogicalKeyboardKey.enter &&
-        !HardwareKeyboard.instance.isShiftPressed &&
-        (!_controller.turnActive ||
-            _controller.isCodexCommand(_composer.messageText))) {
+    return KeyEventResult.ignored;
+  }
+
+  KeyEventResult _handleComposerKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    final keyboard = HardwareKeyboard.instance;
+    if ((_composer.value.composing.isValid &&
+            !_composer.value.composing.isCollapsed) ||
+        keyboard.isShiftPressed ||
+        keyboard.isControlPressed ||
+        keyboard.isAltPressed ||
+        keyboard.isMetaPressed) {
+      return KeyEventResult.ignored;
+    }
+    final commandResult = _handleCommandKey(node, event);
+    if (commandResult != KeyEventResult.ignored) return commandResult;
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp ||
+        event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      final recalled = _history.navigate(
+        older: event.logicalKey == LogicalKeyboardKey.arrowUp,
+        value: _composer.value,
+        history: _controller.composerHistory,
+      );
+      if (recalled == null) return KeyEventResult.ignored;
+      _composer.value = recalled;
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.enter) {
+      if (event is KeyRepeatEvent) return KeyEventResult.handled;
       _submit();
       return KeyEventResult.handled;
     }
@@ -652,6 +688,8 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                                 text: result,
                                 onClose: _controller.dismissCommandResult,
                               ),
+                            if (_controller.queuedMessages.isNotEmpty)
+                              _buildMessageQueue(),
                             _buildComposer(),
                             if (_controller.activeSessionId != null)
                               Semantics(
@@ -893,6 +931,9 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
   }
 
   Widget _buildComposer() {
+    final willQueue =
+        !_controller.isCodexCommand(_composer.messageText) &&
+        (_controller.turnActive || _controller.queuedMessages.isNotEmpty);
     return Semantics(
       container: true,
       label: 'Message composer',
@@ -966,12 +1007,11 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                 ),
               ),
               const SizedBox(width: 5),
-              if (_controller.turnActive &&
-                  !_controller.isCodexCommand(_composer.messageText))
+              if (_controller.turnActive)
                 Semantics(
                   label: 'Stop active turn',
                   button: true,
-                  child: IconButton.filled(
+                  child: IconButton.filledTonal(
                     key: const ValueKey('stop-turn'),
                     tooltip: _controller.activeTurnStopping
                         ? 'Stopping response'
@@ -985,33 +1025,114 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                           : Icons.stop_rounded,
                     ),
                   ),
-                )
-              else
-                Semantics(
-                  label: _controller.submitting
-                      ? 'Preparing context'
-                      : 'Send message',
-                  button: true,
-                  child: IconButton.filled(
-                    key: const ValueKey('send-message'),
-                    tooltip: 'Send',
+                ),
+              Semantics(
+                label: willQueue ? 'Queue message' : 'Send message',
+                button: true,
+                child: IconButton.filled(
+                  key: const ValueKey('send-message'),
+                  tooltip: willQueue ? 'Queue message (Enter)' : 'Send (Enter)',
+                  onPressed:
+                      (_controller.submitting &&
+                              _controller.isCodexCommand(
+                                _composer.messageText,
+                              )) ||
+                          _controller.activeSessionId == null ||
+                          _controller.selectingContent ||
+                          _controller.sessionBusy ||
+                          _controller.sessionReadOnly ||
+                          _controller.runtimeBusy
+                      ? null
+                      : _submit,
+                  icon: const Icon(Icons.arrow_upward_rounded),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMessageQueue() {
+    final messages = _controller.queuedMessages;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 22),
+      child: Container(
+        key: const ValueKey('message-queue'),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${messages.length} queued${_controller.queuePaused ? ' · paused' : ' · sends after response'}',
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                ),
+                if (_controller.queuePaused)
+                  TextButton(
+                    key: const ValueKey('resume-message-queue'),
                     onPressed:
-                        _controller.submitting ||
-                            _controller.selectingContent ||
+                        _controller.turnActive ||
                             _controller.sessionBusy ||
                             _controller.sessionReadOnly ||
                             _controller.runtimeBusy
                         ? null
-                        : _submit,
-                    icon: Icon(
-                      _controller.submitting
-                          ? Icons.more_horiz
-                          : Icons.arrow_upward_rounded,
-                    ),
+                        : _controller.resumeQueuedMessages,
+                    child: const Text('Resume'),
                   ),
-                ),
-            ],
-          ),
+              ],
+            ),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 80),
+              child: ListView.builder(
+                shrinkWrap: true,
+                padding: EdgeInsets.zero,
+                itemCount: messages.length,
+                itemBuilder: (context, index) {
+                  final message = messages[index];
+                  return Row(
+                    key: ValueKey('queued-message-${message.id}'),
+                    children: [
+                      Text(
+                        '${index + 1}. ',
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                      Expanded(
+                        child: Tooltip(
+                          message: message.text,
+                          child: Text(
+                            message.text,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                      if (message.attachments.isNotEmpty)
+                        Text(
+                          ' · ${message.attachments.length} attached',
+                          style: const TextStyle(fontSize: 10),
+                        ),
+                      IconButton(
+                        key: ValueKey('remove-queued-message-${message.id}'),
+                        tooltip: 'Remove queued message ${index + 1}',
+                        onPressed: () =>
+                            _controller.removeQueuedMessage(message.id),
+                        icon: const Icon(Icons.close_rounded, size: 16),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ],
         ),
       ),
     );

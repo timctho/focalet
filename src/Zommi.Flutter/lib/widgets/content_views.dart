@@ -121,7 +121,7 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
                       code: base.copyWith(
                         fontFamily: 'monospace',
                         fontSize: chatFontSize,
-                        backgroundColor: const Color(0xffeef0f6),
+                        backgroundColor: inlineCodeBackground,
                       ),
                       codeblockPadding: EdgeInsets.zero,
                       codeblockDecoration: const BoxDecoration(),
@@ -209,8 +209,11 @@ final class _TooltipLinkBuilder extends MarkdownElementBuilder {
           onTap: destination.isEmpty
               ? null
               : () => unawaited(onOpen(destination)),
-          child: Text(
-            element.textContent,
+          child: Text.rich(
+            TextSpan(
+              text: element.textContent,
+              mouseCursor: SystemMouseCursors.click,
+            ),
             style: (preferredStyle ?? parentStyle ?? chatTextStyleOf(context))
                 .copyWith(
                   color: const Color(0xff5d54a4),

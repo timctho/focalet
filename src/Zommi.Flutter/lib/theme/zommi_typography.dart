@@ -19,6 +19,10 @@ const double assistantMessageFontSize = topBarAndChatFontSize;
 const double chatCodeFontSize = topBarAndChatFontSize;
 const double compactChatCodeFontSize = topBarAndChatFontSize;
 
+const Color chatSelectionColor = Color(0x66617de0);
+// Text backgrounds paint over selection; retain a translucent code tint.
+const Color inlineCodeBackground = Color(0x14616f9b);
+
 const TextStyle topBarAndChatTextStyle = TextStyle(
   fontFamily: codexUiFontFamily,
   fontFamilyFallback: codexUiFontFallback,
