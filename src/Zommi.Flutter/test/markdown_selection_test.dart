@@ -9,6 +9,75 @@ import 'package:zommi_flutter/widgets/content_views.dart';
 import 'package:zommi_flutter/theme/zommi_typography.dart';
 
 void main() {
+  const destination =
+      'https://example.com/source?q=one%20two&mode=full#section';
+  const plainDestination = 'https://example.com/source?q=one&mode=full#section';
+  for (final compact in [false, true]) {
+    for (final (linkText, target) in [
+      ('[Source]($destination)', destination),
+      ('<$destination>', destination),
+      (plainDestination, plainDestination),
+    ]) {
+      testWidgets(
+        'right-click copies the link destination without opening it: $compact $linkText',
+        (tester) async {
+          final copied = <String>[];
+          final opened = <String>[];
+          await tester.pumpWidget(
+            MaterialApp(
+              home: Scaffold(
+                body: CopyableMarkdown(
+                  text: 'Plain $linkText',
+                  compact: compact,
+                  onCopy: (value) async => copied.add(value),
+                  onOpenLink: (value) async => opened.add(value),
+                ),
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          final link = find.byKey(ValueKey('markdown-link-$target'));
+          final mouse = await tester.createGesture(
+            kind: PointerDeviceKind.mouse,
+          );
+          addTearDown(mouse.removePointer);
+          await mouse.addPointer(location: Offset.zero);
+          await mouse.moveTo(tester.getCenter(link));
+          await tester.pump(const Duration(milliseconds: 400));
+          await tester.tap(
+            link,
+            kind: PointerDeviceKind.mouse,
+            buttons: kSecondaryMouseButton,
+          );
+          await tester.pumpAndSettle();
+          expect(find.text('Copy link'), findsOneWidget);
+          expect(copied, isEmpty);
+          expect(opened, isEmpty);
+          await tester.tap(find.text('Copy link'));
+          await tester.pumpAndSettle();
+          expect(copied, [target]);
+          expect(opened, isEmpty);
+          expect(find.text('Copy link'), findsNothing);
+
+          await tester.tap(
+            link,
+            kind: PointerDeviceKind.mouse,
+            buttons: kSecondaryMouseButton,
+          );
+          await tester.pumpAndSettle();
+          await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+          await tester.pumpAndSettle();
+          expect(find.text('Copy link'), findsNothing);
+          expect(copied, [target]);
+          await tester.tap(link);
+          await tester.pump();
+          expect(opened, [target]);
+        },
+        variant: TargetPlatformVariant.only(TargetPlatform.windows),
+      );
+    }
+  }
+
   for (final compact in [false, true]) {
     testWidgets('links use a hand cursor over selectable glyphs: $compact', (
       tester,
