@@ -661,9 +661,11 @@ final class ZommiController extends ChangeNotifier {
       return;
     }
     if (selectingActiveRuntime && !activeRuntimeUnavailable) {
+      _cancelSwitchRecovery();
       closeTransientPanels();
       return;
     }
+    _cancelSwitchRecovery();
     runtimeBusy = true;
     switchingRuntimeId = targetId;
     approval = null;
@@ -878,7 +880,7 @@ final class ZommiController extends ChangeNotifier {
       _transcriptChanged(sessionKey);
     } on Object catch (error) {
       _turnsBySession.putIfAbsent(sessionKey, () => []);
-      if (retryOnFailure && _canRetrySwitch(error)) rethrow;
+      if (retryOnFailure) rethrow;
       _setStatus('History unavailable · $error', warning: true);
     }
     _notify();
@@ -897,6 +899,7 @@ final class ZommiController extends ChangeNotifier {
         !canCreateSession(target)) {
       return;
     }
+    _cancelSwitchRecovery();
     sessionBusy = true;
     final changingRuntime = activeRuntime?.id != target.id;
     switchingRuntimeId = changingRuntime ? target.id : null;
@@ -1076,6 +1079,13 @@ final class ZommiController extends ChangeNotifier {
             'session-busy',
             'core-unavailable',
           }.contains(error.code));
+
+  void _cancelSwitchRecovery() {
+    _switchRetryTimer?.cancel();
+    _pendingSwitch = null;
+    _switchFailures = 0;
+    _switchEpoch++;
+  }
 
   static String? _nonEmpty(String? value) =>
       value == null || value.isEmpty ? null : value;
@@ -1278,7 +1288,9 @@ final class ZommiController extends ChangeNotifier {
             : draftValue;
         attachments.addAll(sendingAttachments);
         _attachmentSequence = draftAttachmentSequence;
-        if (error.code == 'session-busy') _readOnlySessions.add(sessionKey);
+        commandComposerEpoch++;
+        // A busy turn does not imply a foreign writer lease. Only connection
+        // metadata owns read-only state, so a local busy race cannot lock Send.
         _setStatus('Chat is reconnecting · your draft is kept');
         _transcriptChanged(sessionKey);
         return;
