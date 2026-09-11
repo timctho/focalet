@@ -22,8 +22,12 @@ use tokio::{
 };
 
 use crate::{
-    RuntimeCommand, RuntimeTarget, artifacts::artifacts_from_thread_item, build_context_handoff,
-    runtime_discovery::PARENT_APP_RUNTIME_ENVIRONMENT_KEYS, sanitize_diagnostic, validate_turn_input,
+    RuntimeCommand, RuntimeTarget,
+    artifacts::artifacts_from_thread_item,
+    build_context_handoff,
+    codex_home::{CodexHomeStore, pin_wsl_home},
+    runtime_discovery::PARENT_APP_RUNTIME_ENVIRONMENT_KEYS,
+    sanitize_diagnostic, validate_turn_input,
 };
 
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -154,6 +158,8 @@ pub struct CodexAdapter {
 }
 
 struct Inner {
+    home_store: CodexHomeStore,
+    pinned_home: Option<String>,
     config: CodexConfig,
     target_id: String,
     cwd: PathBuf,
@@ -228,8 +234,29 @@ struct AdapterState {
 }
 
 impl CodexAdapter {
-    pub async fn connect(config: CodexConfig, event_tx: EventSender) -> Result<Self, CodexError> {
+    pub async fn connect(
+        mut config: CodexConfig,
+        event_tx: EventSender,
+    ) -> Result<Self, CodexError> {
+        let home_store = CodexHomeStore::for_target(&config.target.id);
+        let pinned_home = home_store.load().map_err(|error| {
+            CodexError::new(
+                "persistence-failed",
+                format!("Could not read Codex home binding: {error}"),
+            )
+        })?;
+        if let Some(home) = &pinned_home
+            && config.target.execution_host.kind == "wsl"
+        {
+            pin_wsl_home(&mut config.command, &config.target.executable_path, home)
+                .map_err(|error| CodexError::new("invalid-configuration", error.to_string()))?;
+        }
         let mut command = Command::new(&config.command.command);
+        if config.target.execution_host.kind != "wsl"
+            && let Some(home) = &pinned_home
+        {
+            command.env("CODEX_HOME", home);
+        }
         command
             .args(&config.command.args)
             .stdin(Stdio::piped())
@@ -265,6 +292,8 @@ impl CodexAdapter {
 
         let adapter = Self {
             inner: Arc::new(Inner {
+                home_store,
+                pinned_home,
                 config: config.clone(),
                 target_id: config.target.id.clone(),
                 cwd: config.cwd,
@@ -341,6 +370,23 @@ impl CodexAdapter {
                 }),
             )
             .await?;
+        let reported_home = initialized.get("codexHome").and_then(Value::as_str);
+        if let Some(expected) = &self.inner.pinned_home
+            && reported_home != Some(expected.as_str())
+        {
+            return Err(CodexError::new(
+                "runtime-home-mismatch",
+                "Codex did not open this runtime's saved home. Reconnect with the configured history directory.",
+            ));
+        }
+        if let Some(home) = reported_home {
+            self.inner.home_store.remember(home).map_err(|error| {
+                CodexError::new(
+                    "persistence-failed",
+                    format!("Could not save Codex home binding: {error}"),
+                )
+            })?;
+        }
         {
             let mut state = self.inner.state.lock().await;
             state.protocol_version = 1;
