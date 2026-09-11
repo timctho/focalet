@@ -22,8 +22,12 @@ use tokio::{
 };
 
 use crate::{
-    RuntimeCommand, RuntimeTarget, artifacts::artifacts_from_thread_item, build_context_handoff,
-    runtime_discovery::PARENT_APP_RUNTIME_ENVIRONMENT_KEYS, sanitize_diagnostic, validate_turn_input,
+    RuntimeCommand, RuntimeTarget,
+    artifacts::artifacts_from_thread_item,
+    build_context_handoff,
+    codex_home::{CodexHomeStore, pin_wsl_home},
+    runtime_discovery::PARENT_APP_RUNTIME_ENVIRONMENT_KEYS,
+    sanitize_diagnostic, validate_turn_input,
 };
 
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -122,6 +126,9 @@ pub struct CodexConnection {
     pub models: Vec<Value>,
     pub sessions: Vec<Value>,
     pub session_metadata: Value,
+    /// Canonical history already returned by opening this session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -151,6 +158,8 @@ pub struct CodexAdapter {
 }
 
 struct Inner {
+    home_store: CodexHomeStore,
+    pinned_home: Option<String>,
     config: CodexConfig,
     target_id: String,
     cwd: PathBuf,
@@ -159,6 +168,7 @@ struct Inner {
     state: Mutex<AdapterState>,
     next_request_id: AtomicU64,
     next_event_sequence: AtomicU64,
+    received_messages: AtomicU64,
     event_tx: EventSender,
     request_timeout: Duration,
     wait_task: Mutex<Option<JoinHandle<()>>>,
@@ -205,6 +215,9 @@ struct AdapterState {
     active_cwd: Option<String>,
     models: Vec<Value>,
     sessions: HashMap<String, Value>,
+    // Only threads created by this adapter, before any turn was submitted.
+    // Codex 0.151 cannot read/resume their unpersisted history yet.
+    empty_threads: HashMap<String, Value>,
     materialized_threads: HashSet<String>,
     submitted_threads: HashSet<String>,
     active_turns: HashMap<String, String>,
@@ -221,8 +234,29 @@ struct AdapterState {
 }
 
 impl CodexAdapter {
-    pub async fn connect(config: CodexConfig, event_tx: EventSender) -> Result<Self, CodexError> {
+    pub async fn connect(
+        mut config: CodexConfig,
+        event_tx: EventSender,
+    ) -> Result<Self, CodexError> {
+        let home_store = CodexHomeStore::for_target(&config.target.id);
+        let pinned_home = home_store.load().map_err(|error| {
+            CodexError::new(
+                "persistence-failed",
+                format!("Could not read Codex home binding: {error}"),
+            )
+        })?;
+        if let Some(home) = &pinned_home
+            && config.target.execution_host.kind == "wsl"
+        {
+            pin_wsl_home(&mut config.command, &config.target.executable_path, home)
+                .map_err(|error| CodexError::new("invalid-configuration", error.to_string()))?;
+        }
         let mut command = Command::new(&config.command.command);
+        if config.target.execution_host.kind != "wsl"
+            && let Some(home) = &pinned_home
+        {
+            command.env("CODEX_HOME", home);
+        }
         command
             .args(&config.command.args)
             .stdin(Stdio::piped())
@@ -258,6 +292,8 @@ impl CodexAdapter {
 
         let adapter = Self {
             inner: Arc::new(Inner {
+                home_store,
+                pinned_home,
                 config: config.clone(),
                 target_id: config.target.id.clone(),
                 cwd: config.cwd,
@@ -266,6 +302,7 @@ impl CodexAdapter {
                 state: Mutex::new(AdapterState::default()),
                 next_request_id: AtomicU64::new(0),
                 next_event_sequence: AtomicU64::new(0),
+                received_messages: AtomicU64::new(0),
                 event_tx,
                 request_timeout: config.request_timeout,
                 wait_task: Mutex::new(None),
@@ -334,6 +371,23 @@ impl CodexAdapter {
                 }),
             )
             .await?;
+        let reported_home = initialized.get("codexHome").and_then(Value::as_str);
+        if let Some(expected) = &self.inner.pinned_home
+            && reported_home != Some(expected.as_str())
+        {
+            return Err(CodexError::new(
+                "runtime-home-mismatch",
+                "Codex did not open this runtime's saved home. Reconnect with the configured history directory.",
+            ));
+        }
+        if let Some(home) = reported_home {
+            self.inner.home_store.remember(home).map_err(|error| {
+                CodexError::new(
+                    "persistence-failed",
+                    format!("Could not save Codex home binding: {error}"),
+                )
+            })?;
+        }
         {
             let mut state = self.inner.state.lock().await;
             state.protocol_version = 1;
@@ -452,6 +506,7 @@ impl CodexAdapter {
             models: state.models.clone(),
             sessions: sorted_sessions(&state.sessions),
             session_metadata,
+            history: None,
         })
     }
 
@@ -551,21 +606,15 @@ impl CodexAdapter {
         if action == "set" {
             // An unanswered mutation can still have persisted the goal. Never
             // replace this chat with an empty one if a later resume fails.
-            self.inner
-                .state
-                .lock()
-                .await
-                .submitted_threads
-                .insert(session_id.into());
+            let mut state = self.inner.state.lock().await;
+            state.submitted_threads.insert(session_id.into());
+            state.empty_threads.remove(session_id);
         }
         let result = self.inner.request(method, params).await?;
         if result.get("goal").is_some_and(Value::is_object) {
-            self.inner
-                .state
-                .lock()
-                .await
-                .materialized_threads
-                .insert(session_id.into());
+            let mut state = self.inner.state.lock().await;
+            state.materialized_threads.insert(session_id.into());
+            state.empty_threads.remove(session_id);
         }
         Ok(result)
     }
@@ -580,6 +629,7 @@ impl CodexAdapter {
     }
 
     pub async fn health_check(&self, deadline: Duration) -> Result<(), CodexError> {
+        let received = self.inner.received_messages.load(Ordering::Relaxed);
         match self
             .inner
             .request_with_timeout("thread/loaded/list", json!({}), deadline)
@@ -589,6 +639,15 @@ impl CodexAdapter {
             // still proves that the process and both sides of the pipe work.
             Ok(_) => Ok(()),
             Err(error) if error.code == "runtime-request-failed" => Ok(()),
+            // A busy server may defer the probe while continuing to stream
+            // replies. That traffic proves liveness; restarting would destroy
+            // healthy turns in every chat sharing the connection.
+            Err(error)
+                if error.code == "unknown-outcome"
+                    && self.inner.received_messages.load(Ordering::Relaxed) != received =>
+            {
+                Ok(())
+            }
             Err(error) => Err(error),
         }
     }
@@ -674,7 +733,7 @@ impl CodexAdapter {
                     .is_some_and(|name| name.starts_with("Zommi · "))
                 || state.sessions.contains_key(&id);
             if is_zommi {
-                remember_session(&mut state.sessions, thread.clone());
+                remember_session(&mut state.sessions, thread);
             }
         }
         Ok(sorted_sessions(&state.sessions))
@@ -708,7 +767,9 @@ impl CodexAdapter {
             .await
             .active_turns
             .contains_key(session_id);
-        let result = if has_active_turn {
+        let result = if let Some(empty) = self.empty_history(session_id).await {
+            empty
+        } else if has_active_turn {
             self.inner
                 .request(
                     "thread/read",
@@ -721,8 +782,13 @@ impl CodexAdapter {
                 .await?
         };
         self.set_active_thread(&result).await?;
-        self.list_sessions().await?;
-        self.connection().await
+        let mut connection = self.connection().await?;
+        // Resume/read already returns the selected transcript. Keep it out of
+        // the catalog and deliver it once instead of requiring another read.
+        if result.pointer("/thread/turns").is_some_and(Value::is_array) {
+            connection.history = Some(result);
+        }
+        Ok(connection)
     }
 
     pub async fn configure_session(
@@ -743,12 +809,20 @@ impl CodexAdapter {
     }
 
     pub async fn read_session(&self, session_id: &str) -> Result<Value, CodexError> {
+        if let Some(empty) = self.empty_history(session_id).await {
+            return Ok(empty);
+        }
         self.inner
             .request(
                 "thread/read",
                 json!({"threadId": session_id, "includeTurns": true}),
             )
             .await
+    }
+
+    async fn empty_history(&self, session_id: &str) -> Option<Value> {
+        let state = self.inner.state.lock().await;
+        state.empty_threads.get(session_id).cloned()
     }
 
     pub async fn start_turn(
@@ -789,6 +863,7 @@ impl CodexAdapter {
             // A request with an unknown outcome may have persisted a turn.
             // Recovery must never silently replace that chat with a new one.
             state.submitted_threads.insert(session_id.into());
+            state.empty_threads.remove(session_id);
             if !state.materialized_threads.contains(session_id) {
                 state
                     .pending_names
@@ -798,7 +873,7 @@ impl CodexAdapter {
                     .insert(session_id.into(), input.message.clone());
                 remember_session(
                     &mut state.sessions,
-                    json!({"id": session_id, "preview": input.message}),
+                    &json!({"id": session_id, "preview": input.message}),
                 );
             }
         }
@@ -973,11 +1048,22 @@ impl CodexAdapter {
         }
         let result = self.inner.request("thread/start", params).await?;
         self.set_active_thread(&result).await?;
+        if result
+            .pointer("/thread/turns")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
+        {
+            let id = value_string(result.pointer("/thread/id"));
+            let mut state = self.inner.state.lock().await;
+            if !state.submitted_threads.contains(&id) && !state.materialized_threads.contains(&id) {
+                state.empty_threads.insert(id, result.clone());
+            }
+        }
         Ok(result)
     }
 
     async fn set_active_thread(&self, result: &Value) -> Result<(), CodexError> {
-        let thread = result.get("thread").cloned().unwrap_or(Value::Null);
+        let thread = result.get("thread").unwrap_or(&Value::Null);
         let thread_id = thread
             .get("id")
             .and_then(Value::as_str)
@@ -1196,11 +1282,9 @@ impl Inner {
             let thread_id = value_string(params.get("threadId"));
             if !thread_id.is_empty() {
                 if params.get("goal").is_some_and(Value::is_object) {
-                    self.state
-                        .lock()
-                        .await
-                        .materialized_threads
-                        .insert(thread_id.clone());
+                    let mut state = self.state.lock().await;
+                    state.materialized_threads.insert(thread_id.clone());
+                    state.empty_threads.remove(&thread_id);
                 }
                 self.emit(
                     "goal.updated",
@@ -1217,6 +1301,7 @@ impl Inner {
             .or_else_nonempty(state.thread_id.clone())
             .unwrap_or_default();
         if method == "turn/started" {
+            state.empty_threads.remove(&thread_id);
             let turn_id = value_string(params.pointer("/turn/id"));
             if !thread_id.is_empty() && !turn_id.is_empty() {
                 state
@@ -1298,12 +1383,13 @@ impl Inner {
                     .insert(turn_key(&thread_id, &completed_turn_id));
             }
             state.materialized_threads.insert(thread_id.clone());
+            state.empty_threads.remove(&thread_id);
             let name = state.pending_names.remove(&thread_id);
             let preview = state.pending_previews.remove(&thread_id);
             if name.is_some() || preview.is_some() {
                 remember_session(
                     &mut state.sessions,
-                    json!({"id": thread_id, "name": name, "preview": preview}),
+                    &json!({"id": thread_id, "name": name, "preview": preview}),
                 );
             }
             let completed_status = params
@@ -1428,7 +1514,10 @@ async fn read_stdout(inner: Weak<Inner>, stdout: tokio::process::ChildStdout) {
                     return;
                 };
                 match serde_json::from_str::<Value>(&line) {
-                    Ok(message) => inner.handle_message(message).await,
+                    Ok(message) => {
+                        inner.received_messages.fetch_add(1, Ordering::Relaxed);
+                        inner.handle_message(message).await;
+                    }
                     Err(_) => inner.emit_status(
                         "Codex app-server emitted invalid JSON.",
                         "degraded",
@@ -1703,7 +1792,7 @@ fn describe_item(item: &Value, lifecycle: &str) -> String {
     }
 }
 
-fn remember_session(sessions: &mut HashMap<String, Value>, thread: Value) {
+fn remember_session(sessions: &mut HashMap<String, Value>, thread: &Value) {
     let id = value_string(thread.get("id"));
     if id.is_empty() {
         return;
@@ -1714,7 +1803,9 @@ fn remember_session(sessions: &mut HashMap<String, Value>, thread: Value) {
         .unwrap_or_default();
     if let Some(object) = thread.as_object() {
         for (key, value) in object {
-            if !value.is_null() {
+            // The catalog is sent with every connection. Retaining turns here
+            // resends every previously opened transcript on each chat switch.
+            if key != "turns" && !value.is_null() {
                 merged.insert(key.clone(), value.clone());
             }
         }
@@ -1826,8 +1917,30 @@ mod tests {
 
     use super::{
         AdapterState, agent_message_kind, build_session_name, codex_runtime_version,
-        completed_agent_source_id, parse_stream_update,
+        completed_agent_source_id, parse_stream_update, remember_session, sorted_sessions,
     };
+
+    #[test]
+    fn session_catalog_never_retains_transcripts() {
+        let mut sessions = HashMap::new();
+        for index in 0..10 {
+            remember_session(
+                &mut sessions,
+                &json!({
+                    "id": format!("chat-{index}"), "name": "Zommi · Saved chat",
+                    "cwd": "/workspace", "updatedAt": index,
+                    "turns": [{"id": "turn", "items": [{"text": "x".repeat(100_000)}]}]
+                }),
+            );
+        }
+        remember_session(&mut sessions, &json!({"id": "chat-0", "preview": "Latest"}));
+        let catalog = sorted_sessions(&sessions);
+        assert!(catalog.iter().all(|session| session.get("turns").is_none()));
+        assert!(serde_json::to_vec(&catalog).unwrap().len() < 2_000);
+        assert_eq!(sessions["chat-0"]["cwd"], "/workspace");
+        assert_eq!(sessions["chat-0"]["preview"], "Latest");
+        assert_eq!(catalog[0]["id"], "chat-9");
+    }
 
     #[test]
     fn commentary_stays_a_message_during_streaming_and_completion() {

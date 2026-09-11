@@ -220,6 +220,7 @@ final class RuntimeConnection {
     required this.capabilities,
     this.sessionMetadata = const <String, Object?>{},
     this.runtimeVersion,
+    this.history,
   });
 
   factory RuntimeConnection.fromJson(Map<String, Object?> json) =>
@@ -234,6 +235,7 @@ final class RuntimeConnection {
             .map((value) => value.toString())
             .toList(growable: false),
         sessionMetadata: _map(json['sessionMetadata']),
+        history: json['history'] is Map ? _map(json['history']) : null,
       );
 
   final String runtimeTargetId;
@@ -244,6 +246,10 @@ final class RuntimeConnection {
   final List<Map<String, Object?>> sessions;
   final List<String> capabilities;
   final Map<String, Object?> sessionMetadata;
+
+  /// Canonical history included by adapters that read it while opening a chat.
+  /// Null means the caller must use readSession; an empty transcript is valid.
+  final Map<String, Object?>? history;
 }
 
 final class TurnReceipt {

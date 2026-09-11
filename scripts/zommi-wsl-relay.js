@@ -245,6 +245,10 @@ function handleSpoolSession(sessionDirectory, requestPath) {
   let inputPaused = false;
   let committedInputLength = null;
   let inputTimer;
+  let heartbeatValue = null;
+  let heartbeatSeenAt = performance.now();
+  let heartbeatCheckedAt = -Infinity;
+  let heartbeatError = null;
 
   const stopInput = () => {
     if (inputTimer) clearInterval(inputTimer);
@@ -266,8 +270,27 @@ function handleSpoolSession(sessionDirectory, requestPath) {
   inputTimer = setInterval(() => {
     if (!started || finished || inputPaused) return;
     try {
-      const heartbeat = fs.statSync(clientHeartbeatPath).mtimeMs;
-      if (!Number.isFinite(heartbeat) || Date.now() - heartbeat > 5_000) {
+      const now = performance.now();
+      if (now - heartbeatCheckedAt >= 250) {
+        heartbeatCheckedAt = now;
+        try {
+          // Windows file timestamps can lag across the WSL mount. Observe
+          // changing heartbeat contents using our own monotonic clock instead.
+          // A concurrent truncate/write or transient read error is not an exit.
+          const value = fs.readFileSync(clientHeartbeatPath, 'utf8').trim();
+          if (/^\d+$/.test(value) && value !== heartbeatValue) {
+            heartbeatValue = value;
+            heartbeatSeenAt = now;
+            heartbeatError = null;
+          }
+        } catch (error) {
+          heartbeatError = error.code;
+        }
+      }
+      if (now - heartbeatSeenAt > 5_000) {
+        tryAppendFrame(outputPath, CHANNEL_STDERR, Buffer.from(
+          `WSL runtime client heartbeat stopped for 5s${heartbeatError ? ` (${heartbeatError})` : ''}.\n`,
+        ));
         stopInput();
         killProcessGroup(child);
         return;
@@ -300,6 +323,9 @@ function handleSpoolSession(sessionDirectory, requestPath) {
         child.stdin.end();
       }
     } catch (error) {
+      tryAppendFrame(outputPath, CHANNEL_STDERR, Buffer.from(
+        `WSL runtime input relay failed (${error.code || 'I/O error'}).\n`,
+      ));
       stopInput();
       killProcessGroup(child);
     }
