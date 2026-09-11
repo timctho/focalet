@@ -8,6 +8,21 @@ or updater that inherits a different `CODEX_HOME` can expose this mismatch.
 The sidebar catalog stores runtime and session IDs; it does not move histories
 when the runtime's home changes.
 
+Zommi now saves the `codexHome` reported by the first successful app-server
+handshake for each exact runtime target. Subsequent launches and recovery
+attempts explicitly set `CODEX_HOME` to that directory, including inside the
+Windows-to-WSL relay. A different returned home or an unreadable binding stops
+the connection before loading or creating chats.
+
+Bindings live in a `codex-homes` directory next to `session-binding.json`.
+Each file is named with the SHA-256 of the runtime target ID and contains
+`runtimeTargetId` and `codexHome`. When repairing an existing split installation,
+close Zommi, repair the history links below, and set that target's binding to the
+chosen absolute home before restarting. Changing a binding selects a history
+directory; it does not move histories or credentials. Keep bindings scoped to
+the exact runtime and execution host. Older servers that do not report
+`codexHome` retain their existing behavior until a home has been bound.
+
 `scripts/repair_codex_history.py` reproduces the missing-file lookup repair.
 Run it on the host where Codex stores its history: for Windows Zommi using WSL
 Codex, run the script **inside that WSL distribution**, with the Windows catalog
@@ -48,12 +63,13 @@ credentials. Keep original files in place while their links are in use.
 After applying, open the previously failing chats in the installed Zommi app,
 check their histories, and switch back to the current chat. This verifies the
 running app as well as the filesystem. The repair does not change runtime-home
-selection: use the same Codex home on subsequent launches to avoid splitting
-new chats between homes again. It does not resolve a genuinely missing rollout,
+selection: select the repaired home in the target's home binding before
+reconnecting. It does not resolve a genuinely missing rollout,
 an active writer in another process, or another provider's connection failure.
 
 Run the regression suite with:
 
 ```sh
 python3 tests/test_codex_history_repair.py -v
+python3 tests/test_codex_home_persistence.py -v
 ```

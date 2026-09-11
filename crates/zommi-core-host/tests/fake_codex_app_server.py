@@ -98,6 +98,9 @@ for line in sys.stdin:
         if control and (control / "stall-initialize").exists():
             continue
         result = {"userAgent": "codex-cli/9.8.7 (fixture)"}
+        if os.environ.get("ZOMMI_FAKE_REPORT_CODEX_HOME") == "1":
+            result["codexHome"] = os.environ.get("ZOMMI_FAKE_REPORTED_HOME", os.environ["CODEX_HOME"])
+            log({"fixtureCodexHome": os.environ["CODEX_HOME"]})
     elif method == "thread/loaded/list":
         if control and (control / "stall-probe-pid").exists() and (control / "stall-probe-pid").read_text() == str(os.getpid()):
             continue
