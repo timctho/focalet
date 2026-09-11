@@ -86,7 +86,10 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
                     },
                     builders: {
                       'pre': _CodeBlockBuilder(onCopy: widget.onCopy),
-                      'a': _TooltipLinkBuilder(onOpen: widget.onOpenLink),
+                      'a': _TooltipLinkBuilder(
+                        onOpen: widget.onOpenLink,
+                        onCopy: widget.onCopy,
+                      ),
                     },
                     styleSheet: MarkdownStyleSheet(
                       a: base.copyWith(
@@ -186,9 +189,28 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
 }
 
 final class _TooltipLinkBuilder extends MarkdownElementBuilder {
-  _TooltipLinkBuilder({required this.onOpen});
+  _TooltipLinkBuilder({required this.onOpen, required this.onCopy});
 
   final Future<void> Function(String value) onOpen;
+  final Future<void> Function(String value) onCopy;
+
+  Future<void> _showContextMenu(
+    BuildContext context,
+    Offset globalPosition,
+    String destination,
+  ) async {
+    Tooltip.dismissAllToolTips();
+    ContextMenuController.removeAny();
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final position = overlay.globalToLocal(globalPosition);
+    final copy = await showMenu<bool>(
+      context: context,
+      position: RelativeRect.fromSize(position & Size.zero, overlay.size),
+      items: const [PopupMenuItem(value: true, child: Text('Copy link'))],
+    );
+    if (copy == true) await onCopy(destination);
+  }
 
   @override
   Widget visitElementAfterWithContext(
@@ -209,6 +231,15 @@ final class _TooltipLinkBuilder extends MarkdownElementBuilder {
           onTap: destination.isEmpty
               ? null
               : () => unawaited(onOpen(destination)),
+          onSecondaryTapUp: destination.isEmpty
+              ? null
+              : (details) => unawaited(
+                  _showContextMenu(
+                    context,
+                    details.globalPosition,
+                    destination,
+                  ),
+                ),
           child: Text.rich(
             TextSpan(
               text: element.textContent,
