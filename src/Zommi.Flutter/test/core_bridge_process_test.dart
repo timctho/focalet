@@ -705,63 +705,71 @@ void main() {
     },
   );
 
-  test('a busy exact binding falls back to one fresh Codex session', () async {
-    final executableName = Platform.isWindows
-        ? 'zommi-core-host.exe'
-        : 'zommi-core-host';
-    final executable = File(
-      '${Directory.current.path}/../../target/debug/$executableName',
-    ).absolute;
-    final fixture = File(
-      '${Directory.current.path}/../../crates/zommi-core-host/tests/'
-      'fake_codex_app_server.py',
-    ).absolute;
-    final python = await _findPython();
-    final temporary = await Directory.systemTemp.createTemp(
-      'zommi-busy-binding-',
-    );
-    addTearDown(() => temporary.delete(recursive: true));
-    final binding = File('${temporary.path}/binding.json');
-    final requestLog = File('${temporary.path}/requests.jsonl');
-    final bridge = ProcessCoreBridge(
-      executablePath: executable.path,
-      environment: <String, String>{
-        'ZOMMI_CODEX_COMMAND': python,
-        'ZOMMI_CODEX_ARGS_JSON': jsonEncode(<String>[fixture.path]),
-        'ZOMMI_CORE_STATE_PATH': binding.path,
-        'ZOMMI_FAKE_REQUEST_LOG': requestLog.path,
-        'ZOMMI_FAKE_BUSY_RESUME': '1',
-        'ZOMMI_FAKE_THREAD_ID': 'busy-thread',
-        'ZOMMI_FAKE_FRESH_THREAD_ID': 'fresh-thread',
-      },
-    );
-    addTearDown(bridge.close);
-    await bridge.initialize();
-    final discovery = await bridge.discoverRuntimeTargets();
-    await binding.writeAsString(
-      jsonEncode(<String, Object?>{
-        'runtimeTargetId': discovery.selectedTargetId,
-        'sessionId': 'busy-thread',
-        'cwd': temporary.path,
-      }),
-    );
-    final connection = await bridge.connectRuntime(
-      runtimeTargetId: discovery.selectedTargetId!,
-      cwd: temporary.path,
-    );
-    expect(connection.sessionId, 'fresh-thread');
-    final requests = await requestLog.readAsLines().then(
-      (lines) => lines.map(jsonDecode).whereType<Map>().toList(),
-    );
-    final resumeIndex = requests.indexWhere(
-      (request) => request['method'] == 'thread/resume',
-    );
-    final startIndex = requests.indexWhere(
-      (request) => request['method'] == 'thread/start',
-    );
-    expect(resumeIndex, greaterThanOrEqualTo(0));
-    expect(startIndex, greaterThan(resumeIndex));
-  });
+  test(
+    'a busy exact binding opens its history without replacing the chat',
+    () async {
+      final executableName = Platform.isWindows
+          ? 'zommi-core-host.exe'
+          : 'zommi-core-host';
+      final executable = File(
+        '${Directory.current.path}/../../target/debug/$executableName',
+      ).absolute;
+      final fixture = File(
+        '${Directory.current.path}/../../crates/zommi-core-host/tests/'
+        'fake_codex_app_server.py',
+      ).absolute;
+      final python = await _findPython();
+      final temporary = await Directory.systemTemp.createTemp(
+        'zommi-busy-binding-',
+      );
+      addTearDown(() => temporary.delete(recursive: true));
+      final binding = File('${temporary.path}/binding.json');
+      final requestLog = File('${temporary.path}/requests.jsonl');
+      final bridge = ProcessCoreBridge(
+        executablePath: executable.path,
+        environment: <String, String>{
+          'ZOMMI_CODEX_COMMAND': python,
+          'ZOMMI_CODEX_ARGS_JSON': jsonEncode(<String>[fixture.path]),
+          'ZOMMI_CORE_STATE_PATH': binding.path,
+          'ZOMMI_FAKE_REQUEST_LOG': requestLog.path,
+          'ZOMMI_FAKE_BUSY_RESUME': '1',
+          'ZOMMI_FAKE_THREAD_ID': 'busy-thread',
+          'ZOMMI_FAKE_FRESH_THREAD_ID': 'fresh-thread',
+        },
+      );
+      addTearDown(bridge.close);
+      await bridge.initialize();
+      final discovery = await bridge.discoverRuntimeTargets();
+      await binding.writeAsString(
+        jsonEncode(<String, Object?>{
+          'runtimeTargetId': discovery.selectedTargetId,
+          'sessionId': 'busy-thread',
+          'cwd': temporary.path,
+        }),
+      );
+      final connection = await bridge.connectRuntime(
+        runtimeTargetId: discovery.selectedTargetId!,
+        cwd: temporary.path,
+      );
+      expect(connection.sessionId, 'busy-thread');
+      expect(connection.sessionMetadata['readOnly'], isTrue);
+      final requests = await requestLog.readAsLines().then(
+        (lines) => lines.map(jsonDecode).whereType<Map>().toList(),
+      );
+      final resumeIndex = requests.indexWhere(
+        (request) => request['method'] == 'thread/resume',
+      );
+      final startIndex = requests.indexWhere(
+        (request) => request['method'] == 'thread/start',
+      );
+      expect(resumeIndex, greaterThanOrEqualTo(0));
+      expect(startIndex, -1);
+      expect(
+        requests.any((request) => request['method'] == 'thread/read'),
+        isTrue,
+      );
+    },
+  );
 }
 
 Future<String> _findPython() async {

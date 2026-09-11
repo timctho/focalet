@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:flutter/services.dart';
+
 enum SessionPresence { active, running, unread, done }
 
 enum TranscriptKind {
@@ -295,6 +297,8 @@ final class QueuedMessage {
     required this.text,
     required this.inlineText,
     required this.settings,
+    required this.draftValue,
+    required this.attachmentSequence,
     required List<ContextAttachment> attachments,
   }) : attachments = List.unmodifiable(attachments);
 
@@ -305,6 +309,8 @@ final class QueuedMessage {
   final String text;
   final String inlineText;
   final SessionSettings settings;
+  final TextEditingValue draftValue;
+  final int attachmentSequence;
   final List<ContextAttachment> attachments;
 }
 

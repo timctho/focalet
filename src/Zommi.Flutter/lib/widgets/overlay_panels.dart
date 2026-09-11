@@ -290,7 +290,7 @@ class _SessionSidebarState extends State<SessionSidebar> {
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontSize: 11),
                         ),
-                        onTap: controller.sessionBusy || controller.runtimeBusy
+                        onTap: controller.runtimeBusy
                             ? null
                             : () => unawaited(
                                 controller.switchSession(

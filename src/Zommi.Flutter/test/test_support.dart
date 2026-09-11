@@ -5,7 +5,7 @@ import 'package:zommi_flutter/desktop/artifact_loader.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 
-final class RichFakeCore
+class RichFakeCore
     implements
         CoreBridge,
         RuntimeConfigurationBridge,
@@ -86,6 +86,7 @@ final class RichFakeCore
   Future<void>? startTurnGate;
   bool uniqueTurnIds = false;
   bool startTurnFails = false;
+  Object? startTurnError;
   bool startTurnAccepted = true;
   final List<Map<String, Object?>> startedTurns = [];
   Future<void>? createSessionGate;
@@ -513,6 +514,7 @@ final class RichFakeCore
       'profile': profile,
     });
     if (startTurnGate case final gate?) await gate;
+    if (startTurnError case final error?) throw error;
     if (startTurnFails) throw StateError('Start failed');
     lastMessage = message;
     lastModel = model;

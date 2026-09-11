@@ -107,6 +107,13 @@ final class ZommiController extends ChangeNotifier {
   String? switchingRuntimeId;
   bool runtimeOverrideBusy = false;
   bool sessionBusy = false;
+  final Set<String> _readOnlySessions = {};
+  bool get sessionReadOnly => _readOnlySessions.contains(_activeSessionKey);
+  (String, String)? _pendingSwitch;
+  Future<void>? _switchWorker;
+  Timer? _switchRetryTimer;
+  int _switchEpoch = 0;
+  int _switchFailures = 0;
   bool sessionSettingsBusy = false;
   bool get submitting => _startingSessions.isNotEmpty;
   bool selectingContent = false;
@@ -182,7 +189,7 @@ final class ZommiController extends ChangeNotifier {
 
   void resumeQueuedMessages() {
     final key = _activeSessionKey;
-    if (key == null || sessionBusy || runtimeBusy) return;
+    if (key == null || sessionReadOnly || sessionBusy || runtimeBusy) return;
     _pausedQueues.remove(key);
     _drainMessageQueue(key);
     _notify();
@@ -195,6 +202,7 @@ final class ZommiController extends ChangeNotifier {
         queue.isEmpty ||
         _activeTurns.containsKey(sessionKey) ||
         _startingSessions.contains(sessionKey) ||
+        _readOnlySessions.contains(sessionKey) ||
         _pausedQueues.contains(sessionKey)) {
       return;
     }
@@ -704,9 +712,11 @@ final class ZommiController extends ChangeNotifier {
       return;
     }
     if (selectingActiveRuntime && !activeRuntimeUnavailable) {
+      _cancelSwitchRecovery();
       closeTransientPanels();
       return;
     }
+    _cancelSwitchRecovery();
     runtimeBusy = true;
     switchingRuntimeId = targetId;
     approval = null;
@@ -886,6 +896,7 @@ final class ZommiController extends ChangeNotifier {
   Future<void> _readActiveHistory({
     Map<String, Object?>? history,
     int? historyRevision,
+    bool retryOnFailure = false,
   }) async {
     final runtimeTargetId = activeRuntime?.id;
     final sessionId = activeSessionId;
@@ -920,6 +931,7 @@ final class ZommiController extends ChangeNotifier {
       _transcriptChanged(sessionKey);
     } on Object catch (error) {
       _turnsBySession.putIfAbsent(sessionKey, () => []);
+      if (retryOnFailure) rethrow;
       _setStatus('History unavailable · $error', warning: true);
     }
     _notify();
@@ -938,6 +950,7 @@ final class ZommiController extends ChangeNotifier {
         !canCreateSession(target)) {
       return;
     }
+    _cancelSwitchRecovery();
     sessionBusy = true;
     final changingRuntime = activeRuntime?.id != target.id;
     switchingRuntimeId = changingRuntime ? target.id : null;
@@ -990,14 +1003,55 @@ final class ZommiController extends ChangeNotifier {
     String? runtimeTargetId,
   }) async {
     final targetId = runtimeTargetId ?? activeRuntime?.id;
-    if (targetId == null ||
+    if (_closed ||
+        targetId == null ||
         starting ||
+        runtimeBusy ||
+        sessionSettingsBusy ||
+        submitting ||
+        selectingContent) {
+      return;
+    }
+    if (sessionBusy && _switchWorker == null) return;
+    _switchRetryTimer?.cancel();
+    _switchFailures = 0;
+    _switchEpoch++;
+    if (_switchWorker == null &&
+        _isActiveSession(targetId, sessionId) &&
+        !sessionReadOnly) {
+      _pendingSwitch = null;
+      return;
+    }
+    _pendingSwitch = (targetId, sessionId);
+    if (_switchWorker case final worker?) return worker;
+    final worker = _drainSessionSwitches();
+    _switchWorker = worker;
+    try {
+      await worker;
+    } finally {
+      _switchWorker = null;
+    }
+  }
+
+  Future<void> _drainSessionSwitches() async {
+    while (!_closed && _pendingSwitch != null) {
+      final (targetId, sessionId) = _pendingSwitch!;
+      _pendingSwitch = null;
+      await _switchSessionOnce(sessionId, targetId, _switchEpoch);
+    }
+  }
+
+  Future<void> _switchSessionOnce(
+    String sessionId,
+    String targetId,
+    int epoch,
+  ) async {
+    if (starting ||
         sessionBusy ||
         runtimeBusy ||
         sessionSettingsBusy ||
         submitting ||
-        selectingContent ||
-        _isActiveSession(targetId, sessionId)) {
+        selectingContent) {
       return;
     }
     sessionBusy = true;
@@ -1010,7 +1064,9 @@ final class ZommiController extends ChangeNotifier {
     _notify();
     try {
       RuntimeConnection? initialConnection;
-      if (changingRuntime || activeRuntime?.status == 'unavailable') {
+      if (changingRuntime ||
+          activeRuntime?.status == 'unavailable' ||
+          _switchFailures > 0) {
         initialConnection = await core.connectRuntime(
           runtimeTargetId: targetId,
           preferredSessionId: sessionId,
@@ -1024,13 +1080,38 @@ final class ZommiController extends ChangeNotifier {
         profile: _nonEmpty(targetSettings.profile),
       );
       if (initialConnection != null) _cacheConnection(initialConnection);
+      if (_closed || epoch != _switchEpoch) return;
       await _applySessionConnection(
         connection,
         historyRevision: historyRevision,
       );
-      _setStatus('Chat switched');
+      _switchFailures = 0;
+      _setStatus(
+        sessionReadOnly
+            ? 'Chat is open elsewhere · reconnecting automatically'
+            : 'Chat switched',
+      );
     } on Object catch (error) {
-      _setStatus('Could not switch chat · $error', warning: true);
+      if (_closed || epoch != _switchEpoch) return;
+      if (_canRetrySwitch(error)) {
+        _switchFailures++;
+        _setStatus('Reconnecting to chat… Your draft is kept.');
+        final delay = Duration(
+          seconds: (1 << (_switchFailures - 1).clamp(0, 4)).clamp(1, 15),
+        );
+        _switchRetryTimer = Timer(delay, () {
+          if (_closed || epoch != _switchEpoch || _switchWorker != null) return;
+          _pendingSwitch = (targetId, sessionId);
+          final worker = _drainSessionSwitches();
+          _switchWorker = worker;
+          unawaited(worker.whenComplete(() => _switchWorker = null));
+        });
+      } else {
+        final detail = error is CoreProtocolException
+            ? error.message
+            : error.toString();
+        _setStatus('Could not open chat · $detail', warning: true);
+      }
     } finally {
       sessionBusy = false;
       switchingRuntimeId = null;
@@ -1038,10 +1119,36 @@ final class ZommiController extends ChangeNotifier {
     }
   }
 
+  static bool _canRetrySwitch(Object error) =>
+      error is TimeoutException ||
+      (error is CoreProtocolException &&
+          const {
+            'runtime-recovering',
+            'runtime-unavailable',
+            'runtime-overloaded',
+            'unknown-outcome',
+            'session-busy',
+            'core-unavailable',
+          }.contains(error.code));
+
+  void _cancelSwitchRecovery() {
+    _switchRetryTimer?.cancel();
+    _pendingSwitch = null;
+    _switchFailures = 0;
+    _switchEpoch++;
+  }
+
   static String? _nonEmpty(String? value) =>
       value == null || value.isEmpty ? null : value;
 
   void _cacheConnection(RuntimeConnection connection) {
+    final key = _sessionKey(connection.runtimeTargetId, connection.sessionId);
+    if (connection.sessionMetadata['readOnly'] == true) {
+      _readOnlySessions.add(key);
+      _pausedQueues.add(key);
+    } else {
+      _readOnlySessions.remove(key);
+    }
     final target = _runtimeTarget(connection.runtimeTargetId);
     if (target != null) _knownRuntimes[target.id] = target;
     _runtimeCapabilities[connection.runtimeTargetId] = {
@@ -1119,6 +1226,7 @@ final class ZommiController extends ChangeNotifier {
     await _readActiveHistory(
       history: connection.history,
       historyRevision: historyRevision,
+      retryOnFailure: true,
     );
     await _refreshGoal();
     focusComposerEpoch++;
@@ -1130,6 +1238,12 @@ final class ZommiController extends ChangeNotifier {
     List<String>? attachmentOrder,
   }) async {
     final text = message.trim();
+    if (sessionReadOnly) {
+      _setStatus(
+        'Chat is open elsewhere · your draft is kept until it reconnects',
+      );
+      return;
+    }
     final runtimeTargetId = activeRuntime?.id;
     final sessionId = activeSessionId;
     if (text.isEmpty || selectingContent || sessionBusy || runtimeBusy) {
@@ -1148,6 +1262,8 @@ final class ZommiController extends ChangeNotifier {
       return;
     }
     _newSessions.remove(sessionKey);
+    final draftValue = composerValue;
+    final draftAttachmentSequence = _attachmentSequence;
     composerValue = TextEditingValue.empty;
     final sendingAttachments = _orderedAttachments(attachmentOrder);
     attachments.clear();
@@ -1164,6 +1280,8 @@ final class ZommiController extends ChangeNotifier {
       inlineText: inlineMessage ?? text,
       attachments: sendingAttachments,
       settings: activeSessionSettings,
+      draftValue: draftValue,
+      attachmentSequence: draftAttachmentSequence,
     );
     final history = _inputHistory.putIfAbsent(sessionKey, () => []);
     history.remove(text);
@@ -1262,6 +1380,33 @@ final class ZommiController extends ChangeNotifier {
       _activeTurns.remove(sessionKey);
       _cancelRequestedSessions.remove(sessionKey);
       _interruptingSessions.remove(sessionKey);
+      if (error is CoreProtocolException &&
+          const {'runtime-recovering', 'session-busy'}.contains(error.code)) {
+        // These errors happen before submission. Preserve the editable draft;
+        // uncertain outcomes remain in the transcript and are never replayed.
+        _turnsBySession[sessionKey]?.remove(localTurn);
+        if (_isActiveSession(runtimeTargetId, sessionId) &&
+            composerValue.text.isEmpty &&
+            attachments.isEmpty) {
+          composerValue = message.draftValue.text.isEmpty
+              ? TextEditingValue(text: message.inlineText)
+              : message.draftValue;
+          attachments.addAll(sendingAttachments);
+          _attachmentSequence = message.attachmentSequence;
+          commandComposerEpoch++;
+        } else {
+          // A queued start may fail after the user switches chats or begins
+          // another draft. Keep it in its original queue without overwriting.
+          _messageQueues.putIfAbsent(sessionKey, () => []).insert(0, message);
+        }
+        // A busy turn does not imply a foreign writer lease. Only connection
+        // metadata owns read-only state, so a local busy race cannot lock Send.
+        if (_isActiveSession(runtimeTargetId, sessionId)) {
+          _setStatus('Chat is reconnecting · your message is kept');
+        }
+        _transcriptChanged(sessionKey);
+        return;
+      }
       localTurn.blocks.add(
         TranscriptBlock(
           id: '$operationId:error',
@@ -1941,6 +2086,29 @@ final class ZommiController extends ChangeNotifier {
     if (event.sequence > 0) _lastSequences[sequenceKey] = event.sequence;
     final sessionId = event.sessionId ?? activeSessionId;
     switch (event.name) {
+      case 'session.refreshed':
+        final connection = RuntimeConnection.fromJson(
+          mapValue(event.payload['connection']),
+        );
+        if (connection.runtimeTargetId != event.runtimeTargetId ||
+            connection.sessionId != event.sessionId) {
+          return;
+        }
+        _cacheConnection(connection);
+        if (!_isActiveSession(
+              connection.runtimeTargetId,
+              connection.sessionId,
+            ) ||
+            sessionBusy) {
+          return;
+        }
+        unawaited(_readActiveHistory(history: connection.history));
+        _setStatus(
+          sessionReadOnly
+              ? 'Chat is open elsewhere · reconnecting automatically'
+              : 'Chat reconnected',
+        );
+        return;
       case 'goal.updated':
         if (sessionId == null) return;
         final key = _sessionKey(event.runtimeTargetId, sessionId);
@@ -2618,6 +2786,7 @@ final class ZommiController extends ChangeNotifier {
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
+    _switchRetryTimer?.cancel();
     _catalogStartupTimer?.cancel();
     _catalogRetentionTimer?.cancel();
     for (final (_, completion) in _catalogQueue) {

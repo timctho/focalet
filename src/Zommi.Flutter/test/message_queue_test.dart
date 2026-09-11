@@ -191,6 +191,40 @@ void main() {
     );
   }
 
+  testWidgets('a rejected queued start preserves the newer composer draft', (
+    tester,
+  ) async {
+    final core = RichFakeCore()
+      ..historyCount = 0
+      ..uniqueTurnIds = true;
+    await tester.pumpWidget(ZommiApp(core: core, desktop: FakeDesktopBridge()));
+    await tester.pumpAndSettle();
+    final field = find.byKey(const ValueKey('zommi-composer'));
+    await tester.enterText(field, 'first');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await tester.enterText(field, 'queued');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await tester.enterText(field, 'newer draft');
+    await tester.pump();
+    core.startTurnError = const CoreProtocolException('session-busy', 'Busy');
+    core.emit(
+      const CoreEvent(
+        name: 'turn.completed',
+        sequence: 1,
+        runtimeTargetId: 'runtime-codex',
+        sessionId: 'session-1',
+        turnId: 'session-1-live-turn-1',
+        payload: {'status': 'completed'},
+      ),
+    );
+    await tester.pump();
+    expect(tester.widget<TextField>(field).controller!.text, 'newer draft');
+    expect(find.text('1 queued · paused'), findsOneWidget);
+    expect(find.text('queued'), findsOneWidget);
+  });
+
   testWidgets(
     'Send and Enter queue during a response; Stop and Resume are separate',
     (tester) async {

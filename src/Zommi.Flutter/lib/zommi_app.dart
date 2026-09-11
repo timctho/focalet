@@ -376,6 +376,7 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
       return;
     }
     if (text.isEmpty ||
+        _controller.sessionReadOnly ||
         (_controller.submitting && isCommand) ||
         _controller.sessionBusy ||
         _controller.runtimeBusy ||
@@ -1039,6 +1040,7 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                           _controller.activeSessionId == null ||
                           _controller.selectingContent ||
                           _controller.sessionBusy ||
+                          _controller.sessionReadOnly ||
                           _controller.runtimeBusy
                       ? null
                       : _submit,
@@ -1080,6 +1082,7 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                     onPressed:
                         _controller.turnActive ||
                             _controller.sessionBusy ||
+                            _controller.sessionReadOnly ||
                             _controller.runtimeBusy
                         ? null
                         : _controller.resumeQueuedMessages,
