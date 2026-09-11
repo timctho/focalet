@@ -41,6 +41,19 @@ void main() {
         desktop: const NoopDesktopBridge(),
       );
       addTearDown(controller.close);
+      // Windows normally prefers its default WSL runtime. Bind this test to
+      // the native Python fixture before the controller chooses a runtime.
+      await bridge.initialize();
+      final discovery = await bridge.discoverRuntimeTargets();
+      final fixtureTarget = discovery.targets.singleWhere(
+        (target) =>
+            target.runtimeId == 'codex' &&
+            target.executionHost['kind'] == 'native',
+      );
+      await bridge.connectRuntime(
+        runtimeTargetId: fixtureTarget.id,
+        cwd: temporary.path,
+      );
       await controller.initialize();
       expect(controller.activeRuntime?.runtimeId, 'codex');
       final runtimeTargetId = controller.activeRuntime!.id;
