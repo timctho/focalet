@@ -889,7 +889,15 @@ async fn main() -> io::Result<()> {
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<CoreEvent>();
     let event_output = output_tx.clone();
     let event_forwarder = tokio::spawn(async move {
-        while let Some(event) = event_rx.recv().await {
+        let mut sequences = HashMap::<String, u64>::new();
+        while let Some(mut event) = event_rx.recv().await {
+            // Adapter replacements start their counters at zero. Sequence at
+            // the host boundary so the UI accepts events after every restart.
+            let sequence = sequences
+                .entry(event.runtime_target_id.clone())
+                .or_default();
+            *sequence += 1;
+            event.sequence = *sequence;
             let envelope = CoreEventEnvelope {
                 protocol_version: CORE_PROTOCOL_VERSION,
                 event,

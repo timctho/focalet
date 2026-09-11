@@ -89,6 +89,7 @@ pub struct CodexConfig {
     pub cwd: PathBuf,
     pub preferred_session_id: Option<String>,
     pub list_only: bool,
+    pub resume_required: bool,
     pub request_timeout: Duration,
 }
 
@@ -105,6 +106,7 @@ impl CodexConfig {
             cwd,
             preferred_session_id,
             list_only: false,
+            resume_required: false,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
         }
     }
@@ -149,6 +151,7 @@ pub struct CodexAdapter {
 }
 
 struct Inner {
+    config: CodexConfig,
     target_id: String,
     cwd: PathBuf,
     stdin: Mutex<ChildStdin>,
@@ -163,6 +166,35 @@ struct Inner {
     stderr_task: Mutex<Option<JoinHandle<()>>>,
 }
 
+impl Drop for Inner {
+    fn drop(&mut self) {
+        for task in [
+            self.wait_task.get_mut().take(),
+            self.stdout_task.get_mut().take(),
+            self.stderr_task.get_mut().take(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            task.abort();
+        }
+    }
+}
+
+#[cfg(unix)]
+struct ProcessGroup(u32);
+
+#[cfg(unix)]
+impl Drop for ProcessGroup {
+    fn drop(&mut self) {
+        // CLI launchers can fork the real app-server. Terminate the group we
+        // created, including descendants still holding pipes or thread locks.
+        unsafe {
+            libc::kill(-(self.0 as i32), libc::SIGKILL);
+        }
+    }
+}
+
 #[derive(Default)]
 struct AdapterState {
     protocol_version: u64,
@@ -174,6 +206,7 @@ struct AdapterState {
     models: Vec<Value>,
     sessions: HashMap<String, Value>,
     materialized_threads: HashSet<String>,
+    submitted_threads: HashSet<String>,
     active_turns: HashMap<String, String>,
     completed_turns: HashSet<String>,
     turn_client_operations: HashMap<String, String>,
@@ -200,6 +233,8 @@ impl CodexAdapter {
         for variable in PARENT_APP_RUNTIME_ENVIRONMENT_KEYS {
             command.env_remove(variable);
         }
+        #[cfg(unix)]
+        command.process_group(0);
         if config.cwd.is_dir() {
             command.current_dir(&config.cwd);
         }
@@ -209,6 +244,8 @@ impl CodexAdapter {
                 format!("Could not start Codex app-server: {error}"),
             )
         })?;
+        #[cfg(unix)]
+        let process_group = ProcessGroup(child.id().expect("newly spawned Codex child has an id"));
         let stdin = child.stdin.take().ok_or_else(|| {
             CodexError::new("runtime-unavailable", "Codex app-server has no stdin.")
         })?;
@@ -221,6 +258,7 @@ impl CodexAdapter {
 
         let adapter = Self {
             inner: Arc::new(Inner {
+                config: config.clone(),
                 target_id: config.target.id.clone(),
                 cwd: config.cwd,
                 stdin: Mutex::new(stdin),
@@ -247,13 +285,20 @@ impl CodexAdapter {
         *adapter.inner.stderr_task.lock().await = Some(stderr_task);
         let weak = Arc::downgrade(&adapter.inner);
         let wait_task = tokio::spawn(async move {
+            #[cfg(unix)]
+            let _process_group = process_group;
             let status = child.wait().await;
             if let Some(inner) = weak.upgrade() {
-                if let Some(task) = inner.stdout_task.lock().await.take() {
-                    let _ = task.await;
-                }
-                if let Some(task) = inner.stderr_task.lock().await.take() {
-                    let _ = task.await;
+                for mut task in [
+                    inner.stdout_task.lock().await.take(),
+                    inner.stderr_task.lock().await.take(),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    if timeout(Duration::from_secs(1), &mut task).await.is_err() {
+                        task.abort();
+                    }
                 }
                 inner.handle_exit(status).await;
             }
@@ -298,6 +343,50 @@ impl CodexAdapter {
         if list_only {
             return Ok(());
         }
+
+        self.load_models().await?;
+        self.list_sessions().await?;
+        let resumed = if let Some(session_id) = preferred_session_id {
+            match self
+                .inner
+                .request("thread/resume", json!({"threadId": session_id}))
+                .await
+            {
+                Ok(result) => {
+                    self.set_active_thread(&result).await?;
+                    true
+                }
+                Err(error) if self.inner.config.resume_required => return Err(error),
+                Err(error) => {
+                    let detail = if error.message.contains("already has an active writer") {
+                        "is open elsewhere"
+                    } else {
+                        "could not be resumed"
+                    };
+                    self.inner.emit_status(
+                        &format!("Bound session {detail}; creating a fresh session…"),
+                        "connecting",
+                        None,
+                        None,
+                    );
+                    false
+                }
+            }
+        } else {
+            false
+        };
+        if !resumed {
+            self.start_thread(None, None).await?;
+        }
+        let session_id = self.active_session_id().await?;
+        self.inner.emit_status(
+            &format!("Codex ready · {}", short_id(&session_id)),
+            "ready",
+            Some(&session_id),
+            None,
+        );
+        // Start optional discovery only after initialization is complete, so
+        // cancelling a reconnect cannot leave a task owning the new process.
         let tools_adapter = self.clone();
         tokio::spawn(async move {
             let result = tools_adapter
@@ -308,6 +397,9 @@ impl CodexAdapter {
                 )
                 .await;
             if let Ok(result) = result {
+                if !tools_adapter.is_running().await {
+                    return;
+                }
                 let chrome = result
                     .get("data")
                     .and_then(Value::as_array)
@@ -338,46 +430,6 @@ impl CodexAdapter {
             }
         });
 
-        self.load_models().await?;
-        self.list_sessions().await?;
-        let resumed = if let Some(session_id) = preferred_session_id {
-            match self
-                .inner
-                .request("thread/resume", json!({"threadId": session_id}))
-                .await
-            {
-                Ok(result) => {
-                    self.set_active_thread(&result).await?;
-                    true
-                }
-                Err(error) => {
-                    let detail = if error.message.contains("already has an active writer") {
-                        "is open elsewhere"
-                    } else {
-                        "could not be resumed"
-                    };
-                    self.inner.emit_status(
-                        &format!("Bound session {detail}; creating a fresh session…"),
-                        "connecting",
-                        None,
-                        None,
-                    );
-                    false
-                }
-            }
-        } else {
-            false
-        };
-        if !resumed {
-            self.start_thread(None, None).await?;
-        }
-        let session_id = self.active_session_id().await?;
-        self.inner.emit_status(
-            &format!("Codex ready · {}", short_id(&session_id)),
-            "ready",
-            Some(&session_id),
-            None,
-        );
         Ok(())
     }
 
@@ -417,7 +469,70 @@ impl CodexAdapter {
     }
 
     pub async fn is_running(&self) -> bool {
-        !self.inner.state.lock().await.exited
+        let state = self.inner.state.lock().await;
+        !state.exited && !state.stopping
+    }
+
+    pub async fn health_check(&self, deadline: Duration) -> Result<(), CodexError> {
+        match self
+            .inner
+            .request_with_timeout("thread/loaded/list", json!({}), deadline)
+            .await
+        {
+            // An older server may reject the probe method; a JSON-RPC response
+            // still proves that the process and both sides of the pipe work.
+            Ok(_) => Ok(()),
+            Err(error) if error.code == "runtime-request-failed" => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
+
+    pub async fn restart(&self) -> Result<Self, CodexError> {
+        let (config, model, effort, cwd) = {
+            let state = self.inner.state.lock().await;
+            let mut config = self.inner.config.clone();
+            config.preferred_session_id = state.thread_id.clone();
+            config.resume_required = state.thread_id.as_ref().is_some_and(|id| {
+                state.materialized_threads.contains(id) || state.submitted_threads.contains(id)
+            });
+            (
+                config,
+                state.active_model.clone(),
+                state.active_effort.clone(),
+                state.active_cwd.clone(),
+            )
+        };
+        self.shutdown().await;
+        let replacement = Self::connect(config, self.inner.event_tx.clone()).await?;
+        {
+            let mut state = replacement.inner.state.lock().await;
+            state.active_model = model.or(state.active_model.take());
+            state.active_effort = effort.or(state.active_effort.take());
+            state.active_cwd = cwd.or(state.active_cwd.take());
+        }
+        Ok(replacement)
+    }
+
+    pub fn emit_status(&self, message: &str, status: &str) {
+        self.inner.emit_status(message, status, None, None);
+    }
+
+    pub async fn emit_recovered(&self, previous_session_id: &str) -> Result<(), CodexError> {
+        self.inner.emit(
+            "runtime.recovered",
+            None,
+            None,
+            None,
+            json!({
+                "previousSessionId": previous_session_id,
+                "connection": self.connection().await?,
+            }),
+        );
+        Ok(())
+    }
+
+    pub async fn mark_unhealthy(&self, error: &CodexError) {
+        self.inner.handle_failure(error.message.clone()).await;
     }
 
     pub async fn list_sessions(&self) -> Result<Vec<Value>, CodexError> {
@@ -565,6 +680,9 @@ impl CodexAdapter {
             state
                 .turn_client_operations
                 .insert(session_id.into(), client_operation_id.into());
+            // A request with an unknown outcome may have persisted a turn.
+            // Recovery must never silently replace that chat with a new one.
+            state.submitted_threads.insert(session_id.into());
             if !state.materialized_threads.contains(session_id) {
                 state
                     .pending_names
@@ -700,6 +818,7 @@ impl CodexAdapter {
         self.inner.state.lock().await.stopping = true;
         if let Some(task) = self.inner.wait_task.lock().await.take() {
             task.abort();
+            let _ = task.await;
         }
         if let Some(task) = self.inner.stdout_task.lock().await.take() {
             task.abort();
@@ -803,12 +922,27 @@ impl CodexAdapter {
 
 impl Inner {
     async fn request(&self, method: &str, params: Value) -> Result<Value, CodexError> {
-        if self.state.lock().await.exited {
+        self.request_with_timeout(method, params, self.request_timeout)
+            .await
+    }
+
+    async fn request_with_timeout(
+        &self,
+        method: &str,
+        params: Value,
+        deadline: Duration,
+    ) -> Result<Value, CodexError> {
+        let state = self.state.lock().await;
+        if state.exited || state.stopping {
             return Err(CodexError::new(
                 "runtime-exited",
-                "Codex app-server is not running.",
+                state
+                    .exit_error
+                    .as_deref()
+                    .unwrap_or("Codex app-server is not running."),
             ));
         }
+        drop(state);
         let id = self
             .next_request_id
             .fetch_add(1, Ordering::Relaxed)
@@ -816,22 +950,27 @@ impl Inner {
             .to_string();
         let (sender, receiver) = oneshot::channel();
         self.pending.lock().await.insert(id.clone(), sender);
-        if let Err(error) = self
-            .write_json(&json!({"method": method, "id": id, "params": params}))
-            .await
-        {
-            self.pending.lock().await.remove(&id);
-            return Err(error);
-        }
-        match timeout(self.request_timeout, receiver).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err(CodexError::new(
-                "runtime-exited",
-                "Codex app-server stopped before answering.",
-            )),
+        let result = timeout(deadline, async {
+            self.write_json(&json!({"method": method, "id": id, "params": params}))
+                .await?;
+            receiver.await.unwrap_or_else(|_| {
+                Err(CodexError::new(
+                    "runtime-exited",
+                    "Codex app-server stopped before answering.",
+                ))
+            })
+        })
+        .await;
+        self.pending.lock().await.remove(&id);
+        match result {
+            Ok(result) => result,
             Err(_) => {
-                self.pending.lock().await.remove(&id);
-                Err(CodexError::timeout(method))
+                let mut error = CodexError::timeout(method);
+                error.message = format!(
+                    "Codex app-server did not respond to '{method}' within {} seconds.",
+                    deadline.as_secs_f64()
+                );
+                Err(error)
             }
         }
     }
@@ -1112,11 +1251,6 @@ impl Inner {
     }
 
     async fn handle_exit(&self, status: std::io::Result<std::process::ExitStatus>) {
-        let mut state = self.state.lock().await;
-        state.exited = true;
-        if state.stopping {
-            return;
-        }
         let status_text = status
             .map(|status| {
                 status
@@ -1126,8 +1260,17 @@ impl Inner {
             .unwrap_or_else(|error| format!("unknown ({error})"));
         let message = sanitize_diagnostic(format!(
             "Codex app-server exited with code {status_text}. {}",
-            state.stderr
+            self.state.lock().await.stderr
         ));
+        self.handle_failure(message).await;
+    }
+
+    async fn handle_failure(&self, message: String) {
+        let mut state = self.state.lock().await;
+        if state.exited || state.stopping {
+            return;
+        }
+        state.exited = true;
         state.exit_error = Some(message.clone());
         let active = std::mem::take(&mut state.active_turns);
         let operations = std::mem::take(&mut state.turn_client_operations);

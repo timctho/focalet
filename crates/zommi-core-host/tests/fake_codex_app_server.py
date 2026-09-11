@@ -5,12 +5,18 @@ import json
 import os
 import sys
 import time
+import pathlib
+import threading
 
 
 thread_id = os.environ.get("ZOMMI_FAKE_THREAD_ID", "thread-rust-flutter")
 fresh_thread_id = os.environ.get("ZOMMI_FAKE_FRESH_THREAD_ID", thread_id)
 turn_id = os.environ.get("ZOMMI_FAKE_TURN_ID", "turn-rust-flutter")
 request_log = os.environ.get("ZOMMI_FAKE_REQUEST_LOG")
+control = pathlib.Path(sys.argv[sys.argv.index("--control-dir") + 1]) if "--control-dir" in sys.argv else None
+if control:
+    request_log = str(control / "requests.jsonl")
+    turn_id += "-" + str(os.getpid())
 rekey_completion = os.environ.get("ZOMMI_FAKE_REKEY_COMPLETION") == "1"
 fragments = ["Book", "keeper", " sees ", "1", "1", "1", ". 世界", "世界", "."] if rekey_completion else ["Rust-owned Codex reply"]
 completed_text = "".join(fragments)
@@ -29,6 +35,22 @@ def log(message):
 
 
 log({"fixtureOriginator": os.environ.get("CODEX_INTERNAL_ORIGINATOR_OVERRIDE")})
+if control:
+    log({"fixturePid": os.getpid(), "startedAt": time.monotonic()})
+
+    def crash_when_requested():
+        while True:
+            try:
+                should_exit = (control / "exit-pid").read_text() == str(os.getpid())
+            except OSError:
+                should_exit = False
+            if should_exit:
+                sys.stderr.write("fixture requested crash token=fixture-private\n")
+                sys.stderr.flush()
+                os._exit(26)
+            time.sleep(0.01)
+
+    threading.Thread(target=crash_when_requested, daemon=True).start()
 
 
 for line in sys.stdin:
@@ -43,7 +65,13 @@ for line in sys.stdin:
         continue
 
     if method == "initialize":
+        if control and (control / "stall-initialize").exists():
+            continue
         result = {"userAgent": "codex-cli/9.8.7 (fixture)"}
+    elif method == "thread/loaded/list":
+        if control and (control / "stall-probe-pid").exists() and (control / "stall-probe-pid").read_text() == str(os.getpid()):
+            continue
+        result = {"data": [thread_id]}
     elif method in ("model/list", "mcpServerStatus/list"):
         result = {"data": []}
     elif method == "thread/list":
@@ -60,7 +88,7 @@ for line in sys.stdin:
     elif method == "thread/start":
         result = {"thread": {"id": fresh_thread_id, "turns": []}}
     elif method == "thread/resume":
-        if os.environ.get("ZOMMI_FAKE_BUSY_RESUME") == "1":
+        if os.environ.get("ZOMMI_FAKE_BUSY_RESUME") == "1" or (control and (control / "reject-resume").exists()):
             send(
                 {
                     "id": request_id,

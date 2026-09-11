@@ -1848,6 +1848,7 @@ dependencies = [
  "base64",
  "ed25519-dalek",
  "futures-util",
+ "libc",
  "rand_core 0.6.4",
  "regex",
  "serde",

@@ -1684,6 +1684,25 @@ final class ZommiController extends ChangeNotifier {
     if (event.sequence > 0) _lastSequences[sequenceKey] = event.sequence;
     final sessionId = event.sessionId ?? activeSessionId;
     switch (event.name) {
+      case 'runtime.recovered':
+        final connection = RuntimeConnection.fromJson(
+          mapValue(event.payload['connection']),
+        );
+        if (connection.runtimeTargetId != event.runtimeTargetId ||
+            connection.sessionId.isEmpty) {
+          return;
+        }
+        _cacheConnection(connection);
+        if (activeRuntime?.id == event.runtimeTargetId &&
+            activeSessionId == event.payload['previousSessionId']) {
+          _rememberActiveSessionSettings();
+          _activateConnection(connection);
+          _restoreSessionSettings(connection);
+          _rememberActiveSessionSettings();
+          _setStatus('$activeRuntimeName connection restored');
+        }
+        _notify();
+        return;
       case 'runtime.status':
         final message = event.payload['message']?.toString();
         final runtimeStatus = event.payload['status']?.toString();
@@ -1697,6 +1716,11 @@ final class ZommiController extends ChangeNotifier {
             );
             if (activeRuntime?.id == event.runtimeTargetId) {
               activeRuntime = runtimeTargets[index];
+              if (runtimeStatus == 'unavailable' ||
+                  runtimeStatus == 'recovering') {
+                approval = null;
+                question = null;
+              }
             }
           }
         }
@@ -1763,6 +1787,34 @@ final class ZommiController extends ChangeNotifier {
           _unreadSessions.add(sessionKey);
         }
         final statusValue = event.payload['status']?.toString() ?? 'completed';
+        if (statusValue == 'unknown') {
+          final sessionTurns =
+              _turnsBySession[sessionKey] ?? const <ConversationTurn>[];
+          final interrupted =
+              sessionTurns
+                  .where(
+                    (turn) =>
+                        turn.id == event.clientOperationId || turn.id == turnId,
+                  )
+                  .lastOrNull ??
+              sessionTurns.lastOrNull;
+          final errorId =
+              '${turnId ?? event.clientOperationId}:connection-lost';
+          if (interrupted != null &&
+              !interrupted.blocks.any((block) => block.id == errorId)) {
+            interrupted.blocks.add(
+              TranscriptBlock(
+                id: errorId,
+                kind: TranscriptKind.error,
+                title: 'Connection lost',
+                text:
+                    '${_runtimeTarget(event.runtimeTargetId)?.displayName ?? 'Agent'} disconnected before this turn finished. The request was not resent.',
+                lifecycle: TranscriptLifecycle.completed,
+                expanded: true,
+              ),
+            );
+          }
+        }
         if (statusValue.toLowerCase() == 'completed') {
           _recordSessionActivity(event.runtimeTargetId, sessionId);
         }
