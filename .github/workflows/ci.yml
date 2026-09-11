@@ -7,6 +7,11 @@ on:
       - main
   workflow_dispatch:
     inputs:
+      upload_packages:
+        description: Upload verified native packages to GitHub artifact storage
+        required: false
+        default: false
+        type: boolean
       windows_interactive:
         description: Run the full Windows desktop shortcut and capture gate
         required: false
@@ -137,7 +142,7 @@ jobs:
           python -c "import glob,json; p=glob.glob('artifacts/zommi-*/release-manifest.json'); assert len(p)==1, p; print(json.dumps(json.load(open(p[0], encoding='utf-8')), indent=2))"
 
       - name: Upload native release
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'workflow_dispatch' && inputs.upload_packages
         continue-on-error: ${{ github.event_name == 'workflow_dispatch' && inputs.windows_deploy_downloads }}
         uses: actions/upload-artifact@v7
         with:
@@ -147,7 +152,7 @@ jobs:
             artifacts/zommi-linux-*.tar.gz.sha256
           if-no-files-found: error
           compression-level: 0
-          retention-days: 14
+          retention-days: 3
 
   release_windows:
     name: Native release (windows)
@@ -244,7 +249,7 @@ jobs:
           python -c "import glob,json; p=glob.glob('artifacts/zommi-*/release-manifest.json'); assert len(p)==1, p; print(json.dumps(json.load(open(p[0], encoding='utf-8')), indent=2))"
 
       - name: Upload native release
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'workflow_dispatch' && inputs.upload_packages
         continue-on-error: ${{ github.event_name == 'workflow_dispatch' && inputs.windows_deploy_downloads }}
         uses: actions/upload-artifact@v7
         with:
@@ -254,7 +259,7 @@ jobs:
             artifacts/zommi-windows-*.zip.sha256
           if-no-files-found: error
           compression-level: 0
-          retention-days: 14
+          retention-days: 3
 
       - name: Deploy verified Windows release to Downloads
         if: github.event_name == 'workflow_dispatch' && inputs.windows_deploy_downloads
@@ -483,6 +488,7 @@ jobs:
         run: bash scripts/package-unix.sh macos
 
       - name: Upload native release
+        if: github.event_name == 'workflow_dispatch' && inputs.upload_packages
         uses: actions/upload-artifact@v7
         with:
           name: zommi-macos-${{ runner.arch }}-${{ github.sha }}
@@ -491,4 +497,4 @@ jobs:
             artifacts/zommi-macos-*.zip.sha256
           if-no-files-found: error
           compression-level: 0
-          retention-days: 14
+          retention-days: 3

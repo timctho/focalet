@@ -174,6 +174,9 @@ void main() {
         'profile': null,
       });
 
+      controller.updateComposerValue(
+        const TextEditingValue(text: 'Codex draft'),
+      );
       await controller.createSession(runtimeTargetId: hermes.id);
       expect(core.createdSessions.last, {
         'runtimeTargetId': hermes.id,
@@ -191,6 +194,9 @@ void main() {
       controller.setModel('hermes-model');
       controller.setEffort('low');
       await controller.setWorkspace('/work/hermes');
+      controller.updateComposerValue(
+        const TextEditingValue(text: 'Hermes draft'),
+      );
 
       await controller.switchSession(
         'created-session',
@@ -420,6 +426,10 @@ void main() {
       await tester.tap(original);
       await tester.pumpAndSettle();
       expect(core.openedSessions.last, ('runtime-codex', 'session-1'));
+      expect(
+        find.byKey(const ValueKey('session-runtime-hermes-created-session')),
+        findsNothing,
+      );
       expect(tester.takeException(), isNull);
     });
   }

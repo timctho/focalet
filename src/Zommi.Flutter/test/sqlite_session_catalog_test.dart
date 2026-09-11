@@ -40,6 +40,40 @@ void main() {
     updatedAt: at?.toIso8601String(),
   );
 
+  test(
+    'version one upgrades without losing rows and dismissals survive reopen',
+    () async {
+      await store.save(
+        SessionCatalogSnapshot(
+          sessions: [
+            row('empty-chat', time),
+            row('empty-chat', time, runtime: 'runtime-codex'),
+          ],
+        ),
+      );
+      final legacy = sqlite3.open(path);
+      legacy.execute('DROP TABLE dismissed_sessions');
+      legacy.execute('PRAGMA user_version = 1');
+      legacy.close();
+      expect((await store.load()).sessions, hasLength(2));
+      await store.save(
+        SessionCatalogSnapshot(
+          sessions: [row('empty-chat', time, runtime: 'runtime-codex')],
+          dismissedSessions: {('runtime-hermes', 'empty-chat')},
+        ),
+      );
+      final restored = await SqliteSessionCatalogStore(
+        path,
+        clock: () => time,
+      ).load();
+      expect(restored.dismissedSessions, {('runtime-hermes', 'empty-chat')});
+      expect(restored.sessions.single.runtimeTargetId, 'runtime-codex');
+      final db = sqlite3.open(path);
+      expect(db.select('PRAGMA user_version').single.values.single, 2);
+      db.close();
+    },
+  );
+
   test('real database preserves scoped metadata and excludes runtime configuration', () async {
     final runtime = RuntimeTarget(
       id: hermes.id,
@@ -256,7 +290,7 @@ void main() {
     );
     await controller.flushSessionCatalog();
     expect((await store.load()).sessions, hasLength(2));
-    await controller.loadOlderSessions();
+    await controller.loadMoreSessions();
     expect(controller.visibleSessions, hasLength(4));
     await controller.flushSessionCatalog();
     expect((await store.load()).sessions, hasLength(2));
@@ -293,7 +327,11 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
       await tester.pumpAndSettle();
       expect(find.text('Earlier Hermes work'), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('load-older-sessions')));
+      expect(find.byKey(const ValueKey('load-older-sessions')), findsNothing);
+      await tester.drag(
+        find.byKey(const ValueKey('session-list')),
+        const Offset(0, -300),
+      );
       await tester.pumpAndSettle();
       expect(find.text('Earlier Hermes work'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());

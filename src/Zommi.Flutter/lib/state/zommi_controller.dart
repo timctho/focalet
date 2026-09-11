@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/desktop/artifact_loader.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
@@ -11,6 +12,18 @@ import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 
 const int historyPageSize = 18;
+const int sessionPageSize = 12;
+
+final class _SessionDraft {
+  const _SessionDraft({
+    required this.value,
+    required this.attachments,
+    required this.attachmentSequence,
+  });
+  final TextEditingValue value;
+  final List<ContextAttachment> attachments;
+  final int attachmentSequence;
+}
 
 final class ZommiController extends ChangeNotifier {
   ZommiController({
@@ -36,6 +49,11 @@ final class ZommiController extends ChangeNotifier {
   final List<SessionSummary> sessions = [];
   final List<Map<String, Object?>> models = [];
   final List<ContextAttachment> attachments = [];
+  TextEditingValue composerValue = TextEditingValue.empty;
+  List<String>? _composerAttachmentOrder;
+  final Map<String, _SessionDraft> _drafts = {};
+  final Set<String> _newSessions = {};
+  final Set<(String, String)> _dismissedSessions = {};
   Map<String, Object?> runtimeSettings = {};
   final Map<String, List<ConversationTurn>> _turnsBySession = {};
   final Map<String, int> _transcriptRevisions = {};
@@ -96,6 +114,8 @@ final class ZommiController extends ChangeNotifier {
   bool transitionTargetLarge = false;
   bool sessionPanelOpen = false;
   bool showingOlderSessions = false;
+  int _visibleSessionLimit = sessionPageSize;
+  bool _loadingMoreSessions = false;
   bool runtimeSetupPanelOpen = false;
   bool modelPanelOpen = false;
   bool workspacePanelOpen = false;
@@ -120,6 +140,55 @@ final class ZommiController extends ChangeNotifier {
     return runtimeTargetId == null || sessionId == null
         ? null
         : _sessionKey(runtimeTargetId, sessionId);
+  }
+
+  String? get composerSessionKey => _activeSessionKey;
+
+  void updateComposerValue(
+    TextEditingValue value, {
+    List<String>? attachmentOrder,
+  }) {
+    composerValue = value;
+    _composerAttachmentOrder = attachmentOrder;
+  }
+
+  void _saveSessionDraft() {
+    final key = _activeSessionKey;
+    if (key == null) return;
+    if (_newSessions.contains(key) &&
+        composerValue.text.trim().isEmpty &&
+        attachments.isEmpty &&
+        turns.isEmpty &&
+        !turnActive) {
+      final identity = (activeRuntime!.id, activeSessionId!);
+      _dismissedSessions.add(identity);
+      sessions.removeWhere(
+        (session) => (session.runtimeTargetId, session.id) == identity,
+      );
+      _newSessions.remove(key);
+      _drafts.remove(key);
+      _sessionSettings.remove(key);
+      _turnsBySession.remove(key);
+      _transcriptRevisions.remove(key);
+      _scheduleCatalogSave();
+      return;
+    }
+    _drafts[key] = _SessionDraft(
+      value: composerValue.copyWith(composing: TextRange.empty),
+      attachments: _orderedAttachments(_composerAttachmentOrder),
+      attachmentSequence: _attachmentSequence,
+    );
+  }
+
+  void _restoreSessionDraft() {
+    final draft = _drafts[_activeSessionKey];
+    composerValue = draft?.value ?? TextEditingValue.empty;
+    attachments
+      ..clear()
+      ..addAll(draft?.attachments ?? const []);
+    _attachmentSequence = draft?.attachmentSequence ?? 0;
+    _composerAttachmentOrder = null;
+    previewAttachment = null;
   }
 
   List<ConversationTurn> get turns =>
@@ -168,7 +237,7 @@ final class ZommiController extends ChangeNotifier {
 
   bool get sessionCatalogLoading => _catalogLoading.isNotEmpty;
 
-  List<SessionSummary> get visibleSessions {
+  List<SessionSummary> get _availableSessions {
     if (showingOlderSessions) return sessions;
     final cutoff = _clock().toUtc().subtract(sessionCatalogRetention);
     return sessions.where((session) {
@@ -179,11 +248,26 @@ final class ZommiController extends ChangeNotifier {
     }).toList();
   }
 
-  Future<void> loadOlderSessions() async {
-    if (_closed || starting) return;
-    showingOlderSessions = true;
-    _notify();
-    await refreshSessionCatalog(force: true);
+  List<SessionSummary> get visibleSessions =>
+      _availableSessions.take(_visibleSessionLimit).toList();
+
+  bool get hasMoreSessions =>
+      !showingOlderSessions || _availableSessions.length > _visibleSessionLimit;
+
+  Future<void> loadMoreSessions() async {
+    if (_closed || starting || _loadingMoreSessions || !hasMoreSessions) return;
+    _loadingMoreSessions = true;
+    try {
+      final revealOlder =
+          _availableSessions.length <= _visibleSessionLimit &&
+          !showingOlderSessions;
+      _visibleSessionLimit += sessionPageSize;
+      if (revealOlder) showingOlderSessions = true;
+      _notify();
+      if (revealOlder) await refreshSessionCatalog(force: true);
+    } finally {
+      _loadingMoreSessions = false;
+    }
   }
 
   String? get sessionCatalogError {
@@ -375,6 +459,11 @@ final class ZommiController extends ChangeNotifier {
       final snapshot = await sessionCatalogStore.load();
       if (_closed) return;
       sessions.addAll(snapshot.sessions);
+      _dismissedSessions.addAll(snapshot.dismissedSessions);
+      sessions.removeWhere(
+        (session) =>
+            _dismissedSessions.contains((session.runtimeTargetId, session.id)),
+      );
       for (final runtime in snapshot.runtimes) {
         _knownRuntimes[runtime.id] = runtime;
       }
@@ -526,6 +615,7 @@ final class ZommiController extends ChangeNotifier {
     final snapshot = SessionCatalogSnapshot(
       runtimes: _knownRuntimes.values.toList(),
       sessions: List.of(sessions),
+      dismissedSessions: Set.of(_dismissedSessions),
       syncedAt: Map.of(_catalogSyncedAt),
       attemptedAt: Map.of(_catalogAttemptedAt),
       usedAt: Map.of(_catalogUsedAt),
@@ -549,7 +639,13 @@ final class ZommiController extends ChangeNotifier {
     final selectingActiveRuntime = activeRuntime?.id == targetId;
     final activeRuntimeUnavailable =
         selectingActiveRuntime && activeRuntime?.status == 'unavailable';
-    if (runtimeBusy || sessionBusy || sessionSettingsBusy || submitting) return;
+    if (runtimeBusy ||
+        sessionBusy ||
+        sessionSettingsBusy ||
+        submitting ||
+        selectingContent) {
+      return;
+    }
     if (selectingActiveRuntime && !activeRuntimeUnavailable) {
       closeTransientPanels();
       return;
@@ -564,7 +660,12 @@ final class ZommiController extends ChangeNotifier {
     try {
       await _connectRuntime(targetId);
     } on Object catch (error) {
-      if (!_applyConnectionError(targetId, error)) {
+      if (!_applyConnectionError(
+        targetId,
+        error,
+        activateTarget:
+            activeSessionId == null || activeRuntime?.id == targetId,
+      )) {
         _setStatus('Could not switch agent · $error', warning: true);
       }
     } finally {
@@ -763,6 +864,7 @@ final class ZommiController extends ChangeNotifier {
         runtimeBusy ||
         sessionSettingsBusy ||
         submitting ||
+        selectingContent ||
         !canCreateSession(target)) {
       return;
     }
@@ -796,6 +898,9 @@ final class ZommiController extends ChangeNotifier {
         profile: _nonEmpty(inherited?.profile),
       );
       if (initialConnection != null) _cacheConnection(initialConnection);
+      _newSessions.add(
+        _sessionKey(connection.runtimeTargetId, connection.sessionId),
+      );
       await _applySessionConnection(connection, inherited: inherited);
       _recordSessionActivity(connection.runtimeTargetId, connection.sessionId);
       _setStatus('New chat ready');
@@ -821,6 +926,7 @@ final class ZommiController extends ChangeNotifier {
         runtimeBusy ||
         sessionSettingsBusy ||
         submitting ||
+        selectingContent ||
         _isActiveSession(targetId, sessionId)) {
       return;
     }
@@ -879,9 +985,20 @@ final class ZommiController extends ChangeNotifier {
 
   void _activateConnection(RuntimeConnection connection) {
     final changingRuntime = activeRuntime?.id != connection.runtimeTargetId;
+    final previousKey = _activeSessionKey;
+    final changingSession =
+        previousKey !=
+        _sessionKey(connection.runtimeTargetId, connection.sessionId);
+    if (changingSession) _saveSessionDraft();
+    _dismissedSessions.remove((
+      connection.runtimeTargetId,
+      connection.sessionId,
+    ));
     _cacheConnection(connection);
     activeRuntime = _runtimeTarget(connection.runtimeTargetId);
     activeSessionId = connection.sessionId;
+    // Content captured before the first connection belongs to that first chat.
+    if (changingSession && previousKey != null) _restoreSessionDraft();
     _catalogUsedAt[connection.runtimeTargetId] = _clock().toUtc();
     _scheduleCatalogSave();
     capabilities = _runtimeCapabilities[connection.runtimeTargetId] ?? {};
@@ -946,6 +1063,8 @@ final class ZommiController extends ChangeNotifier {
     }
     final sessionKey = _sessionKey(runtimeTargetId, sessionId);
     if (_activeTurns.containsKey(sessionKey)) return;
+    _newSessions.remove(sessionKey);
+    composerValue = TextEditingValue.empty;
     final sendingAttachments = _orderedAttachments(attachmentOrder);
     attachments.clear();
     _attachmentSequence = 0;
@@ -1998,6 +2117,7 @@ final class ZommiController extends ChangeNotifier {
         runtimeTargetId: runtimeTargetId,
       );
       if (session.id.isEmpty) continue;
+      if (_dismissedSessions.contains((runtimeTargetId, session.id))) continue;
       final index = sessions.indexWhere(
         (existing) =>
             existing.runtimeTargetId == runtimeTargetId &&

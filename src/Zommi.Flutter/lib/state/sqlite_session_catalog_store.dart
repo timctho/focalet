@@ -103,6 +103,10 @@ Future<SessionCatalogSnapshot> _readOffThread(
       syncedAt: synced,
       attemptedAt: attempted,
       usedAt: used,
+      dismissedSessions: {
+        for (final row in db.select('SELECT * FROM dismissed_sessions'))
+          (row['runtime_target_id'] as String, row['id'] as String),
+      },
       protectedSessions: {
         for (final row in rows)
           if (row['protected'] == 1)
@@ -138,7 +142,7 @@ T _withCatalog<T>(
       db.execute('PRAGMA synchronous = FULL');
       final version =
           db.select('PRAGMA user_version').single.values.single as int;
-      if (version > 1) {
+      if (version > 2) {
         throw const FormatException('Unsupported session catalog database');
       }
       if (version == 0) {
@@ -158,9 +162,22 @@ T _withCatalog<T>(
             );
             CREATE INDEX sessions_activity ON sessions(activity_at DESC);
             CREATE INDEX sessions_expiry ON sessions(activity_at) WHERE protected = 0;
+            CREATE TABLE dismissed_sessions (
+              runtime_target_id TEXT NOT NULL, id TEXT NOT NULL,
+              PRIMARY KEY (runtime_target_id, id)
+            );
           ''');
           _save(db, _readLegacy(legacy).retained(now), now);
-          db.execute('PRAGMA user_version = 1');
+          db.execute('PRAGMA user_version = 2');
+        });
+      }
+      if (version == 1) {
+        _transaction(db, () {
+          db!.execute('''CREATE TABLE dismissed_sessions (
+            runtime_target_id TEXT NOT NULL, id TEXT NOT NULL,
+            PRIMARY KEY (runtime_target_id, id)
+          )''');
+          db.execute('PRAGMA user_version = 2');
         });
       }
       _removeLegacy(legacy);
@@ -190,6 +207,19 @@ void _transaction(Database db, void Function() action) {
 }
 
 void _save(Database db, SessionCatalogSnapshot snapshot, DateTime now) {
+  db.execute('DELETE FROM dismissed_sessions');
+  final dismiss = db.prepare('INSERT INTO dismissed_sessions VALUES (?, ?)');
+  try {
+    for (final (runtime, session) in snapshot.dismissedSessions) {
+      dismiss.execute([runtime, session]);
+      db.execute(
+        'DELETE FROM sessions WHERE runtime_target_id = ? AND id = ?',
+        [runtime, session],
+      );
+    }
+  } finally {
+    dismiss.close();
+  }
   final labels = {for (final runtime in snapshot.runtimes) runtime.id: runtime};
   final runtimeIds = {
     ...labels.keys,
@@ -245,6 +275,12 @@ void _save(Database db, SessionCatalogSnapshot snapshot, DateTime now) {
     )''',
     );
     for (final session in snapshot.sessions) {
+      if (snapshot.dismissedSessions.contains((
+        session.runtimeTargetId,
+        session.id,
+      ))) {
+        continue;
+      }
       sessionWrite.execute([
         session.runtimeTargetId,
         session.id,

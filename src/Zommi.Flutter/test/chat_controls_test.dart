@@ -150,6 +150,11 @@ void main() {
         await tester.pumpAndSettle();
         expect(core.activeSessionId, 'session-2');
         expect(sidebar, findsOneWidget);
+        expect(tester.widget<TextField>(field).controller!.text, isEmpty);
+        await tester.tap(
+          find.byKey(const ValueKey('session-runtime-codex-session-1')),
+        );
+        await tester.pumpAndSettle();
         expect(
           tester.widget<TextField>(field).controller!.text,
           contains('First line'),

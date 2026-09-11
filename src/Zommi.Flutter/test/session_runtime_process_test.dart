@@ -62,6 +62,9 @@ void main() {
     await controller.createSession(runtimeTargetId: codex.id);
     final codexSession = controller.activeSessionId!;
     expect(codexSession, 'created-codex-chat');
+    controller.updateComposerValue(
+      const TextEditingValue(text: 'Message for Codex'),
+    );
     await controller.createSession(runtimeTargetId: hermes.id);
     expect(controller.activeRuntime?.id, hermes.id, reason: controller.status);
     final hermesSession = controller.activeSessionId!;
