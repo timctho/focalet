@@ -206,7 +206,7 @@ mod tests {
         ExecutionHost, RuntimeCommand, RuntimeTarget,
         codex_adapter::{CodexTurnRequest, CoreEvent},
     };
-    use serde_json::Value;
+    use serde_json::{Value, json};
     use std::{fs, path::PathBuf, process::Command};
     use tokio::sync::mpsc;
 
@@ -369,6 +369,120 @@ mod tests {
         assert_eq!(fixture.pids().len(), 2);
         assert_eq!(fixture.count("turn/start"), 1);
         assert_eq!(fixture.count("thread/start"), 1);
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn empty_chats_switch_without_unsupported_history_then_read_the_first_turn() {
+        let fixture = Fixture::new();
+        fixture.mark("unique-threads", "1");
+        fixture.mark("reject-empty-history", "1");
+        let (runtime, _events) = fixture.connect().await;
+        let adapter = runtime.ready().await.unwrap();
+        let first = adapter.active_session_id().await.unwrap();
+        assert_eq!(
+            adapter.read_session(&first).await.unwrap()["thread"]["turns"],
+            json!([])
+        );
+        let second = adapter
+            .create_session(Some("second-model"), None, None)
+            .await
+            .unwrap()
+            .session_id;
+        assert_ne!(first, second);
+        for id in [&first, &second, &first] {
+            let connection = adapter.open_session(id).await.unwrap();
+            assert_eq!(&connection.session_id, id);
+            assert_eq!(
+                connection.session_metadata["activeModel"],
+                if id == &first {
+                    "fixture-default"
+                } else {
+                    "second-model"
+                }
+            );
+            assert_eq!(connection.history.unwrap()["thread"]["turns"], json!([]));
+        }
+        assert_eq!(fixture.count("thread/resume"), 0);
+        assert_eq!(fixture.count("thread/read"), 0);
+        adapter
+            .start_turn(CodexTurnRequest {
+                session_id: &first,
+                message: "hold-for-interrupt",
+                snapshots: &[],
+                images: &[],
+                client_operation_id: "test:first-turn",
+                model: None,
+                effort: None,
+                cwd: None,
+            })
+            .await
+            .unwrap();
+        let history = adapter.read_session(&first).await.unwrap();
+        assert_eq!(history["thread"]["turns"].as_array().unwrap().len(), 1);
+        assert_eq!(fixture.count("thread/read"), 1);
+        adapter.open_session(&second).await.unwrap();
+        assert_eq!(
+            adapter.open_session(&first).await.unwrap().session_id,
+            first
+        );
+        assert_eq!(fixture.count("thread/resume"), 0);
+        assert_eq!(fixture.count("thread/read"), 2);
+        drop(adapter);
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn unsupported_saved_history_is_never_replaced_with_an_empty_transcript() {
+        let fixture = Fixture::new();
+        let (runtime, _events) = fixture.connect().await;
+        fixture.mark("reject-history", "1");
+        let adapter = runtime.ready().await.unwrap();
+        let original = adapter.active_session_id().await.unwrap();
+        assert!(
+            adapter
+                .open_session("saved-chat")
+                .await
+                .unwrap_err()
+                .message
+                .contains("list_turns")
+        );
+        assert!(
+            adapter
+                .read_session("saved-chat")
+                .await
+                .unwrap_err()
+                .message
+                .contains("list_turns")
+        );
+        assert_eq!(adapter.active_session_id().await.unwrap(), original);
+        drop(adapter);
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn delayed_probes_do_not_restart_a_streaming_runtime_but_a_real_stall_does() {
+        let fixture = Fixture::new();
+        let (runtime, mut events) = fixture.connect().await;
+        hold_turn(&runtime, "/chosen/workspace").await;
+        fixture.mark("stream-while-stalled", "1");
+        fixture.mark("stall-probe-pid", fixture.pids()[0]);
+        timeout(Duration::from_secs(5), async {
+            while fixture.count("thread/loaded/list") < 4 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(fixture.pids().len(), 1);
+        while let Ok(e) = events.try_recv() {
+            assert_ne!(e.name, "runtime.recovered");
+            assert!(!(e.name == "turn.completed" && e.payload["status"] == "unknown"));
+        }
+        fs::remove_file(fixture.0.join("stream-while-stalled")).unwrap();
+        event(&mut events, "runtime.recovered").await;
+        assert_eq!(fixture.pids().len(), 2);
+        assert_eq!(fixture.count("turn/start"), 1);
         runtime.shutdown().await;
     }
 

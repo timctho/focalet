@@ -47,7 +47,10 @@ void main() {
           sessionId: 'session-1',
           turnId: 'session-1-live-turn',
           clientOperationId: operationId,
-          payload: const {'status': 'unknown'},
+          payload: const {
+            'status': 'unknown',
+            'error': 'Codex app-server did not respond to thread/loaded/list.',
+          },
         ),
       );
       core.emit(
@@ -70,6 +73,13 @@ void main() {
         contains('not resent'),
       );
       expect(controller.selectedWorkspace, '/chosen/workspace');
+      expect(
+        controller.turns.single.blocks
+            .where((block) => block.kind == TranscriptKind.error)
+            .single
+            .text,
+        contains('did not respond to thread/loaded/list'),
+      );
       expect(controller.selectedEffort, 'xhigh');
       expect(controller.status, 'Codex connection restored');
     },

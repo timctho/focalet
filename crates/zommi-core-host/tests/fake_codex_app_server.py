@@ -22,6 +22,10 @@ fragments = ["Book", "keeper", " sees ", "1", "1", "1", ". 世界", "世界", ".
 completed_text = "".join(fragments)
 history_count = int(os.environ.get("ZOMMI_FAKE_HISTORY_COUNT", "0"))
 request_delay = float(os.environ.get("ZOMMI_FAKE_REQUEST_DELAY_MS", "0")) / 1000
+write_lock = threading.Lock()
+empty_threads = set()
+created_threads = 0
+submitted_threads = set()
 
 
 def history(session_id):
@@ -35,8 +39,9 @@ def history(session_id):
 
 
 def send(message):
-    sys.stdout.write(json.dumps(message, separators=(",", ":")) + "\n")
-    sys.stdout.flush()
+    with write_lock:
+        sys.stdout.write(json.dumps(message, separators=(",", ":")) + "\n")
+        sys.stdout.flush()
 
 
 def log(message):
@@ -60,6 +65,11 @@ if control:
                 sys.stderr.write("fixture requested crash token=fixture-private\n")
                 sys.stderr.flush()
                 os._exit(26)
+            if (control / "stream-while-stalled").exists():
+                send({"method": "item/agentMessage/delta", "params": {
+                    "threadId": "saved-chat", "turnId": turn_id,
+                    "itemId": "agent-fixture", "delta": ".",
+                }})
             time.sleep(0.01)
 
     threading.Thread(target=crash_when_requested, daemon=True).start()
@@ -77,6 +87,12 @@ for line in sys.stdin:
         continue
     if method in ("thread/resume", "thread/read", "thread/list"):
         time.sleep(request_delay)
+    if method in ("thread/resume", "thread/read") and control:
+        requested_thread = request["params"]["threadId"]
+        if ((control / "reject-history").exists() or
+                ((control / "reject-empty-history").exists() and requested_thread in empty_threads)):
+            send({"id": request_id, "error": {"code": -32601, "message": "list_turns is not supported yet"}})
+            continue
 
     if method == "initialize":
         if control and (control / "stall-initialize").exists():
@@ -100,7 +116,10 @@ for line in sys.stdin:
             ]
         }
     elif method == "thread/start":
-        result = {"thread": {"id": fresh_thread_id, "turns": []}}
+        created_threads += 1
+        fresh_id = f"fresh-{created_threads}" if control and (control / "unique-threads").exists() else fresh_thread_id
+        empty_threads.add(fresh_id)
+        result = {"thread": {"id": fresh_id, "turns": []}, "model": request.get("params", {}).get("model") or "fixture-default"}
     elif method == "thread/resume":
         if os.environ.get("ZOMMI_FAKE_BUSY_RESUME") == "1" or (control and (control / "reject-resume").exists()):
             send(
@@ -116,9 +135,13 @@ for line in sys.stdin:
         result = history(request["params"]["threadId"])
     elif method == "thread/read":
         result = history(request["params"]["threadId"])
+        if control and request["params"]["threadId"] in submitted_threads:
+            result["thread"]["turns"] = [{"id": turn_id, "status": "inProgress", "items": []}]
     elif method == "thread/name/set":
         result = {}
     elif method == "turn/start":
+        empty_threads.discard(request["params"]["threadId"])
+        submitted_threads.add(request["params"]["threadId"])
         result = {"turn": {"id": turn_id}}
         send({"id": request_id, "result": result})
         send(
