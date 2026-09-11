@@ -31,6 +31,7 @@ void main() {
         ]),
         'ZOMMI_CORE_STATE_PATH': '${temporary.path}/binding.json',
         'ZOMMI_RUNTIME_OVERRIDES_PATH': '${temporary.path}/overrides.json',
+        'ZOMMI_RUNTIME_DISCOVERY_CACHE_PATH': '${temporary.path}/targets.json',
         'ZOMMI_FAKE_REQUEST_LOG': log.path,
         'ZOMMI_FAKE_FRESH_THREAD_ID': 'new-command-thread',
         'ZOMMI_FAKE_GOAL_TURNS': '1',
@@ -43,6 +44,19 @@ void main() {
       desktop: const NoopDesktopBridge(),
     );
     addTearDown(controller.close);
+    // Windows normally prefers WSL. Pin the native fixture before the
+    // controller selects a runtime so the test never reaches a real agent.
+    await bridge.initialize();
+    final discovery = await bridge.discoverRuntimeTargets();
+    final fixtureTarget = discovery.targets.singleWhere(
+      (target) =>
+          target.runtimeId == 'codex' &&
+          target.executionHost['kind'] == 'native',
+    );
+    await bridge.connectRuntime(
+      runtimeTargetId: fixtureTarget.id,
+      cwd: temporary.path,
+    );
     await controller.initialize();
     expect(controller.activeSessionId, isNotNull, reason: controller.status);
     return (controller, bridge, log);
