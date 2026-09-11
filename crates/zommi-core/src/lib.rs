@@ -11,6 +11,7 @@ pub mod pty_adapter;
 pub mod runtime_adapter;
 pub mod runtime_discovery;
 pub mod session_binding;
+pub mod supervised_codex;
 
 pub use broker_protocol::{
     BROKER_OPERATIONS, BROKER_PROTOCOL_VERSION, BrokerError, NormalizedBrokerRequest,

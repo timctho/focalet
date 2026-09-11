@@ -502,7 +502,20 @@ void main() {
       expect(controller.turnActive, isFalse);
       expect(controller.status, contains('outcome unknown'));
       expect(controller.statusWarning, isTrue);
-      expect(controller.turns.single.blocks.single.text, 'partial');
+      expect(
+        controller.turns.single.blocks
+            .where((block) => block.kind == TranscriptKind.assistant)
+            .single
+            .text,
+        'partial',
+      );
+      expect(
+        controller.turns.single.blocks
+            .where((block) => block.kind == TranscriptKind.error)
+            .single
+            .text,
+        contains('not resent'),
+      );
       await controller.close();
     },
   );

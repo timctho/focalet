@@ -5,15 +5,14 @@ use serde_json::Value;
 use crate::{
     RuntimeCommand, RuntimeTarget,
     acp_adapter::{AcpAdapter, AcpConfig, AcpTurnRequest},
-    codex_adapter::{
-        CodexAdapter, CodexConfig, CodexError, CodexTurnRequest, EventSender, TurnReceipt,
-    },
+    codex_adapter::{CodexConfig, CodexError, CodexTurnRequest, EventSender, TurnReceipt},
     hermes_gateway_adapter::{HermesGatewayAdapter, HermesGatewayConfig, HermesGatewayTurnRequest},
     openclaw_gateway_adapter::{
         OpenClawGatewayAdapter, OpenClawGatewayConfig, OpenClawGatewayTurnRequest,
     },
     pi_adapter::{PiAdapter, PiConfig, PiTurnRequest},
     pty_adapter::{PtyAdapter, PtyConfig, PtyTurnRequest},
+    supervised_codex::SupervisedCodex,
 };
 
 pub struct AdapterTurnRequest<'a> {
@@ -30,7 +29,7 @@ pub struct AdapterTurnRequest<'a> {
 
 #[derive(Clone)]
 pub enum RuntimeAdapter {
-    Codex(CodexAdapter),
+    Codex(SupervisedCodex),
     Acp(AcpAdapter),
     HermesGateway(HermesGatewayAdapter),
     OpenClawGateway(OpenClawGatewayAdapter),
@@ -94,7 +93,7 @@ impl RuntimeAdapter {
     ) -> Result<Self, CodexError> {
         match target.adapter_id.as_str() {
             "codex-app-server" => Ok(Self::Codex(
-                CodexAdapter::connect(
+                SupervisedCodex::connect(
                     CodexConfig {
                         list_only,
                         ..CodexConfig::new(target, command, cwd, preferred_session_id)
@@ -191,7 +190,7 @@ impl RuntimeAdapter {
 
     pub async fn active_session_id(&self) -> Result<String, CodexError> {
         match self {
-            Self::Codex(adapter) => adapter.active_session_id().await,
+            Self::Codex(adapter) => adapter.ready().await?.active_session_id().await,
             Self::Acp(adapter) => adapter.active_session_id().await,
             Self::HermesGateway(adapter) => adapter.active_session_id().await,
             Self::OpenClawGateway(adapter) => adapter.active_session_id().await,
@@ -203,10 +202,12 @@ impl RuntimeAdapter {
     pub async fn connection_value(&self) -> Result<Value, CodexError> {
         match self {
             Self::Codex(adapter) => {
-                serde_json::to_value(adapter.connection().await?).map_err(|error| CodexError {
-                    code: "protocol-error".into(),
-                    message: error.to_string(),
-                    retryable: false,
+                serde_json::to_value(adapter.ready().await?.connection().await?).map_err(|error| {
+                    CodexError {
+                        code: "protocol-error".into(),
+                        message: error.to_string(),
+                        retryable: false,
+                    }
                 })
             }
             Self::Acp(adapter) => adapter.connection_value().await,
@@ -219,7 +220,7 @@ impl RuntimeAdapter {
 
     pub async fn list_sessions(&self) -> Result<Vec<Value>, CodexError> {
         match self {
-            Self::Codex(adapter) => adapter.list_sessions().await,
+            Self::Codex(adapter) => adapter.ready().await?.list_sessions().await,
             Self::Acp(adapter) => adapter.list_sessions().await,
             Self::HermesGateway(adapter) => adapter.list_sessions().await,
             Self::OpenClawGateway(adapter) => adapter.list_sessions().await,
@@ -244,7 +245,11 @@ impl RuntimeAdapter {
     ) -> Result<Value, CodexError> {
         match self {
             Self::Codex(adapter) => serde_json::to_value(
-                adapter.create_session(model, effort, cwd).await?,
+                adapter
+                    .ready()
+                    .await?
+                    .create_session(model, effort, cwd)
+                    .await?,
             )
             .map_err(|error| CodexError {
                 code: "protocol-error".into(),
@@ -272,12 +277,14 @@ impl RuntimeAdapter {
         profile: Option<&str>,
     ) -> Result<Value, CodexError> {
         match self {
-            Self::Codex(adapter) => serde_json::to_value(adapter.open_session(session_id).await?)
-                .map_err(|error| CodexError {
-                    code: "protocol-error".into(),
-                    message: error.to_string(),
-                    retryable: false,
-                }),
+            Self::Codex(adapter) => {
+                serde_json::to_value(adapter.ready().await?.open_session(session_id).await?)
+                    .map_err(|error| CodexError {
+                        code: "protocol-error".into(),
+                        message: error.to_string(),
+                        retryable: false,
+                    })
+            }
             Self::Acp(adapter) => adapter.open_session(session_id).await,
             Self::HermesGateway(adapter) => adapter.open_session(session_id, profile).await,
             Self::OpenClawGateway(adapter) => adapter.open_session(session_id).await,
@@ -300,7 +307,11 @@ impl RuntimeAdapter {
     ) -> Result<Value, CodexError> {
         match self {
             Self::Codex(adapter) => serde_json::to_value(
-                adapter.configure_session(session_id, cwd).await?,
+                adapter
+                    .ready()
+                    .await?
+                    .configure_session(session_id, cwd)
+                    .await?,
             )
             .map_err(|error| CodexError {
                 code: "protocol-error".into(),
@@ -322,7 +333,7 @@ impl RuntimeAdapter {
 
     pub async fn read_session(&self, session_id: &str) -> Result<Value, CodexError> {
         match self {
-            Self::Codex(adapter) => adapter.read_session(session_id).await,
+            Self::Codex(adapter) => adapter.ready().await?.read_session(session_id).await,
             Self::Acp(adapter) => adapter.read_session(session_id).await,
             Self::HermesGateway(adapter) => adapter.read_session(session_id).await,
             Self::OpenClawGateway(adapter) => adapter.read_session(session_id).await,
@@ -338,6 +349,8 @@ impl RuntimeAdapter {
         match self {
             Self::Codex(adapter) => {
                 adapter
+                    .ready()
+                    .await?
                     .start_turn(CodexTurnRequest {
                         session_id: request.session_id,
                         message: request.message,
@@ -421,7 +434,13 @@ impl RuntimeAdapter {
         turn_id: &str,
     ) -> Result<Value, CodexError> {
         match self {
-            Self::Codex(adapter) => adapter.interrupt_turn(session_id, turn_id).await,
+            Self::Codex(adapter) => {
+                adapter
+                    .ready()
+                    .await?
+                    .interrupt_turn(session_id, turn_id)
+                    .await
+            }
             Self::Acp(adapter) => adapter.interrupt_turn(session_id, turn_id).await,
             Self::HermesGateway(adapter) => adapter.interrupt_turn(session_id, turn_id).await,
             Self::OpenClawGateway(adapter) => adapter.interrupt_turn(session_id, turn_id).await,
