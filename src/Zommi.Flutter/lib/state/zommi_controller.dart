@@ -1943,6 +1943,7 @@ final class ZommiController extends ChangeNotifier {
               sessionTurns.lastOrNull;
           final errorId =
               '${turnId ?? event.clientOperationId}:connection-lost';
+          final detail = event.payload['error']?.toString().trim() ?? '';
           if (interrupted != null &&
               !interrupted.blocks.any((block) => block.id == errorId)) {
             interrupted.blocks.add(
@@ -1951,7 +1952,8 @@ final class ZommiController extends ChangeNotifier {
                 kind: TranscriptKind.error,
                 title: 'Connection lost',
                 text:
-                    '${_runtimeTarget(event.runtimeTargetId)?.displayName ?? 'Agent'} disconnected before this turn finished. The request was not resent.',
+                    '${_runtimeTarget(event.runtimeTargetId)?.displayName ?? 'Agent'} disconnected before this turn finished. The request was not resent.'
+                    '${detail.isEmpty ? '' : '\n\n$detail'}',
                 lifecycle: TranscriptLifecycle.completed,
                 expanded: true,
               ),
