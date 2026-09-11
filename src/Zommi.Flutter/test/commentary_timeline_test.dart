@@ -176,21 +176,24 @@ void main() {
       expect(find.text('Second reasoning'), findsNothing);
       final toggle = find.byKey(ValueKey('thinking-toggle-${group.id}'));
       await tester.tap(toggle);
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('First reasoning'), findsOneWidget);
       expect(find.byKey(const ValueKey('activity-inspect')), findsOneWidget);
       expect(find.text('Second reasoning'), findsOneWidget);
       _expectThinkingBeforeMessages(tester, messages);
 
       emit('thinking', 'late-reason', 'Late reasoning', completed: true);
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('First reasoning'), findsOneWidget);
       expect(find.text('Second reasoning'), findsOneWidget);
       expect(find.text('Late reasoning'), findsOneWidget);
       _expectThinkingBeforeMessages(tester, messages);
 
       await tester.tap(toggle);
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('First reasoning'), findsNothing);
       expect(find.text('Second reasoning'), findsNothing);
       expect(find.text('Late reasoning'), findsNothing);

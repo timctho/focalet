@@ -63,8 +63,6 @@ void main() {
         ZommiApp(core: core, desktop: FakeDesktopBridge()),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
-      await tester.pumpAndSettle();
       for (final session in ['session-2', 'session-1', 'session-2']) {
         position(tester).jumpTo(300);
         await tester.pumpAndSettle();

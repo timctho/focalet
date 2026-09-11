@@ -1749,6 +1749,9 @@ Future<void> _pumpApp(
     ZommiApp(core: core, desktop: desktop, artifactLoader: artifactLoader),
   );
   await tester.pumpAndSettle();
+  // Keep the full-width transcript fixture; sidebar behavior has its own tests.
+  await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
+  await tester.pumpAndSettle();
 }
 
 Future<void> _expand(WidgetTester tester) async {

@@ -29,14 +29,17 @@ final savedHermesChats = [
 
 void main() {
   testWidgets(
-    'scrolling reveals chats in small batches without a load button',
+    'sidebar opens with 20 summaries and adds 20 at each scroll to the bottom',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(640, 500));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final now = DateTime.now().toUtc();
-      final core = multiRuntimeCore()
+      final core = RichFakeCore()
+        ..discoveredTargets.removeWhere(
+          (target) => target.id != 'runtime-codex',
+        )
         ..sessionsByRuntime['runtime-codex'] = [
-          for (var i = 1; i <= 40; i++)
+          for (var i = 1; i <= 65; i++)
             {
               'id': 'session-$i',
               'title': 'Saved chat $i',
@@ -47,23 +50,31 @@ void main() {
         ZommiApp(core: core, desktop: FakeDesktopBridge()),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
-      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('session-sidebar')), findsOneWidget);
       final list = find.byKey(const ValueKey('session-list'));
       int count() =>
           (tester.widget<ListView>(list).childrenDelegate
                   as SliverChildBuilderDelegate)
               .childCount!;
-      expect(count(), sessionPageSize);
+      expect(count(), 20);
       expect(find.byKey(const ValueKey('load-older-sessions')), findsNothing);
       final reads = core.catalogRequests.length;
-      await tester.drag(list, const Offset(0, -400));
+      final historyReads = core.readSessionCount;
+      await tester.drag(list, const Offset(0, -100));
       await tester.pumpAndSettle();
-      expect(count(), 2 * sessionPageSize);
+      expect(count(), 20);
+      for (final expectedCount in [40, 60, 65]) {
+        await tester.drag(list, const Offset(0, -3000));
+        await tester.pumpAndSettle();
+        expect(count(), expectedCount);
+        await tester.drag(list, const Offset(0, 200));
+        await tester.pumpAndSettle();
+        expect(count(), expectedCount);
+      }
       expect(core.catalogRequests, hasLength(reads));
-      await tester.drag(list, const Offset(0, 200));
-      await tester.pumpAndSettle();
-      expect(count(), 2 * sessionPageSize);
+      expect(core.readSessionCount, historyReads);
+      expect(core.openedSessions, isEmpty);
+      expect(core.createdSessions, isEmpty);
     },
   );
 
@@ -73,8 +84,6 @@ void main() {
     final core = multiRuntimeCore()
       ..sessionsByRuntime[hermes.id] = savedHermesChats;
     await tester.pumpWidget(ZommiApp(core: core, desktop: FakeDesktopBridge()));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
     await tester.pumpAndSettle();
     expect(find.text('Earlier Hermes work'), findsNothing);
     expect(find.text('Recent Hermes work'), findsOneWidget);
@@ -148,8 +157,6 @@ void main() {
       ..catalogFailures.add(hermes.id)
       ..sessionsByRuntime[hermes.id] = savedHermesChats;
     await tester.pumpWidget(ZommiApp(core: core, desktop: FakeDesktopBridge()));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
     await tester.pumpAndSettle();
     expect(find.textContaining('chats could not be loaded'), findsNothing);
     expect(find.byKey(const ValueKey('retry-session-catalog')), findsNothing);

@@ -237,8 +237,6 @@ void main() {
         ZommiApp(core: core, desktop: FakeDesktopBridge()),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
-      await tester.pumpAndSettle();
       final field = find.byKey(const ValueKey('zommi-composer'));
       final send = find.byKey(const ValueKey('send-message'));
       await tester.enterText(field, 'one');

@@ -14,7 +14,7 @@ import 'package:zommi_flutter/theme/app_preferences.dart';
 part 'codex_commands.dart';
 
 const int historyPageSize = 18;
-const int sessionPageSize = 12;
+const int sessionPageSize = 20;
 const int composerHistoryLimit = 20;
 
 final class _SessionDraft {
@@ -126,7 +126,7 @@ final class ZommiController extends ChangeNotifier {
   bool surfaceTransitionAnimating = false;
   bool transitionTargetExpanded = true;
   bool transitionTargetLarge = false;
-  bool sessionPanelOpen = false;
+  bool sessionPanelOpen = true;
   bool showingOlderSessions = false;
   int _visibleSessionLimit = sessionPageSize;
   bool _loadingMoreSessions = false;

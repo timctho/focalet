@@ -90,7 +90,6 @@ void main() {
     await tester.enterText(field, 'chat one');
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.tap(

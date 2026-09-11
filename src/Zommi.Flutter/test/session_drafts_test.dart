@@ -37,7 +37,6 @@ void main() {
       final original = composer.value;
       expect(composer.inlineAttachments.map((a) => a.id), ['second', 'first']);
 
-      await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('new-session')));
       await tester.pumpAndSettle();
