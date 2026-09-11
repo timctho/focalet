@@ -69,7 +69,11 @@ active-window metadata, so that context is visibly degraded. See
 Browser connection, selection gestures and alignment limits are described in
 [docs/browser-context.md](docs/browser-context.md).
 
-In a Codex chat, type `/` or `/help` to see supported composer commands:
+In a Codex chat, type `/` to open command suggestions. Keep typing to filter
+them (for example `/cl` or `/goal`), use Up/Down to choose, and Tab or a click
+to complete the command. Recognized command names appear in bold without
+changing the text. Press Enter to run a completed command, or `/help` to see
+the reference:
 
 - `/clear` (or `/new`) opens a fresh chat and retains the old chat in history.
 - `/goal <objective>` sets a persistent goal and starts Codex's goal work.

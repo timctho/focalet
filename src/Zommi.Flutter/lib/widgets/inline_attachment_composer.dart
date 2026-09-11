@@ -17,6 +17,7 @@ final class InlineAttachmentTextController extends TextEditingController {
     this.onAttachmentEnter,
     this.onAttachmentExit,
     this.onAttachmentAdjust,
+    this.emphasisRange,
   }) {
     _previousText = text;
     addListener(_handleTextChanged);
@@ -26,6 +27,7 @@ final class InlineAttachmentTextController extends TextEditingController {
   final AttachmentHoverCallback? onAttachmentEnter;
   final ValueChanged<ContextAttachment>? onAttachmentExit;
   final ValueChanged<ContextAttachment>? onAttachmentAdjust;
+  final TextRange Function(String text)? emphasisRange;
   final List<ContextAttachment> _attachments = [];
   late String _previousText;
   bool _mutating = false;
@@ -178,6 +180,7 @@ final class InlineAttachmentTextController extends TextEditingController {
       text: text,
       attachments: _attachments,
       style: style,
+      emphasis: emphasisRange?.call(text) ?? TextRange.empty,
       composing: withComposing && value.isComposingRangeValid
           ? value.composing
           : TextRange.empty,
@@ -261,6 +264,7 @@ List<InlineSpan> inlineAttachmentSpans({
   required TextStyle? style,
   required Widget Function(ContextAttachment attachment) tileBuilder,
   TextRange composing = TextRange.empty,
+  TextRange emphasis = TextRange.empty,
 }) {
   final spans = <InlineSpan>[];
   final showComposing =
@@ -269,31 +273,33 @@ List<InlineSpan> inlineAttachmentSpans({
       composing.end <= text.length;
   void addText(int start, int end) {
     if (start >= end) return;
-    if (!showComposing || composing.end <= start || composing.start >= end) {
-      spans.add(TextSpan(text: text.substring(start, end), style: style));
-      return;
-    }
-    final composingStart = composing.start.clamp(start, end);
-    final composingEnd = composing.end.clamp(start, end);
-    if (start < composingStart) {
-      spans.add(
-        TextSpan(text: text.substring(start, composingStart), style: style),
-      );
-    }
-    spans.add(
-      TextSpan(
-        text: text.substring(composingStart, composingEnd),
-        style:
-            style?.merge(
-              const TextStyle(decoration: TextDecoration.underline),
-            ) ??
-            const TextStyle(decoration: TextDecoration.underline),
-      ),
-    );
-    if (composingEnd < end) {
-      spans.add(
-        TextSpan(text: text.substring(composingEnd, end), style: style),
-      );
+    final boundaries = <int>{
+      start,
+      end,
+      if (showComposing) ...[
+        composing.start.clamp(start, end),
+        composing.end.clamp(start, end),
+      ],
+      if (emphasis.isValid) ...[
+        emphasis.start.clamp(start, end),
+        emphasis.end.clamp(start, end),
+      ],
+    }.toList()..sort();
+    for (var i = 0; i < boundaries.length - 1; i++) {
+      final from = boundaries[i];
+      final to = boundaries[i + 1];
+      var segmentStyle = style;
+      if (emphasis.isValid && from >= emphasis.start && to <= emphasis.end) {
+        segmentStyle = (segmentStyle ?? const TextStyle()).copyWith(
+          fontWeight: FontWeight.w700,
+        );
+      }
+      if (showComposing && from >= composing.start && to <= composing.end) {
+        segmentStyle = (segmentStyle ?? const TextStyle()).copyWith(
+          decoration: TextDecoration.underline,
+        );
+      }
+      spans.add(TextSpan(text: text.substring(from, to), style: segmentStyle));
     }
   }
 

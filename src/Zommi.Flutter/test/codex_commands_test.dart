@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
+import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
 import 'package:zommi_flutter/zommi_app.dart';
 
 import 'test_support.dart';
@@ -191,7 +192,7 @@ void main() {
 
       await tester.enterText(composer, '/');
       await tester.pump();
-      expect(find.textContaining('/clear or /new'), findsOneWidget);
+      expect(find.byKey(const ValueKey('codex-command-menu')), findsOneWidget);
       await command('/goal Finish tests');
       expect(tester.widget<TextField>(composer).controller!.text, isEmpty);
       expect(find.textContaining('Goal · active'), findsOneWidget);
@@ -215,6 +216,87 @@ void main() {
       expect(find.textContaining('Goal · paused'), findsOneWidget);
       expect(core.goalCommands.last['action'], 'pause');
       expect(core.lastMessage, isNull);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'slash suggestions filter, complete with keyboard or click, and highlight only the command',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(720, 620));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final core = RichFakeCore()..historyCount = 0;
+      await tester.pumpWidget(
+        ZommiApp(core: core, desktop: FakeDesktopBridge()),
+      );
+      await tester.pumpAndSettle();
+      final field = find.byKey(const ValueKey('zommi-composer'));
+      InlineAttachmentTextController composer() =>
+          tester.widget<TextField>(field).controller!
+              as InlineAttachmentTextController;
+      final menu = find.byKey(const ValueKey('codex-command-menu'));
+      await tester.enterText(field, '/');
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('codex-command-/clear')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('codex-command-/goal')), findsOneWidget);
+      await tester.enterText(field, '/cl');
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('codex-command-/clear')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('codex-command-/goal')), findsNothing);
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      expect(composer().text, '/clear');
+      expect(menu, findsNothing);
+      expect(core.createdSessions, isEmpty);
+
+      await tester.enterText(field, '/goal');
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('codex-command-/goal pause')),
+        findsOneWidget,
+      );
+      final position = composer().selection;
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pump();
+      expect(composer().selection, position);
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      expect(composer().text, '/goal pause');
+      expect(core.goalCommands.where((c) => c['action'] == 'pause'), isEmpty);
+
+      await tester.enterText(field, '/goal c');
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('codex-command-/goal clear')));
+      await tester.pump();
+      expect(composer().text, '/goal clear');
+
+      await tester.enterText(field, '/goal Fix the bug');
+      await tester.pump();
+      expect(menu, findsNothing);
+      final span = composer().buildTextSpan(
+        context: tester.element(field),
+        style: const TextStyle(fontWeight: FontWeight.w400),
+        withComposing: true,
+      );
+      final textSpans = span.children!.whereType<TextSpan>().toList();
+      expect(textSpans.first.text, '/goal');
+      expect(textSpans.first.style!.fontWeight, FontWeight.w700);
+      expect(textSpans.last.text, ' Fix the bug');
+      expect(textSpans.last.style!.fontWeight, FontWeight.w400);
+      expect(span.toPlainText(), '/goal Fix the bug');
+
+      await tester.enterText(field, '/goal');
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      expect(menu, findsNothing);
+      expect(composer().text, '/goal');
       expect(tester.takeException(), isNull);
     },
   );

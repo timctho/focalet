@@ -42,13 +42,7 @@ extension CodexCommands on ZommiController {
           RegExp(r'^/[A-Za-z][A-Za-z0-9_-]*(?:\s|$)').hasMatch(message.trim()));
 
   String? get commandResult =>
-      commandOutput ??
-      (goalPanelOpen
-          ? _goalSummary
-          : activeRuntime?.adapterId == 'codex-app-server' &&
-                composerValue.text.trim() == '/'
-          ? codexCommandHelp
-          : null);
+      commandOutput ?? (goalPanelOpen ? _goalSummary : null);
 
   String get _goalSummary {
     final goal = _goalsBySession[_activeSessionKey];
