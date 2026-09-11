@@ -163,6 +163,8 @@ class ZommiShell extends StatefulWidget {
 
 class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
   late final InlineAttachmentTextController _composer;
+  String? _composerSessionKey;
+  bool _restoringComposer = false;
   final FocusNode _composerFocus = FocusNode(debugLabel: 'Zommi composer');
   final ScrollController _composerScroll = ScrollController();
   late final ZommiController _controller;
@@ -199,12 +201,36 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
       onAttachmentAdjust: (attachment) =>
           unawaited(_controller.addPointerContext(replacingId: attachment.id)),
     );
+    _composer.addListener(_onComposerChanged);
     _controller.addListener(_onControllerChanged);
     unawaited(_controller.initialize());
   }
 
+  void _onComposerChanged() {
+    if (!_restoringComposer) {
+      _controller.updateComposerValue(
+        _composer.value,
+        attachmentOrder: _composer.inlineAttachments
+            .map((attachment) => attachment.id)
+            .toList(),
+      );
+    }
+  }
+
   void _onControllerChanged() {
     if (!mounted) return;
+    if (_composerSessionKey != _controller.composerSessionKey) {
+      _composerSessionKey = _controller.composerSessionKey;
+      _restoringComposer = true;
+      try {
+        _composer.restoreDraft(
+          _controller.composerValue,
+          _controller.attachments,
+        );
+      } finally {
+        _restoringComposer = false;
+      }
+    }
     if (_previewBlocked && _controller.previewAttachment != null) {
       _controller.hideAttachmentPreview();
       return;
@@ -315,6 +341,9 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
     final text = _composer.messageText;
     if (text.isEmpty ||
         _controller.submitting ||
+        _controller.sessionBusy ||
+        _controller.runtimeBusy ||
+        _controller.selectingContent ||
         _controller.turnActive ||
         _controller.activeRuntime == null ||
         _controller.activeSessionId == null) {
@@ -788,6 +817,11 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
               ),
               const SizedBox(width: 8),
               Expanded(
+                // Undo history belongs to the selected chat too.
+                key: ValueKey((
+                  'composer-session',
+                  _controller.composerSessionKey,
+                )),
                 child: TextField(
                   key: const ValueKey('zommi-composer'),
                   focusNode: _composerFocus,

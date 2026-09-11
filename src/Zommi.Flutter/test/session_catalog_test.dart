@@ -28,6 +28,45 @@ final savedHermesChats = [
 ];
 
 void main() {
+  testWidgets(
+    'scrolling reveals chats in small batches without a load button',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(640, 500));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final now = DateTime.now().toUtc();
+      final core = multiRuntimeCore()
+        ..sessionsByRuntime['runtime-codex'] = [
+          for (var i = 1; i <= 40; i++)
+            {
+              'id': 'session-$i',
+              'title': 'Saved chat $i',
+              'updatedAt': now.subtract(Duration(hours: i)).toIso8601String(),
+            },
+        ];
+      await tester.pumpWidget(
+        ZommiApp(core: core, desktop: FakeDesktopBridge()),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
+      await tester.pumpAndSettle();
+      final list = find.byKey(const ValueKey('session-list'));
+      int count() =>
+          (tester.widget<ListView>(list).childrenDelegate
+                  as SliverChildBuilderDelegate)
+              .childCount!;
+      expect(count(), sessionPageSize);
+      expect(find.byKey(const ValueKey('load-older-sessions')), findsNothing);
+      final reads = core.catalogRequests.length;
+      await tester.drag(list, const Offset(0, -400));
+      await tester.pumpAndSettle();
+      expect(count(), 2 * sessionPageSize);
+      expect(core.catalogRequests, hasLength(reads));
+      await tester.drag(list, const Offset(0, 200));
+      await tester.pumpAndSettle();
+      expect(count(), 2 * sessionPageSize);
+    },
+  );
+
   testWidgets('saved Hermes chats appear at startup without creating a chat', (
     tester,
   ) async {
@@ -39,7 +78,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Earlier Hermes work'), findsNothing);
     expect(find.text('Recent Hermes work'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('load-older-sessions')));
+    expect(find.byKey(const ValueKey('load-older-sessions')), findsNothing);
+    await tester.drag(
+      find.byKey(const ValueKey('session-list')),
+      const Offset(0, -300),
+    );
     await tester.pumpAndSettle();
     expect(find.text('Earlier Hermes work'), findsOneWidget);
     expect(find.text('Recent Hermes work'), findsOneWidget);
@@ -98,7 +141,7 @@ void main() {
     },
   );
 
-  testWidgets('failed catalogs can retry without hiding other chats', (
+  testWidgets('failed catalogs stay quiet and Refresh agents can retry', (
     tester,
   ) async {
     final core = multiRuntimeCore()
@@ -108,13 +151,16 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
     await tester.pumpAndSettle();
-    expect(find.text('Hermes chats could not be loaded'), findsOneWidget);
+    expect(find.textContaining('chats could not be loaded'), findsNothing);
+    expect(find.byKey(const ValueKey('retry-session-catalog')), findsNothing);
     expect(
       find.byKey(const ValueKey('session-runtime-codex-session-1')),
       findsOneWidget,
     );
     core.catalogFailures.clear();
-    await tester.tap(find.byKey(const ValueKey('retry-session-catalog')));
+    await tester.tap(find.byKey(const ValueKey('new-session')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('refresh-runtimes')));
     await tester.pumpAndSettle();
     expect(find.text('Hermes chats could not be loaded'), findsNothing);
     expect(find.text('Recent Hermes work'), findsOneWidget);

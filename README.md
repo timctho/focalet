@@ -82,10 +82,17 @@ Session metadata is retained for seven days since last activity, with exceptions
 for the currently selected or running chats. Expiry runs on load, save, and hourly
 while the app is open; refresh does not re-cache expired rows. Provider rows with
 no valid timestamp can appear during the current run, but are only persisted when
-selected or running. **Load older chats** in Chats reads provider listings on
-demand; selecting an old chat keeps it available while open. No provider history
-is deleted. Runtime labels and sync timestamps remain independent of session
+selected or running. Scrolling down in Chats reveals 12 more sessions at a time
+and reads older provider listings on demand; selecting an old chat keeps it
+available while open. No provider history is deleted. Runtime labels and sync
+timestamps remain independent of session
 expiry, so eviction does not trigger unnecessary runtime launches.
+
+Each chat keeps its own in-memory composer draft, cursor position, and attachments
+when switching chats. Leaving a newly created chat with no draft, attachments, or
+conversation removes it from the sidebar. Its scoped ID is recorded locally so
+provider refreshes and restarts do not restore that empty entry. Provider history
+is not deleted.
 
 The first SQLite open imports a valid legacy `session-catalog.json` or its backup,
 applies the retention window, and removes the JSON files after committing. A
@@ -100,8 +107,9 @@ refreshing five seconds after initialization (or when Chats is opened). A shared
 queue allows at most two reads, prioritizing recently used runtimes. Runtimes
 used in the past seven days refresh after 15 minutes; others after six hours.
 Failures have a persisted two-minute cooldown. Opening Chats checks freshness;
-**Refresh agents** and the catalog retry button bypass it. Opening a cached chat
-connects its exact runtime/session and reads canonical history on demand.
+**Refresh agents** bypasses it. Catalog failures do not add error rows to Chats.
+Opening a cached chat connects its exact runtime/session and reads canonical
+history on demand.
 
 If opening a saved Codex chat reports `no rollout found for thread id`, see
 [Repairing Codex history lookup](docs/codex-history-repair.md) for diagnosing
@@ -173,9 +181,12 @@ On Windows PowerShell:
 
 To require real signing, set `ZOMMI_WINDOWS_SIGNING_THUMBPRINT` or
 `ZOMMI_MACOS_SIGNING_IDENTITY` in the native build environment. CI builds and
-verifies native Windows and Linux releases on separate local runners and
-uploads only each archive plus checksum. The native macOS job is explicitly
-skipped until a local macOS builder is available.
+verifies native Windows and Linux releases on separate local runners. To publish
+the archives and checksums to GitHub Actions storage, dispatch CI with
+`upload_packages: true`; those artifacts are retained for three days. Ordinary
+push and pull-request runs validate packages without uploading them, avoiding
+recurring artifact-quota failures. Manual uploads still require available quota.
+The native macOS job is explicitly skipped until a local macOS builder is available.
 
 ## Launch
 

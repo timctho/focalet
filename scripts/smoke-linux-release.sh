@@ -92,8 +92,10 @@ path = pathlib.Path(sys.argv[1])
 assert path.is_file(), "Packaged Flutter did not initialize its SQLite cache"
 with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as db:
     assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-    assert db.execute("PRAGMA user_version").fetchone()[0] == 1
+    version = db.execute("PRAGMA user_version").fetchone()[0]
+    assert version == 2, f"Expected session catalog schema 2, got {version}"
     db.execute("SELECT runtime_target_id, id FROM sessions LIMIT 1").fetchall()
+    db.execute("SELECT runtime_target_id, id FROM dismissed_sessions LIMIT 1").fetchall()
 PY
 fi
 

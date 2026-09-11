@@ -38,6 +38,23 @@ final class InlineAttachmentTextController extends TextEditingController {
 
   String get inlineText => text;
 
+  void restoreDraft(
+    TextEditingValue draft,
+    List<ContextAttachment> attachments,
+  ) {
+    _mutating = true;
+    try {
+      _attachments
+        ..clear()
+        ..addAll(attachments);
+      _previousText = draft.text;
+      value = draft.copyWith(composing: TextRange.empty);
+    } finally {
+      _mutating = false;
+    }
+    notifyListeners();
+  }
+
   void syncAttachments(List<ContextAttachment> current) {
     final currentIds = current.map((attachment) => attachment.id).toSet();
     var changed = false;

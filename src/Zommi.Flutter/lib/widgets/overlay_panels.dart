@@ -40,10 +40,18 @@ class ZommiOverlayPanelSurface extends StatelessWidget {
   }
 }
 
-class SessionSidebar extends StatelessWidget {
+class SessionSidebar extends StatefulWidget {
   const SessionSidebar({required this.controller, super.key});
 
   final ZommiController controller;
+
+  @override
+  State<SessionSidebar> createState() => _SessionSidebarState();
+}
+
+class _SessionSidebarState extends State<SessionSidebar> {
+  ZommiController get controller => widget.controller;
+  bool _loadedForScroll = false;
 
   @override
   Widget build(BuildContext context) {
@@ -189,127 +197,113 @@ class SessionSidebar extends StatelessWidget {
                 key: ValueKey('session-catalog-loading'),
                 minHeight: 2,
               ),
-            if (controller.sessionCatalogError case final error?)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(error, style: const TextStyle(fontSize: 11)),
-                    ),
-                    IconButton(
-                      key: const ValueKey('retry-session-catalog'),
-                      tooltip: 'Retry loading chats',
-                      onPressed: controller.sessionCatalogLoading
-                          ? null
-                          : () => unawaited(
-                              controller.refreshSessionCatalog(force: true),
-                            ),
-                      icon: const Icon(Icons.refresh_rounded, size: 16),
-                    ),
-                  ],
-                ),
-              ),
             Expanded(
-              child: sessions.isEmpty
-                  ? const Center(
-                      child: Padding(
+              child: NotificationListener<ScrollNotification>(
+                onNotification: (notification) {
+                  if (notification.depth != 0) return false;
+                  if (notification is ScrollStartNotification) {
+                    _loadedForScroll = false;
+                  }
+                  final down = switch (notification) {
+                    ScrollUpdateNotification(:final scrollDelta) =>
+                      (scrollDelta ?? 0) > 0,
+                    OverscrollNotification(:final overscroll) => overscroll > 0,
+                    _ => false,
+                  };
+                  if (!_loadedForScroll &&
+                      down &&
+                      notification.metrics.extentAfter < 120) {
+                    _loadedForScroll = true;
+                    unawaited(controller.loadMoreSessions());
+                  }
+                  return false;
+                },
+                child: ListView.builder(
+                  key: const ValueKey('session-list'),
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
+                  itemCount: sessions.isEmpty ? 1 : sessions.length,
+                  itemBuilder: (context, index) {
+                    if (sessions.isEmpty) {
+                      return const Padding(
                         padding: EdgeInsets.all(18),
                         child: Text(
                           'No recent chats are available.',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: Color(0xff737887)),
                         ),
+                      );
+                    }
+                    final session = sessions[index];
+                    final runtime = controller.runtimeForSession(session);
+                    final presence = controller.presenceFor(
+                      session.id,
+                      runtimeTargetId: session.runtimeTargetId,
+                    );
+                    final selected =
+                        session.id == controller.activeSessionId &&
+                        session.runtimeTargetId == controller.activeRuntime?.id;
+                    return Semantics(
+                      selected: selected,
+                      label:
+                          '${session.title}, ${runtime?.displayName ?? 'Agent'}, ${presence.name} session',
+                      child: ListTile(
+                        key: ValueKey(
+                          'session-${session.runtimeTargetId}-${session.id}',
+                        ),
+                        dense: true,
+                        visualDensity: const VisualDensity(vertical: -3),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                        ),
+                        selected: selected,
+                        selectedTileColor: const Color(0xffebe9f7),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        minLeadingWidth: 0,
+                        horizontalTitleGap: 9,
+                        leading: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SizedBox.square(
+                              dimension: 18,
+                              child: Center(
+                                child: _SessionStatusIcon(presence: presence),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Tooltip(
+                              message: runtime?.displayName ?? 'Agent runtime',
+                              child: RuntimeLogo(
+                                key: ValueKey(
+                                  'session-runtime-${session.runtimeTargetId}-${session.id}',
+                                ),
+                                runtimeId: runtime?.runtimeId ?? '',
+                              ),
+                            ),
+                          ],
+                        ),
+                        title: Text(
+                          session.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                        onTap: controller.sessionBusy || controller.runtimeBusy
+                            ? null
+                            : () => unawaited(
+                                controller.switchSession(
+                                  session.id,
+                                  runtimeTargetId: session.runtimeTargetId,
+                                ),
+                              ),
                       ),
-                    )
-                  : ListView.builder(
-                      key: const ValueKey('session-list'),
-                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
-                      itemCount: sessions.length,
-                      itemBuilder: (context, index) {
-                        final session = sessions[index];
-                        final runtime = controller.runtimeForSession(session);
-                        final presence = controller.presenceFor(
-                          session.id,
-                          runtimeTargetId: session.runtimeTargetId,
-                        );
-                        final selected =
-                            session.id == controller.activeSessionId &&
-                            session.runtimeTargetId ==
-                                controller.activeRuntime?.id;
-                        return Semantics(
-                          selected: selected,
-                          label:
-                              '${session.title}, ${runtime?.displayName ?? 'Agent'}, ${presence.name} session',
-                          child: ListTile(
-                            key: ValueKey(
-                              'session-${session.runtimeTargetId}-${session.id}',
-                            ),
-                            dense: true,
-                            visualDensity: const VisualDensity(vertical: -3),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                            ),
-                            selected: selected,
-                            selectedTileColor: const Color(0xffebe9f7),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            minLeadingWidth: 0,
-                            horizontalTitleGap: 9,
-                            leading: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                SizedBox.square(
-                                  dimension: 18,
-                                  child: Center(
-                                    child: _SessionStatusIcon(
-                                      presence: presence,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                Tooltip(
-                                  message:
-                                      runtime?.displayName ?? 'Agent runtime',
-                                  child: RuntimeLogo(
-                                    key: ValueKey(
-                                      'session-runtime-${session.runtimeTargetId}-${session.id}',
-                                    ),
-                                    runtimeId: runtime?.runtimeId ?? '',
-                                  ),
-                                ),
-                              ],
-                            ),
-                            title: Text(
-                              session.title,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 11),
-                            ),
-                            onTap:
-                                controller.sessionBusy || controller.runtimeBusy
-                                ? null
-                                : () => unawaited(
-                                    controller.switchSession(
-                                      session.id,
-                                      runtimeTargetId: session.runtimeTargetId,
-                                    ),
-                                  ),
-                          ),
-                        );
-                      },
-                    ),
-            ),
-            if (!controller.showingOlderSessions)
-              TextButton(
-                key: const ValueKey('load-older-sessions'),
-                onPressed:
-                    controller.starting || controller.sessionCatalogLoading
-                    ? null
-                    : () => unawaited(controller.loadOlderSessions()),
-                child: const Text('Load older chats'),
+                    );
+                  },
+                ),
               ),
+            ),
           ],
         ),
       ),

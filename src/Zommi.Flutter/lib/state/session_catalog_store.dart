@@ -16,6 +16,7 @@ final class SessionCatalogSnapshot {
     this.attemptedAt = const {},
     this.usedAt = const {},
     this.protectedSessions = const {},
+    this.dismissedSessions = const {},
   });
 
   final List<RuntimeTarget> runtimes;
@@ -24,6 +25,7 @@ final class SessionCatalogSnapshot {
   final Map<String, DateTime> attemptedAt;
   final Map<String, DateTime> usedAt;
   final Set<(String, String)> protectedSessions;
+  final Set<(String, String)> dismissedSessions;
 
   SessionCatalogSnapshot retained(DateTime now) {
     final cutoff = now.toUtc().subtract(sessionCatalogRetention);
@@ -42,6 +44,7 @@ final class SessionCatalogSnapshot {
       attemptedAt: attemptedAt,
       usedAt: usedAt,
       protectedSessions: protectedSessions,
+      dismissedSessions: dismissedSessions,
     );
   }
 
@@ -70,6 +73,10 @@ final class SessionCatalogSnapshot {
     'syncedAt': _encodeTimes(syncedAt),
     'attemptedAt': _encodeTimes(attemptedAt),
     'usedAt': _encodeTimes(usedAt),
+    'dismissedSessions': [
+      for (final (runtime, session) in dismissedSessions)
+        {'runtimeTargetId': runtime, 'id': session},
+    ],
   };
 
   factory SessionCatalogSnapshot.fromJson(Object? value) {
@@ -110,6 +117,12 @@ final class SessionCatalogSnapshot {
       syncedAt: _decodeTimes(value['syncedAt']),
       attemptedAt: _decodeTimes(value['attemptedAt']),
       usedAt: _decodeTimes(value['usedAt']),
+      dismissedSessions: {
+        for (final item in _maps(value['dismissedSessions']))
+          if (item['runtimeTargetId'] case final String runtime)
+            if (item['id'] case final String session)
+              if (runtime.isNotEmpty && session.isNotEmpty) (runtime, session),
+      },
     );
   }
 
