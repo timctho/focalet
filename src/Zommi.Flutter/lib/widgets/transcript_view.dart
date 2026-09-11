@@ -362,16 +362,16 @@ class ConversationTurnView extends StatelessWidget {
       'normalizeBlocks',
       () => distinctTranscriptBlocks(turn.blocks),
     );
-    final segments = <List<TranscriptBlock>>[];
-    for (final block in blocks) {
-      if (block.kind.isFoldedActivity &&
-          segments.isNotEmpty &&
-          segments.last.first.kind.isFoldedActivity) {
-        segments.last.add(block);
-      } else {
-        segments.add([block]);
-      }
-    }
+    // Keep one activity section above every message, even when more thinking
+    // or tool events arrive after commentary or the final response.
+    final activities = blocks
+        .where((block) => block.kind.isFoldedActivity)
+        .toList();
+    final segments = <List<TranscriptBlock>>[
+      if (activities.isNotEmpty) activities,
+      for (final block in blocks)
+        if (!block.kind.isFoldedActivity) [block],
+    ];
     return Semantics(
       container: true,
       label: 'Conversation turn ${turn.number}',
