@@ -14,6 +14,50 @@ import 'package:zommi_flutter/zommi_app.dart';
 import 'test_support.dart';
 
 void main() {
+  testWidgets(
+    'tapping a context thumbnail opens readable details without Adjust',
+    (tester) async {
+      await tester.binding.setSurfaceSize(normalWindowSize);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final desktop = FakeDesktopBridge();
+      await tester.pumpWidget(
+        ZommiApp(core: RichFakeCore()..historyCount = 0, desktop: desktop),
+      );
+      await tester.pumpAndSettle();
+      desktop.emit(
+        DesktopInvocation(
+          kind: DesktopInvocationKind.context,
+          attachment: ContextAttachment(
+            id: 'click-context',
+            token: '',
+            snapshot: const {
+              'windowTitle': 'Selected chart',
+              'selection': ['The complete selected chart details'],
+            },
+            imageDataUrl:
+                'data:image/png;base64,'
+                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('inline-image-click-context')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('context-preview')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('context-preview-text')),
+        findsOneWidget,
+      );
+      final detail = tester.widget<SelectableText>(
+        find.byKey(const ValueKey('context-preview-text')),
+      );
+      expect(detail.data, contains('The complete selected chart details'));
+      expect(find.text('Adjust'), findsNothing);
+    },
+  );
+
   for (final placement in [
     ('right', const Rect.fromLTWH(20, 100, 60, 24), const Offset(88, 100)),
     ('left', const Rect.fromLTWH(560, 100, 60, 24), const Offset(172, 100)),

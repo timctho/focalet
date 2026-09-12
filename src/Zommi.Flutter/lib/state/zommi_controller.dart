@@ -1174,6 +1174,7 @@ final class ZommiController extends ChangeNotifier {
     if (changingSession) {
       commandOutput = null;
       goalPanelOpen = false;
+      previewAttachment = null;
     }
     _dismissedSessions.remove((
       connection.runtimeTargetId,
@@ -2825,8 +2826,13 @@ List<ConversationTurn> mergeSessionHistory(
               cachedTurn,
               merged[index],
               preferPrimaryBlocks: preferCachedUpdates,
+              userPresentation: cachedTurn,
             )
-          : mergeConversationTurn(merged[index], cachedTurn);
+          : mergeConversationTurn(
+              merged[index],
+              cachedTurn,
+              userPresentation: cachedTurn,
+            );
     }
   }
   return merged;
@@ -2836,7 +2842,13 @@ ConversationTurn mergeConversationTurn(
   ConversationTurn primary,
   ConversationTurn secondary, {
   bool preferPrimaryBlocks = false,
+  ConversationTurn? userPresentation,
 }) {
+  final presentation = userPresentation?.attachments.isNotEmpty == true
+      ? userPresentation!
+      : primary.attachments.isNotEmpty
+      ? primary
+      : secondary;
   final blocks = List<TranscriptBlock>.of(primary.blocks);
   // Match each rekeyed snapshot once so repeated messages remain separate.
   final matchedIndexes = <int>{};
@@ -2858,15 +2870,17 @@ ConversationTurn mergeConversationTurn(
     id: primary.id,
     number: primary.number,
     userText: primary.userText,
-    inlineUserText: primary.inlineUserText,
+    inlineUserText: presentation.attachments.isEmpty
+        ? primary.inlineUserText
+        : presentation.inlineUserText,
     activityExpanded: primary.activityExpanded,
     activityGroupExpansion: primary.activityGroupExpansion,
-    contextTokens: primary.contextTokens.isEmpty
+    contextTokens: presentation.attachments.isNotEmpty
+        ? presentation.contextTokens
+        : primary.contextTokens.isEmpty
         ? secondary.contextTokens
         : primary.contextTokens,
-    attachments: primary.attachments.isEmpty
-        ? secondary.attachments
-        : primary.attachments,
+    attachments: presentation.attachments,
     blocks: normalizeTranscriptBlocks(blocks),
   );
 }

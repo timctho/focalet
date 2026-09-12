@@ -48,7 +48,7 @@ Electron, Node module, or `.mjs` payload.
   catalogs sync in the background without creating or switching chats;
 - compact workspace and model menus anchored below their controls, with settings,
   minimize, and close at the right;
-- readable A/B attachments, bounded previews and in-place selection adjustment;
+- readable A/B attachments, clickable bounded previews and restored message contexts;
 - exact runtime, model, reasoning, and provider-owned session selection;
 - paged history, concurrent background turns, running/unread state, and exact
   interruption;

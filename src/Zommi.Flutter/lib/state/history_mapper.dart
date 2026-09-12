@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:zommi_flutter/state/zommi_models.dart';
 
 List<ConversationTurn> mapThreadHistory(Map<String, Object?> response) {
@@ -20,10 +22,16 @@ ConversationTurn _mapTurn(
     orElse: () => null,
   );
   final userText = userItem == null ? 'Continue' : _userItemText(userItem);
+  final id = turn['id']?.toString() ?? 'history-turn-$number';
+  final attachments = userItem == null
+      ? <ContextAttachment>[]
+      : _userItemAttachments(userItem, id);
   final result = ConversationTurn(
-    id: turn['id']?.toString() ?? 'history-turn-$number',
+    id: id,
     number: number,
     userText: userText.isEmpty ? 'Continue' : userText,
+    attachments: attachments,
+    contextTokens: attachments.map((attachment) => attachment.token).toList(),
   );
   for (final item in items) {
     final block = _historyBlock(item, threadCwd);
@@ -492,6 +500,130 @@ String _userItemText(Map<String, Object?> item) {
       .where((text) => text.isNotEmpty)
       .join('\n');
   return displayUserText(content);
+}
+
+List<ContextAttachment> _userItemAttachments(
+  Map<String, Object?> item,
+  String turnId,
+) {
+  final content = mapList(item['content']);
+  final text = content
+      .where((entry) => entry['type'] == 'text')
+      .map((entry) => entry['text']?.toString() ?? '')
+      .join('\n');
+  // Keep missing/invalid images in their original slots: imageIndex refers to
+  // the runtime's image order, not to the number of previews we can decode.
+  final images = [
+    for (final entry in content)
+      if (entry['type'] == 'image' || entry['type'] == 'input_image')
+        _imageDataUrl(entry['url'] ?? entry['image_url']),
+  ];
+  final body =
+      RegExp(
+            r'<zommi_invocation_context>\s*([\s\S]*?)\s*</zommi_invocation_context>',
+          )
+          .firstMatch(text)
+          ?.group(1)
+          ?.replaceFirst(
+            RegExp(r'\nUser-selected image regions attached:[^\n]*$'),
+            '',
+          )
+          .trim();
+  final attachments = <ContextAttachment>[];
+  final assignedImages = <int>{};
+  if (body != null && body.isNotEmpty) {
+    final references = RegExp(
+      r'^User reference \[([^\]\r\n]+)\]:\s*$',
+      multiLine: true,
+    ).allMatches(body).toList();
+    final headers = references.isNotEmpty
+        ? references
+        : RegExp(
+            r'^Context \d+ of \d+:\s*$',
+            multiLine: true,
+          ).allMatches(body).toList();
+    final count = headers.isEmpty ? 1 : headers.length;
+    for (var index = 0; index < count; index++) {
+      final section = body
+          .substring(
+            headers.isEmpty ? 0 : headers[index].start,
+            index + 1 < headers.length ? headers[index + 1].start : body.length,
+          )
+          .trim();
+      final label = references.isEmpty
+          ? String.fromCharCode(65 + index)
+          : references[index].group(1)!;
+      final imageIndex = int.tryParse(
+        RegExp(r'Attached image (\d+) corresponds to this context\.')
+                .firstMatch(section)
+                ?.group(1) ??
+            '',
+      );
+      String? image;
+      if (imageIndex != null && imageIndex > 0 && imageIndex <= images.length) {
+        image = images[imageIndex - 1];
+        assignedImages.add(imageIndex - 1);
+      }
+      attachments.add(
+        ContextAttachment(
+          id: '$turnId-context-$index',
+          token: '[$label]',
+          snapshot: _historyContextSnapshot(section),
+          previewText: section,
+          imageDataUrl: image,
+        ),
+      );
+    }
+  }
+  for (var index = 0; index < images.length; index++) {
+    if (assignedImages.contains(index) || images[index] == null) continue;
+    attachments.add(
+      ContextAttachment(
+        id: '$turnId-image-$index',
+        token: '[Image ${index + 1}]',
+        previewText: 'Attached image ${index + 1}',
+        imageDataUrl: images[index],
+      ),
+    );
+  }
+  return attachments;
+}
+
+Map<String, Object?> _historyContextSnapshot(String section) {
+  String? line(String prefix) => RegExp(
+    '^${RegExp.escape(prefix)}([^\\r\\n]*)',
+    multiLine: true,
+  ).firstMatch(section)?.group(1)?.trim();
+  final window = line('Window: ');
+  final surface = line('Surface: ');
+  final application = surface == null
+      ? null
+      : RegExp(r' in (.+)$').firstMatch(surface)?.group(1);
+  final selected = RegExp(
+    r'Selected text or items:\r?\n((?:- [^\r\n]*(?:\r?\n|$))+)',
+  ).firstMatch(section)?.group(1);
+  final snapshot = <String, Object?>{
+    'windowTitle': ?window,
+    'application': ?application,
+    if (selected != null)
+      'selection': const LineSplitter()
+          .convert(selected)
+          .map((line) => line.substring(2).trim())
+          .where((line) => line.isNotEmpty)
+          .toList(),
+  };
+  final dom = line(
+    'Browser content (original selected text, target and nearby content): ',
+  );
+  if (dom != null) {
+    try {
+      final decoded = jsonDecode(dom);
+      if (decoded is Map) snapshot['dom'] = mapValue(decoded);
+    } on FormatException {
+      // The readable section remains available even for old/truncated JSON.
+    }
+  }
+  return snapshot;
 }
 
 List<String> _stringList(Object? value) => (value as List<Object?>? ?? const [])

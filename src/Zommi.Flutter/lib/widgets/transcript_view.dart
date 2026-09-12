@@ -460,11 +460,13 @@ class ConversationTurnView extends StatelessWidget {
                           ),
                         ),
                       ),
-                    if (turn.attachments.isNotEmpty &&
-                        turn.inlineUserText.contains(inlineAttachmentMarker))
+                    if (turn.attachments.isNotEmpty)
                       InlineAttachmentMessage(
                         key: ValueKey('inline-user-message-${turn.id}'),
-                        text: turn.inlineUserText,
+                        text:
+                            turn.inlineUserText.contains(inlineAttachmentMarker)
+                            ? turn.inlineUserText
+                            : '${turn.userText}\n${List.filled(turn.attachments.length, inlineAttachmentMarker).join(' ')}',
                         attachments: turn.attachments,
                         onAttachmentEnter: onAttachmentEnter,
                         onAttachmentExit: onAttachmentExit,

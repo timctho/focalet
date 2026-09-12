@@ -54,8 +54,10 @@ clip against the body's scrolled border box; actual nested overflow still exclud
 hidden rows and partially clipped items.
 
 Attachments show a stable A/B reference and a readable excerpt or image preview.
-**Adjust** replaces that attachment in place, preserving its reference and the
-typed question. Cancellation or a capture failure preserves the old attachment.
+Hover over or click anywhere on an attachment to read its context details.
+Use its remove button and **Select** to capture a different selection.
+Sent attachments remain available when reopening a chat, including context
+recovered from the runtime history. Images are shown when retained by the runtime.
 References are included in the agent handoff beside the corresponding image
 index. Removed references are not reused within the same draft. Image markup
 and arrows are not included in this first version.
