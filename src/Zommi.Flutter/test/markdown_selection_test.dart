@@ -23,6 +23,23 @@ void main() {
         (tester) async {
           final copied = <String>[];
           final opened = <String>[];
+          String? clipboard;
+          final messenger =
+              TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+          messenger.setMockMethodCallHandler(SystemChannels.platform, (
+            call,
+          ) async {
+            if (call.method == 'Clipboard.setData') {
+              clipboard = (call.arguments as Map)['text'] as String;
+            }
+            return null;
+          });
+          addTearDown(
+            () => messenger.setMockMethodCallHandler(
+              SystemChannels.platform,
+              null,
+            ),
+          );
           await tester.pumpWidget(
             MaterialApp(
               home: Scaffold(
@@ -50,14 +67,17 @@ void main() {
             buttons: kSecondaryMouseButton,
           );
           await tester.pumpAndSettle();
-          expect(find.text('Copy link'), findsOneWidget);
+          expect(find.text('Copy'), findsOneWidget);
+          expect(find.text('Select all'), findsOneWidget);
+          expect(find.byType(AdaptiveTextSelectionToolbar), findsOneWidget);
+          expect(find.byType(PopupMenuItem<bool>), findsNothing);
           expect(copied, isEmpty);
           expect(opened, isEmpty);
-          await tester.tap(find.text('Copy link'));
+          await tester.tap(find.text('Copy'));
           await tester.pumpAndSettle();
           expect(copied, [target]);
           expect(opened, isEmpty);
-          expect(find.text('Copy link'), findsNothing);
+          expect(find.text('Copy'), findsNothing);
 
           await tester.tap(
             link,
@@ -67,7 +87,33 @@ void main() {
           await tester.pumpAndSettle();
           await tester.sendKeyEvent(LogicalKeyboardKey.escape);
           await tester.pumpAndSettle();
-          expect(find.text('Copy link'), findsNothing);
+          expect(find.text('Copy'), findsNothing);
+          expect(copied, [target]);
+          await tester.tap(
+            link,
+            kind: PointerDeviceKind.mouse,
+            buttons: kSecondaryMouseButton,
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Select all'));
+          await tester.pumpAndSettle();
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+          await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+          await tester.pump();
+          expect(
+            clipboard,
+            'Plain ${linkText.startsWith('[Source]') ? 'Source' : target}',
+          );
+          // Copy now applies to the selected message, using the same menu.
+          await tester.tap(
+            link,
+            kind: PointerDeviceKind.mouse,
+            buttons: kSecondaryMouseButton,
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Copy'));
+          await tester.pumpAndSettle();
           expect(copied, [target]);
           await tester.tap(link);
           await tester.pump();
@@ -301,6 +347,32 @@ void main() {
     await tester.pump();
     expect(copied.last, reply);
     await tester.pump(const Duration(seconds: 2));
+
+    final link = find.byKey(
+      const ValueKey('markdown-link-https://example.com/source'),
+    );
+    await mouse.moveTo(tester.getCenter(link));
+    await tester.tap(
+      link,
+      kind: PointerDeviceKind.mouse,
+      buttons: kSecondaryMouseButton,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Select all'));
+    await tester.pumpAndSettle();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    expect(
+      clipboard,
+      stringContainsInOrder([
+        sentence,
+        'Second paragraph stays readable.',
+        'Source',
+        'copy this code',
+      ]),
+    );
     await mouse.removePointer();
   }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 }

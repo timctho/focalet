@@ -44,11 +44,79 @@ final class ContextAttachment {
       snapshot?['application']?.toString() ??
       'Selected content';
 
-  String get detailsText => previewText.isNotEmpty
-      ? previewText
-      : snapshot?.isNotEmpty == true
+  String get detailsText =>
+      previewText.isNotEmpty ? previewText : capturedDetailsText;
+
+  String get capturedDetailsText => snapshot?.isNotEmpty == true
       ? const JsonEncoder.withIndent('  ').convert(snapshot)
       : '';
+
+  String get captureSummary {
+    final data = snapshot;
+    if (data == null || data.isEmpty) return '';
+    final source = data['source'];
+    final region = data['region'];
+    final tree = data['accessibilityTree'];
+    final dom = data['dom'];
+    final spatial = data['spatialContext'];
+    final cells = spatial is Map ? spatial['cells'] : null;
+    final lines = <String>[];
+    String? rectangle(Object? value) {
+      if (value is! Map ||
+          !['x', 'y', 'width', 'height'].every((key) => value[key] is num)) {
+        return null;
+      }
+      return 'x=${value['x']}, y=${value['y']}, ${value['width']} × ${value['height']}';
+    }
+
+    if (source is Map && source['provider'] != null) {
+      lines.add('Source: ${source['provider']}');
+    }
+    final window = rectangle(source is Map ? source['windowBounds'] : null);
+    final selection = rectangle(
+      (region is Map ? region['screenBounds'] : null) ?? bounds,
+    );
+    if (window != null) lines.add('Window: $window');
+    if (selection != null) lines.add('Selection: $selection');
+    final mapping = region is Map ? region['mapping'] : null;
+    if (mapping is Map && mapping['coordinateSpace'] != null) {
+      lines.add('Coordinates: ${mapping['coordinateSpace']}');
+    }
+    int countNodes(Object? value) {
+      if (value is! List) return 0;
+      return value.whereType<Map>().fold(
+        0,
+        (count, node) => count + 1 + countNodes(node['children']),
+      );
+    }
+
+    final nodes = countNodes(tree is Map ? tree['roots'] : null);
+    lines.add(
+      'HTML DOM: ${dom is Map && dom.isNotEmpty ? 'included' : 'not captured'}',
+    );
+    lines.add(
+      'Accessibility tree: ${nodes > 0 ? '$nodes nodes' : 'not captured'}',
+    );
+    final selected = data['selectionElements'];
+    if (selected is List && selected.isNotEmpty) {
+      lines.add('Selected accessibility objects: ${selected.length}');
+    }
+    if (cells is List && cells.isNotEmpty) {
+      lines.add('Table location: ${cells.length} cells');
+    }
+    if ((tree is Map && tree['truncated'] == true) ||
+        (dom is Map && dom['truncated'] == true)) {
+      lines.add('Structure was truncated by the capture provider.');
+    }
+    if (region is Map) {
+      lines.add('Scope: captured region; structure may be partial.');
+    }
+    final limitation = data['limitation']?.toString().trim();
+    if (limitation != null && limitation.isNotEmpty) {
+      lines.add('Limit: $limitation');
+    }
+    return lines.join('\n');
+  }
 
   String get excerpt {
     final selection = snapshot?['selection'];
