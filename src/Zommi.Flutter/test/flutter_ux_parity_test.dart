@@ -255,6 +255,9 @@ void main() {
       );
       await tester.pump();
       expect(find.byKey(const ValueKey('context-preview')), findsOneWidget);
+      expect(find.textContaining('PRIMARY SURFACE SELECTION'), findsNothing);
+      await tester.tap(find.text('Details'));
+      await tester.pumpAndSettle();
       expect(find.textContaining('PRIMARY SURFACE SELECTION'), findsOneWidget);
 
       _appendComposerText(tester, 'compare captures');
@@ -294,6 +297,14 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('[image]'), findsNothing);
+      expect(find.text('Selected image'), findsNothing);
+      expect(
+        find.descendant(
+          of: find.byType(InlineAttachmentTile),
+          matching: find.byType(Text),
+        ),
+        findsNothing,
+      );
       expect(find.byKey(const ValueKey('context-chips')), findsNothing);
 
       _appendComposerText(tester, " and i'd like to consider to buy ");
@@ -314,6 +325,21 @@ void main() {
       expect(core.lastSnapshots, hasLength(2));
       expect(core.lastImages, [_onePixelPng, _onePixelPng]);
       expect(find.byType(InlineAttachmentMessage), findsOneWidget);
+      final message = tester.widget<RichText>(
+        find
+            .descendant(
+              of: find.byType(InlineAttachmentMessage),
+              matching: find.byType(RichText),
+            )
+            .first,
+      );
+      final composer = tester.widget<TextField>(
+        find.byKey(const ValueKey('zommi-composer')),
+      );
+      expect(message.text.style?.fontWeight, FontWeight.w400);
+      expect(message.text.style?.fontWeight, composer.style?.fontWeight);
+      expect(message.text.style?.fontSize, composer.style?.fontSize);
+      expect(message.text.style?.fontFamily, composer.style?.fontFamily);
       expect(
         find.byKey(const ValueKey('sent-inline-image-image-1')),
         findsOneWidget,
@@ -323,6 +349,14 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('[image]'), findsNothing);
+      expect(find.text('Selected image'), findsNothing);
+      expect(
+        find.descendant(
+          of: find.byType(InlineAttachmentTile),
+          matching: find.byType(Text),
+        ),
+        findsNothing,
+      );
 
       final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
       addTearDown(mouse.removePointer);

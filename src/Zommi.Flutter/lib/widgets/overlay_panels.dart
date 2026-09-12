@@ -1588,93 +1588,89 @@ class ContextPreviewPanel extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 10, 7, 7),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          '${attachment.reference} · ${attachment.sourceTitle}',
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'Close context preview',
-                        onPressed: onClose,
-                        icon: const Icon(Icons.close_rounded),
-                      ),
-                    ],
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: IconButton(
+                    tooltip: 'Close context preview',
+                    onPressed: onClose,
+                    icon: const Icon(Icons.close_rounded),
                   ),
                 ),
-                if (image != null || preview.isNotEmpty)
-                  Flexible(
-                    child: SingleChildScrollView(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          if (summary.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
-                              child: SelectableText(
-                                summary,
-                                key: const ValueKey('context-capture-summary'),
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  height: 1.4,
-                                ),
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (image != null)
+                          SizedBox(
+                            key: const ValueKey('context-preview-image-frame'),
+                            width: double.infinity,
+                            height: 220,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                              ),
+                              child: Image.memory(
+                                image,
+                                fit: BoxFit.contain,
+                                gaplessPlayback: true,
+                                semanticLabel:
+                                    'Attached visual context preview',
                               ),
                             ),
-                          if (image != null)
-                            SizedBox(
-                              key: const ValueKey(
-                                'context-preview-image-frame',
-                              ),
-                              width: double.infinity,
-                              height: 220,
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                ),
-                                child: Image.memory(
-                                  image,
-                                  fit: BoxFit.contain,
-                                  gaplessPlayback: true,
-                                  semanticLabel:
-                                      'Attached visual context preview',
-                                ),
-                              ),
-                            ),
-                          if (preview.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
-                              child: SelectableText(
-                                preview,
-                                key: const ValueKey('context-preview-text'),
-                                style: const TextStyle(
-                                  fontFamily: 'monospace',
-                                  fontSize: 10.5,
-                                  height: 1.4,
-                                ),
+                          ),
+                        ExpansionTile(
+                          key: ValueKey(
+                            'context-captured-details-${attachment.id}',
+                          ),
+                          title: const Text('Details'),
+                          childrenPadding: const EdgeInsets.fromLTRB(
+                            16,
+                            0,
+                            16,
+                            16,
+                          ),
+                          expandedCrossAxisAlignment:
+                              CrossAxisAlignment.stretch,
+                          children: [
+                            SelectableText(
+                              '${attachment.reference} · ${attachment.sourceTitle}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
-                          if (attachment.previewText.isNotEmpty &&
-                              capturedDetails.isNotEmpty)
-                            ExpansionTile(
-                              key: const ValueKey('context-captured-details'),
-                              title: const Text('Full captured metadata'),
-                              subtitle: const Text(
-                                'Coordinates, source, and available structure',
+                            if (summary.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 10),
+                                child: SelectableText(
+                                  summary,
+                                  key: const ValueKey(
+                                    'context-capture-summary',
+                                  ),
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    height: 1.4,
+                                  ),
+                                ),
                               ),
-                              childrenPadding: const EdgeInsets.fromLTRB(
-                                16,
-                                0,
-                                16,
-                                16,
+                            if (preview.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 10),
+                                child: SelectableText(
+                                  preview,
+                                  key: const ValueKey('context-preview-text'),
+                                  style: const TextStyle(
+                                    fontFamily: 'monospace',
+                                    fontSize: 10.5,
+                                    height: 1.4,
+                                  ),
+                                ),
                               ),
-                              children: [
-                                SelectableText(
+                            if (attachment.previewText.isNotEmpty &&
+                                capturedDetails.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 10),
+                                child: SelectableText(
                                   capturedDetails,
                                   key: const ValueKey('context-captured-json'),
                                   style: const TextStyle(
@@ -1683,12 +1679,13 @@ class ContextPreviewPanel extends StatelessWidget {
                                     height: 1.4,
                                   ),
                                 ),
-                              ],
-                            ),
-                        ],
-                      ),
+                              ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
+                ),
               ],
             ),
           ),

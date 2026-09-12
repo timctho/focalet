@@ -177,6 +177,9 @@ void main() {
     await tester.tap(image.first);
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('context-preview')), findsOneWidget);
+    expect(find.text('C · Source chart'), findsNothing);
+    await tester.tap(find.text('Details'));
+    await tester.pumpAndSettle();
     expect(find.text('C · Source chart'), findsOneWidget);
     await controller.switchSession('session-1');
     await tester.pumpAndSettle();
@@ -237,6 +240,9 @@ void main() {
       );
       expect(chip, findsOneWidget);
       await tester.tap(chip);
+      await tester.pumpAndSettle();
+      expect(find.text('The original captured context'), findsNothing);
+      await tester.tap(find.text('Details'));
       await tester.pumpAndSettle();
       expect(
         find.byKey(const ValueKey('context-preview-text')),

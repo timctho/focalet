@@ -219,14 +219,9 @@ class InlineAttachmentMessage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final style = DefaultTextStyle.of(context).style.copyWith(
-      color: const Color(0xff272b38),
-      fontSize: chatFontSizeOf(context),
-      fontWeight: FontWeight.w500,
-      height: 1.35,
-      fontFamily: codexUiFontFamily,
-      fontFamilyFallback: codexUiFontFallback,
-    );
+    final style = DefaultTextStyle.of(context).style
+        .merge(chatTextStyleOf(context))
+        .copyWith(color: const Color(0xff272b38), height: 1.38);
     return SelectionArea(
       child: RichText(
         key: key,
@@ -382,15 +377,16 @@ class _InlineAttachmentTileState extends State<InlineAttachmentTile> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  attachment.reference,
-                  style: const TextStyle(
-                    color: Color(0xff625989),
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
+                if (image == null)
+                  Text(
+                    attachment.reference,
+                    style: const TextStyle(
+                      color: Color(0xff625989),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
-                ),
-                const SizedBox(width: 6),
+                if (image == null) const SizedBox(width: 6),
                 if (image != null) ...[
                   ClipRRect(
                     borderRadius: BorderRadius.circular(4),
@@ -407,20 +403,6 @@ class _InlineAttachmentTileState extends State<InlineAttachmentTile> {
                   ),
                   const SizedBox(width: 6),
                 ],
-                Flexible(
-                  child: Tooltip(
-                    message: attachment.sourceTitle,
-                    child: Text(
-                      attachment.excerpt,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Color(0xff272b38),
-                        fontSize: 11,
-                      ),
-                    ),
-                  ),
-                ),
                 if (widget.onDelete != null)
                   IconButton(
                     tooltip: 'Remove ${attachment.reference}',

@@ -110,7 +110,7 @@ void main() {
   );
 
   testWidgets(
-    'hover preview exposes full metadata even when a short preview exists',
+    'capture text stays in Details until expanded, including text-only captures',
     (tester) async {
       final data = snapshot(tree: true, grid: true);
       await tester.pumpWidget(
@@ -133,17 +133,20 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      expect(find.text('Captured window', findRichText: true), findsNothing);
+      expect(
+        find.byKey(const ValueKey('context-capture-summary')),
+        findsNothing,
+      );
+      expect(find.text('Short preview'), findsNothing);
+      expect(find.byKey(const ValueKey('context-captured-json')), findsNothing);
+      await tester.tap(find.text('Details'));
+      await tester.pumpAndSettle();
       final summary = tester.widget<SelectableText>(
         find.byKey(const ValueKey('context-capture-summary')),
       );
       expect(summary.data, contains('Accessibility tree: 2 nodes'));
       expect(find.text('Short preview'), findsOneWidget);
-      expect(find.byKey(const ValueKey('context-captured-json')), findsNothing);
-      final details = find.text('Full captured metadata');
-      await tester.ensureVisible(details);
-      await tester.pumpAndSettle();
-      await tester.tap(details);
-      await tester.pumpAndSettle();
       final json = tester.widget<SelectableText>(
         find.byKey(const ValueKey('context-captured-json')),
       );
