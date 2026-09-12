@@ -197,7 +197,7 @@ internal sealed class BrowserObservationBridge : IDisposable
                 Name = target.Label ?? target.Text[..Math.Min(240, target.Text.Length)], ControlType = target.Role,
                 Bounds = FormatBounds(ToScreen(target.Bounds, observation.Stamp)), Confidence = "high",
             },
-            Source = new ObservationSource
+            Source = NativeCaptureWindow.Source(window, selection.IncludesNativeSelection || useNativeTarget ? "browser-dom+windows-uia" : "browser-dom") with
             {
                 Provider = selection.IncludesNativeSelection || useNativeTarget ? "browser-dom+windows-uia" : "browser-dom", NativeWindowId = window.ToString(CultureInfo.InvariantCulture),
                 ProcessId = processId, BrowserWindowId = session.WindowId, TabId = session.TabId,
@@ -216,6 +216,20 @@ internal sealed class BrowserObservationBridge : IDisposable
                     ImageBounds = new CaptureRectangle(0, 0, area.Width, area.Height),
                 },
             },
+        };
+    }
+
+    public CapturedElement RegionElement(DomElementContext element, BrowserDocumentStamp stamp, Rectangle region, int imageWidth, int imageHeight)
+    {
+        var screen = ToRectangle(region);
+        CaptureRectangle Map(CaptureRectangle bounds) => RegionContextGeometry.ToImage(ToScreen(bounds, stamp), screen, imageWidth, imageHeight);
+        return new CapturedElement
+        {
+            Id = element.Id!, ParentId = element.ParentId, Provider = "browser-dom", NativeIds = element.NativeIds,
+            Role = element.Role, Name = element.Label, Text = element.Text, Value = element.Value,
+            Description = element.Description, Href = element.Href, State = element.State,
+            Bounds = Map(element.Bounds), VisibleBounds = Map(element.VisibleBounds ?? element.Bounds),
+            Relation = element.Relation ?? "inside", Truncated = element.Truncated,
         };
     }
 
@@ -302,6 +316,26 @@ internal sealed class BrowserObservationBridge : IDisposable
 
 internal static class NativeCaptureWindow
 {
+    public static ObservationSource Source(nint window, string provider)
+    {
+        var processId = ProcessId(window);
+        string? processPath = null;
+        DateTimeOffset? startedAt = null;
+        try
+        {
+            using var process = System.Diagnostics.Process.GetProcessById(processId);
+            processPath = process.MainModule?.FileName;
+            startedAt = process.StartTime.ToUniversalTime();
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { }
+        return new ObservationSource
+        {
+            Provider = provider, Platform = "windows", HostName = Environment.MachineName,
+            NativeWindowId = window.ToString(CultureInfo.InvariantCulture), ProcessId = processId,
+            ProcessPath = processPath, ProcessStartedAtUtc = startedAt, WindowBounds = Bounds(window),
+        };
+    }
+
     public static nint BeneathOverlay(Point point, uint excludedProcessId)
     {
         nint result = 0;

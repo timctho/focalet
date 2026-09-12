@@ -238,7 +238,9 @@ try
                     using var regionResult = JsonDocument.Parse(regionJson);
                     var root = regionResult.RootElement;
                     var snapshot = root.GetProperty("snapshot");
-                    var links = snapshot.GetProperty("dom").GetProperty("elements").EnumerateArray().Select(element => element.GetProperty("href").GetString()).ToArray();
+                    var links = snapshot.GetProperty("regionContext").GetProperty("elements").EnumerateArray()
+                        .Where(element => element.TryGetProperty("href", out var href) && href.ValueKind == JsonValueKind.String)
+                        .Select(element => element.GetProperty("href").GetString()).Distinct().ToArray();
                     var expected = onlyEmptyAlt ? new[] { "https://shop.example/products/paddle-b" } :
                         new[] { "https://shop.example/products/paddle-a?color=blue", "https://shop.example/products/paddle-b" };
                     Check(root.GetProperty("alignment").GetProperty("status").GetString() == "aligned" && links.SequenceEqual(expected) &&
@@ -305,13 +307,55 @@ try
     var text = string.Join("\n", cropped.Elements.Select(element => element.Text));
     Check(text.Contains("Review from Mei", StringComparison.Ordinal) && !text.Contains("UNRELATED", StringComparison.Ordinal), "Region text belongs to the chosen comment and excludes the neighboring content");
     var partial = await capture.ReadAsync("region", x, y, new CaptureRectangle(target.X, target.Y, target.Width / 2, target.Height), token);
-    Check(partial.Elements.Count == 0, "A clipped line is not reported as fully selected text");
+    Check(partial.Elements.Any(element => element.Role == "text" && element.Relation == "intersects" && element.Text == "Keep the original spacing."),
+        "A partially selected text node retains its content with an explicit intersection relation");
+    Check(partial.Elements.All(element => element.VisibleBounds is { Width: > 0, Height: > 0 }),
+        "Every region element has a visible intersection with the user's rectangle");
     var all = await capture.ReadAsync("region", x, y, new CaptureRectangle(0, 0, 1000, 900), token);
     Check(!JsonSerializer.Serialize(all.Context).Contains("DO_NOT_CAPTURE", StringComparison.Ordinal), "Hidden, clipped and password content is excluded");
     var icon = await Bounds("#icon");
     var iconContext = await capture.ReadAsync("capture", icon.X + icon.Width / 2, icon.Y + icon.Height / 2, null, token);
     Check(iconContext.Nearby?.Label == "Publish" && iconContext.Nearby.Disabled == true,
         "Pointing at an icon retains its surrounding control label and disabled state");
+    var iconRegion = await capture.ReadAsync("region", icon.X, icon.Y, icon, token);
+    var publish = iconRegion.Elements.Single(element => element.NativeIds?.GetValueOrDefault("domId") == "disabled");
+    Check(publish.Role == "button" && publish.State?.Enabled == false && publish.Label == "Publish" && publish.Relation == "intersects",
+        "An icon crop retains its containing disabled button and native identity");
+    Check(iconRegion.Elements.All(element => element.ParentId is null || iconRegion.Elements.Any(parent => parent.Id == element.ParentId)),
+        "Region parent references resolve within the same observation");
+    await Evaluate("document.querySelector('#selection').focus(); document.querySelector('#selection').readOnly = true; true");
+    var editorBounds = await Bounds("#selection");
+    var editorRegion = await capture.ReadAsync("region", editorBounds.X, editorBounds.Y, editorBounds, token);
+    Check(editorRegion.Elements.Any(element => element.NativeIds?.GetValueOrDefault("domId") == "selection" &&
+        element.State is { Focused: true, Editable: false } && element.Value!.Contains("第二行", StringComparison.Ordinal)),
+        "Region captures preserve editor value, focus and read-only state without an ambient selection");
+    Check(editorRegion.SelectedText.Count == 0, "A bbox is not replaced by text selected inside the app");
+    var originalEditorValue = (await Evaluate("document.querySelector('#selection').value")).GetString();
+    await Evaluate("document.querySelector('#selection').value = 'x'.repeat(31000); document.querySelector('#selection').setAttribute('data-testid', 'id'.repeat(200)); true");
+    var longEditor = await capture.ReadAsync("region", editorBounds.X, editorBounds.Y, editorBounds, token);
+    Check(longEditor.Truncated && longEditor.Elements.Any(element => element.Truncated &&
+        element.NativeIds?.GetValueOrDefault("domId") == "selection" && !element.NativeIds.ContainsKey("testId") && element.Value is { Length: > 0 and <= 30000 }),
+        "Overlong values are labelled and native identifiers are omitted rather than changed into partial IDs");
+    await Evaluate($"document.querySelector('#selection').value = {JsonSerializer.Serialize(originalEditorValue)}; document.querySelector('#selection').removeAttribute('data-testid'); true");
+    await Evaluate("""
+        (() => {
+          const root = document.createElement('div'); root.id = 'overflow-fixture';
+          root.style.cssText = 'position:fixed;left:900px;top:10px;width:1px;height:1px;z-index:100';
+          root.innerHTML = '<div style="position:absolute;left:-170px;top:50px;width:160px;background:white"><span style="display:contents">Overflow visible context</span></div>';
+          document.body.append(root);
+          const secret = document.createElement('div'); secret.id = 'shadow-secret';
+          secret.setAttribute('autocomplete', 'one-time-code');
+          secret.style.cssText = 'position:fixed;left:730px;top:130px;width:160px;height:30px';
+          secret.attachShadow({mode:'open'}).innerHTML = '<span>DO_NOT_CAPTURE_SHADOW_SECRET</span>';
+          document.body.append(secret); return true;
+        })()
+        """);
+    var overflow = await capture.ReadAsync("region", 730, 60, new(725, 55, 170, 150), token);
+    Check(overflow.Elements.Any(element => element.Text == "Overflow visible context"),
+        "Visible overflow descendants and display-contents text survive a crop outside the parent box");
+    Check(!JsonSerializer.Serialize(overflow.Context).Contains("DO_NOT_CAPTURE_SHADOW_SECRET", StringComparison.Ordinal),
+        "Sensitive ancestor exclusion crosses open shadow roots");
+    await Evaluate("document.querySelector('#overflow-fixture').remove(); document.querySelector('#shadow-secret').remove(); true");
     await driver.CallAsync("Browser.setWindowBounds", new { windowId = capture.WindowId, bounds = new { width = 1000, height = 500 } }, null, token);
     await Evaluate("window.scrollTo(0, 300); true");
     await Task.Delay(100, token);
@@ -332,28 +376,32 @@ try
     var productB = await Bounds("#product-b");
     var productRegion = new CaptureRectangle(productA.X, productA.Y, productB.Right - productA.X, productA.Height);
     var products = await capture.ReadAsync("region", productA.X, productA.Y, productRegion, token);
-    Check(products.Elements.Count == 2 && products.Elements.All(element => element.Role == "img" && element.Text == "") &&
-        products.Elements.Select(element => element.Href).SequenceEqual(new[]
+    Check(products.Elements.Count(element => element.Role == "img") == 2 && products.Elements.All(element => element.Text == "") &&
+        products.Elements.Where(element => element.Role == "img").Select(element => element.Href).SequenceEqual(new[]
             { "https://shop.example/products/paddle-a?color=blue", "https://shop.example/products/paddle-b" }),
         "An image-only rectangle retains each enclosed image's own product link without captions or neighboring products");
     var noLabel = await capture.ReadAsync("region", productB.X, productB.Y, productB, token);
-    Check(noLabel.Elements.Single().Label == null && noLabel.Elements.Single().Href == "https://shop.example/products/paddle-b",
+    Check(noLabel.Elements.Single(element => element.Role == "img").Label == null && noLabel.Elements.Single(element => element.Role == "img").Href == "https://shop.example/products/paddle-b",
         "A linked image with no alt text still exposes its destination");
     var caption = await Bounds("#product-b + span");
     var captionOnly = await capture.ReadAsync("region", caption.X, caption.Y, caption, token);
-    Check(captionOnly.Elements.All(element => element.Role == "text" && element.Href == "https://shop.example/products/paddle-b") &&
-        captionOnly.Elements.Count > 0, "Selecting a complete link caption retains its URL without enclosing the image");
+    Check(captionOnly.Elements.Any(element => element.Role == "text" && element.Href == "https://shop.example/products/paddle-b") &&
+        captionOnly.Elements.All(element => element.Role != "img"), "Selecting a complete link caption retains its URL without enclosing the image");
     var roundedProduct = await capture.ReadAsync("region", productB.X, productB.Y,
         productB with { Width = productB.Width - 0.25 / deviceScale }, token);
-    Check(roundedProduct.Elements.Single().Href == "https://shop.example/products/paddle-b",
+    Check(roundedProduct.Elements.Single(element => element.Role == "img").Href == "https://shop.example/products/paddle-b",
         "A subpixel boundary difference does not discard an enclosed image link");
     var partialProduct = await capture.ReadAsync("region", productA.X, productA.Y,
         productA with { Width = productA.Width / 2 }, token);
-    Check(partialProduct.Elements.Count == 0, "A clipped product image does not attach the entire image's link");
+    Check(partialProduct.Elements.Any(element => element.Role == "img" && element.Relation == "intersects" && element.Href == "https://shop.example/products/paddle-a?color=blue"),
+        "A partial image retains its associated link without claiming the whole object was selected");
     await Evaluate("document.querySelector('#layers').scrollIntoView({block:'center'}); true");
     var front = await Bounds("#layer-front");
     var frontHit = await capture.ReadAsync("capture", front.X + 20, front.Y + 20, null, token);
     Check(frontHit.Elements.Single().Text == "Foreground action", "Overlapping browser objects use the visually frontmost hit target");
+    var frontRegion = await capture.ReadAsync("region", front.X, front.Y, front, token);
+    Check(!JsonSerializer.Serialize(frontRegion.Context).Contains("Background action", StringComparison.Ordinal),
+        "A region over an opaque foreground control excludes the covered background text");
     await Evaluate("document.body.style.height='100vh'; document.body.style.overflowX='hidden'; document.querySelector('#card-grid').scrollIntoView({block:'center'}); true");
     var gridBounds = await Bounds("#card-grid");
     var grid = await capture.ReadAsync("region", gridBounds.X, gridBounds.Y, gridBounds, token);
@@ -369,8 +417,8 @@ try
     var clippedLinkBounds = await Bounds("#clipped-link-text");
     var clippedLink = await capture.ReadAsync("region", clippedLinkBounds.X, clippedLinkBounds.Y,
         clippedLinkBounds with { Width = 700 }, token);
-    Check(clippedLink.Elements.All(element => element.Href != "https://cards.example/clipped"),
-        "Text clipped by its own link container does not claim the hidden text or URL");
+    Check(!JsonSerializer.Serialize(clippedLink.Context).Contains("DO_NOT_CAPTURE_DIRECTLY_CLIPPED_LINK_TEXT", StringComparison.Ordinal),
+        "Text clipped by the app's overflow is not reported as fully visible text");
     var stamp = await capture.StampAsync(token);
     await Evaluate("document.getElementById('target').textContent = 'Changed while capturing'; true");
     Check((await capture.StampAsync(token)).Revision > stamp.Revision, "Text changes invalidate an observation stamp");

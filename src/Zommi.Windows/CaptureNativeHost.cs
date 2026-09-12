@@ -299,14 +299,6 @@ internal static class CaptureNativeHost
             if (selected.Window != 0)
             {
                 if (!Matches()) return new { Cancelled = true, ErrorMessage = "The selected window changed. Select the content again." };
-                if (selected.WholeWindow)
-                {
-                    // Explicit whole-window sharing brings that source forward.
-                    // Owned dialogs still remain above it and fail the coverage check.
-                    NativeCaptureWindow.Activate(selected.Window);
-                    Application.DoEvents();
-                    Thread.Sleep(80);
-                }
                 var actualWindow = NativeCaptureWindow.ForRegion(selected.Region);
                 if (!Matches() || actualWindow != selected.Window)
                 {

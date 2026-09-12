@@ -2,7 +2,7 @@
 param([Parameter(Mandatory=$true)][string]$CaptureHost, [string]$ResultPath, [switch]$IndependentWorkerOnly)
 $ErrorActionPreference = 'Stop'
 if (-not ('ZommiWindowsAcceptanceNative' -as [type])) {
-    . (Join-Path $PSScriptRoot 'accept-windows-capture.ps1') -PackageDirectory (Split-Path $CaptureHost) -HelpersOnly
+    . (Join-Path $PSScriptRoot 'accept-windows-capture.ps1') -PackageDirectory (Split-Path $CaptureHost) -HelpersOnly -ResultPath $ResultPath
 }
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -35,6 +35,7 @@ if ($IndependentWorkerOnly) {
     $fixture = [ZommiContextFixture]::new()
     $shared = $null
     try {
+        $fixture.Raise()
         $start = [System.Diagnostics.ProcessStartInfo]::new($CaptureHost)
         $start.ArgumentList.Add('--capture-host')
         $start.UseShellExecute = $false
@@ -84,36 +85,36 @@ if ($IndependentWorkerOnly) {
     }
     return
 }
-$cases = @('mixed', 'rectangles', 'rapid', 'rapid-release', 'cancel', 'changed')
+$cases = @('duplicates', 'rectangles', 'rapid', 'rapid-release', 'cancel', 'changed')
 $results = @()
 foreach ($case in $cases) {
     $fixture = [ZommiContextFixture]::new()
     try {
-        [ZommiWindowsAcceptanceNative]::Restore($fixture.Window)
+        $fixture.Raise()
         Start-Sleep -Milliseconds 200
         $result = Invoke-CaptureRequest -Executable $CaptureHost -Method 'selectContent' -Parameters @{browserPageDetails=$false} -Interact {
             param($process)
             $selector = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi content selection'
             [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(220,220) | Out-Null
             $deadline = [DateTime]::UtcNow.AddSeconds(5)
-            while (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Larger') -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 25 }
-            if (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Larger')) { throw 'Initial outline unavailable.' }
+            while (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Cancel') -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 25 }
+            if (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Cancel')) { throw 'Rectangle selector unavailable.' }
             [ZommiMultiInput]::Control($true)
             try {
                 if ($case -in @('rapid','rapid-release')) {
                     $fixture.PauseProvider(600)
-                    # Neither click may overwrite an unresolved earlier press.
-                    [ZommiWindowsAcceptanceNative]::BeginSelectionDrag($selector,519,364,519,364) | Out-Null
-                    [ZommiWindowsAcceptanceNative]::EndSelectionDrag($selector,519,364)
+                    # Rapid rectangles must retain order without UIA lookups while dragging.
+                    [ZommiWindowsAcceptanceNative]::BeginSelectionDrag($selector,510,355,528,373) | Out-Null
+                    [ZommiWindowsAcceptanceNative]::EndSelectionDrag($selector,528,373)
                     if ($case -eq 'rapid-release') { [ZommiMultiInput]::Control($false) }
-                    [ZommiWindowsAcceptanceNative]::BeginSelectionDrag($selector,543,364,543,364) | Out-Null
-                    [ZommiWindowsAcceptanceNative]::EndSelectionDrag($selector,543,364)
+                    [ZommiWindowsAcceptanceNative]::BeginSelectionDrag($selector,534,355,552,373) | Out-Null
+                    [ZommiWindowsAcceptanceNative]::EndSelectionDrag($selector,552,373)
                 } elseif ($case -eq 'rectangles') {
                     [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,180,200,530,240)
                     [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,180,270,530,310)
                 } else {
-                    [ZommiWindowsAcceptanceNative]::ClickSelection($selector,220,220) | Out-Null
-                    # A fresh hover over the same item must not erase its retained blue outline.
+                    [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,180,200,530,240)
+                    # Moving over a queued rectangle must not erase its blue outline.
                     Start-Sleep -Milliseconds 800
                     Wait-MultiOutline 530 225
                     [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,180,270,530,310)
@@ -125,7 +126,7 @@ foreach ($case in $cases) {
                 [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(620,490) | Out-Null
                 Wait-MultiOutline 528 364
                 Wait-MultiOutline 552 364
-                if ($process.HasExited) { throw 'A queued click after Ctrl release submitted the batch.' }
+                if ($process.HasExited) { throw 'A queued rectangle after Ctrl release submitted the batch.' }
             } elseif ($case -ne 'rapid') {
                 [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(620,490) | Out-Null
                 Wait-MultiOutline 530 225
@@ -148,7 +149,7 @@ foreach ($case in $cases) {
                     $item.alignment.mapping.screenBounds.x -ne $item.bounds.x -or $item.alignment.mapping.imageBounds.width -ne $item.bounds.width) { throw "$case lost image/source mapping." }
             }
             if ($case -in @('rapid','rapid-release')) {
-                if ($items[0].bounds.x -ne 510 -or $items[1].bounds.x -ne 534 -or $items[0].bounds.width -ne 18 -or $items[1].bounds.width -ne 18) { throw 'Rapid clicks changed order or reused an outline.' }
+                if ($items[0].bounds.x -ne 510 -or $items[1].bounds.x -ne 534 -or $items[0].bounds.width -ne 18 -or $items[1].bounds.width -ne 18) { throw 'Rapid rectangles changed order or bounds.' }
             } elseif ($items[0].bounds.y -ne 200 -or $items[1].bounds.y -ne 270 -or
                 ($items[0].snapshot | ConvertTo-Json -Depth 30) -notmatch 'Selected native line' -or
                 ($items[1].snapshot | ConvertTo-Json -Depth 30) -notmatch 'Parent includes this second line') { throw "$case attached incorrect regions or text." }
@@ -159,6 +160,7 @@ foreach ($case in $cases) {
 }
 $fixture = [ZommiContextFixture]::new()
 try {
+    $fixture.Raise()
     $fixture.ShowGrid()
     foreach ($row in @(0,2)) {
         $bounds = $fixture.GridCellBounds($row,0)
@@ -178,7 +180,7 @@ try {
 } finally { $fixture.Dispose() }
 # A deliberately stalled UIA provider can leave process-local accessibility
 # state behind. Give that fault-injection fixture its own driver process.
-& (Get-Process -Id $PID).Path -NoProfile -File $PSCommandPath -CaptureHost $CaptureHost -IndependentWorkerOnly | ForEach-Object { Write-Host $_ }
+& (Get-Process -Id $PID).Path -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath -CaptureHost $CaptureHost -IndependentWorkerOnly | ForEach-Object { Write-Host $_ }
 if ($LASTEXITCODE -ne 0) { throw 'Shared-host independent-worker acceptance failed.' }
 $evidence = @{captureHelper=$CaptureHost; cases=$results; independentSelector=$true}
 if ($ResultPath) { $evidence | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $ResultPath -Encoding utf8 }

@@ -88,6 +88,16 @@ public sealed class ZommiContextFixture : IDisposable
         form.Invoke(new Action(() => form.Text += " changed"));
     }
 
+    public void Raise()
+    {
+        form.Invoke(new Action(() => {
+            form.TopMost = false;
+            form.TopMost = true;
+            form.BringToFront();
+            form.Activate();
+        }));
+    }
+
     public void ShowGrid()
     {
         form.Invoke(new Action(() => {
@@ -104,6 +114,21 @@ public sealed class ZommiContextFixture : IDisposable
             foreach (DataGridViewRow row in grid.Rows) row.Height = 40;
             form.Controls.Add(grid);
             grid.BringToFront();
+        }));
+    }
+
+    public void ShowControls()
+    {
+        form.Invoke(new Action(() => {
+            var panel = new Panel { Bounds = new Rectangle(20, 20, 450, 290), BackColor = Color.White };
+            var editor = new TextBox { Name = "comment-editor", AccessibleName = "Review comment", Text = "Read only draft", ReadOnly = true, Bounds = new Rectangle(20, 20, 260, 32) };
+            panel.Controls.Add(editor);
+            panel.Controls.Add(new Button { Name = "publish-button", Text = "Publish", Enabled = false, Bounds = new Rectangle(20, 65, 110, 30) });
+            panel.Controls.Add(new CheckBox { Name = "notify-toggle", Text = "Notify", Checked = false, Bounds = new Rectangle(150, 65, 110, 30) });
+            panel.Controls.Add(new TextBox { UseSystemPasswordChar = true, Text = "DO_NOT_CAPTURE_PASSWORD", Bounds = new Rectangle(20, 110, 260, 25) });
+            form.Controls.Add(panel);
+            panel.BringToFront();
+            editor.Focus();
         }));
     }
 

@@ -58,6 +58,7 @@ final class ContextAttachment {
     final region = data['region'];
     final tree = data['accessibilityTree'];
     final dom = data['dom'];
+    final context = data['regionContext'];
     final spatial = data['spatialContext'];
     final cells = spatial is Map ? spatial['cells'] : null;
     final lines = <String>[];
@@ -91,12 +92,19 @@ final class ContextAttachment {
     }
 
     final nodes = countNodes(tree is Map ? tree['roots'] : null);
-    lines.add(
-      'HTML DOM: ${dom is Map && dom.isNotEmpty ? 'included' : 'not captured'}',
-    );
-    lines.add(
-      'Accessibility tree: ${nodes > 0 ? '$nodes nodes' : 'not captured'}',
-    );
+    if (context is Map && context['elements'] is List) {
+      lines.add(
+        'Region context: ${(context['elements'] as List).length} elements',
+      );
+      lines.add('Element coordinates: ${context['coordinateSpace']}');
+    } else {
+      lines.add(
+        'HTML DOM: ${dom is Map && dom.isNotEmpty ? 'included' : 'not captured'}',
+      );
+      lines.add(
+        'Accessibility tree: ${nodes > 0 ? '$nodes nodes' : 'not captured'}',
+      );
+    }
     final selected = data['selectionElements'];
     if (selected is List && selected.isNotEmpty) {
       lines.add('Selected accessibility objects: ${selected.length}');
@@ -105,7 +113,8 @@ final class ContextAttachment {
       lines.add('Table location: ${cells.length} cells');
     }
     if ((tree is Map && tree['truncated'] == true) ||
-        (dom is Map && dom['truncated'] == true)) {
+        (dom is Map && dom['truncated'] == true) ||
+        (context is Map && context['truncated'] == true)) {
       lines.add('Structure was truncated by the capture provider.');
     }
     if (region is Map) {
@@ -119,8 +128,9 @@ final class ContextAttachment {
   }
 
   String get excerpt {
+    final context = snapshot?['regionContext'];
     final selection = snapshot?['selection'];
-    if (selection is List && selection.isNotEmpty) {
+    if (context is! Map && selection is List && selection.isNotEmpty) {
       return _compactExcerpt(
         selection.map((value) => value.toString()).join(' '),
       );
@@ -155,7 +165,8 @@ final class ContextAttachment {
     }
 
     return _compactExcerpt(
-      firstText(elements) ??
+      firstText(context is Map ? context['elements'] : null) ??
+          firstText(elements) ??
           firstText(selected) ??
           firstText(tree is Map ? tree['roots'] : null) ??
           location ??

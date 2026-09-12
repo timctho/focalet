@@ -1004,14 +1004,18 @@ void main() {
       expect(context.snapshot?['windowTitle'], 'Fixture window');
 
       final selectedContext = await provider.selectContext();
-      expect(selectedContext.single.snapshot?['application'], 'fixture-app');
+      expect(
+        selectedContext.single.image?.dataUrl,
+        'data:image/png;base64,AQID',
+      );
+      expect(selectedContext.single.snapshot, isNull);
 
       final image = await provider.selectImage();
       expect(image?.dataUrl, 'data:image/png;base64,AQID');
       expect(image?.bounds?['width'], 40);
       expect(calls, [
         ['context'],
-        ['point-context'],
+        ['region', '--output', isA<String>()],
         ['region', '--output', isA<String>()],
       ]);
       expect(await File(calls.last.last).exists(), isFalse);

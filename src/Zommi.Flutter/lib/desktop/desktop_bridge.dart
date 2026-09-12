@@ -1265,6 +1265,17 @@ ContextAttachment imageAttachmentFromSelection(
   String id,
 ) {
   final capturedRegion = _nullableMap(selected.snapshot?['region']);
+  final dimensions = _pngSize(selected.dataUrl);
+  bool matchesImage(Object? value) {
+    final mapping = _nullableMap(value);
+    final image = _nullableMap(mapping?['imageBounds']);
+    return dimensions == null ||
+        (image?['x'] == 0 &&
+            image?['y'] == 0 &&
+            image?['width'] == dimensions['width'] &&
+            image?['height'] == dimensions['height']);
+  }
+
   bool sameBounds(Object? value) {
     final bounds = _nullableMap(value);
     return bounds != null &&
@@ -1277,7 +1288,9 @@ ContextAttachment imageAttachmentFromSelection(
   final hasMapping =
       sameBounds(capturedRegion?['screenBounds']) &&
       sameBounds(selected.alignment?['screenBounds']) &&
-      selected.alignment?['mapping'] is Map;
+      selected.alignment?['mapping'] is Map &&
+      matchesImage(selected.alignment?['mapping']) &&
+      matchesImage(capturedRegion?['mapping']);
   final aligned =
       hasMapping &&
       selected.snapshot?['source'] is Map &&
@@ -1328,10 +1341,20 @@ ContextAttachment imageAttachmentFromSelection(
               if (selected.snapshot!.containsKey(field))
                 field: selected.snapshot![field],
         };
+  final captureSnapshot = <String, Object?>{
+    ...snapshot,
+    'selectionKind': 'bbox',
+    'capturePlatform':
+        _nullableMap(snapshot['source'])?['platform'] ??
+        Platform.operatingSystem,
+    'captureHostName':
+        _nullableMap(snapshot['source'])?['hostName'] ?? Platform.localHostname,
+    'imageSize': ?dimensions,
+  };
   return ContextAttachment(
     id: id,
     token: '',
-    snapshot: snapshot,
+    snapshot: captureSnapshot,
     previewText: aligned || imageOnlyGeometry
         ? selected.previewText ??
               (aligned
@@ -1341,6 +1364,26 @@ ContextAttachment imageAttachmentFromSelection(
     imageDataUrl: selected.dataUrl,
     bounds: selected.bounds,
   );
+}
+
+Map<String, int>? _pngSize(String dataUrl) {
+  if (!dataUrl.startsWith('data:image/png;base64,')) return null;
+  try {
+    final bytes = base64Decode(dataUrl.substring(dataUrl.indexOf(',') + 1));
+    if (bytes.length < 24 ||
+        bytes[0] != 137 ||
+        bytes[1] != 80 ||
+        bytes[2] != 78 ||
+        bytes[3] != 71) {
+      return null;
+    }
+    final data = bytes.buffer.asByteData(bytes.offsetInBytes, bytes.length);
+    final width = data.getUint32(16);
+    final height = data.getUint32(20);
+    return width > 0 && height > 0 ? {'width': width, 'height': height} : null;
+  } on FormatException {
+    return null;
+  }
 }
 
 CaptureProvider platformCaptureProvider() => Platform.isWindows
@@ -1531,16 +1574,8 @@ final class LinuxCaptureProvider implements CaptureProvider {
 
   @override
   Future<List<CaptureResult>> selectContext() async {
-    if (_useWaylandPortals) {
-      // Wayland does not expose an unrestricted global pointer grab. Preserve
-      // the portal's explicit foreground-context authority on that platform.
-      return [await capture()];
-    }
-    final response = await _request([
-      'point-context',
-    ], const Duration(minutes: 5));
-    if (response['cancelled'] == true) return const [];
-    return [_portableResultFromLinuxResponse(response)];
+    final image = await selectImage();
+    return image == null ? const [] : [CaptureResult(image: image)];
   }
 
   @override
@@ -1618,7 +1653,10 @@ final class PortableCaptureProvider implements CaptureProvider {
   }
 
   @override
-  Future<List<CaptureResult>> selectContext() async => [await capture()];
+  Future<List<CaptureResult>> selectContext() async {
+    final image = await selectImage();
+    return image == null ? const [] : [CaptureResult(image: image)];
+  }
 
   Future<CaptureResult> _captureMac() async {
     const script = '''
@@ -1673,12 +1711,6 @@ return appName & linefeed & windowTitle & linefeed & pageUrl
       }
       return ImageSelection(
         dataUrl: 'data:image/png;base64,${base64Encode(imageBytes)}',
-        bounds: {
-          'x': 0,
-          'y': 0,
-          'width': captured.imageWidth,
-          'height': captured.imageHeight,
-        },
       );
     } finally {
       if (await temporary.exists()) await temporary.delete();
