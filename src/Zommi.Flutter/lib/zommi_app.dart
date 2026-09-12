@@ -213,8 +213,6 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
           _controller.removeAttachment(attachment.id),
       onAttachmentEnter: _showAttachmentPreview,
       onAttachmentExit: (_) => _schedulePreviewClose(),
-      onAttachmentAdjust: (attachment) =>
-          unawaited(_controller.addPointerContext(replacingId: attachment.id)),
     );
     _composer.addListener(_onComposerChanged);
     _composerFocus.onKeyEvent = _handleComposerKey;
@@ -719,16 +717,6 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                       onClose: _controller.hideAttachmentPreview,
                       onPointerEnter: () => _previewTimer?.cancel(),
                       onPointerExit: _schedulePreviewClose,
-                      onAdjust:
-                          _controller.attachments.any(
-                            (item) => item.id == attachment.id,
-                          )
-                          ? () => unawaited(
-                              _controller.addPointerContext(
-                                replacingId: attachment.id,
-                              ),
-                            )
-                          : null,
                     ),
                   ),
                 ),

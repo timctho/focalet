@@ -1555,7 +1555,6 @@ class ContextPreviewPanel extends StatelessWidget {
     required this.onClose,
     required this.onPointerEnter,
     required this.onPointerExit,
-    this.onAdjust,
     super.key,
   });
 
@@ -1563,7 +1562,6 @@ class ContextPreviewPanel extends StatelessWidget {
   final VoidCallback onClose;
   final VoidCallback onPointerEnter;
   final VoidCallback onPointerExit;
-  final VoidCallback? onAdjust;
 
   @override
   Widget build(BuildContext context) {
@@ -1597,11 +1595,6 @@ class ContextPreviewPanel extends StatelessWidget {
                           style: const TextStyle(fontWeight: FontWeight.w700),
                         ),
                       ),
-                      if (onAdjust != null)
-                        TextButton(
-                          onPressed: onAdjust,
-                          child: const Text('Adjust'),
-                        ),
                       IconButton(
                         tooltip: 'Close context preview',
                         onPressed: onClose,
@@ -1610,7 +1603,7 @@ class ContextPreviewPanel extends StatelessWidget {
                     ],
                   ),
                 ),
-                if (image != null || attachment.previewText.isNotEmpty)
+                if (image != null || attachment.detailsText.isNotEmpty)
                   Flexible(
                     child: SingleChildScrollView(
                       child: Column(
@@ -1636,11 +1629,11 @@ class ContextPreviewPanel extends StatelessWidget {
                                 ),
                               ),
                             ),
-                          if (attachment.previewText.isNotEmpty)
+                          if (attachment.detailsText.isNotEmpty)
                             Padding(
                               padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
                               child: SelectableText(
-                                attachment.previewText,
+                                attachment.detailsText,
                                 key: const ValueKey('context-preview-text'),
                                 style: const TextStyle(
                                   fontFamily: 'monospace',

@@ -44,6 +44,12 @@ final class ContextAttachment {
       snapshot?['application']?.toString() ??
       'Selected content';
 
+  String get detailsText => previewText.isNotEmpty
+      ? previewText
+      : snapshot?.isNotEmpty == true
+      ? const JsonEncoder.withIndent('  ').convert(snapshot)
+      : '';
+
   String get excerpt {
     final selection = snapshot?['selection'];
     if (selection is List && selection.isNotEmpty) {

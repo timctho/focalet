@@ -118,56 +118,6 @@ void main() {
     expect(controller.attachments.first.excerpt, 'First replacement');
   });
 
-  testWidgets(
-    'adjusting a selection keeps the question, reference and inline position; cancel keeps the old selection',
-    (tester) async {
-      final core = RichFakeCore()..historyCount = 0;
-      final desktop = FakeDesktopBridge()
-        ..nextContext = selected('original', 'First line');
-      await tester.binding.setSurfaceSize(const Size(1000, 820));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      await tester.pumpWidget(ZommiApp(core: core, desktop: desktop));
-      await tester.pumpAndSettle();
-      await tester.enterText(
-        find.byKey(const ValueKey('zommi-composer')),
-        'Explain A',
-      );
-      await tester.tap(find.byKey(const ValueKey('select-content')));
-      await tester.pumpAndSettle();
-      final field = tester.widget<TextField>(
-        find.byKey(const ValueKey('zommi-composer')),
-      );
-      final composer = field.controller! as InlineAttachmentTextController;
-      final draft = composer.inlineText;
-      expect(find.text('First line'), findsOneWidget);
-      expect(composer.inlineAttachments.single.token, '[A]');
-
-      desktop.nextContext = null;
-      await tester.tap(
-        find.byKey(const ValueKey('adjust-attachment-original')),
-      );
-      await tester.pumpAndSettle();
-      expect(composer.inlineText, draft);
-      expect(composer.inlineAttachments.single.excerpt, 'First line');
-      expect(field.focusNode!.hasFocus, isTrue);
-
-      desktop.nextContext = selected('replacement', 'Whole comment');
-      await tester.tap(
-        find.byKey(const ValueKey('adjust-attachment-original')),
-      );
-      await tester.pumpAndSettle();
-      expect(composer.inlineText, draft);
-      expect(composer.inlineAttachments.single.id, 'original');
-      expect(composer.inlineAttachments.single.token, '[A]');
-      expect(composer.inlineAttachments.single.excerpt, 'Whole comment');
-      await tester.tap(find.byKey(const ValueKey('send-message')));
-      await tester.pump();
-      expect(core.lastMessage, 'Explain A');
-      expect(core.lastSnapshots.single['contextLabel'], 'A');
-      expect(core.lastSnapshots.single['selection'], ['Whole comment']);
-    },
-  );
-
   test('a pending adjustment cannot submit the old context or start a second picker', () async {
     final core = RichFakeCore()..historyCount = 0;
     final selection = Completer<ContextAttachment?>();
