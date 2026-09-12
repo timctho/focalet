@@ -1,78 +1,75 @@
-# Browser context selection
+# Rectangle context capture
 
-On Windows, Zommi can enrich accessible context with DOM content from a local
-Chromium debugging connection. Press `Alt+A` or use **Select content** beside
-the composer to open the same Windows content picker.
-Point at content to see its accessible outline, then click to attach it. Drag
-anywhere to choose a rectangle instead. The visible **Larger**, **Smaller** and
-**Whole window** controls change the scope without needing another shortcut.
-Up/Down and Enter remain available. Escape cancels and returns to the draft.
-If an application exposes no usable object, the picker asks you to drag a region.
+Press `Alt+A` or use **Select** beside the composer, then drag a rectangle.
+Releasing the mouse attaches that image with context available for its region.
+A click alone does not select an application element. The same image-style
+selection works when an app exposes no accessibility elements.
 
-Hold **Ctrl** while clicking or dragging to collect several selections. Numbered
-outlines stay on screen when Ctrl is released. Continue selecting, then press
-**Enter** to attach them in order (up to 16); **Escape** discards the whole batch.
-Each attachment retains its own image, context and coordinates. Repeating an
-identical selection does not add another attachment.
+On Windows, hold **Ctrl** during the first drag to collect several rectangles.
+Numbered outlines remain after Ctrl is released. Continue dragging, then use
+**Attach** or **Enter** to attach them in order, up to eight. **Escape** or
+**Cancel** discards the batch. Repeating an identical rectangle does not add an
+attachment. Selection painting does not wait for accessibility providers.
+Linux and macOS use their platform rectangle screenshot selectors.
 
-Dragging starts immediately, including over an outlined item. Hover lookup runs
-on a separate thread and keeps only the newest pointer position. Ordinary hover
-can move from a container into its small children; only a scope you explicitly
-expand stays pinned while the pointer remains inside it. The toolbar stays at
-the top of the starting screen instead of chasing the outline.
+The rectangle is the primary user reference. On Windows, Zommi enriches it with
+DOM or UI Automation observations when the source and image can be aligned.
+Elements that partially intersect the rectangle retain their labels, values,
+links and state, with an explicit intersection relation. Their metadata can
+extend beyond the selected pixels; it does not mean the whole element was
+selected. Existing text selections and focus in the application do not override
+the rectangle. Hidden/password nodes and covered elements are filtered where
+the provider allows it. Hit testing samples each intersection; it does not prove
+every pixel is unobscured.
 
-This first version uses Windows accessibility for the interactive outlines;
-the final rectangle goes through the existing DOM/UIA region capture pipeline.
-Every explicit selection includes an image and aligned text when available.
-Free rectangles automatically collect the readable elements they fully enclose,
-including multiple elements. Partially clipped UIA elements and DOM text lines
-are omitted. Canvas/custom-drawn content, an unconfirmed source window, or a
-changing document can produce **Image only** with an explanation in the preview.
-Whole-window capture brings the explicitly chosen window forward and includes
-its visible desktop portion. Moved sources and covering owned dialogs are
-rejected. It is a single snapshot, not a continuing screen share.
-Other platforms retain their existing selection providers.
+Canvas/custom-drawn content, an unconfirmed source window, or a changing document
+can produce **Image only** with an explanation. Windows image-only captures
+retain physical screen geometry even when there is no single source window.
+On platforms where the screenshot tool does not return a screen origin, Zommi
+keeps the actual image size without inventing a screen mapping. Capture is a
+single observation, not a continuing screen share.
 
-Windows captures without accessible text show **Image with screen location**
-and retain the physical screen rectangle and actual image dimensions. A stable source also includes the app/window title, HWND,
-process ID and window bounds. A region spanning multiple windows keeps its
-screen mapping without guessing one source. The agent receives the capture ID,
-time and image-to-screen formula. These coordinates describe that frame; the
-agent must observe again after a window, scroll or content change before acting.
-This supplies location even when a custom UI exposes no accessible text.
+## Agent-neutral context
 
-When a crop intersects an accessible table cell, separate spatial context carries
-its column header, raw grid indices and, when the first data row can be verified,
-the one-based data row number. This can identify a partial Redis cell without
-claiming that its complete text is inside the image. Providers without grid
-semantics retain coordinates without an invented row number.
+All runtime adapters use the shared context handoff. The model receives the
+image plus the complete bounded `regionContext` payload immediately; reading
+additional local files or invoking a special Zommi retrieval tool is not needed.
+No agent-specific action indices or tool APIs are required.
 
-Enclosed images and text retain their own wrapping link's URL, including cards
-that use background thumbnails. The preview lists each URL once. Region bounds
-allow one physical pixel of rounding difference. Viewport scrolling does not
-clip against the body's scrolled border box; actual nested overflow still excludes
-hidden rows and partially clipped items.
+| Data | Meaning |
+| --- | --- |
+| `snapshotId`, observation/expiry times | Identity and freshness of this observation |
+| `source`, capture platform/host | Source app/window, native window ID, process ID/path/start time when available; browser tab/document IDs when available |
+| `imageSize`, `region.mapping` | Actual PNG dimensions and verified image-to-screen/CSS geometry |
+| `regionContext.version` | Payload schema version, currently 1 |
+| `selectionKind`, `coordinateSpace` | `bbox`, with element geometry in `image-pixels` |
+| `elements[].id`, `parentId` | Capture-local references and the nearest retained ancestor |
+| `nativeIds` | Provider identifiers such as UIA AutomationId or DOM id/name/testId |
+| Role, name, text, value, description, href | Useful observed content and destination links when exposed |
+| `state` | Enabled, focused, selected, editable, toggle, expanded and value type; unknown values are omitted or null |
+| `bounds`, `visibleBounds`, `relation` | Full element bounds, intersection bounds and `inside`/`intersects`; full bounds can extend outside the image |
+| `truncated`, `limitation` | Explicit capture budgets and missing provider coverage |
 
-Attachments show a stable A/B reference and a readable excerpt or image preview.
-Hover over or click anywhere on an attachment to read its context details.
-The preview summarizes the capture source, available window and selection bounds,
-coordinate space, and whether DOM, accessibility nodes or table locations were
-captured. Expand **Full captured metadata** below a short preview to inspect the
-retained snapshot. This is the captured region's data; it does not imply a full
-page DOM or window accessibility tree. The agent receives a formatted handoff
-that preserves coordinates and compacts accessibility structure.
-Use its remove button and **Select** to capture a different selection.
-Sent attachments remain available when reopening a chat, including context
-recovered from the runtime history. Images are shown when retained by the runtime.
-References are included in the agent handoff beside the corresponding image
-index. Removed references are not reused within the same draft. Image markup
-and arrows are not included in this first version.
+Capture-local references are scoped by `snapshotId`; provider identifiers are
+scoped by their source. Neither is an action handle issued by an agent's tools.
+An agent can use them with the text, hierarchy and geometry to locate the same
+control in a fresh observation. The source may be on a different execution host.
+The handoff includes the image-to-screen formula when verified and asks the agent
+to match the source and obtain fresh state before acting. Captured application
+text remains untrusted observed data.
 
-Drag in **Select content** to select an image region. Text is collected from the final region,
-not from the location of the pointer before dragging. The preview says **Image
-only** when structural data cannot be aligned. A text context can still be
-attached separately. Each image and its associated context retains an image
-index in the agent handoff, including when other attachments are interleaved.
+Table-cell spatial context additionally carries column headers, raw grid indices
+and, when the first data row is verified, a one-based data row number. This can
+identify a partial cell without claiming all of its text was selected. Providers
+without grid semantics retain geometry without an invented row number.
+
+Attachments have stable A/B references, image previews and readable context.
+Hover over or click an attachment for details; **Full captured metadata** shows
+the retained snapshot. The readable preview omits ID/coordinate noise while the
+model receives those fields. Image indices preserve association when multiple
+captures and text attachments are interleaved. Sent attachments remain available
+when reopening a chat, including context recovered from runtime history; image
+availability depends on that runtime's retention.
 
 ## Connecting a browser
 
@@ -124,7 +121,7 @@ Linux and macOS keep their existing platform capture providers.
 
 ## Identity and geometry
 
-The capture helper binds to the native window under the pointer. CDP must report
+The capture helper binds to the native window covering the selected rectangle. CDP must report
 the same browser process, exactly one matching visible native window and one
 matching visible tab. A duplicate window/title combination is rejected rather
 than guessed. The connection retains CDP window, target, root frame, loader and
@@ -140,7 +137,7 @@ coordinates. Viewport movement, document mutations, scroll changes and window
 changes invalidate alignment. On Windows, DOM text is read before copying the selected physical screen
 pixels, then checked again afterward along with window coverage. This avoids
 Chrome compositor screenshot commands and their visible surface changes. The
-PNG dimensions are retained in the image mapping. UIA fallback compares the enclosed accessible elements
+PNG dimensions are retained in the image mapping. UIA fallback compares intersecting accessible elements and states
 on both sides of the image capture.
 
 ## Coverage and limits
@@ -153,8 +150,12 @@ on both sides of the image capture.
 - Native object/range selections are preserved when a canvas application has no
   DOM text selection. The tab and loader are pinned before that native read;
   explicit element and image picking do not inherit an older selection.
-- Region capture includes fully enclosed text ranges and accessible objects.
-  A partly clipped line is not sent as though the entire line was selected.
+- Region capture includes intersecting text ranges and accessible objects.
+  Partial user selections are labelled. Text clipped by the application itself
+  is excluded when its complete text cannot be tied to the visible area. DOM
+  traversal is bounded to 6,000 nodes, 256 emitted elements and 30,000 text
+  characters; UIA to 800 nodes, 128 elements, 24,000 characters and 500 ms.
+  These limits and unavailable provider operations can truncate the observation.
 - Open shadow DOM is traversed. Embedded frame content currently falls back to
   an explicit image; a root document observation is not treated as an iframe
   observation.
@@ -175,8 +176,8 @@ screenshot and JSON results are written to `artifacts/browser-capture-acceptance
 
 Flutter tests cover preview fallback, mismatched image bounds, removal of the
 old pointer-context association and stable image numbering. Rust tests verify
-that original selection, identity and coordinate mapping survive the agent
-handoff. Windows desktop acceptance additionally requires a working native
+that original text, native/capture-local IDs, false states and coordinate
+mapping survive the shared agent handoff without ambient-selection overrides. Windows desktop acceptance additionally requires a working native
 capture surface and the built package; headless Chromium tests do not establish
 Windows hotkey, focus, UIA or GDI correctness.
 
@@ -188,3 +189,10 @@ results. The packaged gate also counts browser WebSocket handshakes and target
 attachments across three fresh captures, checks that native crops issue no
 Chrome screenshot commands, and exercises delayed replies and declined connections. The browser observer is released after capture; a disconnected client
 also loses its browser observation lease after 30 seconds.
+
+For native bbox and UIA verification without launching the Zommi app, run
+`./scripts/accept-windows-bbox-context.ps1 -CaptureHost <path-to-Zommi.Capture.exe>`.
+It verifies partial intersections, image-only empty areas, covered controls,
+provider IDs/states, invalid gestures and responsive dragging during a busy
+provider. `accept-windows-multi-content.ps1` verifies ordered multi-rectangle
+batches, duplicates, cancellation, source changes and partial table cells.

@@ -12,6 +12,8 @@ var tests = new (string Name, Action Body)[]
     ("Card previews show each URL once and retain every caption", CardLinkPreview),
     ("Image-only previews explain retained screen location", ImageLocationPreview),
     ("Partial cell previews show the verified data row and column", CellLocationPreview),
+    ("Region pixels map across negative screen origins and scaling", RegionPixelGeometry),
+    ("Region previews retain state and partial metadata without ambient selection", RegionPreview),
 };
 
 var failures = new List<string>();
@@ -42,9 +44,43 @@ static void CellLocationPreview()
             Relation = "contains-selection-center", RowIndex = 1, ColumnIndex = 1,
             DataRowNumber = 1, FirstDataRowIndex = 1, ColumnHeaders = ["Database Alias"],
         }] },
+        RegionContext = new CapturedRegionContext(),
     });
     Contains(preview, "Location: Database Alias · data row 1");
     Contains(preview, "cell surrounding the selection");
+}
+
+static void RegionPixelGeometry()
+{
+    var screen = new CaptureRectangle(-600, 200, 300, 160);
+    var element = new CaptureRectangle(-650, 220, 100, 50);
+    var intersection = RegionContextGeometry.Intersect(element, screen)!;
+    True(intersection == new CaptureRectangle(-600, 220, 50, 50), "Incorrect partial intersection.");
+    True(RegionContextGeometry.ToImage(element, screen, 600, 320) == new CaptureRectangle(-100, 40, 200, 100), "Full element bounds lost the crop offset or scale.");
+    True(RegionContextGeometry.ToImage(intersection, screen, 600, 320) == new CaptureRectangle(0, 40, 100, 100), "Intersection pixels were not clipped to the image.");
+    True(RegionContextGeometry.Intersect(new(-700, 200, 100, 20), screen) is null, "Touching edges are not an intersection.");
+}
+
+static void RegionPreview()
+{
+    var preview = ContextPreviewFormatter.Format(Snapshot() with
+    {
+        Selection = ["unrelated application selection"],
+        RegionContext = new CapturedRegionContext
+        {
+            Truncated = true,
+            Elements = [new CapturedElement
+            {
+                Id = "e1", Provider = "windows-uia", Role = "Edit", Name = "Comment", Value = "Draft text",
+                Bounds = new(-10, 0, 50, 20), VisibleBounds = new(0, 0, 40, 20), Relation = "intersects",
+                NativeIds = new Dictionary<string, string> { ["uiaAutomationId"] = "provider-id" },
+                State = new CapturedElementState { Enabled = false, Editable = false, Focused = true, Toggle = "off" },
+            }],
+        },
+    });
+    foreach (var text in new[] { "User-selected rectangle", "Comment", "Draft text", "partly inside", "disabled", "read only", "focused", "toggle: off", "capture limit" }) Contains(preview, text);
+    NotContains(preview, "unrelated application selection");
+    NotContains(preview, "provider-id");
 }
 
 static void ImageLocationPreview()

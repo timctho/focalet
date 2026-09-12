@@ -26,11 +26,6 @@ public static class ContextPreviewFormatter
 
     private static void AppendSnapshotDetails(StringBuilder builder, ContextSnapshot snapshot)
     {
-        if (snapshot.Region is { } region)
-        {
-            builder.AppendLine(region.Status == "aligned" ? "Image with text from the selected region" :
-                region.Mapping is not null ? $"Image with screen location — {region.Reason}" : $"Image only — {region.Reason}");
-        }
         if (snapshot.SpatialContext is { } spatial)
         {
             foreach (var cell in spatial.Cells)
@@ -39,6 +34,41 @@ public static class ContextPreviewFormatter
                 var row = cell.DataRowNumber is { } number ? $"data row {number}" : $"grid row index {cell.RowIndex} (zero-based)";
                 builder.AppendLine($"Location: {column} · {row} (cell surrounding the selection)");
             }
+        }
+        if (snapshot.RegionContext is { } context)
+        {
+            builder.AppendLine("User-selected rectangle · image with context");
+            if (!string.IsNullOrWhiteSpace(snapshot.WindowTitle)) builder.AppendLine($"Window: {Clean(snapshot.WindowTitle, 240)}");
+            if (snapshot.Locator is { } regionLocator) builder.AppendLine($"{Clean(regionLocator.Kind, 40)}: {Clean(regionLocator.Value, 1_000)}");
+            var links = new HashSet<string>();
+            foreach (var element in context.Elements)
+            {
+                var parts = new[] { element.Name, element.Text, element.Value, element.Description }
+                    .OfType<string>().Where(value => !string.IsNullOrWhiteSpace(value)).Distinct().Select(value => Clean(value, 4_000));
+                var text = string.Join(" · ", parts);
+                if (text.Length > 0)
+                    builder.AppendLine($"{element.Role}: {text}{(element.Relation == "intersects" ? " (partly inside the rectangle)" : "")}");
+                if (element.State is { } state)
+                {
+                    var states = new List<string>();
+                    if (state.Enabled == false) states.Add("disabled");
+                    if (state.Focused == true) states.Add("focused");
+                    if (state.Selected == true) states.Add("selected in app");
+                    if (state.Editable is { } editable) states.Add(editable ? "editable" : "read only");
+                    if (state.Toggle is { } toggle) states.Add($"toggle: {toggle}");
+                    if (state.Expanded is { } expanded) states.Add(expanded);
+                    if (states.Count > 0) builder.AppendLine($"State: {string.Join(", ", states)}");
+                }
+                if (element.Href is { Length: > 0 } href && links.Add(href)) builder.AppendLine($"Link: {Clean(href, 4_000)}");
+            }
+            if (context.Truncated) builder.AppendLine("Some context was omitted because the capture limit was reached.");
+            if (context.Limitation is { } limitation) builder.AppendLine($"Limitation: {limitation}");
+            return;
+        }
+        if (snapshot.Region is { } region)
+        {
+            builder.AppendLine(region.Status == "aligned" ? "Image with text from the selected region" :
+                region.Mapping is not null ? $"Image with screen location — {region.Reason}" : $"Image only — {region.Reason}");
         }
         if (snapshot.Selection.Count > 0 || snapshot.SelectionElements.Count > 0)
         {

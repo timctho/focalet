@@ -57,7 +57,7 @@ internal static class NativeContentInput
         while (GetForegroundWindow() != selector && watch.Elapsed < TimeSpan.FromSeconds(4)) await Task.Delay(20, token);
         if (GetForegroundWindow() != selector) throw new InvalidOperationException("The native selector did not receive foreground input.");
         // Visibility/foreground can precede OnShown completing its input-queue
-        // attachment. Wait for the first observation to reach the UI before
+        // attachment. Wait for the toolbar to reach the UI before
         // pressing Ctrl; AttachThreadInput resets keyboard state on detach.
         var ready = false;
         while (!ready && watch.Elapsed < TimeSpan.FromSeconds(5))
@@ -66,12 +66,12 @@ internal static class NativeContentInput
             {
                 var title = new StringBuilder(128);
                 GetWindowText(child, title, title.Capacity);
-                if (title.ToString() == "Whole window" && IsWindowEnabled(child)) ready = true;
+                if (title.ToString() == "Cancel" && IsWindowEnabled(child)) ready = true;
                 return true;
             }, 0);
             if (!ready) await Task.Delay(20, token);
         }
-        if (!ready) throw new InvalidOperationException("The selector did not finish its initial observation.");
+        if (!ready) throw new InvalidOperationException("The rectangle selector did not become ready.");
         keybd_event(0x11, 0, 0, 0);
         try
         {

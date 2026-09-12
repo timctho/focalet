@@ -597,12 +597,32 @@ def run_acceptance(package: Path) -> int:
                 temporary,
                 "context",
                 shortcut_shift=False,
+                selection_action="drag",
+                expected_event="selection.content",
+                expect_focused=True,
+            )
+            if context.get("count") != 1:
+                raise RuntimeError(f"Alt+A did not attach one rectangle: {context}")
+            image = context["items"][0]
+            expected_bounds = {"x": 100, "y": 100, "width": 40, "height": 30}
+            if not image.get("hasImage") or image.get("bounds") != expected_bounds:
+                raise RuntimeError(f"Alt+A did not preserve the selected image rectangle: {context}")
+            if image.get("alignmentStatus") != "image-only":
+                raise RuntimeError(f"X11 rectangle claimed unavailable semantic alignment: {context}")
+
+            clicked = run_case(
+                package,
+                x11,
+                fixture,
+                temporary,
+                "content-click",
+                shortcut_shift=False,
                 selection_action="click",
                 expected_event="selection.content",
                 expect_focused=True,
             )
-            if context.get("count") != 1 or context["items"][0].get("windowTitle") != fixture_title:
-                raise RuntimeError(f"Alt+A did not preserve the focused context title: {context}")
+            if clicked.get("count") != 0:
+                raise RuntimeError(f"A click without a rectangle attached an item: {clicked}")
 
             pointed = select_point_context(capture, x11, fixture)
             if pointed.get("windowTitle") != fixture_title:
@@ -629,7 +649,8 @@ def run_acceptance(package: Path) -> int:
                 json.dumps(
                     {
                         "x11ContextShortcut": True,
-                        "contextTitle": context["items"][0]["windowTitle"],
+                        "contextImageBounds": image["bounds"],
+                        "contextClickWithoutRectangleIgnored": True,
                         "pointContextTitle": pointed["windowTitle"],
                         "contentCancelRestoredFocusedTaskbar": bool(cancelled),
                         "imageShortcut": False,

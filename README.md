@@ -38,8 +38,8 @@ Electron, Node module, or `.mjs` payload.
 
 - bottom-center quiet orb with a visible working state and 500 ms delayed
   collapse;
-- `Alt+A` or **Select content** opens the same content picker; click an object,
-  drag a region, or use Ctrl to accumulate selections on Windows;
+- `Alt+A` or **Select** opens a rectangle picker; drag to attach an image with
+  available context, or use Ctrl to collect up to eight rectangles on Windows;
 - a sliding chat sidebar with mixed-runtime sessions, runtime logos, and a runtime
   picker for new chats;
 - chats ordered by latest response across runtimes, with the runtime bound when

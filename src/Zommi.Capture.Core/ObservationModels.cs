@@ -17,6 +17,10 @@ public sealed record ObservationSource
     public required string Provider { get; init; }
     public required string NativeWindowId { get; init; }
     public int ProcessId { get; init; }
+    public string? Platform { get; init; }
+    public string? HostName { get; init; }
+    public string? ProcessPath { get; init; }
+    public DateTimeOffset? ProcessStartedAtUtc { get; init; }
     public CaptureRectangle? WindowBounds { get; init; }
     public int? BrowserWindowId { get; init; }
     public string? TabId { get; init; }
@@ -62,11 +66,18 @@ public sealed record RegionSpatialContext
 
 public sealed record DomElementContext
 {
+    public string? Id { get; init; }
+    public string? ParentId { get; init; }
+    public IReadOnlyDictionary<string, string>? NativeIds { get; init; }
     public required string Role { get; init; }
     public required string Text { get; init; }
     public string? Label { get; init; }
     public string? Value { get; init; }
     public string? Href { get; init; }
+    public string? Description { get; init; }
+    public CapturedElementState? State { get; init; }
+    public string? Relation { get; init; }
+    public CaptureRectangle? VisibleBounds { get; init; }
     public bool? Disabled { get; init; }
     public bool? Checked { get; init; }
     public required CaptureRectangle Bounds { get; init; }

@@ -86,11 +86,86 @@ void main() {
         ),
         'region-a',
       );
-      expect(attachment.snapshot, snapshot);
+      for (final field in snapshot.keys) {
+        expect(attachment.snapshot?[field], snapshot[field]);
+      }
+      expect(attachment.snapshot?['selectionKind'], 'bbox');
+      expect(attachment.snapshot?['capturePlatform'], isNotEmpty);
+      expect(attachment.snapshot?['captureHostName'], isNotEmpty);
       expect(attachment.previewText, 'Only the chosen comment');
       expect(attachment.bounds?['x'], -600);
     },
   );
+  test('rich bbox context survives the common handoff with actual image dimensions', () {
+    final imageAlignment = {
+      ...alignment,
+      'mapping': {
+        ...alignment['mapping'] as Map,
+        'imageBounds': {'x': 0, 'y': 0, 'width': 1, 'height': 1},
+      },
+    };
+    final context = {
+      'version': 1,
+      'coordinateSpace': 'image-pixels',
+      'elements': [
+        {
+          'id': 'e1',
+          'nativeIds': {'uiaAutomationId': 'comment'},
+          'text': 'Actual rectangle content',
+          'state': {'enabled': false},
+          'relation': 'intersects',
+        },
+      ],
+    };
+    ImageSelection selection(Map<String, Object?> selectedBounds) =>
+        ImageSelection(
+          dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2ioAAAAASUVORK5CYII=',
+          bounds: selectedBounds,
+          alignment: imageAlignment,
+          snapshot: {
+            ...snapshot,
+            'region': imageAlignment,
+            'regionContext': context,
+            'selection': ['Unrelated application selection'],
+            'source': {
+              ...snapshot['source'] as Map,
+              'platform': 'windows',
+              'hostName': 'capture-pc',
+            },
+          },
+        );
+    final attachment = imageAttachmentFromSelection(selection(bounds), 'bbox');
+    final handoff = contextHandoffSnapshots([attachment]).single;
+    expect(handoff['regionContext'], context);
+    expect(handoff['capturePlatform'], 'windows');
+    expect(handoff['captureHostName'], 'capture-pc');
+    expect(handoff['imageSize'], {'width': 1, 'height': 1});
+    expect(handoff['imageIndex'], 1);
+    expect(attachment.excerpt, 'Actual rectangle content');
+    expect(attachment.captureSummary, contains('Region context: 1 elements'));
+    expect(attachment.captureSummary, contains('image-pixels'));
+    final mismatched = imageAttachmentFromSelection(
+      selection({...bounds, 'x': 100}),
+      'bad',
+    );
+    expect(mismatched.snapshot?['regionContext'], isNull);
+    final wrongImage = imageAttachmentFromSelection(
+      ImageSelection(
+        dataUrl: selection(bounds).dataUrl,
+        bounds: bounds,
+        alignment: alignment,
+        snapshot: {...snapshot, 'regionContext': context},
+      ),
+      'wrong-size',
+    );
+    expect(wrongImage.snapshot?['regionContext'], isNull);
+    final unknownOrigin = imageAttachmentFromSelection(
+      const ImageSelection(dataUrl: 'data:image/png;base64,YQ=='),
+      'unknown',
+    );
+    expect((unknownOrigin.snapshot?['region'] as Map)['screenBounds'], isNull);
+    expect(unknownOrigin.snapshot?['imageSize'], isNull);
+  });
   test('a mismatching region discards structured content and explains image-only capture', () {
     final attachment = imageAttachmentFromSelection(
       ImageSelection(

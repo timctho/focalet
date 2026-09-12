@@ -31,16 +31,25 @@ _Avoid_: Screenshot, transcript, durable record
 
 **Invocation Context**:
 The Context Snapshot captured when the user invokes Floating Chat, before
-Zommi takes keyboard focus. It preserves Surface Selection first, then the
-window, locator, Indicated Target, and surrounding context that made the
-user's request meaningful.
+Zommi takes keyboard focus. An explicit rectangle capture is the primary user
+reference; its intersecting elements, window, locator and image explain the
+request. Without an explicit rectangle, Surface Selection and Indicated Target
+can provide invocation context.
 _Avoid_: Latest background state, post-focus capture
 
 **Surface Selection**:
 The text, range, file, or visual objects deliberately selected in the active
-surface when Zommi is invoked. It is the strongest available indication of
-what the user means and may contain one or multiple selected items.
+surface when Zommi is invoked. It may contain one or multiple selected items.
+When the user explicitly draws a rectangle, that rectangle takes precedence;
+existing app selection is supporting context.
 _Avoid_: Selected text only, pointer target, inferred region
+
+**Rectangle Selection**:
+The image region deliberately drawn by the user. The image defines the selected
+content; intersecting DOM/UIA elements enrich it with source, text, identifiers,
+hierarchy, geometry and state when available. Full element metadata may extend
+beyond the selected pixels and must be labelled accordingly.
+_Avoid_: Element picker, action handle, whole element selection
 
 **Indicated Target**:
 The accessibility item directly under the pointer when Zommi is invoked. It is

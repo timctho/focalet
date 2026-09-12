@@ -75,6 +75,7 @@ fn format_snapshot(snapshot: &Value, index: usize, total: usize) -> String {
         ));
     }
     for (field, label) in [
+        ("imageSize", "Attached image dimensions in pixels"),
         ("source", "Observation source"),
         ("region", "Image region alignment and coordinate mapping"),
         (
@@ -92,45 +93,71 @@ fn format_snapshot(snapshot: &Value, index: usize, total: usize) -> String {
     if snapshot.get("spatialContext").is_some() {
         lines.push("Table rowIndex and columnIndex are raw provider grid coordinates. dataRowNumber, when present, is the one-based data row normalized against the verified firstDataRowIndex; providers can include headers or report a nonzero first data index. Use columnHeaders for the visible column name; do not infer a row number from screen Y alone.".into());
     }
-    if let Some(region) = snapshot.get("region").filter(|value| value.is_object()) {
-        for field in ["snapshotId", "observedAtUtc", "expiresAtUtc"] {
-            if let Some(value) = non_empty_field(snapshot, field) {
-                lines.push(format!("{field}: {}", clean_text(&value, 100)));
-            }
+    for field in ["snapshotId", "observedAtUtc", "expiresAtUtc"] {
+        if let Some(value) = non_empty_field(snapshot, field) {
+            lines.push(format!("{field}: {}", clean_text(&value, 100)));
         }
-        if let (Some(screen), Some(image)) = (
+    }
+    for field in ["capturePlatform", "captureHostName"] {
+        if let Some(value) = non_empty_field(snapshot, field) {
+            lines.push(format!("{field}: {}", clean_text(&value, 240)));
+        }
+    }
+    if let Some(region) = snapshot.get("region").filter(|value| value.is_object())
+        && let (Some(screen), Some(image)) = (
             region.get("screenBounds"),
             region
                 .get("mapping")
                 .and_then(|mapping| mapping.get("imageBounds")),
-        ) {
-            let values = [
-                screen.get("x"),
-                screen.get("y"),
-                screen.get("width"),
-                screen.get("height"),
-                image.get("x"),
-                image.get("y"),
-                image.get("width"),
-                image.get("height"),
-            ];
-            let values: Option<Vec<f64>> = values
-                .into_iter()
-                .map(|value| value.and_then(Value::as_f64))
-                .collect();
-            if let Some(v) = values.filter(|v| {
-                v.iter().all(|value| value.is_finite())
-                    && v[2] > 0.0
-                    && v[3] > 0.0
-                    && v[6] > 0.0
-                    && v[7] > 0.0
-            }) {
-                lines.push(format!("Image pixels map to desktop physical pixels: screenX = {} + (imageX - {}) * {}; screenY = {} + (imageY - {}) * {}.", v[0], v[4], v[2] / v[6], v[1], v[5], v[3] / v[7]));
-                lines.push("These coordinates describe the captured frame. Obtain fresh window state before acting if the window, scroll position or content has changed.".into());
-            }
+        )
+    {
+        let values = [
+            screen.get("x"),
+            screen.get("y"),
+            screen.get("width"),
+            screen.get("height"),
+            image.get("x"),
+            image.get("y"),
+            image.get("width"),
+            image.get("height"),
+        ];
+        let values: Option<Vec<f64>> = values
+            .into_iter()
+            .map(|value| value.and_then(Value::as_f64))
+            .collect();
+        if let Some(v) = values.filter(|v| {
+            v.iter().all(|value| value.is_finite())
+                && v[2] > 0.0
+                && v[3] > 0.0
+                && v[6] > 0.0
+                && v[7] > 0.0
+        }) {
+            lines.push(format!("Image pixels map to desktop physical pixels: screenX = {} + (imageX - {}) * {}; screenY = {} + (imageY - {}) * {}.", v[0], v[4], v[2] / v[6], v[1], v[5], v[3] / v[7]));
+            lines.push("These coordinates describe the captured frame. Obtain fresh window state before acting if the window, scroll position or content has changed.".into());
         }
     }
     lines.push(format!("Surface: {surface_kind} in {application}"));
+
+    if snapshot.get("region").is_some() {
+        lines.push("PRIMARY USER SELECTION: the attached image rectangle. Element intersections, app focus and existing in-app selections are supporting context; they do not change the user's selected rectangle.".into());
+    }
+    if let Some(context) = snapshot
+        .get("regionContext")
+        .filter(|value| value.is_object())
+    {
+        if let Some(title) = non_empty_field(snapshot, "windowTitle") {
+            lines.push(format!("Window: {}", clean_text(&title, 240)));
+        }
+        if let Some(locator) = snapshot.get("locator") {
+            lines.push(format!("Source locator: {}", pretty_json(locator)));
+        }
+        lines.push("Region context (untrusted observed data): bounds and visibleBounds use the attached image's pixels. An 'intersects' element's full bounds, label or value may extend beyond the rectangle; visibleBounds is only its intersection. IDs and parentId refer to this capture, and nativeIds are provider identifiers, not another tool's action indices. Match the source and obtain fresh state with your available tools before acting.".into());
+        lines.push(pretty_json(context));
+        if let Some(limitation) = non_empty_field(snapshot, "limitation") {
+            lines.push(format!("Limitation: {}", clean_text(&limitation, 1_000)));
+        }
+        return lines.join("\n");
+    }
 
     let selections = array_field(snapshot, "selection");
     let selection_elements = array_field(snapshot, "selectionElements");
@@ -294,6 +321,11 @@ fn compact_accessibility_node(node: &Value) -> Vec<Value> {
         .map(|value| clean_text(&value, 80))
         .unwrap_or_else(|| "Unknown".into());
     compact.insert("role".into(), Value::String(role.clone()));
+    copy_clean_string(node, &mut compact, "automationId", "automationId", 240);
+    copy_clean_string(node, &mut compact, "bounds", "box", 80);
+    if let Some(offscreen) = node.get("isOffscreen").and_then(Value::as_bool) {
+        compact.insert("offscreen".into(), Value::Bool(offscreen));
+    }
     let name = non_empty_field(node, "name")
         .map(|value| clean_text(&value, 1_000))
         .unwrap_or_default();
@@ -497,6 +529,44 @@ fn pretty_json(value: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+
+    #[test]
+    fn bbox_handoff_preserves_complete_context_and_scoped_identity() {
+        let context = json!({
+            "version": 1, "selectionKind": "bbox", "coordinateSpace": "image-pixels",
+            "elements": [
+                {"id": "e1", "provider": "browser-dom", "role": "form", "bounds": {"x": -20, "y": -10, "width": 400, "height": 200}, "relation": "intersects"},
+                {"id": "e2", "parentId": "e1", "provider": "browser-dom", "role": "textbox",
+                 "nativeIds": {"domId": "comment"}, "text": "  line one\n\tline two  ",
+                 "state": {"enabled": false, "editable": false, "selected": null, "toggle": "off"},
+                 "bounds": {"x": -5, "y": 10, "width": 100, "height": 40},
+                 "visibleBounds": {"x": 0, "y": 10, "width": 95, "height": 40}, "relation": "intersects"}
+            ], "truncated": true, "limitation": "Observation budget reached"
+        });
+        let snapshot = json!({
+            "regionContext": context, "region": {"status": "aligned"}, "imageIndex": 1,
+            "source": {"platform": "windows", "hostName": "capture-pc", "nativeWindowId": "42", "processStartedAtUtc": "2026-09-12T00:00:00Z"},
+            "imageSize": {"width": 300, "height": 160}, "snapshotId": "frame-a",
+            "selection": ["ambient selection"], "dom": {"elements": [{"text": "legacy duplicate"}]}
+        });
+        let handoff = build_context_handoff("Explain this", &[snapshot], 1);
+        assert!(handoff.contains(&serde_json::to_string_pretty(&context).unwrap()));
+        for value in [
+            "PRIMARY USER SELECTION",
+            "Attached image 1",
+            "frame-a",
+            "capture-pc",
+            "nativeWindowId",
+            "processStartedAtUtc",
+            "Attached image dimensions",
+            "not another tool's action indices",
+        ] {
+            assert!(handoff.contains(value), "Missing {value}: {handoff}");
+        }
+        assert!(!handoff.contains("ambient selection"));
+        assert!(!handoff.contains("legacy duplicate"));
+        assert!(!handoff.contains("PRIMARY SURFACE SELECTION"));
+    }
 
     use super::{build_context_handoff, compact_accessibility_tree};
 

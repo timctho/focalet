@@ -29,9 +29,15 @@
   };
   const intersects = (a, b) => a.x < b.x + b.width && a.x + a.width > b.x &&
     a.y < b.y + b.height && a.y + a.height > b.y;
-  const sensitive = element => !!element?.closest?.(
-    'input[type=password], [autocomplete=current-password], [autocomplete=new-password], [autocomplete=one-time-code]');
   const parent = element => element?.parentElement || element?.getRootNode()?.host || null;
+  const sensitive = element => {
+    for (let current = element; current; current = parent(current)) {
+      if (current.matches?.('input[type=password], [autocomplete=current-password], [autocomplete=new-password], [autocomplete=one-time-code]')) return true;
+    }
+    return false;
+  };
+  const rendered = element => element?.isConnected && !own(element) && !sensitive(element) &&
+    getComputedStyle(element).display !== 'none' && Number(getComputedStyle(element).opacity) > 0;
   const clipFor = element => {
     let left = 0, top = 0, right = innerWidth, bottom = innerHeight;
     for (let ancestor = parent(element), depth = 0; ancestor && depth < 64; ancestor = parent(ancestor), depth++) {
@@ -93,12 +99,32 @@
     }
     return null;
   };
-  const describe = element => {
-    const content = textOf(element);
+  const describe = (element, includeText = true) => {
+    const content = includeText ? textOf(element) : {text: '', truncated: false};
     const role = element.getAttribute('role') || element.tagName.toLowerCase();
+    const ids = [['domId', element.id], ['name', element.getAttribute('name')],
+      ['testId', element.getAttribute('data-testid')]].filter(([, value]) => value);
+    const value = /^(INPUT|TEXTAREA|SELECT)$/.test(element.tagName) && !sensitive(element) ? element.value : null;
     return {
       role, ...content, label: element.getAttribute('aria-label') || element.getAttribute('alt') || null,
-      value: /^(INPUT|TEXTAREA|SELECT)$/.test(element.tagName) && !sensitive(element) ? element.value.slice(0, maximumText) : null,
+      truncated: content.truncated || ids.some(([, value]) => value.length > 240) || (value?.length || 0) > maximumText,
+      nativeIds: Object.fromEntries(ids.filter(([, value]) => value.length <= 240)),
+      description: element.getAttribute('aria-description') || element.getAttribute('title') || null,
+      state: {
+        enabled: element.matches(':disabled') || element.getAttribute('aria-disabled') === 'true' ? false :
+          element.matches('button,input,select,textarea,a[href]') ? true : null,
+        focused: element === element.getRootNode().activeElement,
+        selected: element.hasAttribute('aria-selected') ? element.getAttribute('aria-selected') === 'true' :
+          element.tagName === 'OPTION' ? element.selected : null,
+        editable: element.matches('input,textarea') ? !element.readOnly && !element.matches(':disabled') :
+          element.isContentEditable ? true : null,
+        toggle: element.hasAttribute('aria-checked') ? ({true:'on',false:'off',mixed:'mixed'}[element.getAttribute('aria-checked')] || null) :
+          element.matches('input[type=checkbox],input[type=radio]') ? element.indeterminate ? 'mixed' : element.checked ? 'on' : 'off' : null,
+        expanded: element.hasAttribute('aria-expanded') ? ({true:'expanded',false:'collapsed'}[element.getAttribute('aria-expanded')] || null) : null,
+        valueType: element.matches('input[type=number],input[type=range]') ? 'number' :
+          element.matches('input,textarea,select') || element.isContentEditable ? 'string' : null
+      },
+      value: value?.slice(0, maximumText) ?? null,
       // The destination belongs to the selected object even when its wrapping
       // link and product caption extend beyond an image-only rectangle.
       href: linkFor(element),
@@ -141,27 +167,74 @@
       const region = options.rect;
       let visited = 0;
       let total = 0;
-      const walk = root => {
+      const intersection = (a, b) => ({x: Math.max(a.x, b.x), y: Math.max(a.y, b.y),
+        width: Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x)),
+        height: Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y))});
+      const exposed = (element, bounds) => {
+        // display:contents has no hit-test box; its text belongs to the nearest
+        // ancestor that paints, while the text range still bounds the samples.
+        while (element && getComputedStyle(element).display === 'contents') element = parent(element);
+        for (const [dx, dy] of [[0.5,0.5],[0.1,0.1],[0.9,0.1],[0.1,0.9],[0.9,0.9]]) {
+          for (let front = hit(bounds.x + bounds.width * dx, bounds.y + bounds.height * dy); front; front = parent(front)) {
+            if (front === element) return true;
+          }
+        }
+        return false;
+      };
+      const add = (entry, parentId) => {
+        if (elements.length >= 256 || total >= maximumText) { truncated = true; return null; }
+        for (const field of ['text', 'label', 'value', 'description', 'href']) {
+          if (!entry[field]) continue;
+          const remaining = maximumText - total;
+          if (entry[field].length > remaining) {
+            entry[field] = field === 'href' ? null : entry[field].slice(0, remaining);
+            entry.truncated = truncated = true;
+          }
+          total += entry[field]?.length || 0;
+        }
+        entry.id = `e${elements.length + 1}`;
+        entry.parentId = parentId;
+        elements.push(entry);
+        return entry.id;
+      };
+      const walk = (root, parentId = null) => {
         for (const child of root.childNodes) {
           if (++visited > 6000 || total > maximumText || elements.length >= 256) { truncated = true; return; }
-          if (child.nodeType === Node.TEXT_NODE && child.nodeValue.trim() && visible(child.parentElement)) {
+          if (child.nodeType === Node.TEXT_NODE && child.nodeValue.trim() && rendered(parent(child)) &&
+              getComputedStyle(parent(child)).visibility === 'visible') {
             const range = document.createRange(); range.selectNodeContents(child);
             const rects = [...range.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0);
             // A partially clipped line is not represented as if its entire text were selected.
             const clip = clipFor(child);
-            if (rects.length && rects.every(rect => inside(box(rect), region) && inside(box(rect), clip))) {
+            const bounds = box(range.getBoundingClientRect());
+            const visibleBounds = intersection(intersection(bounds, clip), region);
+            if (rects.length && rects.every(rect => inside(box(rect), clip)) &&
+                visibleBounds.width > 0 && visibleBounds.height > 0 && exposed(parent(child), visibleBounds)) {
               const text = child.nodeValue;
-              elements.push({role: 'text', text, href: linkFor(child.parentElement), bounds: box(range.getBoundingClientRect()), truncated: false});
-              total += text.length;
+              add({role: 'text', text, href: linkFor(child.parentElement), bounds, visibleBounds,
+                relation: rects.every(rect => inside(box(rect), region)) ? 'inside' : 'intersects', truncated: false}, parentId);
             }
-          } else if (child.nodeType === Node.ELEMENT_NODE && visible(child)) {
+          } else if (child.nodeType === Node.ELEMENT_NODE && rendered(child)) {
+            if (['SCRIPT','STYLE','NOSCRIPT','TEMPLATE'].includes(child.tagName)) continue;
+            const bounds = box(child.getBoundingClientRect());
+            const visibleBounds = intersection(intersection(bounds, clipFor(child)), region);
+            let childId = parentId;
             if (child.tagName === 'IFRAME' && intersects(box(child.getBoundingClientRect()), region)) {
               limitation = 'Embedded frame content is not included in this DOM region.';
-            } else if (/^(INPUT|TEXTAREA|SELECT|IMG|CANVAS)$/.test(child.tagName)) {
-              const bounds = box(child.getBoundingClientRect());
-              if (inside(bounds, region) && inside(bounds, clipFor(child))) elements.push(describe(child));
-            } else walk(child);
-            if (child.shadowRoot) walk(child.shadowRoot);
+            }
+            const semantic = child.id || child.hasAttribute('role') || child.hasAttribute('aria-label') ||
+              child.matches('button,input,textarea,select,a[href],img,canvas,iframe,table,tr,td,th,article,section,header,form,li,details,summary');
+            if (semantic && visible(child) && visibleBounds.width > 0 && visibleBounds.height > 0 && exposed(child, visibleBounds)) {
+              const entry = describe(child, false);
+              // Descendant text is emitted once, in spatially checked text nodes.
+              // Container names and native IDs still identify a partially selected control.
+              entry.text = '';
+              entry.visibleBounds = visibleBounds;
+              entry.relation = inside(bounds, region) && inside(bounds, clipFor(child)) ? 'inside' : 'intersects';
+              childId = add(entry, parentId) || parentId;
+            }
+            if (!child.matches('input,textarea,select,iframe')) walk(child, childId);
+            if (child.shadowRoot) walk(child.shadowRoot, childId);
           }
         }
       };
