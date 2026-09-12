@@ -15,7 +15,7 @@ import 'test_support.dart';
 
 void main() {
   testWidgets(
-    'tapping a context thumbnail opens readable details without Adjust',
+    'context thumbnail opens an image with captured text folded in Details',
     (tester) async {
       await tester.binding.setSurfaceSize(normalWindowSize);
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -46,6 +46,13 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('context-preview')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('context-preview-image-frame')),
+        findsOneWidget,
+      );
+      expect(find.byType(SelectableText), findsNothing);
+      await tester.tap(find.text('Details'));
+      await tester.pumpAndSettle();
       expect(
         find.byKey(const ValueKey('context-preview-text')),
         findsOneWidget,
@@ -114,6 +121,10 @@ void main() {
         of: find.byType(ContextPreviewPanel),
         matching: find.byType(SingleChildScrollView),
       );
+      await tester.drag(scroll, const Offset(0, -180));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Details'));
+      await tester.pumpAndSettle();
       await tester.drag(scroll, const Offset(0, -180));
       await tester.pumpAndSettle();
       expect(

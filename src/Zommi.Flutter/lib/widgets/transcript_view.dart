@@ -204,7 +204,11 @@ class _TranscriptPaneState extends State<TranscriptPane> {
   Widget _turnView(ConversationTurn turn, double viewportWidth) {
     // Only visible rows are fingerprinted. Keep completed rows' widget trees
     // unchanged when another row streams, while preserving folds and updates.
+    final isResponding =
+        widget.controller.turnActive &&
+        identical(turn, widget.controller.turns.last);
     final revision = Object.hash(
+      isResponding,
       transcriptContentRevision([turn], visibleOnly: true),
       turn.activityExpanded,
       Object.hashAll(
@@ -238,6 +242,7 @@ class _TranscriptPaneState extends State<TranscriptPane> {
       viewportWidth: viewportWidth,
       runtimeName: runtimeName,
       controller: widget.controller,
+      isResponding: isResponding,
       onAttachmentEnter: _attachmentEnter,
       onAttachmentExit: _attachmentExit,
     );
@@ -383,6 +388,7 @@ class ConversationTurnView extends StatelessWidget {
     required this.controller,
     required this.onAttachmentEnter,
     required this.onAttachmentExit,
+    this.isResponding = false,
     super.key,
   });
 
@@ -392,6 +398,7 @@ class ConversationTurnView extends StatelessWidget {
   final ZommiController controller;
   final AttachmentHoverCallback onAttachmentEnter;
   final ValueChanged<ContextAttachment> onAttachmentExit;
+  final bool isResponding;
 
   @override
   Widget build(BuildContext context) {
@@ -400,6 +407,13 @@ class ConversationTurnView extends StatelessWidget {
       'normalizeBlocks',
       () => distinctTranscriptBlocks(turn.blocks),
     );
+    final showTyping =
+        isResponding &&
+        !blocks.any(
+          (block) =>
+              block.kind.isMessage &&
+              (block.text.trim().isNotEmpty || block.artifacts.isNotEmpty),
+        );
     // Keep one activity section above every message, even when more thinking
     // or tool events arrive after commentary or the final response.
     final activities = blocks
@@ -408,7 +422,11 @@ class ConversationTurnView extends StatelessWidget {
     final segments = <List<TranscriptBlock>>[
       if (activities.isNotEmpty) activities,
       for (final block in blocks)
-        if (!block.kind.isFoldedActivity) [block],
+        if (!block.kind.isFoldedActivity &&
+            (!block.kind.isMessage ||
+                block.text.trim().isNotEmpty ||
+                block.artifacts.isNotEmpty))
+          [block],
     ];
     return Semantics(
       container: true,
@@ -516,6 +534,34 @@ class ConversationTurnView extends StatelessWidget {
                     controller: controller,
                   ),
                 ),
+            if (showTyping)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Semantics(
+                  label: '$runtimeName is typing',
+                  liveRegion: true,
+                  child: ExcludeSemantics(
+                    child: Container(
+                      key: ValueKey('typing-indicator-${turn.id}'),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0x80ffffff),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Text(
+                        '...',
+                        style: chatTextStyleOf(context).copyWith(
+                          color: const Color(0xff747988),
+                          letterSpacing: 2,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
