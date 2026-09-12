@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_html/flutter_html.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -32,7 +33,33 @@ class CopyableMarkdown extends StatefulWidget {
 class _CopyableMarkdownState extends State<CopyableMarkdown> {
   bool _hovered = false;
   bool _copied = false;
+  String? _hoveredLink;
+  String? _contextLink;
   MarkdownBody? _markdown;
+
+  Widget _selectionMenu(BuildContext context, SelectableRegionState region) {
+    final destination = _contextLink;
+    final items = region.contextMenuButtonItems;
+    if (destination == null ||
+        items.any((item) => item.type == ContextMenuButtonType.copy)) {
+      return AdaptiveTextSelectionToolbar.selectableRegion(
+        selectableRegionState: region,
+      );
+    }
+    return AdaptiveTextSelectionToolbar.buttonItems(
+      anchors: region.contextMenuAnchors,
+      buttonItems: [
+        ContextMenuButtonItem(
+          type: ContextMenuButtonType.copy,
+          onPressed: () {
+            region.hideToolbar();
+            unawaited(widget.onCopy(destination));
+          },
+        ),
+        ...items,
+      ],
+    );
+  }
 
   @override
   void didChangeDependencies() {
@@ -60,157 +87,153 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
     final base = DefaultTextStyle.of(context).style
         .merge(chatTextStyleOf(context))
         .copyWith(color: const Color(0xff272b38), height: 1.38);
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: Stack(
-        children: [
-          ConstrainedBox(
-            key: const ValueKey('copy-layout'),
-            constraints: const BoxConstraints(minHeight: 24),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              widthFactor: 1,
-              heightFactor: 1,
-              child: Padding(
-                padding: const EdgeInsets.only(right: 28),
-                child: SelectionArea(
-                  child: _markdown ??= MarkdownBody(
-                    data: widget.text,
-                    // Rich replies share a selection region instead of an
-                    // EditableText per paragraph. Retain compact bubble metrics.
-                    selectable: widget.compact,
-                    fitContent: true,
-                    onTapLink: (_, href, _) {
-                      if (href != null) unawaited(widget.onOpenLink(href));
-                    },
-                    builders: {
-                      'pre': _CodeBlockBuilder(onCopy: widget.onCopy),
-                      'a': _TooltipLinkBuilder(
-                        onOpen: widget.onOpenLink,
-                        onCopy: widget.onCopy,
-                      ),
-                    },
-                    styleSheet: MarkdownStyleSheet(
-                      a: base.copyWith(
-                        color: const Color(0xff5d54a4),
-                        decoration: TextDecoration.underline,
-                      ),
-                      p: base,
-                      h1: base.copyWith(
-                        fontSize: 19.5 + headingDelta,
-                        fontWeight: FontWeight.w700,
-                      ),
-                      h2: base.copyWith(
-                        fontSize: 17.5 + headingDelta,
-                        fontWeight: FontWeight.w700,
-                      ),
-                      h3: base.copyWith(
-                        fontSize: 16 + headingDelta,
-                        fontWeight: FontWeight.w700,
-                      ),
-                      h4: base.copyWith(fontWeight: FontWeight.w700),
-                      h5: base.copyWith(fontWeight: FontWeight.w700),
-                      h6: base.copyWith(fontWeight: FontWeight.w700),
-                      em: base.copyWith(fontStyle: FontStyle.italic),
-                      strong: base.copyWith(fontWeight: FontWeight.w700),
-                      del: base.copyWith(
-                        decoration: TextDecoration.lineThrough,
-                      ),
-                      blockquote: base,
-                      listBullet: base,
-                      tableHead: base.copyWith(fontWeight: FontWeight.w700),
-                      tableBody: base,
-                      code: base.copyWith(
-                        fontFamily: 'monospace',
-                        fontSize: chatFontSize,
-                        backgroundColor: inlineCodeBackground,
-                      ),
-                      codeblockPadding: EdgeInsets.zero,
-                      codeblockDecoration: const BoxDecoration(),
-                      blockquoteDecoration: const BoxDecoration(
-                        border: Border(
-                          left: BorderSide(color: Color(0xff8f83ce), width: 3),
+    return Listener(
+      onPointerDown: (event) {
+        _contextLink = event.buttons == kSecondaryMouseButton
+            ? _hoveredLink
+            : null;
+        if (_contextLink != null) Tooltip.dismissAllToolTips();
+      },
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: Stack(
+          children: [
+            ConstrainedBox(
+              key: const ValueKey('copy-layout'),
+              constraints: const BoxConstraints(minHeight: 24),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                widthFactor: 1,
+                heightFactor: 1,
+                child: Padding(
+                  // Preserve the compact bubble's former caret spacing while
+                  // sharing selection with the rest of the message.
+                  padding: EdgeInsets.only(right: widget.compact ? 31 : 28),
+                  child: SelectionArea(
+                    contextMenuBuilder: _selectionMenu,
+                    child: _markdown ??= MarkdownBody(
+                      data: widget.text,
+                      // All paragraphs and links participate in the same
+                      // selection region, including compact user messages.
+                      selectable: false,
+                      fitContent: true,
+                      onTapLink: (_, href, _) {
+                        if (href != null) unawaited(widget.onOpenLink(href));
+                      },
+                      builders: {
+                        'pre': _CodeBlockBuilder(onCopy: widget.onCopy),
+                        'a': _TooltipLinkBuilder(
+                          onOpen: widget.onOpenLink,
+                          onHover: (link) => _hoveredLink = link,
                         ),
+                      },
+                      styleSheet: MarkdownStyleSheet(
+                        a: base.copyWith(
+                          color: const Color(0xff5d54a4),
+                          decoration: TextDecoration.underline,
+                        ),
+                        p: base,
+                        h1: base.copyWith(
+                          fontSize: 19.5 + headingDelta,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        h2: base.copyWith(
+                          fontSize: 17.5 + headingDelta,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        h3: base.copyWith(
+                          fontSize: 16 + headingDelta,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        h4: base.copyWith(fontWeight: FontWeight.w700),
+                        h5: base.copyWith(fontWeight: FontWeight.w700),
+                        h6: base.copyWith(fontWeight: FontWeight.w700),
+                        em: base.copyWith(fontStyle: FontStyle.italic),
+                        strong: base.copyWith(fontWeight: FontWeight.w700),
+                        del: base.copyWith(
+                          decoration: TextDecoration.lineThrough,
+                        ),
+                        blockquote: base,
+                        listBullet: base,
+                        tableHead: base.copyWith(fontWeight: FontWeight.w700),
+                        tableBody: base,
+                        code: base.copyWith(
+                          fontFamily: 'monospace',
+                          fontSize: chatFontSize,
+                          backgroundColor: inlineCodeBackground,
+                        ),
+                        codeblockPadding: EdgeInsets.zero,
+                        codeblockDecoration: const BoxDecoration(),
+                        blockquoteDecoration: const BoxDecoration(
+                          border: Border(
+                            left: BorderSide(
+                              color: Color(0xff8f83ce),
+                              width: 3,
+                            ),
+                          ),
+                        ),
+                        blockquotePadding: const EdgeInsets.only(left: 12),
+                        tableBorder: TableBorder.all(
+                          color: const Color(0xffd7dbe5),
+                        ),
+                        tableCellsPadding: const EdgeInsets.all(7),
                       ),
-                      blockquotePadding: const EdgeInsets.only(left: 12),
-                      tableBorder: TableBorder.all(
-                        color: const Color(0xffd7dbe5),
-                      ),
-                      tableCellsPadding: const EdgeInsets.all(7),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
-          Positioned(
-            right: 0,
-            top: 0,
-            child: AnimatedOpacity(
-              opacity: _hovered || _copied ? 1 : 0,
-              duration: const Duration(milliseconds: 120),
-              child: Semantics(
-                button: true,
-                label: '${_copied ? 'Copied' : 'Copy'} response',
-                child: IconButton(
-                  key: ValueKey('copy-${widget.text.hashCode}'),
-                  visualDensity: VisualDensity.compact,
-                  constraints: const BoxConstraints.tightFor(
-                    width: 24,
-                    height: 24,
-                  ),
-                  style: IconButton.styleFrom(
-                    fixedSize: const Size(24, 24),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  padding: EdgeInsets.zero,
-                  splashRadius: 13,
-                  tooltip: _copied ? 'Copied' : 'Copy response',
-                  onPressed: () async {
-                    await widget.onCopy(widget.text);
-                    if (!mounted) return;
-                    setState(() => _copied = true);
-                    await Future<void>.delayed(const Duration(seconds: 1));
-                    if (mounted) setState(() => _copied = false);
-                  },
-                  icon: Icon(
-                    _copied ? Icons.check_rounded : Icons.copy_rounded,
-                    size: 14,
+            Positioned(
+              right: 0,
+              top: 0,
+              child: AnimatedOpacity(
+                opacity: _hovered || _copied ? 1 : 0,
+                duration: const Duration(milliseconds: 120),
+                child: Semantics(
+                  button: true,
+                  label: '${_copied ? 'Copied' : 'Copy'} response',
+                  child: IconButton(
+                    key: ValueKey('copy-${widget.text.hashCode}'),
+                    visualDensity: VisualDensity.compact,
+                    constraints: const BoxConstraints.tightFor(
+                      width: 24,
+                      height: 24,
+                    ),
+                    style: IconButton.styleFrom(
+                      fixedSize: const Size(24, 24),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    padding: EdgeInsets.zero,
+                    splashRadius: 13,
+                    tooltip: _copied ? 'Copied' : 'Copy response',
+                    onPressed: () async {
+                      await widget.onCopy(widget.text);
+                      if (!mounted) return;
+                      setState(() => _copied = true);
+                      await Future<void>.delayed(const Duration(seconds: 1));
+                      if (mounted) setState(() => _copied = false);
+                    },
+                    icon: Icon(
+                      _copied ? Icons.check_rounded : Icons.copy_rounded,
+                      size: 14,
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
 
 final class _TooltipLinkBuilder extends MarkdownElementBuilder {
-  _TooltipLinkBuilder({required this.onOpen, required this.onCopy});
+  _TooltipLinkBuilder({required this.onOpen, required this.onHover});
 
   final Future<void> Function(String value) onOpen;
-  final Future<void> Function(String value) onCopy;
-
-  Future<void> _showContextMenu(
-    BuildContext context,
-    Offset globalPosition,
-    String destination,
-  ) async {
-    Tooltip.dismissAllToolTips();
-    ContextMenuController.removeAny();
-    final overlay =
-        Overlay.of(context).context.findRenderObject()! as RenderBox;
-    final position = overlay.globalToLocal(globalPosition);
-    final copy = await showMenu<bool>(
-      context: context,
-      position: RelativeRect.fromSize(position & Size.zero, overlay.size),
-      items: const [PopupMenuItem(value: true, child: Text('Copy link'))],
-    );
-    if (copy == true) await onCopy(destination);
-  }
+  final ValueChanged<String?> onHover;
 
   @override
   Widget visitElementAfterWithContext(
@@ -226,20 +249,13 @@ final class _TooltipLinkBuilder extends MarkdownElementBuilder {
       waitDuration: const Duration(milliseconds: 350),
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
+        onEnter: (_) => onHover(destination.isEmpty ? null : destination),
+        onExit: (_) => onHover(null),
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: destination.isEmpty
               ? null
               : () => unawaited(onOpen(destination)),
-          onSecondaryTapUp: destination.isEmpty
-              ? null
-              : (details) => unawaited(
-                  _showContextMenu(
-                    context,
-                    details.globalPosition,
-                    destination,
-                  ),
-                ),
           child: Text.rich(
             TextSpan(
               text: element.textContent,
@@ -300,7 +316,7 @@ class _CopyableCodeBlockState extends State<_CopyableCodeBlock> {
           Expanded(
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
-              child: SelectableText(
+              child: Text(
                 widget.code,
                 style: TextStyle(
                   color: const Color(0xff272b38),

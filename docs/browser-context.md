@@ -55,6 +55,12 @@ hidden rows and partially clipped items.
 
 Attachments show a stable A/B reference and a readable excerpt or image preview.
 Hover over or click anywhere on an attachment to read its context details.
+The preview summarizes the capture source, available window and selection bounds,
+coordinate space, and whether DOM, accessibility nodes or table locations were
+captured. Expand **Full captured metadata** below a short preview to inspect the
+retained snapshot. This is the captured region's data; it does not imply a full
+page DOM or window accessibility tree. The agent receives a formatted handoff
+that preserves coordinates and compacts accessibility structure.
 Use its remove button and **Select** to capture a different selection.
 Sent attachments remain available when reopening a chat, including context
 recovered from the runtime history. Images are shown when retained by the runtime.

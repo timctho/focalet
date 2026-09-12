@@ -1565,6 +1565,11 @@ class ContextPreviewPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final summary = attachment.captureSummary;
+    final capturedDetails = attachment.capturedDetailsText;
+    final preview = attachment.previewText.isNotEmpty
+        ? attachment.previewText
+        : capturedDetails;
     final image = attachment.imageDataUrl == null
         ? null
         : decodeImageDataUrl(attachment.imageDataUrl!);
@@ -1603,12 +1608,24 @@ class ContextPreviewPanel extends StatelessWidget {
                     ],
                   ),
                 ),
-                if (image != null || attachment.detailsText.isNotEmpty)
+                if (image != null || preview.isNotEmpty)
                   Flexible(
                     child: SingleChildScrollView(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
+                          if (summary.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+                              child: SelectableText(
+                                summary,
+                                key: const ValueKey('context-capture-summary'),
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  height: 1.4,
+                                ),
+                              ),
+                            ),
                           if (image != null)
                             SizedBox(
                               key: const ValueKey(
@@ -1629,11 +1646,11 @@ class ContextPreviewPanel extends StatelessWidget {
                                 ),
                               ),
                             ),
-                          if (attachment.detailsText.isNotEmpty)
+                          if (preview.isNotEmpty)
                             Padding(
                               padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
                               child: SelectableText(
-                                attachment.detailsText,
+                                preview,
                                 key: const ValueKey('context-preview-text'),
                                 style: const TextStyle(
                                   fontFamily: 'monospace',
@@ -1641,6 +1658,32 @@ class ContextPreviewPanel extends StatelessWidget {
                                   height: 1.4,
                                 ),
                               ),
+                            ),
+                          if (attachment.previewText.isNotEmpty &&
+                              capturedDetails.isNotEmpty)
+                            ExpansionTile(
+                              key: const ValueKey('context-captured-details'),
+                              title: const Text('Full captured metadata'),
+                              subtitle: const Text(
+                                'Coordinates, source, and available structure',
+                              ),
+                              childrenPadding: const EdgeInsets.fromLTRB(
+                                16,
+                                0,
+                                16,
+                                16,
+                              ),
+                              children: [
+                                SelectableText(
+                                  capturedDetails,
+                                  key: const ValueKey('context-captured-json'),
+                                  style: const TextStyle(
+                                    fontFamily: 'monospace',
+                                    fontSize: 10.5,
+                                    height: 1.4,
+                                  ),
+                                ),
+                              ],
                             ),
                         ],
                       ),
