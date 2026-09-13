@@ -2510,7 +2510,15 @@ final class ZommiController extends ChangeNotifier {
         status: event.payload['status']?.toString(),
         expanded: kind == TranscriptKind.error,
       );
-      turn.blocks.add(block);
+      final beforeItemId = event.payload['beforeItemId']?.toString();
+      final beforeIndex = beforeItemId == null
+          ? -1
+          : turn.blocks.indexWhere((item) => item.sourceId == beforeItemId);
+      if (beforeIndex < 0) {
+        turn.blocks.add(block);
+      } else {
+        turn.blocks.insert(beforeIndex, block);
+      }
     }
     block.text = mergeActivityText(
       block.text,
@@ -2977,12 +2985,11 @@ ConversationTurn mergeConversationTurn(
   final blocks = List<TranscriptBlock>.of(primary.blocks);
   // Match each rekeyed snapshot once so repeated messages remain separate.
   final matchedIndexes = <int>{};
+  final matches = <int>[];
   for (final candidate in secondary.blocks) {
     final match = _matchingTranscriptBlock(blocks, candidate, matchedIndexes);
-    if (match < 0) {
-      matchedIndexes.add(blocks.length);
-      blocks.add(candidate);
-    } else {
+    matches.add(match);
+    if (match >= 0) {
       matchedIndexes.add(match);
       // Events received after the history request began are newer than its
       // snapshot, including a final replacement of an earlier partial reply.
@@ -2991,6 +2998,30 @@ ConversationTurn mergeConversationTurn(
       }
     }
   }
+  // Place missing history between shared neighbours. Appending everything
+  // after the primary snapshot can put old tools/thinking after its answer.
+  final insertions = <int, List<TranscriptBlock>>{};
+  var previousAnchor = -1;
+  for (var index = 0; index < secondary.blocks.length; index++) {
+    final match = matches[index];
+    if (match >= 0) {
+      if (match > previousAnchor) previousAnchor = match;
+      continue;
+    }
+    final nextAnchor = matches
+        .skip(index + 1)
+        .where((value) => value > previousAnchor)
+        .firstOrNull;
+    insertions
+        .putIfAbsent(nextAnchor ?? blocks.length, () => [])
+        .add(secondary.blocks[index]);
+  }
+  final orderedBlocks = <TranscriptBlock>[
+    for (var index = 0; index <= blocks.length; index++) ...[
+      ...?insertions[index],
+      if (index < blocks.length) blocks[index],
+    ],
+  ];
   return ConversationTurn(
     id: primary.id,
     number: primary.number,
@@ -3006,7 +3037,7 @@ ConversationTurn mergeConversationTurn(
         ? secondary.contextTokens
         : primary.contextTokens,
     attachments: presentation.attachments,
-    blocks: normalizeTranscriptBlocks(blocks),
+    blocks: normalizeTranscriptBlocks(orderedBlocks),
   );
 }
 
@@ -3019,6 +3050,17 @@ int _matchingTranscriptBlock(
     (block) => block.kind == candidate.kind && block.id == candidate.id,
   );
   if (identityMatch >= 0) return identityMatch;
+  if (candidate.kind == TranscriptKind.tool && candidate.preview.isNotEmpty) {
+    for (var index = 0; index < blocks.length; index++) {
+      final block = blocks[index];
+      if (!matchedIndexes.contains(index) &&
+          block.kind == candidate.kind &&
+          block.title == candidate.title &&
+          block.preview == candidate.preview) {
+        return index;
+      }
+    }
+  }
   if (candidate.text.trim().isEmpty) return -1;
   for (var index = 0; index < blocks.length; index++) {
     if (matchedIndexes.contains(index)) continue;
@@ -3058,7 +3100,10 @@ bool _continuesCurrentSegment(
   TranscriptBlock block,
   TranscriptLifecycle lifecycle,
 ) {
-  if (block.kind == TranscriptKind.assistant) return true;
+  if (block.kind == TranscriptKind.assistant ||
+      block.kind == TranscriptKind.tool) {
+    return true;
+  }
   if (blocks.isNotEmpty && identical(blocks.last, block)) return true;
   return lifecycle == TranscriptLifecycle.completed && !block.completed;
 }

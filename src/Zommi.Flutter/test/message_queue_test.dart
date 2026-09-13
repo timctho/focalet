@@ -221,7 +221,7 @@ void main() {
     );
     await tester.pump();
     expect(tester.widget<TextField>(field).controller!.text, 'newer draft');
-    expect(find.text('1 queued · paused'), findsOneWidget);
+    expect(find.text('Paused'), findsOneWidget);
     expect(find.text('queued'), findsOneWidget);
   });
 
@@ -252,7 +252,7 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.pump();
       expect(tester.widget<TextField>(field).controller!.text, isEmpty);
-      expect(find.text('2 queued · sends after response'), findsOneWidget);
+      expect(find.text('2 queued'), findsOneWidget);
       expect(core.startedTurns, hasLength(1));
       await tester.tap(find.byTooltip('Remove queued message 1'));
       await tester.pump();
@@ -269,7 +269,7 @@ void main() {
         ),
       );
       await tester.pump();
-      expect(find.text('1 queued · paused'), findsOneWidget);
+      expect(find.text('Paused'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('resume-message-queue')));
       await tester.pump();
       expect(core.startedTurns.last['message'], 'three');
