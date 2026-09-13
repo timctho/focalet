@@ -793,7 +793,7 @@ void main() {
     expect(find.textContaining('Fixture Pro'), findsOneWidget);
   });
 
-  testWidgets('large panel stays large when the window is shown again', (
+  testWidgets('maximized window stays maximized when shown again', (
     tester,
   ) async {
     final core = RichFakeCore()..historyCount = 0;
@@ -803,11 +803,9 @@ void main() {
     desktop.calls.clear();
     final transcript = tester.element(find.byType(TranscriptPane));
 
-    await tester.tap(find.byKey(const ValueKey('app-settings')));
+    await tester.tap(find.byTooltip('Maximize Zommi'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Wide'));
-    await tester.pumpAndSettle();
-    expect(desktop.calls, contains('surface:true:true'));
+    expect(desktop.calls, contains('toggleMaximized'));
     expect(
       identical(tester.element(find.byType(TranscriptPane)), transcript),
       isTrue,
@@ -816,12 +814,9 @@ void main() {
 
     desktop.emit(const DesktopInvocation(kind: DesktopInvocationKind.open));
     await tester.pumpAndSettle();
+    expect(desktop.calls, containsAllInOrder(['toggleMaximized', 'showPanel']));
     expect(
-      desktop.calls,
-      containsAllInOrder(['surface:true:true', 'showPanel']),
-    );
-    expect(
-      desktop.calls.where((call) => call == 'surface:true:true'),
+      desktop.calls.where((call) => call == 'toggleMaximized'),
       hasLength(1),
     );
     expect(desktop.calls, isNot(contains('surface:true:false')));
@@ -1188,7 +1183,7 @@ void main() {
       find.byKey(const ValueKey('window-drag-region')),
       const Offset(40, -20),
     );
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
     expect(desktop.calls, contains('startDragging'));
   });
 
@@ -1206,7 +1201,7 @@ void main() {
     );
     await gesture.moveBy(const Offset(48, 0));
     await gesture.up();
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
     expect(desktop.calls, contains('startDragging'));
   });
 

@@ -41,7 +41,7 @@ void main() {
     ]);
   });
 
-  testWidgets('history shows thinking before repeated commentary and final', (
+  testWidgets('history preserves alternating responses and thinking', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(900, 1000));
@@ -99,16 +99,18 @@ void main() {
       ..historyBySession['runtime-codex\u0000session-1'] = history;
     await tester.pumpWidget(ZommiApp(core: core, desktop: FakeDesktopBridge()));
     await tester.pumpAndSettle();
-    _expectThinkingBeforeMessages(tester, ['正在查', '正在查', '完成']);
-    final group = tester.widget<ThinkingActivityGroup>(
-      find.byType(ThinkingActivityGroup),
-    );
-    expect(group.activities.map((block) => block.id), ['r1', 'r2']);
+    _expectTimeline(tester, [
+      'message:正在查',
+      'thinking:Checking files',
+      'message:正在查',
+      'thinking:Checking results',
+      'message:完成',
+    ]);
     expect(tester.takeException(), isNull);
   });
 
   testWidgets(
-    'streamed thinking stays above commentary and final as activity arrives',
+    'streamed responses and activity retain their chronological groups',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(900, 1000));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -116,7 +118,8 @@ void main() {
       await tester.pumpWidget(
         ZommiApp(core: core, desktop: FakeDesktopBridge()),
       );
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
       await tester.enterText(
         find.byKey(const ValueKey('zommi-composer')),
         'Check the changes',
@@ -149,7 +152,10 @@ void main() {
       emit('commentary', 'comment', 'Checking files', completed: true);
       emit('thinking', 'reason', 'First reasoning', completed: true);
       await tester.pump();
-      _expectThinkingBeforeMessages(tester, ['Checking files']);
+      _expectTimeline(tester, [
+        'message:Checking files',
+        'thinking:First reasoning',
+      ]);
       final initialGroup = tester.widget<ThinkingActivityGroup>(
         find.byType(ThinkingActivityGroup),
       );
@@ -161,68 +167,66 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 
-      const messages = ['Checking files', 'Checking files', 'Complete'];
-      _expectThinkingBeforeMessages(tester, messages);
-      final group = tester.widget<ThinkingActivityGroup>(
-        find.byType(ThinkingActivityGroup),
-      );
-      expect(group.id, initialGroup.id);
-      expect(group.activities.map((block) => block.text), [
-        'First reasoning',
-        'Inspection result',
-        'Second reasoning',
-      ]);
+      const timeline = [
+        'message:Checking files',
+        'thinking:First reasoning',
+        'message:Checking files',
+        'thinking:Inspection result|Second reasoning',
+        'message:Complete',
+      ];
+      _expectTimeline(tester, timeline);
+      final groups = tester
+          .widgetList<ThinkingActivityGroup>(find.byType(ThinkingActivityGroup))
+          .toList();
+      expect(groups.first.id, initialGroup.id);
       expect(find.text('First reasoning'), findsNothing);
       expect(find.text('Second reasoning'), findsNothing);
-      final toggle = find.byKey(ValueKey('thinking-toggle-${group.id}'));
+      final toggle = find.byKey(ValueKey('thinking-toggle-${groups.first.id}'));
       await tester.tap(toggle);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('First reasoning'), findsOneWidget);
-      expect(find.byKey(const ValueKey('activity-inspect')), findsOneWidget);
-      expect(find.text('Second reasoning'), findsOneWidget);
-      _expectThinkingBeforeMessages(tester, messages);
+      expect(find.text('Second reasoning'), findsNothing);
+      _expectTimeline(tester, timeline);
 
       emit('thinking', 'late-reason', 'Late reasoning', completed: true);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('First reasoning'), findsOneWidget);
-      expect(find.text('Second reasoning'), findsOneWidget);
-      expect(find.text('Late reasoning'), findsOneWidget);
-      _expectThinkingBeforeMessages(tester, messages);
+      expect(find.text('Late reasoning'), findsNothing);
+      _expectTimeline(tester, [...timeline, 'thinking:Late reasoning']);
 
       await tester.tap(toggle);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('First reasoning'), findsNothing);
-      expect(find.text('Second reasoning'), findsNothing);
-      expect(find.text('Late reasoning'), findsNothing);
       expect(find.text('Checking files'), findsNWidgets(2));
-      _expectThinkingBeforeMessages(tester, messages);
+      _expectTimeline(tester, [...timeline, 'thinking:Late reasoning']);
       expect(tester.takeException(), isNull);
     },
   );
 }
 
-void _expectThinkingBeforeMessages(WidgetTester tester, List<String> texts) {
-  expect(find.byType(ThinkingActivityGroup), findsOneWidget);
-  final group = tester.widget<ThinkingActivityGroup>(
-    find.byType(ThinkingActivityGroup),
+void _expectTimeline(WidgetTester tester, List<String> expected) {
+  final views = find.byWidgetPredicate(
+    (widget) => widget is AssistantBlockView || widget is ThinkingActivityGroup,
   );
-  final messages = tester
-      .widgetList<AssistantBlockView>(find.byType(AssistantBlockView))
-      .toList();
-  expect(messages.map((message) => message.block.text), texts);
-  final ordered = [
-    find.byKey(ValueKey('user-message-${group.turn.id}')),
-    find.byKey(ValueKey('activity-section-${group.id}')),
-    for (final message in messages)
-      find.byKey(ValueKey('assistant-${message.block.id}')),
-  ];
-  for (var index = 1; index < ordered.length; index++) {
+  final widgets = tester.widgetList(views).toList();
+  expect(
+    widgets.map(
+      (widget) => switch (widget) {
+        AssistantBlockView() => 'message:${widget.block.text}',
+        ThinkingActivityGroup() =>
+          'thinking:${widget.activities.map((block) => block.text).join('|')}',
+        _ => throw StateError('Unexpected transcript view'),
+      },
+    ),
+    expected,
+  );
+  for (var index = 1; index < widgets.length; index++) {
     expect(
-      tester.getTopLeft(ordered[index]).dy,
-      greaterThan(tester.getBottomLeft(ordered[index - 1]).dy),
+      tester.getTopLeft(find.byWidget(widgets[index])).dy,
+      greaterThan(tester.getBottomLeft(find.byWidget(widgets[index - 1])).dy),
     );
   }
 }

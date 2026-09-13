@@ -120,6 +120,7 @@ final class ZommiController extends ChangeNotifier {
   int _attachmentSequence = 0;
   bool expanded = true;
   WindowSizeSetting windowSize;
+  WindowSizeSetting _restoredWindowSize = WindowSizeSetting.standard;
   bool get largePanel => windowSize == WindowSizeSetting.wide;
   bool get maximizedPanel => windowSize == WindowSizeSetting.maximized;
   bool surfaceTransitioning = false;
@@ -1950,6 +1951,31 @@ final class ZommiController extends ChangeNotifier {
     largePanel ? WindowSizeSetting.standard : WindowSizeSetting.wide,
   );
 
+  Future<void> toggleMaximized() async {
+    if (surfaceTransitioning) return;
+    surfaceTransitioning = true;
+    _notify();
+    try {
+      _applyWindowMaximized(await desktop.toggleMaximized());
+    } on Object catch (error) {
+      _setStatus('Window resize failed · $error', warning: true);
+    } finally {
+      surfaceTransitioning = false;
+      _notify();
+    }
+  }
+
+  void _applyWindowMaximized(bool maximized) {
+    if (maximized == maximizedPanel) return;
+    if (maximized) {
+      _restoredWindowSize = windowSize;
+      windowSize = WindowSizeSetting.maximized;
+    } else {
+      windowSize = _restoredWindowSize;
+    }
+    _notify();
+  }
+
   Future<void> setWindowSize(WindowSizeSetting setting) => _transitionSurface(
     targetExpanded: true,
     targetLarge: setting == WindowSizeSetting.wide,
@@ -2057,6 +2083,12 @@ final class ZommiController extends ChangeNotifier {
   }
 
   Future<void> _handleDesktopInvocation(DesktopInvocation invocation) async {
+    if (invocation.kind == DesktopInvocationKind.windowState) {
+      if (invocation.maximized case final maximized?) {
+        _applyWindowMaximized(maximized);
+      }
+      return;
+    }
     if (invocation.kind == DesktopInvocationKind.selectContent) {
       await addPointerContext();
       return;

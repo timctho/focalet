@@ -48,6 +48,7 @@ enum DesktopInvocationKind {
   context,
   image,
   status,
+  windowState,
 }
 
 final class DesktopInvocation {
@@ -56,12 +57,14 @@ final class DesktopInvocation {
     this.attachment,
     this.message,
     this.warning = false,
+    this.maximized,
   });
 
   final DesktopInvocationKind kind;
   final ContextAttachment? attachment;
   final String? message;
   final bool warning;
+  final bool? maximized;
 }
 
 DesktopInvocation imageSelectionInvocation(ContextAttachment? attachment) {
@@ -146,7 +149,7 @@ abstract interface class DesktopBridge {
 
   Future<void> closeWindow();
 
-  Future<void> toggleMaximized();
+  Future<bool> toggleMaximized();
 
   Future<void> startDragging();
 
@@ -207,7 +210,7 @@ final class NoopDesktopBridge implements DesktopBridge {
   Future<void> closeWindow() async {}
 
   @override
-  Future<void> toggleMaximized() async {}
+  Future<bool> toggleMaximized() async => false;
 
   @override
   Future<void> startDragging() async {}
@@ -275,7 +278,7 @@ final class FlutterDesktopBridge
       if (supportsNativeWindowShadow(Platform.operatingSystem)) {
         await windowManager.setHasShadow(false);
       }
-      await windowManager.setResizable(false);
+      await windowManager.setResizable(true);
       await configureNativeSurfaceWindow();
       await windowManager.setSize(normalWindowSize, animate: false);
       await windowManager.setAlwaysOnTop(false);
@@ -566,6 +569,7 @@ final class FlutterDesktopBridge
     required bool animate,
     required int transitionEpoch,
   }) async {
+    await windowManager.setResizable(expanded);
     if (expanded && maximized && !animate && !_useNativeSurface) {
       await windowManager.setMinimumSize(const Size(640, 500));
       await windowManager.maximize();
@@ -690,26 +694,30 @@ final class FlutterDesktopBridge
   Future<void> closeWindow() => windowManager.close();
 
   @override
-  Future<void> toggleMaximized() async {
+  Future<bool> toggleMaximized() async {
     if (_useNativeSurface) {
       ++_surfaceTransitionEpoch;
       final operation = _surfaceResizeQueue
           .catchError((Object _) {})
-          .then<void>(
-            (_) => _windowAnimationChannel.invokeMethod<void>(
+          .then<bool>((_) async {
+            await _windowAnimationChannel.invokeMethod<void>(
               'toggleSurfaceMaximized',
-            ),
-          );
-      _surfaceResizeQueue = operation;
-      await operation;
-      return;
+            );
+            return (await readNativeSurfaceGeometry(_windowAnimationChannel))
+                .maximized;
+          });
+      _surfaceResizeQueue = operation.then<void>(
+        (_) {},
+        onError: (Object _, StackTrace _) {},
+      );
+      return operation;
     }
     if (await windowManager.isMaximized()) {
       await windowManager.unmaximize();
-      await setSurface(expanded: true);
     } else {
       await windowManager.maximize();
     }
+    return windowManager.isMaximized();
   }
 
   @override
@@ -891,6 +899,22 @@ final class FlutterDesktopBridge
 
   @override
   void onWindowFocus() {}
+
+  @override
+  void onWindowMaximize() => _reportWindowState(true);
+
+  @override
+  void onWindowUnmaximize() => _reportWindowState(false);
+
+  void _reportWindowState(bool maximized) {
+    if (_invocations.isClosed) return;
+    _invocations.add(
+      DesktopInvocation(
+        kind: DesktopInvocationKind.windowState,
+        maximized: maximized,
+      ),
+    );
+  }
 
   @override
   void didChangeMetrics() {

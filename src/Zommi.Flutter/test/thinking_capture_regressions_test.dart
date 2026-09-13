@@ -242,38 +242,37 @@ void main() {
     expect(tester.element(find.byType(SelectionArea)), same(selection));
   });
 
-  testWidgets('Maximize applies native state and restores Wide or Standard', (
+  testWidgets('header maximizes and restores the previous window mode', (
     tester,
   ) async {
     final desktop = FakeDesktopBridge();
     await tester.binding.setSurfaceSize(normalWindowSize);
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
-      ZommiApp(core: RichFakeCore()..historyCount = 0, desktop: desktop),
+      ZommiApp(
+        core: RichFakeCore()..historyCount = 0,
+        desktop: desktop,
+        initialPreferences: const AppPreferences(
+          windowSize: WindowSizeSetting.wide,
+        ),
+      ),
     );
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('app-settings')));
     await tester.pumpAndSettle();
-    expect(find.text('Maximize'), findsNothing);
-    final maxLabel = tester.widget<Text>(find.text('Max'));
-    expect(maxLabel.maxLines, 1);
-    expect(maxLabel.softWrap, isFalse);
-    await tester.tap(find.text('Max'));
+    expect(find.text('Window size'), findsNothing);
+    expect(find.byKey(const ValueKey('window-size-control')), findsNothing);
+    await tester.tap(find.byTooltip('Maximize Zommi'));
     await tester.pumpAndSettle();
-    expect(desktop.calls, contains('maximize'));
-    expect(desktop.surfaceAnimations.last, isTrue);
-    final selector = tester.widget<SegmentedButton<WindowSizeSetting>>(
-      find.byKey(const ValueKey('window-size-control')),
-    );
-    expect(selector.selected, {WindowSizeSetting.maximized});
-    await tester.tap(find.text('Wide'));
+    expect(desktop.calls.last, 'toggleMaximized');
+    expect(find.byTooltip('Restore Zommi'), findsOneWidget);
+    await tester.tap(find.byTooltip('Restore Zommi'));
     await tester.pumpAndSettle();
-    expect(desktop.calls.last, 'surface:true:true');
-    expect(desktop.surfaceAnimations.last, isTrue);
-    await tester.tap(find.text('Standard'));
-    await tester.pumpAndSettle();
-    expect(desktop.calls.last, 'surface:true:false');
-    expect(desktop.surfaceAnimations.last, isTrue);
+    final controller = tester
+        .widget<TranscriptPane>(find.byType(TranscriptPane))
+        .controller;
+    expect(controller.windowSize, WindowSizeSetting.wide);
+    expect(find.byTooltip('Maximize Zommi'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -292,18 +291,13 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('app-settings')));
-    await tester.pumpAndSettle();
     final nativeResize = Completer<void>();
     desktop.surfaceGate = nativeResize.future;
-    await tester.tap(find.text('Max'));
+    await tester.tap(find.byTooltip('Maximize Zommi'));
     await tester.pump();
     nativeResize.completeError(StateError('native resize rejected'));
     await tester.pumpAndSettle();
-    final selector = tester.widget<SegmentedButton<WindowSizeSetting>>(
-      find.byKey(const ValueKey('window-size-control')),
-    );
-    expect(selector.selected, {WindowSizeSetting.standard});
+    expect(find.byTooltip('Maximize Zommi'), findsOneWidget);
     expect(preferences.saved, isEmpty);
     expect(tester.takeException(), isNull);
   });

@@ -6,7 +6,7 @@ import 'package:zommi_flutter/zommi_app.dart';
 import 'test_support.dart';
 
 void main() {
-  testWidgets('a size choice applies on release and cancellation stays inert', (
+  testWidgets('maximize applies on release and cancellation stays inert', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(normalWindowSize);
@@ -16,18 +16,19 @@ void main() {
       ZommiApp(core: RichFakeCore()..historyCount = 0, desktop: desktop),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('App settings'));
-    await tester.pumpAndSettle();
-    final choice = find.text('Max');
+    final choice = find.byTooltip('Maximize Zommi');
     final gesture = await tester.startGesture(tester.getCenter(choice));
     await tester.pump();
-    expect(desktop.calls.where((call) => call == 'maximize'), isEmpty);
+    expect(desktop.calls.where((call) => call == 'toggleMaximized'), isEmpty);
     await gesture.cancel();
     await tester.pumpAndSettle();
-    expect(desktop.calls.where((call) => call == 'maximize'), isEmpty);
+    expect(desktop.calls.where((call) => call == 'toggleMaximized'), isEmpty);
     await tester.tap(choice);
     await tester.pumpAndSettle();
-    expect(desktop.calls.where((call) => call == 'maximize'), hasLength(1));
+    expect(
+      desktop.calls.where((call) => call == 'toggleMaximized'),
+      hasLength(1),
+    );
   });
 
   testWidgets(

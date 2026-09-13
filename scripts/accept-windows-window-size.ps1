@@ -339,13 +339,12 @@ try {
     Wait-SizeCondition -Description 'foreground' -Condition { [ZommiWindowsAcceptanceNative]::Foreground($window) }
     $background = [ZommiSizeBackground]::new($window, [ZommiWindowsAcceptanceNative]::WorkArea($window))
     Click-SizeControl 'App settings'
-    Measure-SizeTransition 'Wide' 'wide'
-    Measure-SizeTransition 'Standard' 'standard'
-    $null = Get-SizeControl 'Max'
-    if (@([ZommiWindowSizeAccess]::Read($view) | Where-Object Name -eq 'Maximize').Count) { throw 'Old Maximize label remains.' }
+    if (@([ZommiWindowSizeAccess]::Read($view) | Where-Object Name -eq 'Window size').Count) { throw 'Window size remains in Settings.' }
+    Click-SizeControl 'App settings'
+    $null = Get-SizeControl 'Maximize Zommi'
     $normal = [ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
     $normalMarker = [ZommiRenderedSizeProbe]::Capture(0, $false)
-    Measure-SizeTransition 'Max' 'maximized'
+    Measure-SizeTransition 'Maximize Zommi' 'maximized'
     Measure-SizeTransition 'Restore' 'standard' -NativeRestore
     Wait-SizeCondition -Description 'native Restore retains pre-Max placement' -Condition { ([ZommiWindowsAcceptanceNative]::PhysicalBounds($window) -join ',') -eq ($normal -join ',') }
     Wait-SizeCondition -Description 'native Restore redraws the previous panel' -Condition {
@@ -355,11 +354,10 @@ try {
         return $true
     }
     $result.restorePlacementVerified = $true
-    Measure-SizeTransition 'Wide' 'wide'
-    Measure-SizeTransition 'Max' 'maximized'
-    Measure-SizeTransition 'Wide' 'wide'
-    Measure-SizeTransition 'Max' 'maximized'
-    Measure-SizeTransition 'Standard' 'standard'
+    Measure-SizeTransition 'Maximize Zommi' 'maximized'
+    Measure-SizeTransition 'Restore Zommi' 'standard'
+    Measure-SizeTransition 'Maximize Zommi' 'maximized'
+    Measure-SizeTransition 'Restore Zommi' 'standard'
     $result.passed = $true
 } catch {
     $result.passed = $false
