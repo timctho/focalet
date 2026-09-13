@@ -109,6 +109,13 @@ abstract interface class RuntimeConfigurationBridge {
   Future<RuntimeDiscovery> removeRuntimeOverride(String overrideId);
 }
 
+abstract interface class SessionForkBridge {
+  Future<RuntimeConnection> forkSession({
+    required String runtimeTargetId,
+    required String sessionId,
+  });
+}
+
 abstract interface class SessionCatalogBridge {
   /// Lists stored chats without creating, resuming, or selecting a session.
   Future<List<Map<String, Object?>>> listSessionCatalog({
@@ -351,6 +358,7 @@ final class ProcessCoreBridge
         CoreBridge,
         RuntimeConfigurationBridge,
         SessionCatalogBridge,
+        SessionForkBridge,
         GoalControlBridge,
         RuntimeCommandBridge {
   ProcessCoreBridge({
@@ -519,6 +527,17 @@ final class ProcessCoreBridge
     });
     return RuntimeConnection.fromJson(result);
   }
+
+  @override
+  Future<RuntimeConnection> forkSession({
+    required String runtimeTargetId,
+    required String sessionId,
+  }) async => RuntimeConnection.fromJson(
+    await _request('session.fork', {
+      'runtimeTargetId': runtimeTargetId,
+      'sessionId': sessionId,
+    }),
+  );
 
   @override
   Future<RuntimeConnection> openSession({

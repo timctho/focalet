@@ -272,6 +272,24 @@ impl RuntimeAdapter {
         }
     }
 
+    pub async fn fork_session(&self, session_id: &str) -> Result<Value, CodexError> {
+        match self {
+            Self::Codex(adapter) => {
+                serde_json::to_value(adapter.ready().await?.fork_session(session_id).await?)
+                    .map_err(|error| CodexError {
+                        code: "protocol-error".into(),
+                        message: error.to_string(),
+                        retryable: false,
+                    })
+            }
+            _ => Err(CodexError {
+                code: "capability-unavailable".into(),
+                message: "This runtime does not support duplicating chats.".into(),
+                retryable: false,
+            }),
+        }
+    }
+
     pub async fn open_session(
         &self,
         session_id: &str,

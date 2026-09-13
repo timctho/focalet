@@ -6,7 +6,6 @@ import 'package:zommi_flutter/diagnostics/scroll_performance.dart';
 import 'package:zommi_flutter/state/history_mapper.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
-import 'package:zommi_flutter/theme/app_preferences.dart';
 import 'package:zommi_flutter/theme/zommi_typography.dart';
 import 'package:zommi_flutter/widgets/content_views.dart';
 import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
@@ -297,18 +296,21 @@ class _TranscriptPaneState extends State<TranscriptPane> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text(
+            Text(
               'Point, ask, keep moving.',
               style: TextStyle(
-                color: Color(0xff43495a),
+                color: Theme.of(context).colorScheme.onSurface,
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
               ),
             ),
             const SizedBox(height: 4),
-            const Text(
+            Text(
               'Ask about anything under your pointer.',
-              style: TextStyle(color: Color(0xff737887), fontSize: 10.5),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontSize: 10.5,
+              ),
             ),
           ],
         ),
@@ -451,17 +453,7 @@ class ConversationTurnView extends StatelessWidget {
                   vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color:
-                      Theme.of(context)
-                              .extension<ZommiVisualSettings>()
-                              ?.themeColor ==
-                          ZommiThemeColor.violet
-                      ? const Color(0xffe9e7f8)
-                      : Color.alphaBlend(
-                          Theme.of(context).colorScheme.primary
-                              .withValues(alpha: 0.10),
-                          const Color(0xfff2f3f8),
-                        ),
+                  color: Theme.of(context).colorScheme.primaryContainer,
                   borderRadius: BorderRadius.circular(18),
                 ),
                 child: Column(
@@ -474,8 +466,8 @@ class ConversationTurnView extends StatelessWidget {
                         padding: const EdgeInsets.only(bottom: 5),
                         child: Text(
                           turn.contextTokens.join(' '),
-                          style: const TextStyle(
-                            color: Color(0xff6d639f),
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.primary,
                             fontSize: 10,
                             fontWeight: FontWeight.w700,
                           ),
@@ -551,7 +543,7 @@ class ConversationTurnView extends StatelessWidget {
                         vertical: 6,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0x80ffffff),
+                        color: Theme.of(context).colorScheme.surface,
                         borderRadius: BorderRadius.circular(14),
                       ),
                       child: const RepaintBoundary(child: TypingDots()),
@@ -611,7 +603,7 @@ class _TypingDotsState extends State<TypingDots> {
               text: '.',
               style: TextStyle(
                 color: index < visibleDots
-                    ? const Color(0xff747988)
+                    ? Theme.of(context).colorScheme.onSurfaceVariant
                     : const Color(0x00747988),
               ),
             ),
@@ -854,9 +846,11 @@ class ThinkingActivityGroup extends StatelessWidget {
           child: Container(
             key: ValueKey('activity-section-$id'),
             decoration: BoxDecoration(
-              color: const Color(0x80ffffff),
+              color: Theme.of(context).colorScheme.surface,
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0xffe2e5ed)),
+              border: Border.all(
+                color: Theme.of(context).colorScheme.outlineVariant,
+              ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -876,17 +870,17 @@ class ThinkingActivityGroup extends StatelessWidget {
                     ),
                     child: Row(
                       children: [
-                        const Icon(
+                        Icon(
                           Icons.auto_awesome_rounded,
                           size: 15,
-                          color: Color(0xff746b99),
+                          color: Theme.of(context).colorScheme.primary,
                         ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             'Thinking',
                             style: chatTextStyleOf(context).copyWith(
-                              color: Color(0xff4b5060),
+                              color: Theme.of(context).colorScheme.onSurface,
                               fontWeight: FontWeight.w700,
                             ),
                           ),
@@ -895,8 +889,11 @@ class ThinkingActivityGroup extends StatelessWidget {
                           Text(
                             '$toolCount tool${toolCount == 1 ? '' : 's'}',
                             key: const ValueKey('thinking-tool-count'),
-                            style: chatTextStyleOf(context)
-                                .copyWith(color: Color(0xff747988)),
+                            style: chatTextStyleOf(context).copyWith(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
+                            ),
                           ),
                         if (toolCount > 0) const SizedBox(width: 8),
                         if (!completed)
@@ -1037,7 +1034,7 @@ class _ThinkingActivitySubItem extends StatelessWidget {
       margin: const EdgeInsets.only(top: 7),
       padding: const EdgeInsets.fromLTRB(9, 7, 9, 9),
       decoration: BoxDecoration(
-        color: const Color(0x52f3f1fb),
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(10),
       ),
       child: Column(
@@ -1045,10 +1042,10 @@ class _ThinkingActivitySubItem extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(
+              Icon(
                 Icons.auto_awesome_rounded,
                 size: 14,
-                color: Color(0xff746b99),
+                color: Theme.of(context).colorScheme.primary,
               ),
               const SizedBox(width: 7),
               Expanded(
@@ -1056,7 +1053,7 @@ class _ThinkingActivitySubItem extends StatelessWidget {
                   block.title,
                   overflow: TextOverflow.ellipsis,
                   style: chatTextStyleOf(context).copyWith(
-                    color: const Color(0xff4b5060),
+                    color: Theme.of(context).colorScheme.onSurface,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -1105,7 +1102,7 @@ class _ToolActivitySubItem extends StatelessWidget {
       key: ValueKey('activity-${block.id}'),
       margin: const EdgeInsets.only(top: 7),
       decoration: BoxDecoration(
-        color: const Color(0x66eef0f6),
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(10),
       ),
       child: Column(
@@ -1119,10 +1116,10 @@ class _ToolActivitySubItem extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
               child: Row(
                 children: [
-                  const Icon(
+                  Icon(
                     Icons.build_outlined,
                     size: 14,
-                    color: Color(0xff746b99),
+                    color: Theme.of(context).colorScheme.primary,
                   ),
                   const SizedBox(width: 7),
                   Expanded(
@@ -1130,7 +1127,7 @@ class _ToolActivitySubItem extends StatelessWidget {
                       activityBlockTitle(block),
                       overflow: TextOverflow.ellipsis,
                       style: chatTextStyleOf(context).copyWith(
-                        color: Color(0xff4b5060),
+                        color: Theme.of(context).colorScheme.onSurface,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -1213,9 +1210,9 @@ class AssistantBlockView extends StatelessWidget {
             key: ValueKey('assistant-${block.id}'),
             padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 5),
             decoration: BoxDecoration(
-              color: const Color(0xb3ffffff),
+              color: Theme.of(context).colorScheme.surface,
               borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: const Color(0x99ffffff)),
+              border: Border.all(color: Theme.of(context).colorScheme.surface),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1270,13 +1267,13 @@ class ActivityBlockView extends StatelessWidget {
             key: ValueKey('activity-${block.id}'),
             decoration: BoxDecoration(
               color: block.kind == TranscriptKind.error
-                  ? const Color(0xffffedf0)
-                  : const Color(0x80ffffff),
+                  ? Theme.of(context).colorScheme.errorContainer
+                  : Theme.of(context).colorScheme.surface,
               borderRadius: BorderRadius.circular(14),
               border: Border.all(
                 color: block.kind == TranscriptKind.error
-                    ? const Color(0xffe9b6bf)
-                    : const Color(0xffe2e5ed),
+                    ? Theme.of(context).colorScheme.error
+                    : Theme.of(context).colorScheme.outlineVariant,
               ),
             ),
             child: Column(
@@ -1293,14 +1290,18 @@ class ActivityBlockView extends StatelessWidget {
                     ),
                     child: Row(
                       children: [
-                        Icon(icon, size: 15, color: const Color(0xff746b99)),
+                        Icon(
+                          icon,
+                          size: 15,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             block.title,
                             overflow: TextOverflow.ellipsis,
                             style: chatTextStyleOf(context).copyWith(
-                              color: Color(0xff4b5060),
+                              color: Theme.of(context).colorScheme.onSurface,
                               fontWeight: FontWeight.w700,
                             ),
                           ),
@@ -1412,9 +1413,9 @@ class _ArtifactCardState extends State<ArtifactCard> {
       margin: const EdgeInsets.only(top: 10),
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: const Color(0xfff7f8fb),
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xffdfe3ec)),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1425,8 +1426,8 @@ class _ArtifactCardState extends State<ArtifactCard> {
               children: [
                 Text(
                   artifact.kind == 'html' ? 'HTML' : 'Image',
-                  style: const TextStyle(
-                    color: Color(0xff746b99),
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.primary,
                     fontSize: 10,
                     fontWeight: FontWeight.w800,
                   ),
@@ -1450,7 +1451,9 @@ class _ArtifactCardState extends State<ArtifactCard> {
                     child: Text(
                       'Preview unavailable · $_error',
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: Color(0xff9b4050)),
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
                     ),
                   ),
           ),
@@ -1463,8 +1466,8 @@ class _ArtifactCardState extends State<ArtifactCard> {
                     artifact.path ?? 'Generated in this chat',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Color(0xff747988),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                       fontSize: 11,
                     ),
                   ),

@@ -53,6 +53,15 @@ void main() {
       );
       final legacy = sqlite3.open(path);
       legacy.execute('DROP TABLE dismissed_sessions');
+      legacy.execute(
+        '''CREATE TABLE old_sessions AS SELECT runtime_target_id, id, title, cwd, profile, updated_at, activity_at, protected FROM sessions''',
+      );
+      legacy.execute('DROP TABLE sessions');
+      legacy.execute(
+        '''CREATE TABLE sessions (runtime_target_id TEXT NOT NULL, id TEXT NOT NULL, title TEXT NOT NULL, cwd TEXT, profile TEXT, updated_at TEXT, activity_at INTEGER, protected INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(runtime_target_id, id))''',
+      );
+      legacy.execute('INSERT INTO sessions SELECT * FROM old_sessions');
+      legacy.execute('DROP TABLE old_sessions');
       legacy.execute('PRAGMA user_version = 1');
       legacy.close();
       expect((await store.load()).sessions, hasLength(2));
@@ -69,7 +78,7 @@ void main() {
       expect(restored.dismissedSessions, {('runtime-hermes', 'empty-chat')});
       expect(restored.sessions.single.runtimeTargetId, 'runtime-codex');
       final db = sqlite3.open(path);
-      expect(db.select('PRAGMA user_version').single.values.single, 2);
+      expect(db.select('PRAGMA user_version').single.values.single, 3);
       db.close();
     },
   );

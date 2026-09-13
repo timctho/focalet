@@ -801,6 +801,49 @@ impl CodexAdapter {
         self.connection().await
     }
 
+    pub async fn fork_session(&self, session_id: &str) -> Result<CodexConnection, CodexError> {
+        if session_id.trim().is_empty() {
+            return Err(CodexError::new(
+                "invalid-request",
+                "A source chat is required.",
+            ));
+        }
+        let _selection = self.inner.session_selection.lock().await;
+        if self
+            .inner
+            .state
+            .lock()
+            .await
+            .active_turns
+            .contains_key(session_id)
+        {
+            return Err(CodexError::new(
+                "session-busy",
+                "Wait for this chat to finish before duplicating it.",
+            ));
+        }
+        let result = self
+            .inner
+            .request("thread/fork", json!({"threadId": session_id}))
+            .await?;
+        let new_id = result
+            .pointer("/thread/id")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if new_id.is_empty() || new_id == session_id {
+            return Err(CodexError::new(
+                "identity-mismatch",
+                "Codex did not return a new chat id.",
+            ));
+        }
+        self.set_active_thread(&result).await?;
+        let mut connection = self.connection().await?;
+        if result.pointer("/thread/turns").is_some_and(Value::is_array) {
+            connection.history = Some(result);
+        }
+        Ok(connection)
+    }
+
     pub async fn open_session(&self, session_id: &str) -> Result<CodexConnection, CodexError> {
         let _selection = self.inner.session_selection.lock().await;
         self.open_session_selected(session_id).await

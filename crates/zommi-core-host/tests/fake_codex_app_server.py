@@ -128,6 +128,17 @@ for line in sys.stdin:
             fresh_id += "-" + str(created_threads)
         empty_threads.add(fresh_id)
         result = {"thread": {"id": fresh_id, "turns": []}, "model": request.get("params", {}).get("model") or "fixture-default"}
+    elif method == "thread/fork":
+        if os.environ.get("ZOMMI_FAKE_FORK_FAIL") == "1":
+            send({"id": request_id, "error": {"code": -32601, "message": "Fork unavailable"}})
+            continue
+        source_id = request["params"]["threadId"]
+        created_threads += 1
+        fork_id = source_id if os.environ.get("ZOMMI_FAKE_FORK_SAME_ID") == "1" else f"{source_id}-fork-{created_threads}"
+        result = history(source_id)
+        result["thread"]["id"] = fork_id
+        if os.environ.get("ZOMMI_FAKE_FORK_CWD"):
+            result["thread"]["cwd"] = os.environ["ZOMMI_FAKE_FORK_CWD"]
     elif method == "thread/resume":
         if control and (control / "busy-session").exists() and (control / "busy-session").read_text() == request['params']['threadId']:
             send({'id': request_id, 'error': {'code': -32600, 'message': 'thread already has an active writer'}})

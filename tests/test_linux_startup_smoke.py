@@ -46,8 +46,11 @@ class LinuxStartupSmokeTests(unittest.TestCase):
                         with sqlite3.connect(path) as db:
                             db.execute("PRAGMA user_version = {sqlite_version}")
                             db.execute("CREATE TABLE sessions (runtime_target_id TEXT, id TEXT)")
-                            if {sqlite_version} == 2:
+                            if {sqlite_version} >= 2:
                                 db.execute("CREATE TABLE dismissed_sessions (runtime_target_id TEXT, id TEXT)")
+                            if {sqlite_version} >= 3:
+                                db.execute("ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+                                db.execute("ALTER TABLE sessions ADD COLUMN custom_title TEXT")
                         """
                     ),
                     "PY\n",
@@ -176,16 +179,16 @@ class LinuxStartupSmokeTests(unittest.TestCase):
         self.assertIn("unhandled startup exception", completed.stderr)
 
     def test_current_sqlite_catalog_passes_packaged_startup(self) -> None:
-        self._write_application(sqlite_version=2)
+        self._write_application(sqlite_version=3)
         completed = self._run(verify_sqlite=True)
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertTrue(json.loads(completed.stdout)["cleanShutdown"])
 
     def test_outdated_sqlite_catalog_fails_packaged_startup(self) -> None:
-        self._write_application(sqlite_version=1)
+        self._write_application(sqlite_version=2)
         completed = self._run(verify_sqlite=True)
         self.assertNotEqual(completed.returncode, 0)
-        self.assertIn("Expected session catalog schema 2, got 1", completed.stderr)
+        self.assertIn("Expected session catalog schema 3, got 2", completed.stderr)
 
     def test_exited_unreaped_core_counts_as_stopped(self) -> None:
         self._write_orphaning_application(terminate_core=True)

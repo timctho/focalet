@@ -8,6 +8,8 @@ import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 import 'package:zommi_flutter/widgets/content_views.dart';
 import 'package:zommi_flutter/widgets/runtime_logo.dart';
+import 'package:zommi_flutter/widgets/session_context_menu.dart';
+import 'package:zommi_flutter/widgets/theme_color_picker.dart';
 
 const Color zommiOverlayPanelColor = Color(0xfaf7f9fd);
 const Color zommiOverlayPanelShadowColor = Color(0x260d172a);
@@ -29,7 +31,7 @@ class ZommiOverlayPanelSurface extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: zommiOverlayPanelColor,
+      color: Theme.of(context).colorScheme.surfaceContainerLow,
       surfaceTintColor: Colors.transparent,
       shadowColor: zommiOverlayPanelShadowColor,
       elevation: zommiOverlayPanelElevation,
@@ -61,7 +63,7 @@ class _SessionSidebarState extends State<SessionSidebar> {
       label: 'Chat sessions',
       child: Material(
         key: const ValueKey('session-sidebar'),
-        color: const Color(0xf6f6f8fc),
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
         elevation: 0,
         child: Column(
           children: [
@@ -80,7 +82,7 @@ class _SessionSidebarState extends State<SessionSidebar> {
                     tooltip: 'Create new chat',
                     enabled: !controller.sessionBusy && !controller.runtimeBusy,
                     position: PopupMenuPosition.under,
-                    color: zommiOverlayPanelColor,
+                    color: Theme.of(context).colorScheme.surfaceContainerLow,
                     surfaceTintColor: Colors.transparent,
                     elevation: zommiOverlayPanelElevation,
                     shadowColor: zommiOverlayPanelShadowColor,
@@ -111,7 +113,7 @@ class _SessionSidebarState extends State<SessionSidebar> {
                       }
                     },
                     itemBuilder: (context) => [
-                      const PopupMenuItem<String>(
+                      PopupMenuItem<String>(
                         enabled: false,
                         height: 36,
                         child: Text(
@@ -119,7 +121,7 @@ class _SessionSidebarState extends State<SessionSidebar> {
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w700,
-                            color: Color(0xff3c4352),
+                            color: Theme.of(context).colorScheme.onSurface,
                           ),
                         ),
                       ),
@@ -150,9 +152,11 @@ class _SessionSidebarState extends State<SessionSidebar> {
                                           : 'New chats unavailable',
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontSize: 10,
-                                        color: Color(0xff737887),
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onSurfaceVariant,
                                       ),
                                     ),
                                   ],
@@ -225,12 +229,16 @@ class _SessionSidebarState extends State<SessionSidebar> {
                   itemCount: sessions.isEmpty ? 1 : sessions.length,
                   itemBuilder: (context, index) {
                     if (sessions.isEmpty) {
-                      return const Padding(
+                      return Padding(
                         padding: EdgeInsets.all(18),
                         child: Text(
                           'No recent chats are available.',
                           textAlign: TextAlign.center,
-                          style: TextStyle(color: Color(0xff737887)),
+                          style: TextStyle(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant,
+                          ),
                         ),
                       );
                     }
@@ -247,57 +255,71 @@ class _SessionSidebarState extends State<SessionSidebar> {
                       selected: selected,
                       label:
                           '${session.title}, ${runtime?.displayName ?? 'Agent'}, ${presence.name} session',
-                      child: ListTile(
-                        key: ValueKey(
-                          'session-${session.runtimeTargetId}-${session.id}',
-                        ),
-                        dense: true,
-                        visualDensity: const VisualDensity(vertical: -3),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                        ),
-                        selected: selected,
-                        selectedTileColor: const Color(0xffebe9f7),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        minLeadingWidth: 0,
-                        horizontalTitleGap: 9,
-                        leading: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            SizedBox.square(
-                              dimension: 18,
-                              child: Center(
-                                child: _SessionStatusIcon(presence: presence),
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Tooltip(
-                              message: runtime?.displayName ?? 'Agent runtime',
-                              child: RuntimeLogo(
-                                key: ValueKey(
-                                  'session-runtime-${session.runtimeTargetId}-${session.id}',
-                                ),
-                                runtimeId: runtime?.runtimeId ?? '',
-                              ),
-                            ),
-                          ],
-                        ),
-                        title: Text(
-                          session.title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 11),
-                        ),
-                        onTap: controller.runtimeBusy
-                            ? null
-                            : () => unawaited(
-                                controller.switchSession(
-                                  session.id,
-                                  runtimeTargetId: session.runtimeTargetId,
+                      child: SessionContextMenu(
+                        controller: controller,
+                        session: session,
+                        child: ListTile(
+                          key: ValueKey(
+                            'session-${session.runtimeTargetId}-${session.id}',
+                          ),
+                          dense: true,
+                          visualDensity: const VisualDensity(vertical: -3),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                          ),
+                          selected: selected,
+                          selectedTileColor: Theme.of(context)
+                              .colorScheme
+                              .primaryContainer,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          minLeadingWidth: 0,
+                          horizontalTitleGap: 9,
+                          leading: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SizedBox.square(
+                                dimension: 18,
+                                child: Center(
+                                  child: _SessionStatusIcon(presence: presence),
                                 ),
                               ),
+                              const SizedBox(width: 6),
+                              Tooltip(
+                                message:
+                                    runtime?.displayName ?? 'Agent runtime',
+                                child: RuntimeLogo(
+                                  key: ValueKey(
+                                    'session-runtime-${session.runtimeTargetId}-${session.id}',
+                                  ),
+                                  runtimeId: runtime?.runtimeId ?? '',
+                                ),
+                              ),
+                            ],
+                          ),
+                          trailing: session.pinned
+                              ? Icon(
+                                  Icons.push_pin_rounded,
+                                  size: 13,
+                                  color: Theme.of(context).colorScheme.primary,
+                                )
+                              : null,
+                          title: Text(
+                            session.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                          onTap: controller.runtimeBusy
+                              ? null
+                              : () => unawaited(
+                                  controller.switchSession(
+                                    session.id,
+                                    runtimeTargetId: session.runtimeTargetId,
+                                  ),
+                                ),
+                        ),
                       ),
                     );
                   },
@@ -323,20 +345,20 @@ class _SessionStatusIcon extends StatelessWidget {
         dimension: 15,
         child: CircularProgressIndicator(strokeWidth: 1.6),
       ),
-      SessionPresence.unread => const Icon(
+      SessionPresence.unread => Icon(
         Icons.circle,
         size: 10,
-        color: Color(0xff887cc8),
+        color: Theme.of(context).colorScheme.primary,
       ),
       SessionPresence.active => const Icon(
         Icons.visibility_outlined,
         size: 17,
         color: Color(0xff5f8c6a),
       ),
-      SessionPresence.done => const Icon(
+      SessionPresence.done => Icon(
         Icons.check_circle_outline_rounded,
         size: 16,
-        color: Color(0xff8b909d),
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
       ),
     };
   }
@@ -385,13 +407,13 @@ class _RuntimeSetupPanelState extends State<RuntimeSetupPanel> {
         : (hosts.isEmpty ? '' : hosts.first['id']?.toString() ?? '');
     return Material(
       key: const ValueKey('runtime-setup-panel'),
-      color: const Color(0xfff8f9fd),
+      color: Theme.of(context).colorScheme.surfaceContainerLow,
       elevation: 10,
       shadowColor: const Color(0x330d172a),
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(22),
-        side: const BorderSide(color: Color(0xffe0e3ec)),
+        side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       clipBehavior: Clip.antiAlias,
       child: SizedBox(
@@ -405,7 +427,7 @@ class _RuntimeSetupPanelState extends State<RuntimeSetupPanel> {
                 children: [
                   const Icon(Icons.tune_rounded, size: 18),
                   const SizedBox(width: 9),
-                  const Expanded(
+                  Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -420,7 +442,9 @@ class _RuntimeSetupPanelState extends State<RuntimeSetupPanel> {
                           'Add a supported CLI that automatic discovery missed',
                           style: TextStyle(
                             fontSize: 10,
-                            color: Color(0xff737887),
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant,
                           ),
                         ),
                       ],
@@ -509,7 +533,9 @@ class _RuntimeSetupPanelState extends State<RuntimeSetupPanel> {
                           width: double.infinity,
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: const Color(0xfff1f2f7),
+                            color: Theme.of(context)
+                                .colorScheme
+                                .surfaceContainerHighest,
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Row(
@@ -525,8 +551,12 @@ class _RuntimeSetupPanelState extends State<RuntimeSetupPanel> {
                                   style: TextStyle(
                                     fontSize: 10.5,
                                     color: _executablePath == null
-                                        ? const Color(0xff777c89)
-                                        : const Color(0xff333744),
+                                        ? Theme.of(context)
+                                              .colorScheme
+                                              .onSurfaceVariant
+                                        : Theme.of(context)
+                                              .colorScheme
+                                              .onSurface,
                                   ),
                                 ),
                               ),
@@ -676,7 +706,7 @@ class _RuntimeSetupOption extends StatelessWidget {
     visualDensity: const VisualDensity(vertical: -3),
     contentPadding: const EdgeInsets.symmetric(horizontal: 8),
     selected: selected,
-    selectedTileColor: const Color(0xffebe9f7),
+    selectedTileColor: Theme.of(context).colorScheme.primaryContainer,
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     title: Text(
       title,
@@ -929,6 +959,24 @@ class AppSettingsPanel extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             const Text(
+              'Theme type',
+              style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 7),
+            SegmentedButton<ThemeMode>(
+              key: const ValueKey('theme-mode-control'),
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(value: ThemeMode.system, label: Text('System')),
+                ButtonSegment(value: ThemeMode.light, label: Text('Light')),
+                ButtonSegment(value: ThemeMode.dark, label: Text('Dark')),
+              ],
+              selected: {preferences.themeMode},
+              onSelectionChanged: (selection) =>
+                  onChanged(preferences.copyWith(themeMode: selection.single)),
+            ),
+            const SizedBox(height: 14),
+            const Text(
               'Theme color',
               style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
             ),
@@ -942,9 +990,30 @@ class AppSettingsPanel extends StatelessWidget {
                   Expanded(
                     child: _ThemeColorChoice(
                       color: color,
+                      seed: color == ZommiThemeColor.custom
+                          ? preferences.customThemeColor
+                          : color.seed,
                       selected: preferences.themeColor == color,
-                      onTap: () =>
-                          onChanged(preferences.copyWith(themeColor: color)),
+                      onTap: () async {
+                        if (color == ZommiThemeColor.custom) {
+                          final chosen = await showDialog<Color>(
+                            context: context,
+                            builder: (_) => ThemeColorPicker(
+                              initialColor: preferences.customThemeColor,
+                            ),
+                          );
+                          if (chosen != null) {
+                            onChanged(
+                              preferences.copyWith(
+                                themeColor: color,
+                                customThemeColor: chosen,
+                              ),
+                            );
+                          }
+                        } else {
+                          onChanged(preferences.copyWith(themeColor: color));
+                        }
+                      },
                     ),
                   ),
                 ],
@@ -960,11 +1029,13 @@ class AppSettingsPanel extends StatelessWidget {
 class _ThemeColorChoice extends StatelessWidget {
   const _ThemeColorChoice({
     required this.color,
+    required this.seed,
     required this.selected,
     required this.onTap,
   });
 
   final ZommiThemeColor color;
+  final Color seed;
   final bool selected;
   final VoidCallback onTap;
 
@@ -980,26 +1051,37 @@ class _ThemeColorChoice extends StatelessWidget {
           duration: const Duration(milliseconds: 140),
           height: 34,
           decoration: BoxDecoration(
-            color: selected
-                ? color.seed.withValues(alpha: 0.13)
-                : Colors.transparent,
+            color: selected ? seed.withValues(alpha: 0.13) : Colors.transparent,
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-              color: selected ? color.seed : const Color(0xffd9dde7),
+              color: selected
+                  ? seed
+                  : Theme.of(context).colorScheme.outlineVariant,
             ),
           ),
           child: Center(
             child: Container(
               width: 15,
               height: 15,
-              decoration: BoxDecoration(
-                color: color.seed,
-                shape: BoxShape.circle,
-              ),
-              child: selected
-                  ? const Icon(
+              decoration: BoxDecoration(color: seed, shape: BoxShape.circle),
+              child: color == ZommiThemeColor.custom
+                  ? Icon(
+                      Icons.palette_outlined,
+                      size: 15,
+                      color:
+                          ThemeData.estimateBrightnessForColor(seed) ==
+                              Brightness.dark
+                          ? Colors.white
+                          : Colors.black87,
+                    )
+                  : selected
+                  ? Icon(
                       Icons.check_rounded,
-                      color: Colors.white,
+                      color:
+                          ThemeData.estimateBrightnessForColor(seed) ==
+                              Brightness.dark
+                          ? Colors.white
+                          : Colors.black87,
                       size: 11,
                     )
                   : null,
@@ -1038,12 +1120,18 @@ class _SettingsRow extends StatelessWidget {
         duration: const Duration(milliseconds: 140),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
         decoration: BoxDecoration(
-          color: selected ? const Color(0xffe9edf8) : Colors.transparent,
+          color: selected
+              ? Theme.of(context).colorScheme.primaryContainer
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(12),
         ),
         child: Row(
           children: [
-            Icon(icon, size: 17, color: const Color(0xff4f596d)),
+            Icon(
+              icon,
+              size: 17,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
             const SizedBox(width: 9),
             Expanded(
               child: Column(
@@ -1055,8 +1143,8 @@ class _SettingsRow extends StatelessWidget {
                       fontSize: 10.5,
                       fontWeight: FontWeight.w700,
                       color: enabled
-                          ? const Color(0xff3c4352)
-                          : Colors.blueGrey.shade300,
+                          ? Theme.of(context).colorScheme.onSurface
+                          : Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
                   const SizedBox(height: 2),
@@ -1066,7 +1154,7 @@ class _SettingsRow extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 10.5,
-                      color: Colors.blueGrey.shade500,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ],
@@ -1076,8 +1164,8 @@ class _SettingsRow extends StatelessWidget {
               Icons.chevron_right_rounded,
               size: 17,
               color: enabled
-                  ? Colors.blueGrey.shade400
-                  : Colors.blueGrey.shade200,
+                  ? Theme.of(context).colorScheme.onSurfaceVariant
+                  : Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ],
         ),
@@ -1537,7 +1625,7 @@ class ContextPreviewPanel extends StatelessWidget {
       onExit: (_) => onPointerExit(),
       child: Material(
         key: const ValueKey('context-preview'),
-        color: const Color(0xfaf7f9fd),
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
         elevation: 18,
         borderRadius: BorderRadius.circular(18),
         child: SizedBox(
@@ -1700,7 +1788,7 @@ class ApprovalDialogCard extends StatelessWidget {
                       : () => unawaited(controller.resolveApproval(option.id)),
                   style: option.isReject
                       ? FilledButton.styleFrom(
-                          foregroundColor: const Color(0xff9b4050),
+                          foregroundColor: Theme.of(context).colorScheme.error,
                         )
                       : null,
                   child: Text(option.label),
@@ -1883,7 +1971,7 @@ class _QuestionDialogCardState extends State<QuestionDialogCard> {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xffe1e4ec)),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1973,7 +2061,7 @@ class ArtifactViewerDialog extends StatelessWidget {
       bottom: 24,
       child: Material(
         key: const ValueKey('artifact-viewer'),
-        color: const Color(0xfff8f9fc),
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
         elevation: 22,
         borderRadius: BorderRadius.circular(20),
         clipBehavior: Clip.antiAlias,
@@ -2024,7 +2112,7 @@ class _ModalCard extends StatelessWidget {
       container: true,
       label: semanticLabel,
       child: Material(
-        color: const Color(0xfffbfbfd),
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
         elevation: 24,
         borderRadius: BorderRadius.circular(20),
         child: ConstrainedBox(

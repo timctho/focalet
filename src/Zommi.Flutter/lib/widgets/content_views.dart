@@ -86,7 +86,7 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
     final headingDelta = chatFontSize - topBarAndChatFontSize;
     final base = DefaultTextStyle.of(context).style
         .merge(chatTextStyleOf(context))
-        .copyWith(color: const Color(0xff272b38), height: 1.38);
+        .copyWith(color: Theme.of(context).colorScheme.onSurface, height: 1.38);
     return Listener(
       onPointerDown: (event) {
         _contextLink = event.buttons == kSecondaryMouseButton
@@ -130,7 +130,7 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
                       },
                       styleSheet: MarkdownStyleSheet(
                         a: base.copyWith(
-                          color: const Color(0xff5d54a4),
+                          color: Theme.of(context).colorScheme.primary,
                           decoration: TextDecoration.underline,
                         ),
                         p: base,
@@ -165,17 +165,17 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
                         ),
                         codeblockPadding: EdgeInsets.zero,
                         codeblockDecoration: const BoxDecoration(),
-                        blockquoteDecoration: const BoxDecoration(
+                        blockquoteDecoration: BoxDecoration(
                           border: Border(
                             left: BorderSide(
-                              color: Color(0xff8f83ce),
+                              color: Theme.of(context).colorScheme.primary,
                               width: 3,
                             ),
                           ),
                         ),
                         blockquotePadding: const EdgeInsets.only(left: 12),
                         tableBorder: TableBorder.all(
-                          color: const Color(0xffd7dbe5),
+                          color: Theme.of(context).colorScheme.outlineVariant,
                         ),
                         tableCellsPadding: const EdgeInsets.all(7),
                       ),
@@ -263,7 +263,7 @@ final class _TooltipLinkBuilder extends MarkdownElementBuilder {
             ),
             style: (preferredStyle ?? parentStyle ?? chatTextStyleOf(context))
                 .copyWith(
-                  color: const Color(0xff5d54a4),
+                  color: Theme.of(context).colorScheme.primary,
                   decoration: TextDecoration.underline,
                 ),
           ),
@@ -306,9 +306,9 @@ class _CopyableCodeBlockState extends State<_CopyableCodeBlock> {
       margin: const EdgeInsets.symmetric(vertical: 5),
       padding: const EdgeInsets.fromLTRB(11, 9, 5, 9),
       decoration: BoxDecoration(
-        color: const Color(0xffeef0f6),
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xffdce0e9)),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -319,7 +319,7 @@ class _CopyableCodeBlockState extends State<_CopyableCodeBlock> {
               child: Text(
                 widget.code,
                 style: TextStyle(
-                  color: const Color(0xff272b38),
+                  color: Theme.of(context).colorScheme.onSurface,
                   fontFamily: 'monospace',
                   fontSize: chatFontSizeOf(context),
                   height: 1.35,
@@ -370,25 +370,37 @@ class SafeHtmlView extends StatelessWidget {
         'body': Style(
           margin: Margins.zero,
           padding: HtmlPaddings.zero,
-          color: const Color(0xff272b38),
+          color: Theme.of(context).colorScheme.onSurface,
           fontSize: FontSize(
             compact ? chatFontSizeOf(context) : chatFontSizeOf(context) + 1.5,
           ),
           backgroundColor: const Color(0x00000000),
         ),
-        'table': Style(border: Border.all(color: const Color(0xffd7dbe5))),
+        'table': Style(
+          border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant,
+          ),
+        ),
         'th': Style(
           padding: HtmlPaddings.all(6),
           fontWeight: FontWeight.w700,
-          backgroundColor: const Color(0xffeceef4),
+          backgroundColor: Theme.of(context)
+              .colorScheme
+              .surfaceContainerHighest,
         ),
         'td': Style(
           padding: HtmlPaddings.all(6),
-          border: const Border(bottom: BorderSide(color: Color(0xffd7dbe5))),
+          border: Border(
+            bottom: BorderSide(
+              color: Theme.of(context).colorScheme.outlineVariant,
+            ),
+          ),
         ),
         'pre': Style(
           padding: HtmlPaddings.all(8),
-          backgroundColor: const Color(0xffeef0f6),
+          backgroundColor: Theme.of(context)
+              .colorScheme
+              .surfaceContainerHighest,
           whiteSpace: WhiteSpace.pre,
         ),
       },
@@ -447,7 +459,7 @@ class ArtifactSurface extends StatelessWidget {
     if (artifact.kind == 'error') {
       return SelectableText(
         artifact.html ?? 'Preview unavailable',
-        style: const TextStyle(color: Color(0xff9b4050)),
+        style: TextStyle(color: Theme.of(context).colorScheme.error),
       );
     }
     final dataUrl = artifact.dataUrl;
@@ -461,7 +473,7 @@ class ArtifactSurface extends StatelessWidget {
           semanticLabel: artifact.title,
           errorBuilder: (_, error, stackTrace) => Text(
             'Image preview unavailable · $error',
-            style: const TextStyle(color: Color(0xff9b4050)),
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
           ),
         );
       }
@@ -473,7 +485,7 @@ class ArtifactSurface extends StatelessWidget {
     return Center(
       child: Text(
         artifact.path == null ? 'Loading preview…' : 'Preview available',
-        style: const TextStyle(color: Color(0xff6d7280)),
+        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
       ),
     );
   }

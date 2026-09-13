@@ -213,6 +213,8 @@ final class SessionSummary {
     this.cwd,
     this.profile,
     this.updatedAt,
+    this.pinned = false,
+    this.customTitle,
   });
 
   factory SessionSummary.fromJson(
@@ -223,7 +225,9 @@ final class SessionSummary {
     return SessionSummary(
       id: json['id']?.toString() ?? json['sessionId']?.toString() ?? '',
       runtimeTargetId: runtimeTargetId,
-      title: compactSessionTitle(source),
+      title: json['customTitle']?.toString() ?? compactSessionTitle(source),
+      pinned: json['pinned'] == true,
+      customTitle: json['customTitle']?.toString(),
       cwd: json['cwd']?.toString(),
       profile: json['profile']?.toString(),
       updatedAt: (json['updatedAt'] ?? json['createdAt'])?.toString(),
@@ -236,6 +240,8 @@ final class SessionSummary {
   final String? cwd;
   final String? profile;
   final String? updatedAt;
+  final bool pinned;
+  final String? customTitle;
 
   DateTime? get activityTime {
     final value = updatedAt;
@@ -258,6 +264,8 @@ final class SessionSummary {
     String? cwd,
     String? profile,
     String? updatedAt,
+    bool? pinned,
+    String? customTitle,
   }) => SessionSummary(
     id: id,
     runtimeTargetId: runtimeTargetId,
@@ -265,6 +273,8 @@ final class SessionSummary {
     cwd: cwd ?? this.cwd,
     profile: profile ?? this.profile,
     updatedAt: updatedAt ?? this.updatedAt,
+    pinned: pinned ?? this.pinned,
+    customTitle: customTitle ?? this.customTitle,
   );
 }
 

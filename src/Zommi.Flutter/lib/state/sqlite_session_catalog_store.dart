@@ -95,6 +95,8 @@ Future<SessionCatalogSnapshot> _readOffThread(
             id: row['id'] as String,
             runtimeTargetId: row['runtime_target_id'] as String,
             title: row['title'] as String,
+            pinned: row['pinned'] == 1,
+            customTitle: row['custom_title'] as String?,
             cwd: row['cwd'] as String?,
             profile: row['profile'] as String?,
             updatedAt: row['updated_at'] as String?,
@@ -142,7 +144,7 @@ T _withCatalog<T>(
       db.execute('PRAGMA synchronous = FULL');
       final version =
           db.select('PRAGMA user_version').single.values.single as int;
-      if (version > 2) {
+      if (version > 3) {
         throw const FormatException('Unsupported session catalog database');
       }
       if (version == 0) {
@@ -158,6 +160,7 @@ T _withCatalog<T>(
               runtime_target_id TEXT NOT NULL, id TEXT NOT NULL, title TEXT NOT NULL,
               cwd TEXT, profile TEXT, updated_at TEXT, activity_at INTEGER,
               protected INTEGER NOT NULL DEFAULT 0,
+              pinned INTEGER NOT NULL DEFAULT 0, custom_title TEXT,
               PRIMARY KEY (runtime_target_id, id)
             );
             CREATE INDEX sessions_activity ON sessions(activity_at DESC);
@@ -168,7 +171,7 @@ T _withCatalog<T>(
             );
           ''');
           _save(db, _readLegacy(legacy).retained(now), now);
-          db.execute('PRAGMA user_version = 2');
+          db.execute('PRAGMA user_version = 3');
         });
       }
       if (version == 1) {
@@ -178,6 +181,15 @@ T _withCatalog<T>(
             PRIMARY KEY (runtime_target_id, id)
           )''');
           db.execute('PRAGMA user_version = 2');
+        });
+      }
+      if (version == 1 || version == 2) {
+        _transaction(db, () {
+          db!.execute(
+            'ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0',
+          );
+          db.execute('ALTER TABLE sessions ADD COLUMN custom_title TEXT');
+          db.execute('PRAGMA user_version = 3');
         });
       }
       _removeLegacy(legacy);
@@ -238,20 +250,25 @@ void _save(Database db, SessionCatalogSnapshot snapshot, DateTime now) {
       OR attempted_at IS NOT excluded.attempted_at OR used_at IS NOT excluded.used_at
   ''');
   final sessionWrite = db.prepare('''
-    INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO sessions (runtime_target_id, id, title, cwd, profile, updated_at, activity_at, protected, pinned, custom_title) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(runtime_target_id, id) DO UPDATE SET
       title = excluded.title, cwd = excluded.cwd, profile = excluded.profile,
       updated_at = excluded.updated_at, activity_at = excluded.activity_at,
-      protected = excluded.protected
+      protected = excluded.protected, pinned = excluded.pinned, custom_title = excluded.custom_title
     WHERE title IS NOT excluded.title OR cwd IS NOT excluded.cwd
       OR profile IS NOT excluded.profile OR updated_at IS NOT excluded.updated_at
       OR activity_at IS NOT excluded.activity_at OR protected IS NOT excluded.protected
+      OR pinned IS NOT excluded.pinned OR custom_title IS NOT excluded.custom_title
   ''');
   // Protection is a snapshot of the current selected/running sessions, not a
   // permanent pin. Previously protected rows become eligible for expiry again.
   db.execute(
     'CREATE TEMP TABLE current_protection (runtime_target_id TEXT, id TEXT, PRIMARY KEY(runtime_target_id, id))',
   );
+  db.execute(
+    'CREATE TEMP TABLE current_pins (runtime_target_id TEXT, id TEXT, PRIMARY KEY(runtime_target_id, id))',
+  );
+  final pin = db.prepare('INSERT INTO current_pins VALUES (?, ?)');
   final protect = db.prepare('INSERT INTO current_protection VALUES (?, ?)');
   try {
     for (final id in runtimeIds) {
@@ -266,6 +283,16 @@ void _save(Database db, SessionCatalogSnapshot snapshot, DateTime now) {
         snapshot.usedAt[id]?.millisecondsSinceEpoch,
       ]);
     }
+    for (final session in snapshot.sessions.where(
+      (session) => session.pinned,
+    )) {
+      pin.execute([session.runtimeTargetId, session.id]);
+    }
+    db.execute(
+      '''UPDATE sessions SET pinned = 0 WHERE pinned = 1 AND NOT EXISTS (
+      SELECT 1 FROM current_pins p WHERE p.runtime_target_id = sessions.runtime_target_id AND p.id = sessions.id
+    )''',
+    );
     for (final key in snapshot.protectedSessions) {
       protect.execute([key.$1, key.$2]);
     }
@@ -295,20 +322,24 @@ void _save(Database db, SessionCatalogSnapshot snapshot, DateTime now) {
             ))
             ? 1
             : 0,
+        session.pinned ? 1 : 0,
+        session.customTitle,
       ]);
     }
     _prune(db, now);
   } finally {
+    pin.close();
     protect.close();
     sessionWrite.close();
     runtimeWrite.close();
     db.execute('DROP TABLE current_protection');
+    db.execute('DROP TABLE current_pins');
   }
 }
 
 void _prune(Database db, DateTime now) {
   db.execute(
-    'DELETE FROM sessions WHERE protected = 0 AND (activity_at < ? OR activity_at IS NULL)',
+    'DELETE FROM sessions WHERE protected = 0 AND pinned = 0 AND custom_title IS NULL AND (activity_at < ? OR activity_at IS NULL)',
     [now.toUtc().subtract(sessionCatalogRetention).millisecondsSinceEpoch],
   );
 }
