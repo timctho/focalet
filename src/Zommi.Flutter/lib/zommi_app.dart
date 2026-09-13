@@ -80,23 +80,23 @@ class _ZommiAppState extends State<ZommiApp> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = ThemeData(
-      brightness: Brightness.light,
-      fontFamily: codexUiFontFamily,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: _preferences.themeColor.seed,
-        brightness: Brightness.light,
-      ),
-      scaffoldBackgroundColor: Colors.transparent,
-      useMaterial3: true,
-    );
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Zommi',
-      theme: theme.copyWith(
-        textSelectionTheme: const TextSelectionThemeData(
-          selectionColor: chatSelectionColor,
+    ThemeData buildTheme(Brightness brightness) {
+      final theme = ThemeData(
+        brightness: brightness,
+        fontFamily: codexUiFontFamily,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: _preferences.seedColor,
+          brightness: brightness,
+          dynamicSchemeVariant:
+              _preferences.themeColor == ZommiThemeColor.mist ||
+                  _preferences.themeColor == ZommiThemeColor.cream
+              ? DynamicSchemeVariant.fidelity
+              : DynamicSchemeVariant.tonalSpot,
         ),
+        scaffoldBackgroundColor: Colors.transparent,
+        useMaterial3: true,
+      );
+      return theme.copyWith(
         textTheme: _compactTextTheme(theme.textTheme),
         visualDensity: VisualDensity.compact,
         extensions: [
@@ -105,7 +105,15 @@ class _ZommiAppState extends State<ZommiApp> {
             themeColor: _preferences.themeColor,
           ),
         ],
-      ),
+      );
+    }
+
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'Zommi',
+      themeMode: _preferences.themeMode,
+      theme: buildTheme(Brightness.light),
+      darkTheme: buildTheme(Brightness.dark),
       home: ZommiShell(
         core: widget.core,
         desktop: widget.desktop,
@@ -565,20 +573,14 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
   }
 
   Widget _buildPanel(double width, double height) {
-    final accent = Theme.of(context).colorScheme.primary;
-    final tone = Theme.of(context).extension<ZommiVisualSettings>()?.themeColor;
+    final scheme = Theme.of(context).colorScheme;
     return ClipRRect(
       borderRadius: BorderRadius.circular(34),
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: tone == null || tone == ZommiThemeColor.violet
-              ? const Color(0xeaf9fbff)
-              : Color.alphaBlend(
-                  accent.withValues(alpha: 0.055),
-                  const Color(0xeaf9fbff),
-                ),
+          color: scheme.surface,
           borderRadius: BorderRadius.circular(34),
-          border: Border.all(color: const Color(0xccffffff)),
+          border: Border.all(color: Theme.of(context).colorScheme.surface),
           boxShadow: const [
             BoxShadow(
               color: Color(0x240d172a),
@@ -973,9 +975,11 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
           key: const ValueKey('message-composer-shell'),
           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
           decoration: BoxDecoration(
-            color: const Color(0xe6ffffff),
+            color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: const Color(0xffe1e4ed)),
+            border: Border.all(
+              color: Theme.of(context).colorScheme.outlineVariant,
+            ),
             boxShadow: const [
               BoxShadow(
                 color: Color(0x160d172a),
@@ -1180,7 +1184,7 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
               color: _controller.statusWarning
                   ? const Color(0xffcf805f)
                   : _controller.turnActive
-                  ? const Color(0xff8f83ce)
+                  ? Theme.of(context).colorScheme.primary
                   : const Color(0xff66a27b),
               shape: BoxShape.circle,
             ),
@@ -1197,8 +1201,8 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: _controller.statusWarning
-                      ? const Color(0xffa2543f)
-                      : const Color(0xff6d7280),
+                      ? Theme.of(context).colorScheme.error
+                      : Theme.of(context).colorScheme.onSurfaceVariant,
                   fontSize: 11,
                 ),
               ),
@@ -1248,9 +1252,9 @@ class _LoadingPill extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: const Color(0xf7ffffff),
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: const Color(0xffdedbea)),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
         boxShadow: const [
           BoxShadow(
             color: Color(0x1f554b7a),
@@ -1276,7 +1280,7 @@ class _LoadingPill extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: topBarAndChatTextStyle.copyWith(
-                color: Color(0xff514a70),
+                color: Theme.of(context).colorScheme.onSurface,
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -1309,7 +1313,7 @@ class _SummaryButton extends StatelessWidget {
       child: TextButton.icon(
         onPressed: onPressed,
         style: TextButton.styleFrom(
-          foregroundColor: const Color(0xff4c5160),
+          foregroundColor: Theme.of(context).colorScheme.onSurface,
           visualDensity: VisualDensity.compact,
           padding: const EdgeInsets.symmetric(horizontal: 8),
           textStyle: topBarAndChatTextStyle,

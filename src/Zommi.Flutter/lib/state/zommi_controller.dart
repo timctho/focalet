@@ -12,6 +12,7 @@ import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 
 part 'codex_commands.dart';
+part 'session_actions.dart';
 
 const int historyPageSize = 18;
 const int sessionPageSize = 20;
@@ -308,7 +309,8 @@ final class ZommiController extends ChangeNotifier {
     final cutoff = _clock().toUtc().subtract(sessionCatalogRetention);
     return sessions.where((session) {
       final key = _sessionKey(session.runtimeTargetId, session.id);
-      return key == _activeSessionKey ||
+      return session.pinned ||
+          key == _activeSessionKey ||
           _activeTurns.containsKey(key) ||
           session.activityTime?.isBefore(cutoff) != true;
     }).toList();
@@ -1177,13 +1179,15 @@ final class ZommiController extends ChangeNotifier {
       goalPanelOpen = false;
       previewAttachment = null;
     }
-    _dismissedSessions.remove((
-      connection.runtimeTargetId,
-      connection.sessionId,
-    ));
     _cacheConnection(connection);
     activeRuntime = _runtimeTarget(connection.runtimeTargetId);
-    activeSessionId = connection.sessionId;
+    activeSessionId =
+        _dismissedSessions.contains((
+          connection.runtimeTargetId,
+          connection.sessionId,
+        ))
+        ? null
+        : connection.sessionId;
     // Content captured before the first connection belongs to that first chat.
     if (changingSession && previousKey != null) _restoreSessionDraft();
     _catalogUsedAt[connection.runtimeTargetId] = _clock().toUtc();
@@ -2472,7 +2476,11 @@ final class ZommiController extends ChangeNotifier {
 
   void _ensureSession(String sessionId) {
     final runtimeTargetId = activeRuntime?.id;
-    if (sessionId.isEmpty || runtimeTargetId == null) return;
+    if (sessionId.isEmpty ||
+        runtimeTargetId == null ||
+        _dismissedSessions.contains((runtimeTargetId, sessionId))) {
+      return;
+    }
     if (!sessions.any(
       (session) =>
           session.id == sessionId && session.runtimeTargetId == runtimeTargetId,
@@ -2523,7 +2531,11 @@ final class ZommiController extends ChangeNotifier {
           'title',
         ].any((key) => value[key]?.toString().trim().isNotEmpty == true);
         sessions[index] = session.copyWith(
-          title: hasTitle ? session.title : existing.title,
+          title:
+              existing.customTitle ??
+              (hasTitle ? session.title : existing.title),
+          customTitle: existing.customTitle,
+          pinned: existing.pinned,
           cwd: session.cwd ?? existing.cwd,
           profile: session.profile ?? existing.profile,
           updatedAt:
@@ -2559,6 +2571,8 @@ final class ZommiController extends ChangeNotifier {
           for (final (index, session) in sessions.indexed)
             (index, session, session.activityTime?.microsecondsSinceEpoch ?? 0),
         ]..sort((a, b) {
+          final byPin = (b.$2.pinned ? 1 : 0).compareTo(a.$2.pinned ? 1 : 0);
+          if (byPin != 0) return byPin;
           final byTime = b.$3.compareTo(a.$3);
           return byTime != 0 ? byTime : a.$1.compareTo(b.$1);
         });
@@ -2584,7 +2598,8 @@ final class ZommiController extends ChangeNotifier {
           title: title,
         ),
       );
-    } else if (sessions[index].title.startsWith('New ')) {
+    } else if (sessions[index].customTitle == null &&
+        sessions[index].title.startsWith('New ')) {
       sessions[index] = sessions[index].copyWith(title: title);
     }
     _scheduleCatalogSave();

@@ -167,6 +167,7 @@ impl HostState {
                     "session.list.v1",
                     "session.catalog.v1",
                     "session.create.v1",
+                    "session.fork.v1",
                     "session.resume.v1",
                     "session.configure.v1",
                     "history.read.v1",
@@ -273,6 +274,26 @@ impl HostState {
                     &session_id,
                     adapter.binding_metadata().await,
                     payload,
+                )?;
+                Ok(connection)
+            }
+            "session.fork" => {
+                let adapter = self.exact_adapter(payload)?;
+                let source_id = required_string(payload, "sessionId")?;
+                let connection = adapter.fork_session(source_id).await?;
+                let session_id = adapter.active_session_id().await?;
+                let mut binding_payload = payload.clone();
+                if let Some(cwd) = connection
+                    .pointer("/sessionMetadata/cwd")
+                    .and_then(Value::as_str)
+                {
+                    binding_payload["cwd"] = Value::String(cwd.into());
+                }
+                self.save_binding(
+                    adapter.target_id(),
+                    &session_id,
+                    adapter.binding_metadata().await,
+                    &binding_payload,
                 )?;
                 Ok(connection)
             }
