@@ -33,7 +33,9 @@ final class SessionCatalogSnapshot {
       runtimes: runtimes,
       sessions: [
         for (final session in sessions)
-          if (protectedSessions.contains((
+          if (session.pinned ||
+              session.customTitle != null ||
+              protectedSessions.contains((
                 session.runtimeTargetId,
                 session.id,
               )) ||
@@ -65,6 +67,8 @@ final class SessionCatalogSnapshot {
           'runtimeTargetId': session.runtimeTargetId,
           'id': session.id,
           'title': session.title,
+          'pinned': session.pinned,
+          'customTitle': ?session.customTitle,
           'cwd': ?session.cwd,
           'profile': ?session.profile,
           'updatedAt': ?session.updatedAt,

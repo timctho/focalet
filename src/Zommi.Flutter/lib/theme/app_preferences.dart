@@ -6,10 +6,10 @@ import 'package:flutter/material.dart';
 enum WindowSizeSetting { standard, wide, maximized }
 
 enum ZommiThemeColor {
-  violet('violet', 'Violet', Color(0xff8178c9)),
   ocean('ocean', 'Ocean', Color(0xff387da8)),
-  forest('forest', 'Forest', Color(0xff468267)),
-  ember('ember', 'Ember', Color(0xffb26a4b));
+  mist('mist', 'Macaron grey', Color(0xffb4b8c1)),
+  cream('cream', 'Macaron cream', Color(0xffe8dcc9)),
+  custom('custom', 'Custom color', Color(0xff8178c9));
 
   const ZommiThemeColor(this.id, this.label, this.seed);
 
@@ -19,7 +19,7 @@ enum ZommiThemeColor {
 
   static ZommiThemeColor fromId(String? id) => values.firstWhere(
     (value) => value.id == id,
-    orElse: () => ZommiThemeColor.violet,
+    orElse: () => ZommiThemeColor.ocean,
   );
 }
 
@@ -28,24 +28,35 @@ final class AppPreferences {
   const AppPreferences({
     this.chatFontSize = 13,
     this.browserPageDetails = true,
-    this.themeColor = ZommiThemeColor.violet,
+    this.themeColor = ZommiThemeColor.ocean,
+    this.themeMode = ThemeMode.system,
+    this.customThemeColor = const Color(0xff8178c9),
     this.windowSize = WindowSizeSetting.standard,
   });
 
   final bool browserPageDetails;
   final double chatFontSize;
   final ZommiThemeColor themeColor;
+  final ThemeMode themeMode;
+  final Color customThemeColor;
+
+  Color get seedColor =>
+      themeColor == ZommiThemeColor.custom ? customThemeColor : themeColor.seed;
   final WindowSizeSetting windowSize;
 
   AppPreferences copyWith({
     bool? browserPageDetails,
     double? chatFontSize,
     ZommiThemeColor? themeColor,
+    ThemeMode? themeMode,
+    Color? customThemeColor,
     WindowSizeSetting? windowSize,
   }) => AppPreferences(
     browserPageDetails: browserPageDetails ?? this.browserPageDetails,
     chatFontSize: chatFontSize ?? this.chatFontSize,
     themeColor: themeColor ?? this.themeColor,
+    themeMode: themeMode ?? this.themeMode,
+    customThemeColor: customThemeColor ?? this.customThemeColor,
     windowSize: windowSize ?? this.windowSize,
   );
 
@@ -53,6 +64,8 @@ final class AppPreferences {
     'browserPageDetails': browserPageDetails,
     'chatFontSize': chatFontSize,
     'themeColor': themeColor.id,
+    'themeMode': themeMode.name,
+    'customThemeColor': customThemeColor.toARGB32(),
     'windowSize': windowSize.name,
   };
 
@@ -62,7 +75,23 @@ final class AppPreferences {
     return AppPreferences(
       browserPageDetails: value['browserPageDetails'] != false,
       chatFontSize: fontSize.clamp(12, 15).toDouble(),
-      themeColor: ZommiThemeColor.fromId(value['themeColor']?.toString()),
+      themeColor:
+          const ['violet', 'forest', 'ember'].contains(value['themeColor'])
+          ? ZommiThemeColor.custom
+          : ZommiThemeColor.fromId(value['themeColor']?.toString()),
+      themeMode: ThemeMode.values.firstWhere(
+        (mode) => mode.name == value['themeMode'],
+        orElse: () => ThemeMode.system,
+      ),
+      customThemeColor: Color(switch (value['customThemeColor']) {
+        final int color when color >= 0 && color <= 0xffffffff =>
+          color | 0xff000000,
+        _ => switch (value['themeColor']) {
+          'forest' => 0xff468267,
+          'ember' => 0xffb26a4b,
+          _ => 0xff8178c9,
+        },
+      }),
       windowSize: WindowSizeSetting.values.firstWhere(
         (setting) => setting.name == value['windowSize'],
         orElse: () => value['largeWindow'] == true
@@ -78,11 +107,19 @@ final class AppPreferences {
       other.browserPageDetails == browserPageDetails &&
       other.chatFontSize == chatFontSize &&
       other.themeColor == themeColor &&
+      other.themeMode == themeMode &&
+      other.customThemeColor == customThemeColor &&
       other.windowSize == windowSize;
 
   @override
-  int get hashCode =>
-      Object.hash(browserPageDetails, chatFontSize, themeColor, windowSize);
+  int get hashCode => Object.hash(
+    browserPageDetails,
+    chatFontSize,
+    themeColor,
+    themeMode,
+    customThemeColor,
+    windowSize,
+  );
 }
 
 abstract interface class AppPreferencesStore {

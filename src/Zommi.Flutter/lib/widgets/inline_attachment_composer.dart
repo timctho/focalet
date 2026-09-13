@@ -221,7 +221,7 @@ class InlineAttachmentMessage extends StatelessWidget {
   Widget build(BuildContext context) {
     final style = DefaultTextStyle.of(context).style
         .merge(chatTextStyleOf(context))
-        .copyWith(color: const Color(0xff272b38), height: 1.38);
+        .copyWith(color: Theme.of(context).colorScheme.onSurface, height: 1.38);
     return SelectionArea(
       child: RichText(
         key: key,
@@ -366,12 +366,12 @@ class _InlineAttachmentTileState extends State<InlineAttachmentTile> {
             constraints: const BoxConstraints(maxWidth: 290),
             padding: const EdgeInsets.only(left: 6, right: 2),
             decoration: BoxDecoration(
-              color: const Color(0xffeceaf8),
+              color: Theme.of(context).colorScheme.primaryContainer,
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
                 color: _hovered
-                    ? const Color(0xff8178c9)
-                    : const Color(0xffd8d4ed),
+                    ? Theme.of(context).colorScheme.primary
+                    : Theme.of(context).colorScheme.primaryContainer,
               ),
             ),
             child: Row(
@@ -380,8 +380,8 @@ class _InlineAttachmentTileState extends State<InlineAttachmentTile> {
                 if (image == null)
                   Text(
                     attachment.reference,
-                    style: const TextStyle(
-                      color: Color(0xff625989),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.primary,
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
                     ),
