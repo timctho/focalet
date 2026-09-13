@@ -9,6 +9,57 @@ import 'package:zommi_flutter/zommi_app.dart';
 import 'test_support.dart';
 
 void main() {
+  testWidgets('dots appear in a repeating sequence without changing size', (
+    tester,
+  ) async {
+    var parentBuilds = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) {
+            parentBuilds++;
+            return const Center(child: TypingDots());
+          },
+        ),
+      ),
+    );
+    final bounds = tester.getRect(find.byType(TypingDots));
+    final initialBuilds = parentBuilds;
+    for (final count in [1, 2, 3, 1, 2, 3, 1]) {
+      expect(_visibleDots(tester), count);
+      expect(tester.getRect(find.byType(TypingDots)), bounds);
+      expect(parentBuilds, initialBuilds);
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 2));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('reduced motion and disabled tickers pause typing animation', (
+    tester,
+  ) async {
+    Widget view({bool reduceMotion = false, bool enabled = true}) =>
+        MaterialApp(
+          home: MediaQuery(
+            data: MediaQueryData(disableAnimations: reduceMotion),
+            child: TickerMode(enabled: enabled, child: const TypingDots()),
+          ),
+        );
+    await tester.pumpWidget(view(reduceMotion: true));
+    expect(_visibleDots(tester), 3);
+    await tester.pump(const Duration(seconds: 2));
+    expect(_visibleDots(tester), 3);
+    await tester.pumpWidget(view(enabled: false));
+    final paused = _visibleDots(tester);
+    await tester.pump(const Duration(seconds: 2));
+    expect(_visibleDots(tester), paused);
+    await tester.pumpWidget(view());
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(_visibleDots(tester), paused % 3 + 1);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   for (final kind in ['commentary', 'assistant']) {
     testWidgets('typing waits through activity until the first $kind text', (
       tester,
@@ -138,6 +189,14 @@ void main() {
       expect(find.text('...'), findsOneWidget);
     },
   );
+}
+
+int _visibleDots(WidgetTester tester) {
+  final span = tester.widget<Text>(find.text('...')).textSpan! as TextSpan;
+  return span.children!
+      .cast<TextSpan>()
+      .where((dot) => dot.style!.color!.a != 0)
+      .length;
 }
 
 // A live chat can keep focus/caret animations active while it responds.

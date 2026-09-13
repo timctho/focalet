@@ -4,6 +4,7 @@ import 'package:zommi_flutter/core/core_bridge.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:window_manager/window_manager.dart';
 import 'package:zommi_flutter/desktop/artifact_loader.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/diagnostics/scroll_performance.dart';
@@ -397,11 +398,11 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
     unawaited(submission);
   }
 
-  Future<void> _selectWindowSize(WindowSizeSetting setting) async {
-    await _controller.setWindowSize(setting);
-    if (mounted && _controller.windowSize == setting) {
+  Future<void> _toggleWindowMaximized() async {
+    await _controller.toggleMaximized();
+    if (mounted && _controller.windowSize != widget.preferences.windowSize) {
       widget.onPreferencesChanged(
-        widget.preferences.copyWith(windowSize: setting),
+        widget.preferences.copyWith(windowSize: _controller.windowSize),
       );
     }
   }
@@ -538,7 +539,24 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
             final height = constraints.maxHeight;
             return SizedBox.expand(
               key: const ValueKey('zommi-surface'),
-              child: RepaintBoundary(child: _buildPanel(width, height)),
+              child: DragToResizeArea(
+                resizeEdgeSize: 16,
+                enableResizeEdges:
+                    // macOS provides native resize handles; startResizing is
+                    // supplied by window_manager on Windows and Linux.
+                    Theme.of(context).platform != TargetPlatform.macOS &&
+                        _controller.expanded &&
+                        !_controller.maximizedPanel &&
+                        !_controller.surfaceTransitioning
+                    ? const [
+                        ResizeEdge.topLeft,
+                        ResizeEdge.topRight,
+                        ResizeEdge.bottomLeft,
+                        ResizeEdge.bottomRight,
+                      ]
+                    : const [],
+                child: RepaintBoundary(child: _buildPanel(width, height)),
+              ),
             );
           },
         ),
@@ -772,7 +790,6 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                       controller: _controller,
                       preferences: widget.preferences,
                       onChanged: widget.onPreferencesChanged,
-                      onWindowSizeChanged: _selectWindowSize,
                     ),
                   ),
                 ),
@@ -826,94 +843,118 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
       onPanStart: (_) => unawaited(_startWindowDrag()),
       child: SizedBox(
         height: 62,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 7),
-          child: Row(
-            children: [
-              Semantics(
-                expanded: _controller.sessionPanelOpen,
-                child: _HeaderButton(
-                  key: const ValueKey('toggle-sessions'),
-                  label: _controller.sessionPanelOpen
-                      ? 'Hide chat sessions'
-                      : 'Show chat sessions',
-                  customIcon: const SessionSidebarIcon(),
-                  onPressed: _controller.sessionNavigationSupported
-                      ? () => _controller.toggleSessionPanel()
-                      : null,
-                ),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onDoubleTap: () => unawaited(_toggleWindowMaximized()),
               ),
-              Expanded(
-                child: Row(
-                  children: [
-                    if (_controller.sessionSettingsSupported) ...[
-                      const SizedBox(width: 5),
-                      Flexible(
-                        child: TapRegion(
-                          groupId: _modelTapGroup,
-                          onTapOutside: (_) => _controller.dismissModelPanel(),
-                          child: CompositedTransformTarget(
-                            link: _settingsPanelLink,
-                            child: _SummaryButton(
-                              key: const ValueKey('model-summary'),
-                              label: _controller.modelSummary,
-                              semanticLabel: 'Model settings',
-                              onPressed: _controller.toggleModelPanel,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 5),
-                      Flexible(
-                        child: TapRegion(
-                          groupId: _workspaceTapGroup,
-                          onTapOutside: (_) =>
-                              _controller.dismissWorkspacePanel(),
-                          child: CompositedTransformTarget(
-                            link: _workspacePanelLink,
-                            child: _SummaryButton(
-                              key: const ValueKey('workspace-summary'),
-                              label: _controller.selectedWorkspace.isEmpty
-                                  ? 'Workspace'
-                                  : _controller.workspaceSummary,
-                              semanticLabel: 'Workspace',
-                              icon: Icons.folder_outlined,
-                              onPressed: _controller.toggleWorkspacePanel,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              TapRegion(
-                groupId: _appSettingsTapGroup,
-                onTapOutside: (_) => _controller.dismissAppSettingsPanel(),
-                child: CompositedTransformTarget(
-                  link: _appSettingsPanelLink,
-                  child: _HeaderButton(
-                    key: const ValueKey('app-settings'),
-                    label: 'App settings',
-                    icon: Icons.settings_outlined,
-                    onPressed: _controller.toggleAppSettingsPanel,
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 7),
+              child: Row(
+                children: [
+                  Semantics(
+                    expanded: _controller.sessionPanelOpen,
+                    child: _HeaderButton(
+                      key: const ValueKey('toggle-sessions'),
+                      label: _controller.sessionPanelOpen
+                          ? 'Hide chat sessions'
+                          : 'Show chat sessions',
+                      customIcon: const SessionSidebarIcon(),
+                      onPressed: _controller.sessionNavigationSupported
+                          ? () => _controller.toggleSessionPanel()
+                          : null,
+                    ),
                   ),
-                ),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        if (_controller.sessionSettingsSupported) ...[
+                          const SizedBox(width: 5),
+                          Flexible(
+                            child: TapRegion(
+                              groupId: _modelTapGroup,
+                              onTapOutside: (_) =>
+                                  _controller.dismissModelPanel(),
+                              child: CompositedTransformTarget(
+                                link: _settingsPanelLink,
+                                child: _SummaryButton(
+                                  key: const ValueKey('model-summary'),
+                                  label: _controller.modelSummary,
+                                  semanticLabel: 'Model settings',
+                                  onPressed: _controller.toggleModelPanel,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                          Flexible(
+                            child: TapRegion(
+                              groupId: _workspaceTapGroup,
+                              onTapOutside: (_) =>
+                                  _controller.dismissWorkspacePanel(),
+                              child: CompositedTransformTarget(
+                                link: _workspacePanelLink,
+                                child: _SummaryButton(
+                                  key: const ValueKey('workspace-summary'),
+                                  label: _controller.selectedWorkspace.isEmpty
+                                      ? 'Workspace'
+                                      : _controller.workspaceSummary,
+                                  semanticLabel: 'Workspace',
+                                  icon: Icons.folder_outlined,
+                                  onPressed: _controller.toggleWorkspacePanel,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  TapRegion(
+                    groupId: _appSettingsTapGroup,
+                    onTapOutside: (_) => _controller.dismissAppSettingsPanel(),
+                    child: CompositedTransformTarget(
+                      link: _appSettingsPanelLink,
+                      child: _HeaderButton(
+                        key: const ValueKey('app-settings'),
+                        label: 'App settings',
+                        icon: Icons.settings_outlined,
+                        onPressed: _controller.toggleAppSettingsPanel,
+                      ),
+                    ),
+                  ),
+                  _HeaderButton(
+                    key: const ValueKey('hide-zommi'),
+                    label: 'Minimize Zommi',
+                    icon: Icons.remove_rounded,
+                    onPressed: () => unawaited(_controller.hideWindow()),
+                  ),
+                  _HeaderButton(
+                    key: const ValueKey('maximize-zommi'),
+                    label: _controller.maximizedPanel
+                        ? 'Restore Zommi'
+                        : 'Maximize Zommi',
+                    icon: _controller.maximizedPanel
+                        ? Icons.filter_none_rounded
+                        : Icons.crop_square_rounded,
+                    onPressed: _controller.surfaceTransitioning
+                        ? null
+                        : () => unawaited(_toggleWindowMaximized()),
+                  ),
+                  _HeaderButton(
+                    key: const ValueKey('close-zommi'),
+                    label: 'Close Zommi',
+                    icon: Icons.close_rounded,
+                    onPressed: () => unawaited(_controller.closeWindow()),
+                  ),
+                ],
               ),
-              _HeaderButton(
-                key: const ValueKey('hide-zommi'),
-                label: 'Minimize Zommi',
-                icon: Icons.remove_rounded,
-                onPressed: () => unawaited(_controller.hideWindow()),
-              ),
-              _HeaderButton(
-                key: const ValueKey('close-zommi'),
-                label: 'Close Zommi',
-                icon: Icons.close_rounded,
-                onPressed: () => unawaited(_controller.closeWindow()),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

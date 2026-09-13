@@ -606,6 +606,7 @@ final class FakeDesktopBridge implements DesktopBridge, BrowserCaptureSettings {
   bool closed = false;
   Future<DesktopReadiness>? initializeGate;
   Future<void>? surfaceGate;
+  bool maximized = false;
   Future<ContextAttachment?>? selectionGate;
   bool pointerWithinSurface = false;
 
@@ -654,6 +655,7 @@ final class FakeDesktopBridge implements DesktopBridge, BrowserCaptureSettings {
     if (maximized) calls.add('maximize');
     surfaceAnimations.add(animate);
     if (surfaceGate case final gate?) await gate;
+    this.maximized = maximized;
   }
 
   @override
@@ -678,8 +680,10 @@ final class FakeDesktopBridge implements DesktopBridge, BrowserCaptureSettings {
   }
 
   @override
-  Future<void> toggleMaximized() async {
+  Future<bool> toggleMaximized() async {
     calls.add('toggleMaximized');
+    if (surfaceGate case final gate?) await gate;
+    return maximized = !maximized;
   }
 
   @override

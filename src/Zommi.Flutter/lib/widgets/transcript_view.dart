@@ -414,20 +414,23 @@ class ConversationTurnView extends StatelessWidget {
               block.kind.isMessage &&
               (block.text.trim().isNotEmpty || block.artifacts.isNotEmpty),
         );
-    // Keep one activity section above every message, even when more thinking
-    // or tool events arrive after commentary or the final response.
-    final activities = blocks
-        .where((block) => block.kind.isFoldedActivity)
-        .toList();
-    final segments = <List<TranscriptBlock>>[
-      if (activities.isNotEmpty) activities,
-      for (final block in blocks)
-        if (!block.kind.isFoldedActivity &&
-            (!block.kind.isMessage ||
-                block.text.trim().isNotEmpty ||
-                block.artifacts.isNotEmpty))
-          [block],
-    ];
+    // Fold only adjacent activity so later thinking stays after the response
+    // that preceded it. Empty message placeholders do not split a group.
+    final segments = <List<TranscriptBlock>>[];
+    for (final block in blocks) {
+      if (block.kind.isMessage &&
+          block.text.trim().isEmpty &&
+          block.artifacts.isEmpty) {
+        continue;
+      }
+      if (block.kind.isFoldedActivity &&
+          segments.isNotEmpty &&
+          segments.last.first.kind.isFoldedActivity) {
+        segments.last.add(block);
+      } else {
+        segments.add([block]);
+      }
+    }
     return Semantics(
       container: true,
       label: 'Conversation turn ${turn.number}',
@@ -551,13 +554,7 @@ class ConversationTurnView extends StatelessWidget {
                         color: const Color(0x80ffffff),
                         borderRadius: BorderRadius.circular(14),
                       ),
-                      child: Text(
-                        '...',
-                        style: chatTextStyleOf(context).copyWith(
-                          color: const Color(0xff747988),
-                          letterSpacing: 2,
-                        ),
-                      ),
+                      child: const RepaintBoundary(child: TypingDots()),
                     ),
                   ),
                 ),
@@ -565,6 +562,62 @@ class ConversationTurnView extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class TypingDots extends StatefulWidget {
+  const TypingDots({super.key});
+
+  @override
+  State<TypingDots> createState() => _TypingDotsState();
+}
+
+class _TypingDotsState extends State<TypingDots> {
+  Timer? _timer;
+  int _visibleDots = 1;
+  bool _reduceMotion = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _reduceMotion = MediaQuery.disableAnimationsOf(context);
+    if (_reduceMotion || !TickerMode.valuesOf(context).enabled) {
+      _timer?.cancel();
+      _timer = null;
+    } else {
+      // Only the discrete dot phases need repainting, not every display frame.
+      _timer ??= Timer.periodic(const Duration(milliseconds: 400), (_) {
+        setState(() => _visibleDots = _visibleDots % 3 + 1);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final visibleDots = _reduceMotion ? 3 : _visibleDots;
+    // Keep all three glyphs laid out so each phase has identical bounds.
+    return Text.rich(
+      TextSpan(
+        children: [
+          for (var index = 0; index < 3; index++)
+            TextSpan(
+              text: '.',
+              style: TextStyle(
+                color: index < visibleDots
+                    ? const Color(0xff747988)
+                    : const Color(0x00747988),
+              ),
+            ),
+        ],
+      ),
+      style: chatTextStyleOf(context).copyWith(letterSpacing: 2),
     );
   }
 }

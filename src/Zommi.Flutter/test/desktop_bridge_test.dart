@@ -240,7 +240,10 @@ void main() {
       return true;
     });
     messenger.setMockMethodCallHandler(windowChannel, (call) async {
-      expect(call.method, isIn(['setMinimumSize', 'setAlwaysOnTop']));
+      expect(
+        call.method,
+        isIn(['setResizable', 'setMinimumSize', 'setAlwaysOnTop']),
+      );
       return null;
     });
     addTearDown(() {
@@ -326,6 +329,14 @@ void main() {
     final operations = <String>[];
     final messenger = tester.binding.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(nativeChannel, (call) async {
+      if (call.method == 'getSurfaceGeometry') {
+        return {
+          'bounds': [0, 0, 1600, 1000],
+          'workArea': [0, 0, 1600, 1000],
+          'scale': 1.0,
+          'maximized': true,
+        };
+      }
       operations.add(call.method);
       return operations.length == 1 ? pending.future : true;
     });
@@ -348,7 +359,7 @@ void main() {
     expect(operations, ['toggleSurfaceMaximized']);
     pending.completeError(PlatformException(code: 'surface_handoff_failed'));
     await failure;
-    await second;
+    expect(await second, isTrue);
     expect(operations, ['toggleSurfaceMaximized', 'toggleSurfaceMaximized']);
   });
 
