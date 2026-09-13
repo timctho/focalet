@@ -57,10 +57,15 @@ for line in sys.stdin:
                 "sessionId": session_id,
                 "sessionFile": session_file,
                 "sessionName": "Pi fixture",
+                "isStreaming": active,
+                "isCompacting": False,
+                "pendingMessageCount": 0,
                 "model": {"provider": "openai", "id": "gpt-test"},
                 "thinkingLevel": "high",
             },
         )
+    elif request_type == "get_commands":
+        response(request, {"commands":[{"name":"inspect", "description":"Inspect project", "source":"prompt"}, {"name":"local", "description":"Local extension", "source":"extension"}]})
     elif request_type == "get_available_models":
         response(
             request,
@@ -112,6 +117,8 @@ for line in sys.stdin:
         session_file = "/sessions/new.jsonl"
         response(request, {"cancelled": False})
     elif request_type in ("set_model", "set_thinking_level"):
+        response(request)
+    elif request_type == "prompt" and request.get("message") == "/local":
         response(request)
     elif request_type == "prompt":
         active = True

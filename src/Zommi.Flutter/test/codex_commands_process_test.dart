@@ -148,6 +148,22 @@ void main() {
     );
   });
 
+  test(
+    'background command discovery and history requests share the core pipe',
+    () async {
+      final (controller, bridge, _) = await setup();
+      final target = controller.activeRuntime!.id;
+      final session = controller.activeSessionId!;
+      final results = await Future.wait([
+        for (var i = 0; i < 12; i++) ...[
+          bridge.listCommands(runtimeTargetId: target, sessionId: session),
+          bridge.readSession(runtimeTargetId: target, sessionId: session),
+        ],
+      ]);
+      expect(results, hasLength(24));
+    },
+  );
+
   test('unavailable native goal API reports failure and never sends slash text to the model', () async {
     final (controller, bridge, log) = await setup(unsupported: true);
     await controller.submit('/goal Do work');

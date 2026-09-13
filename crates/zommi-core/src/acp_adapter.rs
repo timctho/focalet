@@ -42,6 +42,7 @@ pub struct AcpConfig {
 pub struct AcpTurnRequest<'a> {
     pub session_id: &'a str,
     pub message: &'a str,
+    pub slash_command: bool,
     pub snapshots: &'a [Value],
     pub images: &'a [String],
     pub client_operation_id: &'a str,
@@ -76,6 +77,7 @@ struct PendingRequest {
 
 #[derive(Default)]
 struct State {
+    command_catalogs: HashMap<String, Vec<Value>>,
     protocol_version: u64,
     runtime_version: Option<String>,
     capabilities: Vec<String>,
@@ -329,6 +331,22 @@ impl AcpAdapter {
             .ok_or_else(|| adapter_error("runtime-failed", "ACP has no active session."))
     }
 
+    pub async fn list_commands(
+        &self,
+        session_id: &str,
+        _force: bool,
+    ) -> Result<Vec<Value>, CodexError> {
+        Ok(self
+            .inner
+            .state
+            .lock()
+            .await
+            .command_catalogs
+            .get(session_id)
+            .cloned()
+            .unwrap_or_default())
+    }
+
     pub async fn connection_value(&self) -> Result<Value, CodexError> {
         let state = self.inner.state.lock().await;
         let session_id = state
@@ -404,7 +422,7 @@ impl AcpAdapter {
         let turn_id = Uuid::new_v4().to_string();
         let mut prompt = vec![json!({
             "type": "text",
-            "text": build_context_handoff(&input.message, &input.snapshots, input.images.len())
+            "text": if request.slash_command { input.message.clone() } else { build_context_handoff(&input.message, &input.snapshots, input.images.len()) }
         })];
         for image in &input.images {
             prompt.push(acp_image(image)?);
@@ -1044,6 +1062,26 @@ impl Inner {
             .get("sessionUpdate")
             .and_then(Value::as_str)
             .unwrap_or_default();
+        if kind == "available_commands_update" {
+            let Some(values) = update.get("availableCommands").and_then(Value::as_array) else {
+                return;
+            };
+            let commands = crate::command_catalog::with_client_limits(
+                crate::command_catalog::normalize(values),
+            );
+            state
+                .command_catalogs
+                .insert(session_id.clone(), commands.clone());
+            drop(state);
+            self.emit(
+                "commands.updated",
+                Some(&session_id),
+                None,
+                None,
+                json!({"commands":commands}),
+            );
+            return;
+        }
         let turn_id = state.active_turns.get(&session_id).cloned();
         let operation = state.turn_operations.get(&session_id).cloned();
         if turn_id.as_ref().is_some_and(|turn_id| {

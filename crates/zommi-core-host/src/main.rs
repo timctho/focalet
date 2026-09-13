@@ -323,7 +323,24 @@ impl HostState {
                 let session_id = required_string(payload, "sessionId")?;
                 Ok(adapter.goal_command(session_id, payload).await?)
             }
-            "turn.start" => {
+            "session.commands" => {
+                let adapter = self.exact_adapter(payload)?;
+                let session_id = required_string(payload, "sessionId")?;
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    adapter.list_commands(
+                        session_id,
+                        payload
+                            .get("force")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
+                    ),
+                )
+                .await
+                .map_err(|_| HostError::new("timeout", "Command discovery timed out."))?
+                .map_err(Into::into)
+            }
+            "turn.start" | "command.execute" => {
                 let adapter = self.exact_adapter(payload)?;
                 let session_id = required_string(payload, "sessionId")?;
                 let message = required_string(payload, "message")?;
@@ -369,6 +386,7 @@ impl HostState {
                 let fingerprint = operation_fingerprint(&json!({
                     "runtimeTargetId": adapter.target_id(),
                     "sessionId": session_id,
+                    "command": operation == "command.execute",
                     "message": input.message,
                     "snapshots": input.snapshots,
                     "images": input.images,
@@ -390,6 +408,7 @@ impl HostState {
                     .start_turn(AdapterTurnRequest {
                         session_id,
                         message: &input.message,
+                        slash_command: operation == "command.execute",
                         snapshots: &input.snapshots,
                         images: &input.images,
                         client_operation_id: &client_operation_id,

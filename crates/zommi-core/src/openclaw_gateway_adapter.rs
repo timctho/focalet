@@ -43,6 +43,7 @@ pub struct OpenClawGatewayConfig {
 pub struct OpenClawGatewayTurnRequest<'a> {
     pub session_id: &'a str,
     pub message: &'a str,
+    pub slash_command: bool,
     pub snapshots: &'a [Value],
     pub images: &'a [String],
     pub client_operation_id: &'a str,
@@ -75,6 +76,7 @@ struct PendingRequest {
 
 #[derive(Default)]
 struct State {
+    command_catalogs: HashMap<String, Vec<Value>>,
     protocol_version: u64,
     runtime_version: Option<String>,
     capabilities: Vec<String>,
@@ -377,6 +379,65 @@ impl OpenClawGatewayAdapter {
             })
     }
 
+    pub async fn list_commands(
+        &self,
+        session_id: &str,
+        force: bool,
+    ) -> Result<Vec<Value>, CodexError> {
+        if self.active_session_id().await? != session_id {
+            return Err(crate::command_catalog::error(
+                "Command catalog belongs to a different session.",
+            ));
+        }
+        if !force
+            && let Some(commands) = self
+                .inner
+                .state
+                .lock()
+                .await
+                .command_catalogs
+                .get(session_id)
+                .cloned()
+        {
+            return Ok(commands);
+        }
+        let state = self.inner.state.lock().await;
+        if !state.methods.contains("commands.list") {
+            return Err(crate::command_catalog::error(
+                "This OpenClaw version does not advertise command discovery.",
+            ));
+        }
+        let agent_id = session_id
+            .strip_prefix("agent:")
+            .and_then(|s| s.split(':').next())
+            .unwrap_or("main")
+            .to_owned();
+        drop(state);
+        let response = self
+            .inner
+            .request(
+                "commands.list",
+                json!({"agentId":agent_id,"scope":"text", "includeArgs":true}),
+            )
+            .await?;
+        let commands = crate::command_catalog::normalize(
+            response
+                .get("commands")
+                .and_then(Value::as_array)
+                .ok_or_else(|| {
+                    crate::command_catalog::error("OpenClaw did not return a command catalog.")
+                })?,
+        );
+        let commands = crate::command_catalog::with_client_limits(commands);
+        self.inner
+            .state
+            .lock()
+            .await
+            .command_catalogs
+            .insert(session_id.into(), commands.clone());
+        Ok(commands)
+    }
+
     pub async fn connection_value(&self) -> Result<Value, CodexError> {
         let state = self.inner.state.lock().await;
         let session_id = state.active_session_id.clone().ok_or_else(|| {
@@ -490,7 +551,7 @@ impl OpenClawGatewayAdapter {
         }
         let mut params = json!({
             "sessionKey": request.session_id,
-            "message": build_context_handoff(&input.message, &input.snapshots, input.images.len()),
+            "message": if request.slash_command { input.message.clone() } else { build_context_handoff(&input.message, &input.snapshots, input.images.len()) },
             "idempotencyKey": request.client_operation_id
         });
         if !attachments.is_empty() {
@@ -509,6 +570,46 @@ impl OpenClawGatewayAdapter {
                 return Err(error);
             }
         };
+        // Some Gateway controls (for example /stop) acknowledge synchronously
+        // without creating a run. Do not leave a pending start or claim failure.
+        if request.slash_command && result.get("runId").is_none() && result["ok"] == true {
+            let turn_id = Uuid::new_v4().to_string();
+            let output = result
+                .get("output")
+                .or_else(|| result.get("message"))
+                .and_then(Value::as_str)
+                .unwrap_or("Command completed.");
+            let mut state = self.inner.state.lock().await;
+            state.pending_starts.remove(request.session_id);
+            state
+                .histories
+                .entry(request.session_id.into())
+                .or_default()
+                .push(json!({"role":"assistant", "content":[{"type":"text", "text":output}]}));
+            drop(state);
+            self.inner.emit(
+                "turn.started",
+                Some(request.session_id),
+                Some(&turn_id),
+                Some(request.client_operation_id),
+                json!({"status":"inProgress"}),
+            );
+            self.inner.emit("item.update", Some(request.session_id), Some(&turn_id), Some(request.client_operation_id), json!({"kind":"assistant", "lifecycle":"completed", "text":output, "itemId":format!("{turn_id}-command")}));
+            self.inner.emit(
+                "turn.completed",
+                Some(request.session_id),
+                Some(&turn_id),
+                Some(request.client_operation_id),
+                json!({"status":"completed"}),
+            );
+            return Ok(TurnReceipt {
+                accepted: true,
+                runtime_target_id: self.target_id().into(),
+                session_id: request.session_id.into(),
+                turn_id,
+                client_operation_id: request.client_operation_id.into(),
+            });
+        }
         let run_id = result
             .get("runId")
             .and_then(Value::as_str)

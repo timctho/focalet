@@ -9,14 +9,14 @@ import 'package:zommi_flutter/desktop/artifact_loader.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/diagnostics/scroll_performance.dart';
 import 'package:zommi_flutter/state/session_catalog_store.dart';
-import 'package:zommi_flutter/state/codex_command_catalog.dart';
+import 'package:zommi_flutter/state/runtime_command_catalog.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 import 'package:zommi_flutter/theme/zommi_typography.dart';
 import 'package:zommi_flutter/widgets/context_preview_layout.dart';
 import 'package:zommi_flutter/widgets/command_result.dart';
-import 'package:zommi_flutter/widgets/codex_command_menu.dart';
+import 'package:zommi_flutter/widgets/runtime_command_menu.dart';
 import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
 import 'package:zommi_flutter/widgets/message_history_navigation.dart';
 import 'package:zommi_flutter/widgets/overlay_panels.dart';
@@ -207,9 +207,7 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
     );
     _composer = InlineAttachmentTextController(
       emphasisRange: (text) =>
-          _controller.activeRuntime?.adapterId == 'codex-app-server'
-          ? codexCommandEmphasis(text)
-          : TextRange.empty,
+          commandEmphasis(text, _controller.composerCommands),
       onAttachmentRemoved: (attachment) =>
           _controller.removeAttachment(attachment.id),
       onAttachmentEnter: _showAttachmentPreview,
@@ -226,7 +224,7 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
     _history.textChanged(_composer.text);
     if (!_restoringComposer) {
       final previous = _controller.composerValue.text.trim();
-      final wasCommand = _controller.isCodexCommand(previous);
+      final wasCommand = _controller.isRuntimeCommand(previous);
       _controller.updateComposerValue(
         _composer.value,
         attachmentOrder: _composer.inlineAttachments
@@ -237,7 +235,7 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
         _selectedCommand = 0;
         _dismissedCommandText = null;
       }
-      if (wasCommand || _controller.isCodexCommand(_composer.messageText)) {
+      if (wasCommand || _controller.isRuntimeCommand(_composer.messageText)) {
         setState(() {});
       }
     }
@@ -368,7 +366,7 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
 
   void _submit() {
     final text = _composer.messageText;
-    final isCommand = _controller.isCodexCommand(text);
+    final isCommand = _controller.isRuntimeCommand(text);
     if (_composer.value.composing.isValid &&
         !_composer.value.composing.isCollapsed) {
       return;
@@ -464,10 +462,9 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
     if (mounted) setState(() {});
   }
 
-  List<CodexComposerCommand> get _commandSuggestions {
+  List<ComposerCommand> get _commandSuggestions {
     if (!_composerFocus.hasFocus ||
         _controller.sessionBusy ||
-        _controller.activeRuntime?.adapterId != 'codex-app-server' ||
         _dismissedCommandText == _composer.text ||
         (_composer.value.composing.isValid &&
             !_composer.value.composing.isCollapsed) ||
@@ -475,10 +472,11 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
         _composer.selection.extentOffset != _composer.text.length) {
       return const [];
     }
-    return matchingCodexCommands(_composer.text);
+    return matchingCommands(_composer.text, _controller.composerCommands);
   }
 
-  void _chooseCommand(CodexComposerCommand command) {
+  void _chooseCommand(ComposerCommand command) {
+    if (!command.enabled) return;
     _composer.value = TextEditingValue(
       text: command.completion,
       selection: TextSelection.collapsed(offset: command.completion.length),
@@ -688,13 +686,25 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                                 ],
                               ),
                             ),
-                            if (_commandSuggestions.isNotEmpty)
-                              CodexCommandMenu(
-                                key: const ValueKey('codex-command-menu'),
+                            if (_commandSuggestions.isNotEmpty ||
+                                (_composer.text == '/' &&
+                                    _composerFocus.hasFocus &&
+                                    _controller.activeRuntime != null &&
+                                    _controller.activeRuntime?.adapterId !=
+                                        'pty-compatibility' &&
+                                    !_controller.sessionBusy &&
+                                    _dismissedCommandText != '/'))
+                              RuntimeCommandMenu(
+                                key: const ValueKey('runtime-command-menu'),
                                 commands: _commandSuggestions,
-                                selectedIndex: _selectedCommand.clamp(
-                                  0,
-                                  _commandSuggestions.length - 1,
+                                selectedIndex: _commandSuggestions.isEmpty
+                                    ? 0
+                                    : _selectedCommand.clamp(
+                                        0,
+                                        _commandSuggestions.length - 1,
+                                      ),
+                                onRefresh: () => unawaited(
+                                  _controller.refreshCommands(force: true),
                                 ),
                                 onSelected: _chooseCommand,
                               )
@@ -962,7 +972,7 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
 
   Widget _buildComposer() {
     final willQueue =
-        !_controller.isCodexCommand(_composer.messageText) &&
+        !_controller.isRuntimeCommand(_composer.messageText) &&
         (_controller.turnActive || _controller.queuedMessages.isNotEmpty);
     return Semantics(
       container: true,
@@ -1064,7 +1074,7 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                   tooltip: willQueue ? 'Queue message (Enter)' : 'Send (Enter)',
                   onPressed:
                       (_controller.submitting &&
-                              _controller.isCodexCommand(
+                              _controller.isRuntimeCommand(
                                 _composer.messageText,
                               )) ||
                           _controller.activeSessionId == null ||

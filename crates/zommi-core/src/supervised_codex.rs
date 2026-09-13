@@ -343,6 +343,7 @@ mod tests {
         adapter.open_session("saved-chat").await.unwrap();
         adapter
             .start_turn(CodexTurnRequest {
+                slash_command: false,
                 session_id: "saved-chat",
                 message: "hold-for-interrupt",
                 snapshots: &[],
@@ -374,6 +375,7 @@ mod tests {
         let adapter = runtime.ready().await.unwrap();
         let error = adapter
             .start_turn(CodexTurnRequest {
+                slash_command: false,
                 session_id: "saved-chat",
                 message: "keep draft",
                 snapshots: &[],
@@ -527,6 +529,7 @@ mod tests {
         assert_eq!(fixture.count("thread/read"), 0);
         adapter
             .start_turn(CodexTurnRequest {
+                slash_command: false,
                 session_id: &first,
                 message: "hold-for-interrupt",
                 snapshots: &[],

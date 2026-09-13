@@ -206,6 +206,12 @@ def serve_hermes(connection: socket.socket) -> None:
                     }
                 ]
             }
+        elif method == "commands.catalog":
+            result = {"pairs":[["/inspect", "Inspect project"], ["/skill-test", "A skill"], ["/quit", "Exit"], ["/quick", "Quick alias"]], "categories":[{"name":"User commands", "pairs":[["/quick", "Quick alias"]]}], "skills":{"/skill-test":{}}, "canon":{}}
+        elif method == "slash.exec":
+            result = {"output":"Hermes command result"}
+        elif method == "command.dispatch":
+            result = {"type":"alias", "target":"inspect"} if params.get("name") == "quick" else {"type":"skill", "message":"Expanded Hermes skill"}
         elif method == "prompt.submit":
             current_turn = str(params.get("text", ""))
             result = {"status": "streaming"}
@@ -283,6 +289,7 @@ def serve_hermes(connection: socket.socket) -> None:
 
 
 OPENCLAW_METHODS = [
+    "commands.list",
     "sessions.list",
     "sessions.create",
     "sessions.messages.subscribe",
@@ -368,6 +375,11 @@ def serve_openclaw(connection: socket.socket) -> None:
                     {"id": "gpt-test", "name": "GPT Test", "provider": "copilot"}
                 ]
             }
+        elif method == "commands.list":
+            result = {"commands":[{"name":"inspect", "description":"Inspect project", "acceptsArgs":True}, {"name":"stop", "description":"Stop"}]}
+        elif method == "chat.send" and params.get("message") == "/stop":
+            send_ws(connection, {"type":"res", "id":request.get("id"), "ok":True, "payload":{"ok":True, "aborted":False, "runIds":[]}})
+            continue
         elif method == "chat.send":
             run_counter += 1
             active_run = f"openclaw-run-{run_counter}"

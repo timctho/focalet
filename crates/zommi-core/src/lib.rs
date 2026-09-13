@@ -3,6 +3,7 @@ pub mod artifacts;
 pub mod broker_protocol;
 pub mod codex_adapter;
 mod codex_home;
+pub mod command_catalog;
 pub mod context_handoff;
 pub mod hermes_gateway_adapter;
 mod openclaw_device_identity;

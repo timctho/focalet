@@ -47,6 +47,7 @@ pub struct HermesGatewayConfig {
 pub struct HermesGatewayTurnRequest<'a> {
     pub session_id: &'a str,
     pub message: &'a str,
+    pub slash_command: bool,
     pub snapshots: &'a [Value],
     pub images: &'a [String],
     pub client_operation_id: &'a str,
@@ -84,6 +85,7 @@ struct PendingRequest {
 
 #[derive(Default)]
 struct State {
+    command_catalogs: HashMap<String, Vec<Value>>,
     protocol_version: u64,
     runtime_version: Option<String>,
     capabilities: Vec<String>,
@@ -340,6 +342,50 @@ impl HermesGatewayAdapter {
         }))
     }
 
+    pub async fn list_commands(
+        &self,
+        session_id: &str,
+        force: bool,
+    ) -> Result<Vec<Value>, CodexError> {
+        if self.active_session_id().await? != session_id {
+            return Err(crate::command_catalog::error(
+                "Command catalog belongs to a different session.",
+            ));
+        }
+        if !force
+            && let Some(commands) = self
+                .inner
+                .state
+                .lock()
+                .await
+                .command_catalogs
+                .get(session_id)
+                .cloned()
+        {
+            return Ok(commands);
+        }
+        let runtime_session_id = self
+            .inner
+            .state
+            .lock()
+            .await
+            .runtime_session_id
+            .clone()
+            .ok_or_else(|| crate::command_catalog::error("Hermes session is not ready."))?;
+        let response = self
+            .inner
+            .request("commands.catalog", json!({"session_id":runtime_session_id}))
+            .await?;
+        let commands = crate::command_catalog::hermes_catalog(&response);
+        self.inner
+            .state
+            .lock()
+            .await
+            .command_catalogs
+            .insert(session_id.into(), commands.clone());
+        Ok(commands)
+    }
+
     pub async fn connection_value(&self) -> Result<Value, CodexError> {
         let state = self.inner.state.lock().await;
         let session_id = state.active_session_id.clone().ok_or_else(|| {
@@ -481,6 +527,70 @@ impl HermesGatewayAdapter {
         Ok(json!({"thread": {"id": session_id, "turns": messages_to_turns(&messages)}}))
     }
 
+    async fn submit_command(
+        &self,
+        runtime_session_id: &str,
+        session_id: &str,
+        text: &str,
+    ) -> Result<Value, CodexError> {
+        let commands = self.list_commands(session_id, false).await?;
+        let mut text = text.to_owned();
+        for _ in 0..5 {
+            let command = crate::command_catalog::require_command(&commands, &text)?;
+            let name = crate::command_catalog::command_name(&text).unwrap();
+            let args = text
+                .split_once(char::is_whitespace)
+                .map(|(_, args)| args)
+                .unwrap_or("");
+            let value = if matches!(command["source"].as_str(), Some("skill" | "quick")) {
+                self.inner
+                    .request(
+                        "command.dispatch",
+                        json!({"session_id":runtime_session_id,"name":name,"arg":args}),
+                    )
+                    .await?
+            } else {
+                self.inner
+                    .request(
+                        "slash.exec",
+                        json!({"session_id":runtime_session_id,"command":text}),
+                    )
+                    .await?
+            };
+            match value.get("type").and_then(Value::as_str) {
+                Some("alias") => {
+                    let target = value["target"].as_str().ok_or_else(|| {
+                        crate::command_catalog::error("Hermes returned an invalid alias.")
+                    })?;
+                    text = format!("/{} {}", target.trim_start_matches('/'), args);
+                }
+                Some("send" | "skill") => {
+                    let message = value["message"].as_str().ok_or_else(|| {
+                        crate::command_catalog::error(
+                            "Hermes returned an invalid command expansion.",
+                        )
+                    })?;
+                    return self
+                        .inner
+                        .request(
+                            "prompt.submit",
+                            json!({"session_id":runtime_session_id,"text":message}),
+                        )
+                        .await;
+                }
+                _ if value.get("output").and_then(Value::as_str).is_some() => return Ok(value),
+                _ => {
+                    return Err(crate::command_catalog::error(
+                        "This Hermes command requires a terminal interaction that Zommi does not support.",
+                    ));
+                }
+            }
+        }
+        Err(crate::command_catalog::error(
+            "Hermes command aliases form a loop.",
+        ))
+    }
+
     pub async fn start_turn(
         &self,
         request: HermesGatewayTurnRequest<'_>,
@@ -546,16 +656,43 @@ impl HermesGatewayAdapter {
             Some(request.client_operation_id),
             json!({"status": "inProgress"}),
         );
-        let result = self
-            .inner
-            .request(
-                "prompt.submit",
-                json!({
-                    "session_id": runtime_session_id,
-                    "text": build_context_handoff(&input.message, &input.snapshots, input.images.len())
-                }),
-            )
-            .await;
+        let result = if request.slash_command {
+            self.submit_command(&runtime_session_id, request.session_id, &input.message)
+                .await
+        } else {
+            self.inner.request("prompt.submit", json!({"session_id":runtime_session_id,
+                "text":build_context_handoff(&input.message, &input.snapshots, input.images.len())})).await
+        };
+        if let Ok(value) = &result
+            && let Some(output) = value.get("output").and_then(Value::as_str)
+        {
+            let mut state = self.inner.state.lock().await;
+            state.active_turns.remove(request.session_id);
+            state.turn_operations.remove(request.session_id);
+            state.streamed_assistant.remove(request.session_id);
+            state
+                .histories
+                .entry(request.session_id.into())
+                .or_default()
+                .push(json!({"role":"assistant", "text":output}));
+            drop(state);
+            self.inner.emit("item.update", Some(request.session_id), Some(&turn_id), Some(request.client_operation_id),
+                json!({"kind":"assistant", "lifecycle":"completed", "text":output, "itemId":format!("{turn_id}-command")}));
+            self.inner.emit(
+                "turn.completed",
+                Some(request.session_id),
+                Some(&turn_id),
+                Some(request.client_operation_id),
+                json!({"status":"completed"}),
+            );
+            return Ok(TurnReceipt {
+                accepted: true,
+                runtime_target_id: self.target_id().into(),
+                session_id: request.session_id.into(),
+                turn_id,
+                client_operation_id: request.client_operation_id.into(),
+            });
+        }
         match result {
             Ok(value)
                 if matches!(

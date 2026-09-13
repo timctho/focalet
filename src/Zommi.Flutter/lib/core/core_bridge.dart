@@ -116,6 +116,24 @@ abstract interface class SessionCatalogBridge {
   });
 }
 
+abstract interface class RuntimeCommandBridge {
+  Future<Map<String, Object?>> listCommands({
+    required String runtimeTargetId,
+    required String sessionId,
+    bool force = false,
+  });
+  Future<TurnReceipt> startCommand({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String message,
+    required String clientOperationId,
+    String? model,
+    String? effort,
+    String? cwd,
+    String? profile,
+  });
+}
+
 abstract interface class GoalControlBridge {
   Future<Map<String, Object?>> goalCommand({
     required String runtimeTargetId,
@@ -333,7 +351,8 @@ final class ProcessCoreBridge
         CoreBridge,
         RuntimeConfigurationBridge,
         SessionCatalogBridge,
-        GoalControlBridge {
+        GoalControlBridge,
+        RuntimeCommandBridge {
   ProcessCoreBridge({
     this.executablePath,
     this.requestTimeout = const Duration(seconds: 30),
@@ -355,6 +374,7 @@ final class ProcessCoreBridge
       StreamController<CoreEvent>.broadcast(sync: true);
   Process? _process;
   Future<void>? _starting;
+  Future<void> _writeTail = Future<void>.value();
   StreamSubscription<String>? _stdoutSubscription;
   StreamSubscription<String>? _stderrSubscription;
   int _nextId = 0;
@@ -565,6 +585,41 @@ final class ProcessCoreBridge
   });
 
   @override
+  Future<Map<String, Object?>> listCommands({
+    required String runtimeTargetId,
+    required String sessionId,
+    bool force = false,
+  }) => _request('session.commands', {
+    'runtimeTargetId': runtimeTargetId,
+    'sessionId': sessionId,
+    'force': force,
+  });
+
+  @override
+  Future<TurnReceipt> startCommand({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String message,
+    required String clientOperationId,
+    String? model,
+    String? effort,
+    String? cwd,
+    String? profile,
+  }) async {
+    final result = await _request('command.execute', {
+      'runtimeTargetId': runtimeTargetId,
+      'sessionId': sessionId,
+      'message': message,
+      'clientOperationId': clientOperationId,
+      'model': ?model,
+      'effort': ?effort,
+      'cwd': ?cwd,
+      'profile': ?profile,
+    });
+    return TurnReceipt.fromJson(result);
+  }
+
+  @override
   Future<TurnReceipt> startTurn({
     required String runtimeTargetId,
     required String sessionId,
@@ -692,7 +747,11 @@ final class ProcessCoreBridge
     final id = (++_nextId).toString();
     final completer = Completer<Map<String, Object?>>();
     _pending[id] = completer;
-    try {
+    // A response or process exit may arrive while its write is still flushing.
+    // Attach an error listener immediately; the caller still awaits the result.
+    completer.future.ignore();
+    final write = _writeTail.then((_) async {
+      checkOpen();
       process.stdin.writeln(
         jsonEncode(<String, Object?>{
           'id': id,
@@ -702,6 +761,12 @@ final class ProcessCoreBridge
         }),
       );
       await process.stdin.flush();
+    });
+    // IOSink rejects writes during flush. Serialize only writes, not replies,
+    // so background catalogs can overlap history, chat, and runtime recovery.
+    _writeTail = write.catchError((Object _) {});
+    try {
+      await write;
     } on Object {
       _pending.remove(id);
       rethrow;
