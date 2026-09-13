@@ -18,6 +18,7 @@ use crate::{
 pub struct AdapterTurnRequest<'a> {
     pub session_id: &'a str,
     pub message: &'a str,
+    pub slash_command: bool,
     pub snapshots: &'a [Value],
     pub images: &'a [String],
     pub client_operation_id: &'a str,
@@ -360,10 +361,43 @@ impl RuntimeAdapter {
         }
     }
 
+    pub async fn list_commands(&self, session_id: &str, force: bool) -> Result<Value, CodexError> {
+        if self.active_session_id().await? != session_id {
+            return Err(crate::command_catalog::error(
+                "Command catalog belongs to a different session.",
+            ));
+        }
+        let commands = match self {
+            Self::Codex(a) => a.ready().await?.list_commands(session_id, force).await?,
+            Self::Acp(a) => a.list_commands(session_id, force).await?,
+            Self::Pi(a) => a.list_commands(session_id, force).await?,
+            Self::HermesGateway(a) => a.list_commands(session_id, force).await?,
+            Self::OpenClawGateway(a) => a.list_commands(session_id, force).await?,
+            Self::Pty(_) => {
+                return Err(crate::command_catalog::error(
+                    "Terminal compatibility does not expose command discovery.",
+                ));
+            }
+        };
+        Ok(serde_json::json!({"commands":commands}))
+    }
+
     pub async fn start_turn(
         &self,
         request: AdapterTurnRequest<'_>,
     ) -> Result<TurnReceipt, CodexError> {
+        if request.slash_command {
+            if !request.snapshots.is_empty() || !request.images.is_empty() {
+                return Err(crate::command_catalog::error(
+                    "Send or remove attachments before running a command.",
+                ));
+            }
+            let catalog = self.list_commands(request.session_id, false).await?;
+            crate::command_catalog::require_command(
+                catalog["commands"].as_array().unwrap(),
+                request.message,
+            )?;
+        }
         match self {
             Self::Codex(adapter) => {
                 adapter
@@ -372,6 +406,7 @@ impl RuntimeAdapter {
                     .start_turn(CodexTurnRequest {
                         session_id: request.session_id,
                         message: request.message,
+                        slash_command: request.slash_command,
                         snapshots: request.snapshots,
                         images: request.images,
                         client_operation_id: request.client_operation_id,
@@ -386,6 +421,7 @@ impl RuntimeAdapter {
                     .start_turn(AcpTurnRequest {
                         session_id: request.session_id,
                         message: request.message,
+                        slash_command: request.slash_command,
                         snapshots: request.snapshots,
                         images: request.images,
                         client_operation_id: request.client_operation_id,
@@ -398,6 +434,7 @@ impl RuntimeAdapter {
                     .start_turn(HermesGatewayTurnRequest {
                         session_id: request.session_id,
                         message: request.message,
+                        slash_command: request.slash_command,
                         snapshots: request.snapshots,
                         images: request.images,
                         client_operation_id: request.client_operation_id,
@@ -411,6 +448,7 @@ impl RuntimeAdapter {
                     .start_turn(OpenClawGatewayTurnRequest {
                         session_id: request.session_id,
                         message: request.message,
+                        slash_command: request.slash_command,
                         snapshots: request.snapshots,
                         images: request.images,
                         client_operation_id: request.client_operation_id,
@@ -424,6 +462,7 @@ impl RuntimeAdapter {
                     .start_turn(PiTurnRequest {
                         session_id: request.session_id,
                         message: request.message,
+                        slash_command: request.slash_command,
                         snapshots: request.snapshots,
                         images: request.images,
                         client_operation_id: request.client_operation_id,

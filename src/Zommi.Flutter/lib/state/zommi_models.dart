@@ -394,6 +394,7 @@ final class QueuedMessage {
     required this.settings,
     required this.draftValue,
     required this.attachmentSequence,
+    this.isCommand = false,
     required List<ContextAttachment> attachments,
   }) : attachments = List.unmodifiable(attachments);
 
@@ -406,6 +407,7 @@ final class QueuedMessage {
   final SessionSettings settings;
   final TextEditingValue draftValue;
   final int attachmentSequence;
+  final bool isCommand;
   final List<ContextAttachment> attachments;
 }
 

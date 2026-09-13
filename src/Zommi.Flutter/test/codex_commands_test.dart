@@ -170,7 +170,8 @@ void main() {
     expect(core.lastMessage, 'Explain /goal without running it');
     await controller.selectRuntime('runtime-pi');
     await controller.submit('/goal Something for Pi');
-    expect(core.lastMessage, '/goal Something for Pi');
+    expect(core.lastMessage, 'Explain /goal without running it');
+    expect(controller.commandResult, contains('not advertised'));
   });
 
   testWidgets(
@@ -194,7 +195,10 @@ void main() {
 
       await tester.enterText(composer, '/');
       await tester.pump();
-      expect(find.byKey(const ValueKey('codex-command-menu')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('runtime-command-menu')),
+        findsOneWidget,
+      );
       await command('/goal Finish tests');
       expect(tester.widget<TextField>(composer).controller!.text, isEmpty);
       expect(find.textContaining('Goal · active'), findsOneWidget);
@@ -236,21 +240,24 @@ void main() {
       InlineAttachmentTextController composer() =>
           tester.widget<TextField>(field).controller!
               as InlineAttachmentTextController;
-      final menu = find.byKey(const ValueKey('codex-command-menu'));
+      final menu = find.byKey(const ValueKey('runtime-command-menu'));
       await tester.enterText(field, '/');
       await tester.pump();
       expect(
-        find.byKey(const ValueKey('codex-command-/clear')),
+        find.byKey(const ValueKey('runtime-command-/clear')),
         findsOneWidget,
       );
-      expect(find.byKey(const ValueKey('codex-command-/goal')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('runtime-command-/goal')),
+        findsOneWidget,
+      );
       await tester.enterText(field, '/cl');
       await tester.pump();
       expect(
-        find.byKey(const ValueKey('codex-command-/clear')),
+        find.byKey(const ValueKey('runtime-command-/clear')),
         findsOneWidget,
       );
-      expect(find.byKey(const ValueKey('codex-command-/goal')), findsNothing);
+      expect(find.byKey(const ValueKey('runtime-command-/goal')), findsNothing);
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.pump();
       expect(composer().text, '/clear');
@@ -260,7 +267,7 @@ void main() {
       await tester.enterText(field, '/goal');
       await tester.pump();
       expect(
-        find.byKey(const ValueKey('codex-command-/goal pause')),
+        find.byKey(const ValueKey('runtime-command-/goal pause')),
         findsOneWidget,
       );
       final position = composer().selection;
@@ -274,7 +281,9 @@ void main() {
 
       await tester.enterText(field, '/goal c');
       await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('codex-command-/goal clear')));
+      await tester.tap(
+        find.byKey(const ValueKey('runtime-command-/goal clear')),
+      );
       await tester.pump();
       expect(composer().text, '/goal clear');
 

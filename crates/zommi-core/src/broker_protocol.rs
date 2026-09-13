@@ -24,7 +24,9 @@ pub const BROKER_OPERATIONS: &[&str] = &[
     "session.create",
     "session.open",
     "session.read",
+    "session.commands",
     "session.goal",
+    "command.execute",
     "turn.start",
     "turn.steer",
     "turn.interrupt",
@@ -35,8 +37,10 @@ pub const BROKER_OPERATIONS: &[&str] = &[
 
 const SESSION_ID_OPERATIONS: &[&str] = &[
     "session.goal",
+    "command.execute",
     "session.open",
     "session.read",
+    "session.commands",
     "turn.start",
     "turn.steer",
     "turn.interrupt",
@@ -46,6 +50,7 @@ const SESSION_ID_OPERATIONS: &[&str] = &[
 const TURN_ID_OPERATIONS: &[&str] = &["turn.steer", "turn.interrupt"];
 const MUTATING_OPERATIONS: &[&str] = &[
     "session.goal",
+    "command.execute",
     "session.create",
     "session.open",
     "turn.start",

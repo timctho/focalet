@@ -145,6 +145,7 @@ pub struct TurnReceipt {
 pub struct CodexTurnRequest<'a> {
     pub session_id: &'a str,
     pub message: &'a str,
+    pub slash_command: bool,
     pub snapshots: &'a [Value],
     pub images: &'a [String],
     pub client_operation_id: &'a str,
@@ -208,6 +209,7 @@ impl Drop for ProcessGroup {
 
 #[derive(Default)]
 struct AdapterState {
+    command_catalogs: HashMap<String, Vec<Value>>,
     read_only_threads: HashSet<String>,
     protocol_version: u64,
     runtime_version: Option<String>,
@@ -461,6 +463,55 @@ impl CodexAdapter {
         });
 
         Ok(())
+    }
+
+    pub async fn list_commands(
+        &self,
+        session_id: &str,
+        force: bool,
+    ) -> Result<Vec<Value>, CodexError> {
+        if self.active_session_id().await? != session_id {
+            return Err(crate::command_catalog::error(
+                "Command catalog belongs to a different session.",
+            ));
+        }
+        if !force
+            && let Some(commands) = self
+                .inner
+                .state
+                .lock()
+                .await
+                .command_catalogs
+                .get(session_id)
+                .cloned()
+        {
+            return Ok(commands);
+        }
+        let cwd = self
+            .inner
+            .state
+            .lock()
+            .await
+            .active_cwd
+            .clone()
+            .unwrap_or_else(|| self.inner.cwd.to_string_lossy().into_owned());
+        let response = self
+            .inner
+            .request("skills/list", json!({"cwds":[cwd], "forceReload":force}))
+            .await?;
+        let skills: Vec<Value> = response["data"].as_array().into_iter().flatten()
+            .filter(|entry| entry["cwd"] == cwd)
+            .flat_map(|entry| entry["skills"].as_array().into_iter().flatten())
+            .filter(|skill| skill.get("enabled").and_then(Value::as_bool) != Some(false) && skill.get("path").and_then(Value::as_str).is_some())
+            .map(|skill| json!({"name":format!("skill:{}", skill["name"].as_str().unwrap_or_default()),"description":skill["description"],"inputHint":"instructions", "source":"skill", "path":skill["path"]})).collect();
+        let commands = crate::command_catalog::normalize(&skills);
+        self.inner
+            .state
+            .lock()
+            .await
+            .command_catalogs
+            .insert(session_id.into(), commands.clone());
+        Ok(commands)
     }
 
     pub async fn connection(&self) -> Result<CodexConnection, CodexError> {
@@ -953,6 +1004,7 @@ impl CodexAdapter {
         let CodexTurnRequest {
             session_id,
             message,
+            slash_command,
             snapshots,
             images,
             client_operation_id,
@@ -969,6 +1021,12 @@ impl CodexAdapter {
                 "The requested session is not the exact active Codex session.",
             ));
         }
+        let skill = if slash_command {
+            let commands = self.list_commands(session_id, false).await?;
+            Some(crate::command_catalog::require_command(&commands, &input.message)?.clone())
+        } else {
+            None
+        };
         {
             let mut state = self.inner.state.lock().await;
             if state.active_turns.contains_key(session_id)
@@ -1000,10 +1058,29 @@ impl CodexAdapter {
             }
         }
 
+        let model_message = if let Some(skill) = &skill {
+            let args = input
+                .message
+                .split_once(char::is_whitespace)
+                .map(|(_, args)| args)
+                .unwrap_or("");
+            format!(
+                "${} {args}",
+                skill["name"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .trim_start_matches("skill:")
+            )
+        } else {
+            input.message.clone()
+        };
         let mut codex_input = vec![json!({
             "type": "text",
-            "text": build_context_handoff(&input.message, &input.snapshots, input.images.len())
+            "text": build_context_handoff(&model_message, &input.snapshots, input.images.len())
         })];
+        if let Some(skill) = skill {
+            codex_input.push(json!({"type":"skill", "name":skill["name"].as_str().unwrap_or_default().trim_start_matches("skill:"), "path":skill["path"]}));
+        }
         codex_input.extend(
             input
                 .images
@@ -1409,6 +1486,11 @@ impl Inner {
     }
 
     async fn handle_notification(self: &Arc<Self>, method: &str, params: Value) {
+        if method == "skills/changed" {
+            self.state.lock().await.command_catalogs.clear();
+            self.emit("commands.invalidated", None, None, None, json!({}));
+            return;
+        }
         if matches!(method, "thread/goal/updated" | "thread/goal/cleared") {
             let thread_id = value_string(params.get("threadId"));
             if !thread_id.is_empty() {

@@ -40,6 +40,7 @@ pub struct PiConfig {
 pub struct PiTurnRequest<'a> {
     pub session_id: &'a str,
     pub message: &'a str,
+    pub slash_command: bool,
     pub snapshots: &'a [Value],
     pub images: &'a [String],
     pub client_operation_id: &'a str,
@@ -73,6 +74,7 @@ struct PendingRequest {
 
 #[derive(Default)]
 struct State {
+    command_catalogs: HashMap<String, Vec<Value>>,
     protocol_version: u64,
     runtime_version: Option<String>,
     runtime_state: Value,
@@ -233,6 +235,46 @@ impl PiAdapter {
             .map(|session_file| json!({"sessionFile": session_file}))
     }
 
+    pub async fn list_commands(
+        &self,
+        session_id: &str,
+        force: bool,
+    ) -> Result<Vec<Value>, CodexError> {
+        if self.active_session_id().await? != session_id {
+            return Err(crate::command_catalog::error(
+                "Command catalog belongs to a different session.",
+            ));
+        }
+        if !force
+            && let Some(commands) = self
+                .inner
+                .state
+                .lock()
+                .await
+                .command_catalogs
+                .get(session_id)
+                .cloned()
+        {
+            return Ok(commands);
+        }
+        let response = self.inner.request(json!({"type":"get_commands"})).await?;
+        let commands = crate::command_catalog::normalize(
+            response
+                .pointer("/data/commands")
+                .and_then(Value::as_array)
+                .ok_or_else(|| {
+                    crate::command_catalog::error("Pi did not return a command catalog.")
+                })?,
+        );
+        self.inner
+            .state
+            .lock()
+            .await
+            .command_catalogs
+            .insert(session_id.into(), commands.clone());
+        Ok(commands)
+    }
+
     pub async fn connection_value(&self) -> Result<Value, CodexError> {
         let state = self.inner.state.lock().await;
         let session_id = runtime_session_id(&state.runtime_state)?;
@@ -343,7 +385,7 @@ impl PiAdapter {
         }
         let mut command = json!({
             "type": "prompt",
-            "message": build_context_handoff(&input.message, &input.snapshots, input.images.len())
+            "message": if request.slash_command { input.message.clone() } else { build_context_handoff(&input.message, &input.snapshots, input.images.len()) }
         });
         if !input.images.is_empty() {
             command["images"] = Value::Array(
@@ -403,6 +445,35 @@ impl PiAdapter {
                 );
             }
             return Err(error);
+        }
+        // Extension commands can finish during prompt preflight without emitting
+        // agent_start/agent_end. A state read after the ACK distinguishes these
+        // from commands that launched an actual model turn.
+        if request.slash_command {
+            let response = self.inner.request(json!({"type":"get_state"})).await?;
+            let state_value = &response["data"];
+            if state_value["isStreaming"] == false
+                && state_value["isCompacting"] != true
+                && state_value["pendingMessageCount"].as_u64().unwrap_or(0) == 0
+            {
+                let mut state = self.inner.state.lock().await;
+                let complete = state.active_turns.get(request.session_id) == Some(&turn_id);
+                if complete {
+                    state.active_turns.remove(request.session_id);
+                    state.turn_operations.remove(request.session_id);
+                }
+                drop(state);
+                if complete {
+                    self.inner.emit("item.update", Some(request.session_id), Some(&turn_id), Some(request.client_operation_id), json!({"kind":"assistant", "lifecycle":"completed", "text":"Command completed.", "itemId":format!("{turn_id}-command")}));
+                    self.inner.emit(
+                        "turn.completed",
+                        Some(request.session_id),
+                        Some(&turn_id),
+                        Some(request.client_operation_id),
+                        json!({"status":"completed"}),
+                    );
+                }
+            }
         }
         Ok(TurnReceipt {
             accepted: true,

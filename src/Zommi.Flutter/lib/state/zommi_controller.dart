@@ -7,11 +7,13 @@ import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/desktop/artifact_loader.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/history_mapper.dart';
+import 'package:zommi_flutter/state/runtime_command_catalog.dart';
 import 'package:zommi_flutter/state/session_catalog_store.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 
 part 'codex_commands.dart';
+part 'runtime_commands.dart';
 part 'session_actions.dart';
 
 const int historyPageSize = 18;
@@ -57,6 +59,11 @@ final class ZommiController extends ChangeNotifier {
   List<String>? _composerAttachmentOrder;
   final Map<String, _SessionDraft> _drafts = {};
   final Map<String, List<String>> _inputHistory = {};
+  final Map<String, List<ComposerCommand>> _commandCatalogs = {};
+  final Map<String, String> _commandContexts = {};
+  final Map<String, String> _commandErrors = {};
+  final Map<String, int> _commandRevisions = {};
+  final Map<String, int> _commandRequests = {};
   final Map<String, List<QueuedMessage>> _messageQueues = {};
   final Set<String> _pausedQueues = {};
   final Set<String> _startingSessions = {};
@@ -1227,6 +1234,7 @@ final class ZommiController extends ChangeNotifier {
     if (inherited != null) _sessionSettings[key] = inherited;
     _restoreSessionSettings(connection);
     _rememberActiveSessionSettings();
+    unawaited(refreshCommands());
     // Paint cached history while an adapter finishes reading the selected chat.
     _notify();
     await _readActiveHistory(
@@ -1263,9 +1271,34 @@ final class ZommiController extends ChangeNotifier {
       return;
     }
     final sessionKey = _sessionKey(runtimeTargetId, sessionId);
-    if (isCodexCommand(text)) {
+    final command = commandFor(text);
+    if (isCodexCommand(text) && (command == null || command.native)) {
       if (!submitting) await _submitCodexCommand(text);
       return;
+    }
+    final runtimeCommand = isRuntimeCommand(text);
+    if (runtimeCommand) {
+      if (command == null) {
+        _commandError(
+          _commandErrors[sessionKey] ??
+              'This command is not advertised by $activeRuntimeName. Refresh commands or choose one from the menu.',
+        );
+        return;
+      }
+      if (!command.enabled ||
+          turnActive ||
+          submitting ||
+          attachments.isNotEmpty ||
+          core is! RuntimeCommandBridge) {
+        _commandError(
+          command.disabledReason ??
+              (attachments.isNotEmpty
+                  ? 'Send or remove attachments before running a command.'
+                  : 'Wait for this chat to be ready before running a command.'),
+        );
+        return;
+      }
+      commandComposerEpoch++;
     }
     _newSessions.remove(sessionKey);
     final draftValue = composerValue;
@@ -1279,6 +1312,7 @@ final class ZommiController extends ChangeNotifier {
         'flutter:${DateTime.now().microsecondsSinceEpoch}:${++_localTurnSequence}';
     final pendingMessage = QueuedMessage(
       id: operationId,
+      isCommand: runtimeCommand,
       runtimeTargetId: runtimeTargetId,
       runtimeName: activeRuntimeName,
       sessionId: sessionId,
@@ -1336,21 +1370,32 @@ final class ZommiController extends ChangeNotifier {
       _notify();
     }
     try {
-      final receipt = await core.startTurn(
-        runtimeTargetId: runtimeTargetId,
-        sessionId: sessionId,
-        message: message.text,
-        snapshots: contextHandoffSnapshots(sendingAttachments),
-        images: sendingAttachments
-            .map((item) => item.imageDataUrl)
-            .whereType<String>()
-            .toList(growable: false),
-        clientOperationId: operationId,
-        model: settings.model.isEmpty ? null : settings.model,
-        effort: settings.effort.isEmpty ? null : settings.effort,
-        cwd: settings.workspace.isEmpty ? null : settings.workspace,
-        profile: settings.profile.isEmpty ? null : settings.profile,
-      );
+      final receipt = message.isCommand
+          ? await (core as RuntimeCommandBridge).startCommand(
+              runtimeTargetId: runtimeTargetId,
+              sessionId: sessionId,
+              message: message.text,
+              clientOperationId: operationId,
+              model: settings.model.isEmpty ? null : settings.model,
+              effort: settings.effort.isEmpty ? null : settings.effort,
+              cwd: settings.workspace.isEmpty ? null : settings.workspace,
+              profile: settings.profile.isEmpty ? null : settings.profile,
+            )
+          : await core.startTurn(
+              runtimeTargetId: runtimeTargetId,
+              sessionId: sessionId,
+              message: message.text,
+              snapshots: contextHandoffSnapshots(sendingAttachments),
+              images: sendingAttachments
+                  .map((item) => item.imageDataUrl)
+                  .whereType<String>()
+                  .toList(growable: false),
+              clientOperationId: operationId,
+              model: settings.model.isEmpty ? null : settings.model,
+              effort: settings.effort.isEmpty ? null : settings.effort,
+              cwd: settings.workspace.isEmpty ? null : settings.workspace,
+              profile: settings.profile.isEmpty ? null : settings.profile,
+            );
       if (!receipt.accepted) {
         throw StateError('Agent did not accept the message');
       }
@@ -1387,7 +1432,8 @@ final class ZommiController extends ChangeNotifier {
       _cancelRequestedSessions.remove(sessionKey);
       _interruptingSessions.remove(sessionKey);
       if (error is CoreProtocolException &&
-          const {'runtime-recovering', 'session-busy'}.contains(error.code)) {
+          (const {'runtime-recovering', 'session-busy'}.contains(error.code) ||
+              (message.isCommand && error.code == 'command-unavailable'))) {
         // These errors happen before submission. Preserve the editable draft;
         // uncertain outcomes remain in the transcript and are never replayed.
         _turnsBySession[sessionKey]?.remove(localTurn);
@@ -2123,6 +2169,30 @@ final class ZommiController extends ChangeNotifier {
     if (event.sequence > 0) _lastSequences[sequenceKey] = event.sequence;
     final sessionId = event.sessionId ?? activeSessionId;
     switch (event.name) {
+      case 'commands.updated':
+        if (event.sessionId == null) return;
+        final key = _sessionKey(event.runtimeTargetId, event.sessionId!);
+        _commandRevisions[key] = (_commandRevisions[key] ?? 0) + 1;
+        _commandCatalogs[key] = _parseRuntimeCommands(
+          event.payload['commands'],
+        );
+        _commandErrors.remove(key);
+        _notify();
+      case 'commands.invalidated':
+        _commandCatalogs.removeWhere(
+          (key, _) => key.startsWith('${event.runtimeTargetId}\u0000'),
+        );
+        _commandRequests.updateAll(
+          (key, value) => key.startsWith('${event.runtimeTargetId}\u0000')
+              ? value + 1
+              : value,
+        );
+        _commandContexts.removeWhere(
+          (key, _) => key.startsWith('${event.runtimeTargetId}\u0000'),
+        );
+        if (event.runtimeTargetId == activeRuntime?.id) {
+          unawaited(refreshCommands(force: true));
+        }
       case 'session.refreshed':
         final connection = RuntimeConnection.fromJson(
           mapValue(event.payload['connection']),
@@ -2155,6 +2225,13 @@ final class ZommiController extends ChangeNotifier {
         _notify();
         return;
       case 'runtime.recovered':
+        bool belongsToRuntime(String key) =>
+            key.startsWith('${event.runtimeTargetId}\u0000');
+        _commandContexts.removeWhere((key, _) => belongsToRuntime(key));
+        _commandCatalogs.removeWhere((key, _) => belongsToRuntime(key));
+        _commandRequests.updateAll(
+          (key, value) => belongsToRuntime(key) ? value + 1 : value,
+        );
         final connection = RuntimeConnection.fromJson(
           mapValue(event.payload['connection']),
         );
@@ -2792,6 +2869,7 @@ final class ZommiController extends ChangeNotifier {
     );
     _sessionSettings[key] = restored;
     _applySettings(restored);
+    unawaited(refreshCommands());
   }
 
   void _applySettings(SessionSettings settings) {

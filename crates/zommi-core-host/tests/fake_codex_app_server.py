@@ -106,6 +106,8 @@ for line in sys.stdin:
         if control and (control / "stall-probe-pid").exists() and (control / "stall-probe-pid").read_text() == str(os.getpid()):
             continue
         result = {"data": [thread_id]}
+    elif method == "skills/list":
+        result = {"data":[{"cwd":request["params"]["cwds"][0],"skills":[{"name":"inspect", "description":"Inspect project", "path":"/skills/inspect/SKILL.md", "enabled":True}]}]}
     elif method in ("model/list", "mcpServerStatus/list"):
         result = {"data": []}
     elif method == "thread/list":

@@ -221,3 +221,5 @@ for line in sys.stdin:
         )
         continue
     send({"jsonrpc": "2.0", "id": request_id, "result": result})
+    if method in ("session/new", "session/load"):
+        send({"jsonrpc":"2.0", "method":"session/update", "params":{"sessionId":session_id,"update":{"sessionUpdate":"available_commands_update", "availableCommands":[{"name":"inspect", "description":"Inspect this session", "input":{"hint":"target"}}]}}})
