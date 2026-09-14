@@ -171,6 +171,34 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('session-action-pin')));
       await tester.pumpAndSettle();
       expect(find.byIcon(Icons.push_pin_rounded), findsOneWidget);
+      if (Platform.environment.containsKey('ZOMMI_THEME_PREVIEW_DIR')) {
+        await tester.tap(find.byKey(const ValueKey('app-settings')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('theme-color-ocean')));
+        await tester.tap(find.byKey(const ValueKey('app-settings')));
+        await tester.pumpAndSettle();
+        final composer = find.byKey(const ValueKey('zommi-composer'));
+        await tester.enterText(composer, 'Check the implementation');
+        await tester.tap(find.byKey(const ValueKey('send-message')));
+        await tester.pump();
+        await tester.enterText(composer, 'Review the tests once this finishes');
+        await tester.tap(find.byKey(const ValueKey('send-message')));
+        await tester.pump();
+        await tester.enterText(
+          composer,
+          'Summarize the results and remaining risks',
+        );
+        await tester.tap(find.byKey(const ValueKey('send-message')));
+        await tester.pump(const Duration(milliseconds: 300));
+        await capturePreview('queue-light');
+        tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
+        await tester.pump();
+        for (var frame = 0; frame < 8; frame++) {
+          await tester.pump(const Duration(milliseconds: 100));
+        }
+        expect(theme().brightness, Brightness.dark);
+        await capturePreview('queue-dark');
+      }
       expect(tester.takeException(), isNull);
     },
   );

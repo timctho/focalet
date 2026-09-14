@@ -746,12 +746,12 @@ List<TranscriptBlock> distinctTranscriptBlocks(
         block.artifacts.isEmpty) {
       continue;
     }
-    final duplicateIndex = block.kind == TranscriptKind.assistant
-        ? result.indexWhere(
-            (existing) =>
-                existing.kind == TranscriptKind.assistant &&
-                transcriptTextSnapshotsOverlap(existing.text, block.text),
-          )
+    final duplicateIndex =
+        block.kind == TranscriptKind.assistant &&
+            result.isNotEmpty &&
+            result.last.kind == TranscriptKind.assistant &&
+            transcriptTextSnapshotsOverlap(result.last.text, block.text)
+        ? result.length - 1
         : -1;
     if (duplicateIndex < 0) {
       result.add(block);

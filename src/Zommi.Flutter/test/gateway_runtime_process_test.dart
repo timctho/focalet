@@ -3,8 +3,172 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
+import 'package:zommi_flutter/state/history_mapper.dart';
+import 'package:zommi_flutter/state/zommi_controller.dart';
+import 'package:zommi_flutter/state/zommi_models.dart';
+
+import 'test_support.dart';
 
 void main() {
+  for (final switchWhileRunning in [false, true]) {
+    test(
+      'Hermes preserves reply order when switching ${switchWhileRunning ? 'during' : 'after'} a turn',
+      () async {
+        final temporary = await Directory.systemTemp.createTemp(
+          'zommi-hermes-order-',
+        );
+        addTearDown(() => temporary.delete(recursive: true));
+        final bridge = ProcessCoreBridge(
+          executablePath: _coreHostPath(),
+          environment: {
+            'ZOMMI_HERMES_COMMAND': await _findPython(),
+            'ZOMMI_HERMES_GATEWAY_ARGS_JSON': jsonEncode([
+              _fixturePath().path,
+              '--mode',
+              'hermes',
+            ]),
+            'ZOMMI_CORE_STATE_PATH': '${temporary.path}/binding.json',
+          },
+        );
+        addTearDown(bridge.close);
+        await bridge.initialize();
+        final discovery = await bridge.discoverRuntimeTargets();
+        final target = discovery.targets.singleWhere(
+          (target) => target.adapterId == 'hermes-gateway',
+        );
+        final connection = await bridge.connectRuntime(
+          runtimeTargetId: target.id,
+          cwd: temporary.path,
+        );
+
+        // Run the real adapter's normalized events through the production Flutter
+        // reducer; only the runtime/session identity is bound to this test chat.
+        final core = RichFakeCore()..historyCount = 0;
+        final controller = ZommiController(
+          core: core,
+          desktop: FakeDesktopBridge(),
+        );
+        addTearDown(controller.close);
+        await controller.initialize();
+        final prompt = switchWhileRunning
+            ? 'timeline-order-hold'
+            : 'timeline-order';
+        await controller.submit(prompt);
+        final liveTurnId = controller.turns.single.id;
+        final subscription = bridge.events.listen((event) {
+          if (event.sessionId != connection.sessionId) return;
+          core.emit(
+            CoreEvent(
+              name: event.name,
+              sequence: event.sequence,
+              runtimeTargetId: 'runtime-codex',
+              sessionId: 'session-1',
+              turnId: liveTurnId,
+              payload: event.payload,
+            ),
+          );
+        });
+        addTearDown(subscription.cancel);
+        final complete = bridge.events.firstWhere(
+          (event) => event.name == 'turn.completed',
+        );
+        final toolStarted = bridge.events.firstWhere(
+          (event) =>
+              event.name == 'item.update' && event.payload['kind'] == 'tool',
+        );
+        await bridge.startTurn(
+          runtimeTargetId: target.id,
+          sessionId: connection.sessionId,
+          message: prompt,
+          snapshots: const [],
+          images: const [],
+          clientOperationId: 'hermes-order',
+        );
+        if (switchWhileRunning) {
+          await toolStarted;
+          await bridge.openSession(
+            runtimeTargetId: target.id,
+            sessionId: 'hermes-coder-session',
+          );
+          await bridge.openSession(
+            runtimeTargetId: target.id,
+            sessionId: connection.sessionId,
+          );
+        }
+        await complete;
+        await Future<void>.delayed(Duration.zero);
+        final live = controller.turns.single;
+        final expectedKinds = [
+          TranscriptKind.thinking,
+          TranscriptKind.assistant,
+          TranscriptKind.tool,
+          TranscriptKind.thinking,
+          TranscriptKind.assistant,
+          TranscriptKind.thinking,
+          TranscriptKind.assistant,
+        ];
+        expect(live.blocks.map((block) => block.kind), expectedKinds);
+        expect(
+          live.blocks
+              .where((block) => block.kind.isMessage)
+              .map((block) => block.text),
+          ['Checking files', 'Checking results', 'Verified answer'],
+        );
+        expect(
+          live.blocks
+              .where((block) => block.kind == TranscriptKind.thinking)
+              .map((block) => block.text),
+          ['First reasoning', 'Second reasoning', 'Final reasoning'],
+        );
+        expect(
+          live.blocks.where((block) => block.kind == TranscriptKind.tool),
+          hasLength(1),
+        );
+        expect(
+          live.blocks
+              .where((block) => block.isActivity)
+              .every((block) => block.completed),
+          isTrue,
+        );
+
+        final immediate = mapThreadHistory(
+          await bridge.readSession(
+            runtimeTargetId: target.id,
+            sessionId: connection.sessionId,
+          ),
+        ).last;
+        expect(immediate.blocks.map((block) => block.kind), expectedKinds);
+        expect(immediate.blocks.last.text, 'Verified answer');
+        await bridge.openSession(
+          runtimeTargetId: target.id,
+          sessionId: 'hermes-coder-session',
+        );
+        await bridge.openSession(
+          runtimeTargetId: target.id,
+          sessionId: connection.sessionId,
+        );
+        final restored = mapThreadHistory(
+          await bridge.readSession(
+            runtimeTargetId: target.id,
+            sessionId: connection.sessionId,
+          ),
+        ).last;
+        expect(restored.blocks.map((block) => block.kind), expectedKinds);
+        for (final primary in [live, restored]) {
+          final merged = mergeConversationTurn(
+            primary,
+            identical(primary, live) ? restored : live,
+          );
+          expect(merged.blocks.map((block) => block.kind), expectedKinds);
+          expect(merged.blocks.last.text, 'Verified answer');
+          expect(
+            merged.blocks.where((block) => block.kind == TranscriptKind.tool),
+            hasLength(1),
+          );
+        }
+      },
+    );
+  }
   test(
     'Hermes falls back to legacy session listing when REST is unavailable',
     () async {

@@ -132,6 +132,8 @@ def serve_hermes(connection: socket.socket) -> None:
     runtime_session_id = "hermes-runtime-session"
     stored_session_id = "hermes-stored-session"
     pending_interactions = {"approval": False, "question": False}
+    timeline_history: list[dict[str, Any]] = []
+    pending_timeline: list[tuple[str, dict[str, Any]]] = []
     current_turn = ""
     while True:
         request = read_ws(connection)
@@ -180,7 +182,8 @@ def serve_hermes(connection: socket.socket) -> None:
                 "session_id": runtime_session_id,
                 "resumed": params.get("session_id"),
                 "session_key": params.get("session_id"),
-                "messages": [
+                "running": bool(pending_timeline) and params.get("session_id") == stored_session_id,
+                "messages": timeline_history if timeline_history and params.get("session_id") == stored_session_id else [
                     {"role": "user", "text": "saved question"},
                     {"role": "assistant", "text": "saved answer"},
                 ],
@@ -230,6 +233,35 @@ def serve_hermes(connection: socket.socket) -> None:
         send_ws(connection, {"jsonrpc": "2.0", "id": request.get("id"), "result": result})
 
         if method == "prompt.submit":
+            if "timeline-order" in current_turn:
+                frames = [
+                    ("message.start", {}),
+                    ("thinking.delta", {"text": "First reasoning"}),
+                    ("message.delta", {"text": "Checking files"}),
+                    ("reasoning.available", {"text": "Checking files"}),
+                    ("message.interim", {"text": "Checking files", "already_streamed": True}),
+                    ("tool.start", {"tool_id": "inspect", "name": "terminal", "context": "git status"}),
+                    ("thinking.delta", {"text": "Second reasoning"}),
+                    ("message.interim", {"text": "Checking results", "already_streamed": False}),
+                    ("tool.progress", {"tool_id": "inspect", "name": "terminal", "text": "Working"}),
+                    ("tool.complete", {"tool_id": "inspect", "name": "terminal", "result": "Clean"}),
+                    ("message.delta", {"text": "An obsolete final candidate"}),
+                    ("reasoning.available", {"text": "An obsolete final candidate"}),
+                    ("message.complete", {"text": "Verified answer", "reasoning": "Final reasoning", "status": "complete"}),
+                ]
+                timeline_history = [
+                    {"role":"user", "text":current_turn, "row_id":100},
+                    {"role":"assistant", "text":"Checking files", "reasoning_content":"First reasoning", "row_id":101},
+                    {"role":"tool", "name":"terminal", "context":"git status"},
+                    {"role":"assistant", "text":"Checking results", "reasoning":"Second reasoning", "row_id":102},
+                    {"role":"assistant", "text":"Verified answer", "reasoning":"Final reasoning", "row_id":103},
+                ]
+                if "timeline-order-hold" in current_turn:
+                    pending_timeline = frames[6:]
+                    frames = frames[:6]
+                for event_type, payload in frames:
+                    hermes_event(connection, event_type, runtime_session_id, payload)
+                continue
             hermes_event(connection, "message.delta", runtime_session_id, {"text": "Hermes Rust "})
             if "request-interactions" in current_turn:
                 hermes_event(
@@ -272,6 +304,10 @@ def serve_hermes(connection: socket.socket) -> None:
                 connection.shutdown(socket.SHUT_RDWR)
                 connection.close()
                 return
+        elif method == "session.resume" and params.get("session_id") == stored_session_id and pending_timeline:
+            for event_type, payload in pending_timeline:
+                hermes_event(connection, event_type, runtime_session_id, payload)
+            pending_timeline = []
         elif method in {"approval.respond", "clarify.respond"} and all(pending_interactions.values()):
             hermes_event(
                 connection,

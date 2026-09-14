@@ -19,6 +19,7 @@ import 'package:zommi_flutter/widgets/command_result.dart';
 import 'package:zommi_flutter/widgets/runtime_command_menu.dart';
 import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
 import 'package:zommi_flutter/widgets/message_history_navigation.dart';
+import 'package:zommi_flutter/widgets/message_queue.dart';
 import 'package:zommi_flutter/widgets/overlay_panels.dart';
 import 'package:zommi_flutter/widgets/runtime_logo.dart';
 import 'package:zommi_flutter/widgets/transcript_view.dart';
@@ -81,18 +82,32 @@ class _ZommiAppState extends State<ZommiApp> {
   @override
   Widget build(BuildContext context) {
     ThemeData buildTheme(Brightness brightness) {
+      var scheme = ColorScheme.fromSeed(
+        seedColor: _preferences.seedColor,
+        brightness: brightness,
+        dynamicSchemeVariant:
+            _preferences.themeColor == ZommiThemeColor.mist ||
+                _preferences.themeColor == ZommiThemeColor.cream
+            ? DynamicSchemeVariant.fidelity
+            : DynamicSchemeVariant.tonalSpot,
+      );
+      if (brightness == Brightness.dark) {
+        scheme = scheme.copyWith(
+          surface: const Color(0xff2b2d31),
+          surfaceDim: const Color(0xff26282c),
+          surfaceBright: const Color(0xff484b52),
+          surfaceContainerLowest: const Color(0xff24262a),
+          surfaceContainerLow: const Color(0xff303238),
+          surfaceContainer: const Color(0xff35383e),
+          surfaceContainerHigh: const Color(0xff3d4047),
+          surfaceContainerHighest: const Color(0xff454850),
+          outlineVariant: const Color(0xff555a63),
+        );
+      }
       final theme = ThemeData(
         brightness: brightness,
         fontFamily: codexUiFontFamily,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: _preferences.seedColor,
-          brightness: brightness,
-          dynamicSchemeVariant:
-              _preferences.themeColor == ZommiThemeColor.mist ||
-                  _preferences.themeColor == ZommiThemeColor.cream
-              ? DynamicSchemeVariant.fidelity
-              : DynamicSchemeVariant.tonalSpot,
-        ),
+        colorScheme: scheme,
         scaffoldBackgroundColor: Colors.transparent,
         useMaterial3: true,
       );
@@ -947,6 +962,7 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                   ),
                   _HeaderButton(
                     key: const ValueKey('maximize-zommi'),
+                    iconSize: 15,
                     label: _controller.maximizedPanel
                         ? 'Restore Zommi'
                         : 'Maximize Zommi',
@@ -1098,89 +1114,22 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildMessageQueue() {
-    final messages = _controller.queuedMessages;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 22),
-      child: Container(
-        key: const ValueKey('message-queue'),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerLow,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '${messages.length} queued${_controller.queuePaused ? ' · paused' : ' · sends after response'}',
-                    style: const TextStyle(fontSize: 11),
-                  ),
-                ),
-                if (_controller.queuePaused)
-                  TextButton(
-                    key: const ValueKey('resume-message-queue'),
-                    onPressed:
-                        _controller.turnActive ||
-                            _controller.sessionBusy ||
-                            _controller.sessionReadOnly ||
-                            _controller.runtimeBusy
-                        ? null
-                        : _controller.resumeQueuedMessages,
-                    child: const Text('Resume'),
-                  ),
-              ],
-            ),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 80),
-              child: ListView.builder(
-                shrinkWrap: true,
-                padding: EdgeInsets.zero,
-                itemCount: messages.length,
-                itemBuilder: (context, index) {
-                  final message = messages[index];
-                  return Row(
-                    key: ValueKey('queued-message-${message.id}'),
-                    children: [
-                      Text(
-                        '${index + 1}. ',
-                        style: const TextStyle(fontSize: 11),
-                      ),
-                      Expanded(
-                        child: Tooltip(
-                          message: message.text,
-                          child: Text(
-                            message.text,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ),
-                      if (message.attachments.isNotEmpty)
-                        Text(
-                          ' · ${message.attachments.length} attached',
-                          style: const TextStyle(fontSize: 10),
-                        ),
-                      IconButton(
-                        key: ValueKey('remove-queued-message-${message.id}'),
-                        tooltip: 'Remove queued message ${index + 1}',
-                        onPressed: () =>
-                            _controller.removeQueuedMessage(message.id),
-                        icon: const Icon(Icons.close_rounded, size: 16),
-                      ),
-                    ],
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  Widget _buildMessageQueue() => Padding(
+    padding: const EdgeInsets.fromLTRB(22, 4, 22, 2),
+    child: MessageQueue(
+      key: const ValueKey('message-queue'),
+      messages: _controller.queuedMessages,
+      paused: _controller.queuePaused,
+      onRemove: _controller.removeQueuedMessage,
+      onResume:
+          _controller.turnActive ||
+              _controller.sessionBusy ||
+              _controller.sessionReadOnly ||
+              _controller.runtimeBusy
+          ? null
+          : _controller.resumeQueuedMessages,
+    ),
+  );
 
   Widget _buildFooter() {
     return Padding(
@@ -1229,6 +1178,7 @@ class _HeaderButton extends StatelessWidget {
     required this.label,
     this.icon,
     this.customIcon,
+    this.iconSize = 18,
     required this.onPressed,
     super.key,
   });
@@ -1236,6 +1186,7 @@ class _HeaderButton extends StatelessWidget {
   final String label;
   final IconData? icon;
   final Widget? customIcon;
+  final double iconSize;
   final VoidCallback? onPressed;
 
   @override
@@ -1246,7 +1197,7 @@ class _HeaderButton extends StatelessWidget {
       child: IconButton(
         tooltip: label,
         onPressed: onPressed,
-        icon: customIcon ?? Icon(icon, size: 18),
+        icon: customIcon ?? Icon(icon, size: iconSize),
         visualDensity: VisualDensity.compact,
       ),
     );

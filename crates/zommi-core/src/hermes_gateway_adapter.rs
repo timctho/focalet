@@ -101,12 +101,36 @@ struct State {
     session_info: Value,
     active_turns: HashMap<String, String>,
     turn_operations: HashMap<String, String>,
-    streamed_assistant: HashMap<String, String>,
+    streamed_assistant: HashMap<String, StreamedTurn>,
     terminal_turns: HashSet<String>,
     approvals: HashMap<String, PendingApproval>,
     questions: HashMap<String, PendingQuestion>,
     stopping: bool,
     exited: bool,
+}
+
+#[derive(Default)]
+struct StreamedTurn {
+    assistant_segment: u64,
+    assistant_text: String,
+    reasoning_segment: u64,
+    reasoning_id: Option<String>,
+    reasoning_text: String,
+    reasoning_open: bool,
+}
+
+impl StreamedTurn {
+    fn assistant_id(&self, turn_id: &str) -> String {
+        format!("{turn_id}-assistant-{}", self.assistant_segment)
+    }
+
+    fn seal_assistant(&mut self) {
+        self.assistant_segment += 1;
+        self.assistant_text.clear();
+        self.reasoning_id = None;
+        self.reasoning_text.clear();
+        self.reasoning_open = false;
+    }
 }
 
 #[derive(Clone)]
@@ -523,8 +547,8 @@ impl HermesGatewayAdapter {
 
     pub async fn read_session(&self, session_id: &str) -> Result<Value, CodexError> {
         let state = self.inner.state.lock().await;
-        let messages = state.histories.get(session_id).cloned().unwrap_or_default();
-        Ok(json!({"thread": {"id": session_id, "turns": messages_to_turns(&messages)}}))
+        let turns = state.histories.get(session_id).cloned().unwrap_or_default();
+        Ok(json!({"thread": {"id": session_id, "turns": turns}}))
     }
 
     async fn submit_command(
@@ -642,12 +666,15 @@ impl HermesGatewayAdapter {
             );
             state
                 .streamed_assistant
-                .insert(request.session_id.into(), String::new());
+                .insert(request.session_id.into(), StreamedTurn::default());
             state
                 .histories
                 .entry(request.session_id.into())
                 .or_default()
-                .push(json!({"role": "user", "text": input.message}));
+                .push(
+                    json!({"id": turn_id, "items": [{"id": format!("{turn_id}-user"),
+                    "type": "userMessage", "content": [{"type":"text", "text":input.message}]}]}),
+                );
         }
         self.inner.emit(
             "turn.started",
@@ -670,11 +697,13 @@ impl HermesGatewayAdapter {
             state.active_turns.remove(request.session_id);
             state.turn_operations.remove(request.session_id);
             state.streamed_assistant.remove(request.session_id);
-            state
-                .histories
-                .entry(request.session_id.into())
-                .or_default()
-                .push(json!({"role":"assistant", "text":output}));
+            remember_history_item(
+                &mut state.histories,
+                request.session_id,
+                &turn_id,
+                json!({"id":format!("{turn_id}-command"), "type":"agentMessage", "text":output, "status":"completed"}),
+                None,
+            );
             drop(state);
             self.inner.emit("item.update", Some(request.session_id), Some(&turn_id), Some(request.client_operation_id),
                 json!({"kind":"assistant", "lifecycle":"completed", "text":output, "itemId":format!("{turn_id}-command")}));
@@ -1085,19 +1114,26 @@ impl HermesGatewayAdapter {
         state
             .runtime_session_ids
             .insert(runtime_session_id.into(), session_id.into());
-        state.histories.insert(
-            session_id.into(),
-            result
-                .get("messages")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default(),
-        );
+        // A resume snapshot can lag events already received by this adapter.
+        // Keep the local timeline and turn identity while its stream is live.
+        if !state.streamed_assistant.contains_key(session_id) {
+            state.histories.insert(
+                session_id.into(),
+                messages_to_turns(
+                    &result
+                        .get("messages")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default(),
+                ),
+            );
+        }
         state.session_info = result.get("info").cloned().unwrap_or_else(|| json!({}));
         if result.get("running").and_then(Value::as_bool) == Some(true) {
             state
                 .active_turns
-                .insert(session_id.into(), format!("gateway-inflight-{session_id}"));
+                .entry(session_id.into())
+                .or_insert_with(|| format!("gateway-inflight-{session_id}"));
         }
         Ok(())
     }
@@ -1358,43 +1394,95 @@ impl Inner {
             }
             "message.start" => {
                 if turn_id.is_some() {
-                    state.streamed_assistant.insert(session_id, String::new());
+                    state.streamed_assistant.entry(session_id).or_default();
                 }
             }
-            "message.delta" | "message.interim" => {
+            "message.delta" => {
                 let Some(turn_id) = turn_id else { return };
                 let text = payload
                     .get("text")
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .to_owned();
-                state
+                let stream = state
                     .streamed_assistant
                     .entry(session_id.clone())
-                    .or_default()
-                    .push_str(&text);
+                    .or_default();
+                stream.assistant_text.push_str(&text);
+                stream.reasoning_open = false;
+                let item_id = stream.assistant_id(&turn_id);
+                let item = json!({"id":item_id, "type":"agentMessage", "text":stream.assistant_text, "status":"inProgress"});
+                remember_history_item(&mut state.histories, &session_id, &turn_id, item, None);
                 drop(state);
                 self.emit(
                     "item.update",
                     Some(&session_id),
                     Some(&turn_id),
                     operation.as_deref(),
-                    json!({"kind": "assistant", "lifecycle": "delta", "title": "Hermes", "text": text, "itemId": format!("{turn_id}-assistant")}),
+                    json!({"kind": "assistant", "lifecycle": "delta", "title": "Hermes", "text": text, "textMode":"append", "itemId": item_id}),
                 );
             }
-            "reasoning.delta" | "thinking.delta" | "reasoning.available" => {
+            "message.interim" => {
                 let Some(turn_id) = turn_id else { return };
                 let text = payload
                     .get("text")
                     .and_then(Value::as_str)
                     .unwrap_or_default();
+                if text.is_empty() {
+                    return;
+                }
+                let stream = state
+                    .streamed_assistant
+                    .entry(session_id.clone())
+                    .or_default();
+                let item_id = stream.assistant_id(&turn_id);
+                // Interim text is a complete snapshot, including when its
+                // deltas have already streamed. Seal it before the next step.
+                stream.seal_assistant();
+                remember_history_item(
+                    &mut state.histories,
+                    &session_id,
+                    &turn_id,
+                    json!({"id":item_id, "type":"agentMessage", "text":text, "status":"completed"}),
+                    None,
+                );
+                drop(state);
+                self.emit("item.update", Some(&session_id), Some(&turn_id), operation.as_deref(),
+                    json!({"kind":"assistant", "lifecycle":"completed", "title":"Hermes", "text":text, "replace":true, "itemId":item_id}));
+            }
+            "reasoning.available" => {
+                // Hermes emits this from assistant_message.content (a 500-char
+                // reply preview), not the provider's reasoning channel. The
+                // message events carry that same prose authoritatively.
+            }
+            "reasoning.delta" | "thinking.delta" => {
+                let Some(turn_id) = turn_id else { return };
+                let text = payload
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let stream = state
+                    .streamed_assistant
+                    .entry(session_id.clone())
+                    .or_default();
+                if !stream.reasoning_open {
+                    stream.reasoning_segment += 1;
+                    stream.reasoning_id =
+                        Some(format!("{turn_id}-thinking-{}", stream.reasoning_segment));
+                    stream.reasoning_text.clear();
+                    stream.reasoning_open = true;
+                }
+                stream.reasoning_text.push_str(text);
+                let item_id = stream.reasoning_id.clone().expect("reasoning segment");
+                let item = json!({"id":item_id, "type":"reasoning", "summary":[stream.reasoning_text], "status":"inProgress"});
+                remember_history_item(&mut state.histories, &session_id, &turn_id, item, None);
                 drop(state);
                 self.emit(
                     "item.update",
                     Some(&session_id),
                     Some(&turn_id),
                     operation.as_deref(),
-                    json!({"kind": "thinking", "lifecycle": "delta", "title": "Thinking", "text": text, "itemId": format!("{turn_id}-thinking")}),
+                    json!({"kind": "thinking", "lifecycle": "delta", "title": "Thinking", "text": text, "textMode":"append", "itemId": item_id}),
                 );
             }
             "tool.start" | "tool.progress" | "tool.complete" => {
@@ -1413,6 +1501,8 @@ impl Inner {
                 let text = payload
                     .get("text")
                     .or_else(|| payload.get("output"))
+                    .or_else(|| payload.get("result"))
+                    .or_else(|| payload.get("context"))
                     .map(value_string_value)
                     .unwrap_or_else(|| payload.to_string());
                 let item_id = payload
@@ -1420,13 +1510,39 @@ impl Inner {
                     .and_then(Value::as_str)
                     .map(str::to_owned)
                     .unwrap_or_else(|| format!("{turn_id}-tool"));
+                let preview = payload
+                    .get("context")
+                    .map(value_string_value)
+                    .unwrap_or_default();
+                let existing = state
+                    .histories
+                    .get(&session_id)
+                    .and_then(|turns| turns.last())
+                    .and_then(|turn| turn["items"].as_array())
+                    .and_then(|items| items.iter().find(|item| item["id"] == item_id));
+                let preview = if preview.is_empty() {
+                    existing
+                        .and_then(|item| item["command"].as_str())
+                        .unwrap_or_default()
+                        .to_owned()
+                } else {
+                    preview
+                };
+                remember_history_item(
+                    &mut state.histories,
+                    &session_id,
+                    &turn_id,
+                    json!({"id":item_id, "type":"commandExecution", "title":title, "command":preview, "aggregatedOutput":text,
+                        "status":if lifecycle == "completed" {"completed"} else {"inProgress"}}),
+                    None,
+                );
                 drop(state);
                 self.emit(
                     "item.update",
                     Some(&session_id),
                     Some(&turn_id),
                     operation.as_deref(),
-                    json!({"kind": if lifecycle == "delta" { "toolOutput" } else { "tool" }, "lifecycle": lifecycle, "title": title, "text": text, "itemId": item_id}),
+                    json!({"kind": if lifecycle == "delta" { "toolOutput" } else { "tool" }, "lifecycle": lifecycle, "title": title, "text": text, "itemId": item_id, "preview":preview}),
                 );
             }
             "status.update" => {
@@ -1535,45 +1651,69 @@ impl Inner {
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .to_owned();
-                let streamed = state
+                let stream = state
                     .streamed_assistant
                     .remove(&session_id)
                     .unwrap_or_default();
+                let item_id = stream.assistant_id(&turn_id);
+                let status =
+                    normalize_completion_status(payload.get("status").and_then(Value::as_str));
+                let error = payload.get("error").cloned();
+                let reasoning = reasoning_text(&payload);
+                let reasoning_id = stream.reasoning_id.clone().unwrap_or_else(|| {
+                    format!("{turn_id}-thinking-{}", stream.reasoning_segment + 1)
+                });
+                if !reasoning.is_empty() {
+                    remember_history_item(
+                        &mut state.histories,
+                        &session_id,
+                        &turn_id,
+                        json!({"id":reasoning_id, "type":"reasoning", "summary":[reasoning], "status":"completed"}),
+                        Some(&item_id),
+                    );
+                }
+                // A final frame is authoritative even if it differs from the
+                // streamed candidate, or an interim message already sealed it.
+                let final_text = if final_text.is_empty() {
+                    stream.assistant_text
+                } else {
+                    final_text
+                };
+                if !final_text.is_empty() {
+                    remember_history_item(
+                        &mut state.histories,
+                        &session_id,
+                        &turn_id,
+                        json!({"id":item_id, "type":"agentMessage", "text":final_text, "status":"completed"}),
+                        None,
+                    );
+                }
                 state.active_turns.remove(&session_id);
                 state.turn_operations.remove(&session_id);
                 state
                     .terminal_turns
                     .insert(format!("{session_id}:{turn_id}"));
-                state
+                if let Some(items) = state
                     .histories
-                    .entry(session_id.clone())
-                    .or_default()
-                    .push(json!({
-                        "role": "assistant",
-                        "text": final_text,
-                        "reasoning": payload.get("reasoning")
-                    }));
+                    .get_mut(&session_id)
+                    .and_then(|turns| turns.last_mut())
+                    .and_then(|turn| turn["items"].as_array_mut())
+                {
+                    for item in items {
+                        item["status"] = json!("completed");
+                    }
+                }
                 prune_set(&mut state.terminal_turns);
-                let suffix = if streamed.is_empty() {
-                    final_text.clone()
-                } else {
-                    final_text
-                        .strip_prefix(&streamed)
-                        .unwrap_or_default()
-                        .to_owned()
-                };
-                let status =
-                    normalize_completion_status(payload.get("status").and_then(Value::as_str));
-                let error = payload.get("error").cloned();
                 drop(state);
-                if !suffix.is_empty() {
-                    self.emit(
-                        "item.update",
-                        Some(&session_id),
-                        Some(&turn_id),
-                        operation.as_deref(),
-                        json!({"kind": "assistant", "lifecycle": "completed", "title": "Hermes", "text": suffix, "itemId": format!("{turn_id}-assistant")}),
-                    );
+                if !reasoning.is_empty() {
+                    self.emit("item.update", Some(&session_id), Some(&turn_id), operation.as_deref(),
+                        json!({"kind":"thinking", "lifecycle":"completed", "title":"Thinking", "text":reasoning,
+                            "replace":true, "itemId":reasoning_id, "beforeItemId":item_id}));
+                }
+                if !final_text.is_empty() {
+                    self.emit("item.update", Some(&session_id), Some(&turn_id), operation.as_deref(),
+                        json!({"kind":"assistant", "lifecycle":"completed", "title":"Hermes", "text":final_text,
+                            "replace":true, "itemId":item_id}));
                 }
                 let mut completion = json!({"status": status});
                 if let Some(error) = error {
@@ -1951,6 +2091,36 @@ fn models_for_ui(payload: &Value) -> Vec<Value> {
         .collect()
 }
 
+fn remember_history_item(
+    histories: &mut HashMap<String, Vec<Value>>,
+    session_id: &str,
+    turn_id: &str,
+    item: Value,
+    before_id: Option<&str>,
+) {
+    let turns = histories.entry(session_id.into()).or_default();
+    if !turns.iter().any(|turn| turn["id"] == turn_id) {
+        turns.push(json!({"id":turn_id, "items":[]}));
+    }
+    let items = turns
+        .iter_mut()
+        .find(|turn| turn["id"] == turn_id)
+        .and_then(|turn| turn["items"].as_array_mut())
+        .expect("turn items");
+    if let Some(existing) = items
+        .iter_mut()
+        .find(|existing| existing["id"] == item["id"] && existing["type"] == item["type"])
+    {
+        *existing = item;
+    } else if let Some(index) =
+        before_id.and_then(|id| items.iter().position(|existing| existing["id"] == id))
+    {
+        items.insert(index, item);
+    } else {
+        items.push(item);
+    }
+}
+
 fn messages_to_turns(messages: &[Value]) -> Vec<Value> {
     let mut turns: Vec<Value> = Vec::new();
     for (index, message) in messages.iter().enumerate() {
@@ -1960,15 +2130,19 @@ fn messages_to_turns(messages: &[Value]) -> Vec<Value> {
             .unwrap_or_default()
             .to_ascii_lowercase();
         let text = message_text(message);
+        let identity = message
+            .get("row_id")
+            .map(value_string_value)
+            .unwrap_or_else(|| index.to_string());
         if role == "user" {
             turns.push(json!({
-                "id": format!("hermes-turn-{index}"),
-                "items": [{"id": format!("hermes-user-{index}"), "type": "userMessage", "content": [{"type": "text", "text": text}]}]
+                "id": format!("hermes-turn-{identity}"),
+                "items": [{"id": format!("hermes-user-{identity}"), "type": "userMessage", "content": [{"type": "text", "text": text}]}]
             }));
             continue;
         }
         if turns.is_empty() {
-            turns.push(json!({"id": format!("hermes-turn-{index}"), "items": []}));
+            turns.push(json!({"id": format!("hermes-turn-{identity}"), "items": []}));
         }
         let items = turns
             .last_mut()
@@ -1976,19 +2150,56 @@ fn messages_to_turns(messages: &[Value]) -> Vec<Value> {
             .and_then(Value::as_array_mut)
             .expect("turn items");
         if role == "assistant" {
-            if let Some(reasoning) = message.get("reasoning").and_then(Value::as_str)
-                && !reasoning.is_empty()
-            {
-                items.push(json!({"id": format!("hermes-thinking-{index}"), "type": "reasoning", "status": "completed", "summary": [reasoning], "content": []}));
+            let reasoning = reasoning_text(message);
+            if !reasoning.is_empty() {
+                items.push(json!({"id":format!("hermes-thinking-{identity}"), "type":"reasoning", "status":"completed", "summary":[reasoning]}));
             }
             if !text.is_empty() {
-                items.push(json!({"id": format!("hermes-agent-{index}"), "type": "agentMessage", "phase": "final", "status": "completed", "text": text}));
+                items.push(json!({"id":format!("hermes-agent-{identity}"), "type":"agentMessage", "phase":"final", "status":"completed", "text":text}));
             }
+        } else if role == "tool" {
+            // Gateway history includes the tool's name/context even when it
+            // omits the potentially large result body.
+            items.push(json!({"id":format!("hermes-tool-{identity}"), "type":"commandExecution", "status":"completed",
+                "title":message.get("name").and_then(Value::as_str).unwrap_or("Tool"),
+                "command":message.get("context").map(value_string_value).unwrap_or_default(), "aggregatedOutput":text}));
         } else if !text.is_empty() {
-            items.push(json!({"id": format!("hermes-tool-{index}"), "type": "commandExecution", "status": "completed", "title": message.get("name").and_then(Value::as_str).unwrap_or("Tool"), "text": text}));
+            items.push(json!({"id":format!("hermes-system-{identity}"), "type":"commandExecution", "title":"System", "status":"completed", "aggregatedOutput":text}));
         }
     }
     turns
+}
+
+fn reasoning_text(message: &Value) -> String {
+    fn text(value: &Value) -> String {
+        match value {
+            Value::String(value) => value.clone(),
+            Value::Array(parts) => parts
+                .iter()
+                .map(text)
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n"),
+            Value::Object(parts) => ["text", "summary", "content"]
+                .into_iter()
+                .filter_map(|key| parts.get(key))
+                .map(text)
+                .find(|value| !value.is_empty())
+                .unwrap_or_default(),
+            _ => String::new(),
+        }
+    }
+    [
+        "reasoning_content",
+        "reasoning",
+        "reasoning_details",
+        "codex_reasoning_items",
+    ]
+    .into_iter()
+    .filter_map(|key| message.get(key))
+    .map(text)
+    .find(|value| !value.trim().is_empty())
+    .unwrap_or_default()
 }
 
 fn message_text(message: &Value) -> String {

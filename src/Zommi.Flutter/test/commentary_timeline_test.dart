@@ -10,6 +10,169 @@ import 'package:zommi_flutter/zommi_app.dart';
 import 'test_support.dart';
 
 void main() {
+  test(
+    'history restores missing activity before its shared final response',
+    () {
+      TranscriptBlock block(String id, TranscriptKind kind, String text) =>
+          TranscriptBlock(id: id, kind: kind, title: '', text: text);
+      for (final preserveCached in [false, true]) {
+        final canonical = ConversationTurn(
+          id: 'turn',
+          userText: 'Inspect',
+          blocks: [
+            block('r', TranscriptKind.thinking, 'Inspecting'),
+            block('answer', TranscriptKind.assistant, 'Done'),
+          ],
+        );
+        final cached = ConversationTurn(
+          id: 'turn',
+          userText: 'Inspect',
+          blocks: [
+            block('r-live', TranscriptKind.thinking, 'Inspecting'),
+            block('tool', TranscriptKind.tool, 'Tool output'),
+            block('answer-live', TranscriptKind.assistant, 'Done'),
+          ],
+        );
+        final merged = mergeSessionHistory(
+          [canonical],
+          [cached],
+          preserveCached: preserveCached,
+        );
+        expect(merged.single.blocks.map((block) => block.text), [
+          'Inspecting',
+          'Tool output',
+          'Done',
+        ]);
+      }
+    },
+  );
+
+  test(
+    'history inserts an earlier missing segment before a shared commentary',
+    () {
+      TranscriptBlock block(String id, TranscriptKind kind, String text) =>
+          TranscriptBlock(id: id, kind: kind, title: '', text: text);
+      final merged = mergeConversationTurn(
+        ConversationTurn(
+          id: 'turn',
+          userText: 'Inspect',
+          blocks: [
+            block('comment', TranscriptKind.commentary, 'Checking'),
+            block('answer', TranscriptKind.assistant, 'Done'),
+          ],
+        ),
+        ConversationTurn(
+          id: 'turn',
+          userText: 'Inspect',
+          blocks: [
+            block('reason', TranscriptKind.thinking, 'Plan'),
+            block('comment', TranscriptKind.commentary, 'Checking'),
+            block('tool', TranscriptKind.tool, 'Result'),
+            block('answer', TranscriptKind.assistant, 'Done'),
+          ],
+        ),
+      );
+      expect(merged.blocks.map((block) => block.text), [
+        'Plan',
+        'Checking',
+        'Result',
+        'Done',
+      ]);
+    },
+  );
+
+  test(
+    'repeated assistant messages separated by activity retain both positions',
+    () {
+      final blocks = distinctTranscriptBlocks([
+        TranscriptBlock(
+          id: 'first',
+          kind: TranscriptKind.assistant,
+          title: '',
+          text: 'Done',
+        ),
+        TranscriptBlock(
+          id: 'verify',
+          kind: TranscriptKind.thinking,
+          title: '',
+          text: 'Verify',
+        ),
+        TranscriptBlock(
+          id: 'final',
+          kind: TranscriptKind.assistant,
+          title: '',
+          text: 'Done',
+        ),
+      ]);
+      expect(blocks.map((block) => block.id), ['first', 'verify', 'final']);
+    },
+  );
+
+  test(
+    'interleaved tool progress completes its original activity block',
+    () async {
+      final core = RichFakeCore()..historyCount = 0;
+      final controller = ZommiController(
+        core: core,
+        desktop: FakeDesktopBridge(),
+      );
+      addTearDown(controller.close);
+      await controller.initialize();
+      await controller.submit('Inspect');
+      var sequence = 0;
+      void emit(
+        String kind,
+        String id,
+        String text,
+        String lifecycle, {
+        String? before,
+      }) {
+        core.emit(
+          CoreEvent(
+            name: 'item.update',
+            sequence: ++sequence,
+            runtimeTargetId: 'runtime-codex',
+            sessionId: 'session-1',
+            turnId: controller.turns.single.id,
+            payload: {
+              'kind': kind,
+              'itemId': id,
+              'text': text,
+              'lifecycle': lifecycle,
+              'beforeItemId': ?before,
+            },
+          ),
+        );
+      }
+
+      emit('tool', 'command', 'Started', 'started');
+      emit('commentary', 'comment', 'Checking another file', 'completed');
+      emit('thinking', 'reason', 'Next step', 'completed');
+      emit('toolOutput', 'command', 'Progress', 'delta');
+      emit('assistant', 'answer', 'Done', 'delta');
+      emit(
+        'thinking',
+        'final-reason',
+        'Final check',
+        'completed',
+        before: 'answer',
+      );
+      emit('tool', 'command', 'Completed', 'completed');
+      final blocks = controller.turns.single.blocks;
+      expect(blocks.map((block) => block.id), [
+        'command',
+        'comment',
+        'reason',
+        'final-reason',
+        'answer',
+      ]);
+      expect(blocks.first.completed, isTrue);
+      expect(
+        blocks.where((block) => block.kind == TranscriptKind.tool),
+        hasLength(1),
+      );
+    },
+  );
   test('a partial live cache cannot swallow a later identical commentary', () {
     TranscriptBlock block(String id, TranscriptKind kind, String text) =>
         TranscriptBlock(id: id, kind: kind, title: '', text: text);

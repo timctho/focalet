@@ -107,7 +107,7 @@ TranscriptBlock? _historyBlock(Map<String, Object?> item, String? cwd) {
     case 'commandExecution':
       return _toolBlock(
         id,
-        'Command',
+        item['title']?.toString() ?? 'Command',
         [item['aggregatedOutput']],
         lifecycle,
         status,
