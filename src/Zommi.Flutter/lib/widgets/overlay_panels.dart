@@ -54,6 +54,21 @@ class SessionSidebar extends StatefulWidget {
 class _SessionSidebarState extends State<SessionSidebar> {
   ZommiController get controller => widget.controller;
   bool _loadedForScroll = false;
+  late final Timer _relativeTimeTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _relativeTimeTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _relativeTimeTimer.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -251,6 +266,10 @@ class _SessionSidebarState extends State<SessionSidebar> {
                     final selected =
                         session.id == controller.activeSessionId &&
                         session.runtimeTargetId == controller.activeRuntime?.id;
+                    final workspace = _sessionWorkspaceLabel(session.cwd);
+                    final updated = session.activityTime?.toLocal();
+                    final colors = Theme.of(context).colorScheme;
+                    final localizations = MaterialLocalizations.of(context);
                     return Semantics(
                       selected: selected,
                       label:
@@ -266,6 +285,7 @@ class _SessionSidebarState extends State<SessionSidebar> {
                           visualDensity: const VisualDensity(vertical: -3),
                           contentPadding: const EdgeInsets.symmetric(
                             horizontal: 8,
+                            vertical: 8,
                           ),
                           selected: selected,
                           selectedTileColor: Theme.of(context)
@@ -274,42 +294,96 @@ class _SessionSidebarState extends State<SessionSidebar> {
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          minLeadingWidth: 0,
-                          horizontalTitleGap: 9,
-                          leading: Row(
+                          title: Column(
                             mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              SizedBox.square(
-                                dimension: 18,
-                                child: Center(
-                                  child: _SessionStatusIcon(presence: presence),
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.folder_outlined,
+                                    size: 14,
+                                    color: colors.onSurfaceVariant,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Tooltip(
+                                      message:
+                                          session.cwd?.trim().isNotEmpty == true
+                                          ? session.cwd!.trim()
+                                          : workspace,
+                                      child: Text(
+                                        workspace,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: colors.onSurfaceVariant,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  if (session.pinned) ...[
+                                    const SizedBox(width: 6),
+                                    Icon(
+                                      Icons.push_pin_rounded,
+                                      size: 13,
+                                      color: colors.primary,
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                session.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
                                 ),
                               ),
-                              const SizedBox(width: 6),
-                              Tooltip(
-                                message:
-                                    runtime?.displayName ?? 'Agent runtime',
-                                child: RuntimeLogo(
-                                  key: ValueKey(
-                                    'session-runtime-${session.runtimeTargetId}-${session.id}',
+                              const SizedBox(height: 5),
+                              Row(
+                                children: [
+                                  Tooltip(
+                                    message: presence.name,
+                                    child: SizedBox.square(
+                                      dimension: 18,
+                                      child: Center(
+                                        child: _SessionStatusIcon(
+                                          presence: presence,
+                                        ),
+                                      ),
+                                    ),
                                   ),
-                                  runtimeId: runtime?.runtimeId ?? '',
-                                ),
+                                  const SizedBox(width: 6),
+                                  Tooltip(
+                                    message:
+                                        runtime?.displayName ?? 'Agent runtime',
+                                    child: RuntimeLogo(
+                                      key: ValueKey(
+                                        'session-runtime-${session.runtimeTargetId}-${session.id}',
+                                      ),
+                                      runtimeId: runtime?.runtimeId ?? '',
+                                    ),
+                                  ),
+                                  const Spacer(),
+                                  Tooltip(
+                                    message: updated == null
+                                        ? 'Last update unavailable'
+                                        : 'Last updated ${localizations.formatFullDate(updated)} ${localizations.formatTimeOfDay(TimeOfDay.fromDateTime(updated))}',
+                                    child: Text(
+                                      _sessionUpdatedLabel(updated),
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: colors.onSurfaceVariant,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
-                          ),
-                          trailing: session.pinned
-                              ? Icon(
-                                  Icons.push_pin_rounded,
-                                  size: 13,
-                                  color: Theme.of(context).colorScheme.primary,
-                                )
-                              : null,
-                          title: Text(
-                            session.title,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 11),
                           ),
                           onTap: controller.runtimeBusy
                               ? null
@@ -331,6 +405,25 @@ class _SessionSidebarState extends State<SessionSidebar> {
       ),
     );
   }
+}
+
+String _sessionWorkspaceLabel(String? cwd) {
+  final path = cwd?.trim() ?? '';
+  if (path.isEmpty) return 'No workspace';
+  final segments = path
+      .replaceAll('\\', '/')
+      .split('/')
+      .where((part) => part.isNotEmpty);
+  return segments.isEmpty ? path : segments.last;
+}
+
+String _sessionUpdatedLabel(DateTime? updated) {
+  if (updated == null) return '—';
+  final elapsed = DateTime.now().difference(updated);
+  if (elapsed.inMinutes < 1) return 'now';
+  if (elapsed.inHours < 1) return '${elapsed.inMinutes}m';
+  if (elapsed.inDays < 1) return '${elapsed.inHours}h';
+  return '${elapsed.inDays}d';
 }
 
 class _SessionStatusIcon extends StatelessWidget {
