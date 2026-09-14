@@ -1421,6 +1421,20 @@ void main() {
       expect(find.text('Command · 12345678901234567890...'), findsOneWidget);
       expect(find.text('Reading the selected table.'), findsOneWidget);
       expect(find.text('Comparing the selected rows.'), findsOneWidget);
+      final thinkingMarkdown = find
+          .descendant(of: thinkingCard, matching: find.byType(CopyableMarkdown))
+          .first;
+      expect(
+        tester
+            .getTopLeft(
+              find.descendant(
+                of: thinkingMarkdown,
+                matching: find.byType(MarkdownBody),
+              ),
+            )
+            .dx,
+        closeTo(tester.getTopLeft(thinkingMarkdown).dx, .1),
+      );
       final timeline = [
         find.byKey(const ValueKey('activity-thinking-a')),
         toolCard,
@@ -1818,7 +1832,12 @@ Future<void> _pumpApp(
   await tester.binding.setSurfaceSize(const Size(1000, 820));
   addTearDown(() => tester.binding.setSurfaceSize(null));
   await tester.pumpWidget(
-    ZommiApp(core: core, desktop: desktop, artifactLoader: artifactLoader),
+    ZommiApp(
+      core: core,
+      desktop: desktop,
+      artifactLoader: artifactLoader,
+      clock: () => DateTime(2026, 9, 14, 14, 32),
+    ),
   );
   await tester.pumpAndSettle();
   // Keep the full-width transcript fixture; sidebar behavior has its own tests.

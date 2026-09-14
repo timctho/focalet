@@ -9,6 +9,7 @@ import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/zommi_typography.dart';
 import 'package:zommi_flutter/widgets/content_views.dart';
 import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
+import 'package:zommi_flutter/widgets/message_actions.dart';
 
 const double userMessageBoxWidth = 416;
 const double assistantMessageBoxWidth = 496;
@@ -458,55 +459,70 @@ class ConversationTurnView extends StatelessWidget {
           children: [
             Align(
               alignment: Alignment.centerRight,
-              child: Container(
-                key: ValueKey('user-message-${turn.id}'),
-                constraints: BoxConstraints(
-                  maxWidth: responsiveUserMessageBoxWidth(viewportWidth),
-                ),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 13,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (turn.contextTokens.isNotEmpty &&
-                        turn.attachments.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 5),
-                        child: Text(
-                          turn.contextTokens.join(' '),
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.primary,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
+              child: _EditableUserMessage(
+                turn: turn,
+                controller: controller,
+                width: responsiveUserMessageBoxWidth(viewportWidth),
+                onAttachmentEnter: onAttachmentEnter,
+                onAttachmentExit: onAttachmentExit,
+                child: Container(
+                  key: ValueKey('user-message-${turn.id}'),
+                  constraints: BoxConstraints(
+                    maxWidth: responsiveUserMessageBoxWidth(viewportWidth),
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 13,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primaryContainer
+                        .withValues(alpha: .60),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.primary
+                          .withValues(alpha: .10),
+                    ),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (turn.contextTokens.isNotEmpty &&
+                          turn.attachments.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 5),
+                          child: Text(
+                            turn.contextTokens.join(' '),
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.primary,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
-                      ),
-                    if (turn.attachments.isNotEmpty)
-                      InlineAttachmentMessage(
-                        key: ValueKey('inline-user-message-${turn.id}'),
-                        text:
-                            turn.inlineUserText.contains(inlineAttachmentMarker)
-                            ? turn.inlineUserText
-                            : '${turn.userText}\n${List.filled(turn.attachments.length, inlineAttachmentMarker).join(' ')}',
-                        attachments: turn.attachments,
-                        onAttachmentEnter: onAttachmentEnter,
-                        onAttachmentExit: onAttachmentExit,
-                      )
-                    else
-                      CopyableMarkdown(
-                        text: turn.userText,
-                        compact: true,
-                        onCopy: controller.copyText,
-                        onOpenLink: controller.openExternalLink,
-                      ),
-                  ],
+                      if (turn.attachments.isNotEmpty)
+                        InlineAttachmentMessage(
+                          key: ValueKey('inline-user-message-${turn.id}'),
+                          text:
+                              turn.inlineUserText.contains(
+                                inlineAttachmentMarker,
+                              )
+                              ? turn.inlineUserText
+                              : '${turn.userText}\n${List.filled(turn.attachments.length, inlineAttachmentMarker).join(' ')}',
+                          attachments: turn.attachments,
+                          onAttachmentEnter: onAttachmentEnter,
+                          onAttachmentExit: onAttachmentExit,
+                        )
+                      else
+                        CopyableMarkdown(
+                          text: turn.userText,
+                          compact: true,
+                          showCopyAction: false,
+                          onCopy: controller.copyText,
+                          onOpenLink: controller.openExternalLink,
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -571,6 +587,172 @@ class ConversationTurnView extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _EditableUserMessage extends StatefulWidget {
+  const _EditableUserMessage({
+    required this.turn,
+    required this.controller,
+    required this.width,
+    required this.onAttachmentEnter,
+    required this.onAttachmentExit,
+    required this.child,
+  });
+
+  final ConversationTurn turn;
+  final ZommiController controller;
+  final double width;
+  final AttachmentHoverCallback onAttachmentEnter;
+  final ValueChanged<ContextAttachment> onAttachmentExit;
+  final Widget child;
+
+  @override
+  State<_EditableUserMessage> createState() => _EditableUserMessageState();
+}
+
+class _EditableUserMessageState extends State<_EditableUserMessage> {
+  TextEditingController? _editor;
+  bool _sending = false;
+
+  @override
+  void dispose() {
+    _editor?.dispose();
+    super.dispose();
+  }
+
+  void _cancel() {
+    final editor = _editor;
+    setState(() => _editor = null);
+    // The field releases its listener on the next build.
+    WidgetsBinding.instance.addPostFrameCallback((_) => editor?.dispose());
+  }
+
+  Future<void> _send() async {
+    final editor = _editor;
+    if (editor == null ||
+        _sending ||
+        (editor.value.composing.isValid &&
+            !editor.value.composing.isCollapsed)) {
+      return;
+    }
+    setState(() => _sending = true);
+    final accepted = await widget.controller.resendMessage(
+      widget.turn,
+      editor.text,
+    );
+    if (!mounted) return;
+    setState(() => _sending = false);
+    if (accepted) _cancel();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = widget.controller;
+    final editor = _editor;
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        final enabled =
+            !_sending &&
+            !controller.sessionReadOnly &&
+            !controller.sessionBusy &&
+            !controller.runtimeBusy &&
+            !controller.selectingContent &&
+            controller.turns.contains(widget.turn);
+        return ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: widget.width),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (editor == null)
+                widget.child
+              else
+                Container(
+                  key: ValueKey('message-editor-${widget.turn.id}'),
+                  width: widget.width,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surfaceContainerHigh
+                        .withValues(alpha: .80),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.primary
+                          .withValues(alpha: .4),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextField(
+                        key: ValueKey('edit-message-text-${widget.turn.id}'),
+                        controller: editor,
+                        autofocus: true,
+                        enabled: !_sending,
+                        minLines: 1,
+                        maxLines: 8,
+                        style: chatTextStyleOf(context),
+                        decoration: const InputDecoration(
+                          border: InputBorder.none,
+                          isDense: true,
+                        ),
+                      ),
+                      if (widget.turn.attachments.isNotEmpty)
+                        InlineAttachmentMessage(
+                          text: List.filled(
+                            widget.turn.attachments.length,
+                            inlineAttachmentMarker,
+                          ).join(' '),
+                          attachments: widget.turn.attachments,
+                          onAttachmentEnter: widget.onAttachmentEnter,
+                          onAttachmentExit: widget.onAttachmentExit,
+                        ),
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton(
+                            onPressed: _sending ? null : _cancel,
+                            child: const Text('Cancel'),
+                          ),
+                          const SizedBox(width: 6),
+                          ValueListenableBuilder<TextEditingValue>(
+                            valueListenable: editor,
+                            builder: (context, value, _) => FilledButton(
+                              key: ValueKey('resend-message-${widget.turn.id}'),
+                              onPressed: enabled && value.text.trim().isNotEmpty
+                                  ? _send
+                                  : null,
+                              child: Text(_sending ? 'Sending…' : 'Resend'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              if (editor == null)
+                MessageActions(
+                  key: ValueKey('user-actions-${widget.turn.id}'),
+                  text: widget.turn.userText,
+                  timestamp: widget.turn.createdAt,
+                  isUser: true,
+                  onCopy: controller.copyText,
+                  onEdit: enabled
+                      ? () => setState(
+                          () => _editor = TextEditingController(
+                            text: widget.turn.userText,
+                          ),
+                        )
+                      : null,
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -640,6 +822,7 @@ int transcriptContentRevision(
     turns.expand(
       (turn) => <Object?>[
         turn.id,
+        turn.createdAt,
         turn.userText,
         turn.inlineUserText,
         ...turn.attachments.map((attachment) => attachment.id),
@@ -650,12 +833,14 @@ int transcriptContentRevision(
                   block.kind.isFoldedActivity
               ? <Object?>[
                   block.id,
+                  block.createdAt,
                   block.kind,
                   block.completed,
                   block.text.trim().isNotEmpty || block.artifacts.isNotEmpty,
                 ]
               : <Object?>[
                   block.id,
+                  block.createdAt,
                   block.kind,
                   block.text,
                   block.lifecycle,
@@ -1244,28 +1429,48 @@ class AssistantBlockView extends StatelessWidget {
         alignment: Alignment.centerLeft,
         child: ConstrainedBox(
           constraints: BoxConstraints(maxWidth: width),
-          child: Container(
-            key: ValueKey('assistant-${block.id}'),
-            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 5),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: Theme.of(context).colorScheme.surface),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                CopyableMarkdown(
-                  text: block.text,
-                  onCopy: controller.copyText,
-                  onOpenLink: controller.openExternalLink,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                key: ValueKey('assistant-${block.id}'),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 13,
+                  vertical: 5,
                 ),
-                for (final artifact in block.artifacts)
-                  ArtifactCard(artifact: artifact, controller: controller),
-              ],
-            ),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface
+                      .withValues(alpha: .30),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.onSurface
+                        .withValues(alpha: .04),
+                  ),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    CopyableMarkdown(
+                      text: block.text,
+                      showCopyAction: false,
+                      onCopy: controller.copyText,
+                      onOpenLink: controller.openExternalLink,
+                    ),
+                    for (final artifact in block.artifacts)
+                      ArtifactCard(artifact: artifact, controller: controller),
+                  ],
+                ),
+              ),
+              MessageActions(
+                key: ValueKey('assistant-actions-${block.id}'),
+                text: block.text,
+                timestamp: block.createdAt,
+                onCopy: controller.copyText,
+              ),
+            ],
           ),
         ),
       ),

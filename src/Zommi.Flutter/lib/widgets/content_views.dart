@@ -18,6 +18,7 @@ class CopyableMarkdown extends StatefulWidget {
     required this.onCopy,
     required this.onOpenLink,
     this.compact = false,
+    this.showCopyAction = true,
     super.key,
   });
 
@@ -25,6 +26,7 @@ class CopyableMarkdown extends StatefulWidget {
   final Future<void> Function(String value) onCopy;
   final Future<void> Function(String value) onOpenLink;
   final bool compact;
+  final bool showCopyAction;
 
   @override
   State<CopyableMarkdown> createState() => _CopyableMarkdownState();
@@ -95,8 +97,12 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
         if (_contextLink != null) Tooltip.dismissAllToolTips();
       },
       child: MouseRegion(
-        onEnter: (_) => setState(() => _hovered = true),
-        onExit: (_) => setState(() => _hovered = false),
+        onEnter: widget.showCopyAction
+            ? (_) => setState(() => _hovered = true)
+            : null,
+        onExit: widget.showCopyAction
+            ? (_) => setState(() => _hovered = false)
+            : null,
         child: Stack(
           children: [
             ConstrainedBox(
@@ -109,7 +115,11 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
                 child: Padding(
                   // Preserve the compact bubble's former caret spacing while
                   // sharing selection with the rest of the message.
-                  padding: EdgeInsets.only(right: widget.compact ? 31 : 28),
+                  padding: EdgeInsets.only(
+                    right: widget.showCopyAction
+                        ? (widget.compact ? 31 : 28)
+                        : 0,
+                  ),
                   child: SelectionArea(
                     contextMenuBuilder: _selectionMenu,
                     child: _markdown ??= MarkdownBody(
@@ -184,44 +194,45 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
                 ),
               ),
             ),
-            Positioned(
-              right: 0,
-              top: 0,
-              child: AnimatedOpacity(
-                opacity: _hovered || _copied ? 1 : 0,
-                duration: const Duration(milliseconds: 120),
-                child: Semantics(
-                  button: true,
-                  label: '${_copied ? 'Copied' : 'Copy'} response',
-                  child: IconButton(
-                    key: ValueKey('copy-${widget.text.hashCode}'),
-                    visualDensity: VisualDensity.compact,
-                    constraints: const BoxConstraints.tightFor(
-                      width: 24,
-                      height: 24,
-                    ),
-                    style: IconButton.styleFrom(
-                      fixedSize: const Size(24, 24),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    padding: EdgeInsets.zero,
-                    splashRadius: 13,
-                    tooltip: _copied ? 'Copied' : 'Copy response',
-                    onPressed: () async {
-                      await widget.onCopy(widget.text);
-                      if (!mounted) return;
-                      setState(() => _copied = true);
-                      await Future<void>.delayed(const Duration(seconds: 1));
-                      if (mounted) setState(() => _copied = false);
-                    },
-                    icon: Icon(
-                      _copied ? Icons.check_rounded : Icons.copy_rounded,
-                      size: 14,
+            if (widget.showCopyAction)
+              Positioned(
+                right: 0,
+                top: 0,
+                child: AnimatedOpacity(
+                  opacity: _hovered || _copied ? 1 : 0,
+                  duration: const Duration(milliseconds: 120),
+                  child: Semantics(
+                    button: true,
+                    label: '${_copied ? 'Copied' : 'Copy'} response',
+                    child: IconButton(
+                      key: ValueKey('copy-${widget.text.hashCode}'),
+                      visualDensity: VisualDensity.compact,
+                      constraints: const BoxConstraints.tightFor(
+                        width: 24,
+                        height: 24,
+                      ),
+                      style: IconButton.styleFrom(
+                        fixedSize: const Size(24, 24),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      padding: EdgeInsets.zero,
+                      splashRadius: 13,
+                      tooltip: _copied ? 'Copied' : 'Copy response',
+                      onPressed: () async {
+                        await widget.onCopy(widget.text);
+                        if (!mounted) return;
+                        setState(() => _copied = true);
+                        await Future<void>.delayed(const Duration(seconds: 1));
+                        if (mounted) setState(() => _copied = false);
+                      },
+                      icon: Icon(
+                        _copied ? Icons.check_rounded : Icons.copy_rounded,
+                        size: 14,
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
           ],
         ),
       ),

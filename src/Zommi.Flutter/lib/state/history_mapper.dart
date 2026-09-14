@@ -30,18 +30,51 @@ ConversationTurn _mapTurn(
     id: id,
     number: number,
     userText: userText.isEmpty ? 'Continue' : userText,
+    createdAt: messageTimestamp(userItem ?? {}) ?? messageTimestamp(turn),
     attachments: attachments,
     contextTokens: attachments.map((attachment) => attachment.token).toList(),
   );
   for (final item in items) {
     final block = _historyBlock(item, threadCwd);
-    if (block != null) result.blocks.add(block);
+    if (block != null) {
+      block.createdAt = messageTimestamp(item);
+      result.blocks.add(block);
+    }
   }
   final normalized = normalizeTranscriptBlocks(result.blocks);
   result.blocks
     ..clear()
     ..addAll(normalized);
   return result;
+}
+
+/// Native runtimes use either ISO timestamps or Unix seconds/milliseconds.
+/// Missing historical timestamps stay unknown instead of becoming read time.
+DateTime? messageTimestamp(Map<String, Object?> value) {
+  for (final key in [
+    'createdAt',
+    'created_at',
+    'timestamp',
+    'startedAt',
+    'started_at',
+  ]) {
+    final raw = value[key];
+    final numeric = raw is num ? raw : num.tryParse(raw?.toString() ?? '');
+    if (numeric != null && numeric.isFinite && numeric > 0) {
+      final milliseconds = numeric < 100000000000 ? numeric * 1000 : numeric;
+      if (milliseconds <= 8640000000000000) {
+        return DateTime.fromMillisecondsSinceEpoch(
+          milliseconds.round(),
+          isUtc: true,
+        );
+      }
+    }
+    if (raw is String) {
+      final date = DateTime.tryParse(raw);
+      if (date != null) return date;
+    }
+  }
+  return null;
 }
 
 TranscriptBlock? _historyBlock(Map<String, Object?> item, String? cwd) {
@@ -480,6 +513,7 @@ TranscriptBlock mergeTranscriptBlocks(
   return TranscriptBlock(
     id: primary.id,
     sourceId: primary.sourceId,
+    createdAt: primary.createdAt ?? secondary.createdAt,
     kind: primary.kind,
     title: primary.title.isEmpty ? secondary.title : primary.title,
     text: text,

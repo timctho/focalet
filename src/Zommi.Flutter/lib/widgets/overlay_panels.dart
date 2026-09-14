@@ -78,7 +78,8 @@ class _SessionSidebarState extends State<SessionSidebar> {
       label: 'Chat sessions',
       child: Material(
         key: const ValueKey('session-sidebar'),
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
+        color: Theme.of(context).colorScheme.surfaceContainerLow
+            .withValues(alpha: .38),
         elevation: 0,
         child: Column(
           children: [

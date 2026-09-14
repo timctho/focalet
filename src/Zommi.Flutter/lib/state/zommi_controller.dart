@@ -1322,7 +1322,61 @@ final class ZommiController extends ChangeNotifier {
       settings: activeSessionSettings,
       draftValue: draftValue,
       attachmentSequence: draftAttachmentSequence,
+      createdAt: _clock(),
     );
+    await _enqueueMessage(pendingMessage);
+  }
+
+  /// Resubmits an explicitly edited message without consuming the composer
+  /// draft or changing the original conversation. It uses the normal queue.
+  Future<bool> resendMessage(ConversationTurn original, String message) async {
+    final text = message.trim();
+    final runtime = activeRuntime;
+    final sessionId = activeSessionId;
+    if (text.isEmpty ||
+        runtime == null ||
+        sessionId == null ||
+        sessionReadOnly ||
+        sessionBusy ||
+        runtimeBusy ||
+        selectingContent ||
+        !turns.contains(original)) {
+      return false;
+    }
+    final inlineText = original.attachments.isEmpty
+        ? text
+        : '$text\n${List.filled(original.attachments.length, '\u{fffc}').join(' ')}';
+    final pendingMessage = QueuedMessage(
+      id: 'flutter:${DateTime.now().microsecondsSinceEpoch}:${++_localTurnSequence}',
+      runtimeTargetId: runtime.id,
+      runtimeName: activeRuntimeName,
+      sessionId: sessionId,
+      text: text,
+      inlineText: inlineText,
+      attachments: original.attachments,
+      settings: activeSessionSettings,
+      draftValue: TextEditingValue(text: inlineText),
+      attachmentSequence: original.attachments.fold(0, (sequence, attachment) {
+        final index = attachment.reference.codeUnits.fold(
+          0,
+          (value, char) => value * 26 + char - 64,
+        );
+        return index > sequence ? index : sequence;
+      }),
+      createdAt: _clock(),
+    );
+    _newSessions.remove(_sessionKey(runtime.id, sessionId));
+    await _enqueueMessage(pendingMessage);
+    return true;
+  }
+
+  Future<void> _enqueueMessage(QueuedMessage pendingMessage) async {
+    final sessionKey = _sessionKey(
+      pendingMessage.runtimeTargetId,
+      pendingMessage.sessionId,
+    );
+    final text = pendingMessage.text;
+    final sessionId = pendingMessage.sessionId;
     final history = _inputHistory.putIfAbsent(sessionKey, () => []);
     history.remove(text);
     history.add(text);
@@ -1354,6 +1408,7 @@ final class ZommiController extends ChangeNotifier {
       number: (_turnsBySession[sessionKey]?.length ?? 0) + 1,
       userText: message.text,
       inlineUserText: message.inlineText,
+      createdAt: message.createdAt ?? _clock(),
       contextTokens: sendingAttachments
           .where((item) => !item.hasImage)
           .map((item) => item.token)
@@ -2300,6 +2355,7 @@ final class ZommiController extends ChangeNotifier {
                   id: turnId,
                   number: turns.length + 1,
                   userText: 'Continue goal',
+                  createdAt: messageTimestamp(event.payload) ?? _clock(),
                 ),
               );
               _transcriptChanged(sessionKey);
@@ -2460,6 +2516,7 @@ final class ZommiController extends ChangeNotifier {
         id: eventIdentity ?? 'runtime-turn-${sessionTurns.length + 1}',
         number: sessionTurns.length + 1,
         userText: 'Continue',
+        createdAt: messageTimestamp(event.payload) ?? _clock(),
       );
       sessionTurns.add(turn);
     }
@@ -2509,6 +2566,7 @@ final class ZommiController extends ChangeNotifier {
         lifecycle: lifecycle,
         status: event.payload['status']?.toString(),
         expanded: kind == TranscriptKind.error,
+        createdAt: messageTimestamp(event.payload) ?? _clock(),
       );
       final beforeItemId = event.payload['beforeItemId']?.toString();
       final beforeIndex = beforeItemId == null
@@ -3026,6 +3084,7 @@ ConversationTurn mergeConversationTurn(
     id: primary.id,
     number: primary.number,
     userText: primary.userText,
+    createdAt: primary.createdAt ?? secondary.createdAt,
     inlineUserText: presentation.attachments.isEmpty
         ? primary.inlineUserText
         : presentation.inlineUserText,
