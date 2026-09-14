@@ -283,9 +283,10 @@ class _SessionSidebarState extends State<SessionSidebar> {
                           ),
                           dense: true,
                           visualDensity: const VisualDensity(vertical: -3),
+                          minVerticalPadding: 0,
                           contentPadding: const EdgeInsets.symmetric(
                             horizontal: 8,
-                            vertical: 8,
+                            vertical: 4,
                           ),
                           selected: selected,
                           selectedTileColor: Theme.of(context)
@@ -333,7 +334,7 @@ class _SessionSidebarState extends State<SessionSidebar> {
                                   ],
                                 ],
                               ),
-                              const SizedBox(height: 4),
+                              const SizedBox(height: 2),
                               Text(
                                 session.title,
                                 maxLines: 1,
@@ -343,7 +344,7 @@ class _SessionSidebarState extends State<SessionSidebar> {
                                   fontWeight: FontWeight.w500,
                                 ),
                               ),
-                              const SizedBox(height: 5),
+                              const SizedBox(height: 3),
                               Row(
                                 children: [
                                   Tooltip(
