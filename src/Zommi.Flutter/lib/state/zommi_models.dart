@@ -363,6 +363,7 @@ final class TranscriptBlock {
     this.status,
     this.preview = '',
     this.expanded = true,
+    this.createdAt,
     List<ArtifactPreview> artifacts = const [],
   }) : sourceId = sourceId ?? id,
        artifacts = List<ArtifactPreview>.of(artifacts);
@@ -376,6 +377,7 @@ final class TranscriptBlock {
   String? status;
   String preview;
   bool expanded;
+  DateTime? createdAt;
   final List<ArtifactPreview> artifacts;
 
   bool get isActivity => !kind.isMessage;
@@ -395,6 +397,7 @@ final class QueuedMessage {
     required this.draftValue,
     required this.attachmentSequence,
     this.isCommand = false,
+    this.createdAt,
     required List<ContextAttachment> attachments,
   }) : attachments = List.unmodifiable(attachments);
 
@@ -408,6 +411,7 @@ final class QueuedMessage {
   final TextEditingValue draftValue;
   final int attachmentSequence;
   final bool isCommand;
+  final DateTime? createdAt;
   final List<ContextAttachment> attachments;
 }
 
@@ -417,6 +421,7 @@ final class ConversationTurn {
     required this.userText,
     String? inlineUserText,
     this.number = 0,
+    this.createdAt,
     this.activityExpanded = false,
     Map<String, bool> activityGroupExpansion = const {},
     List<String> contextTokens = const [],
@@ -430,6 +435,7 @@ final class ConversationTurn {
 
   final String id;
   final int number;
+  final DateTime? createdAt;
   final String userText;
   final String inlineUserText;
   bool activityExpanded;

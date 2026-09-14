@@ -974,8 +974,8 @@ void main() {
         ),
       );
       final assistantBox = find.byKey(const ValueKey('assistant-answer'));
-      expect(userMessageBoxWidth, 520 * 0.8);
-      expect(assistantMessageBoxWidth, 620 * 0.8);
+      expect(userMessageBoxWidth, 416 * 1.2);
+      expect(assistantMessageBoxWidth, 496 * 1.2);
       expect(
         userBox.constraints?.maxWidth,
         responsiveUserMessageBoxWidth(conversationContentMaxWidth),
@@ -1357,9 +1357,8 @@ void main() {
               'activity-section-',
             ),
       );
-      expect(thinkingCards, findsNWidgets(2));
+      expect(thinkingCards, findsOneWidget);
       final thinkingCard = thinkingCards.at(0);
-      final laterThinkingCard = thinkingCards.at(1);
       expect(find.byKey(const ValueKey('activity-tool-1')), findsNothing);
       expect(find.byType(AnimatedCrossFade), findsNothing);
       expect(
@@ -1398,18 +1397,6 @@ void main() {
           ),
         ),
       );
-      await tester.tap(
-        find.descendant(
-          of: laterThinkingCard,
-          matching: find.byWidgetPredicate(
-            (widget) =>
-                widget.key is ValueKey<String> &&
-                (widget.key! as ValueKey<String>).value.startsWith(
-                  'thinking-toggle-',
-                ),
-          ),
-        ),
-      );
       await tester.pumpAndSettle();
 
       final toolCard = find.byKey(const ValueKey('activity-tool-1'));
@@ -1421,6 +1408,20 @@ void main() {
       expect(find.text('Command · 12345678901234567890...'), findsOneWidget);
       expect(find.text('Reading the selected table.'), findsOneWidget);
       expect(find.text('Comparing the selected rows.'), findsOneWidget);
+      final thinkingMarkdown = find
+          .descendant(of: thinkingCard, matching: find.byType(CopyableMarkdown))
+          .first;
+      expect(
+        tester
+            .getTopLeft(
+              find.descendant(
+                of: thinkingMarkdown,
+                matching: find.byType(MarkdownBody),
+              ),
+            )
+            .dx,
+        closeTo(tester.getTopLeft(thinkingMarkdown).dx, .1),
+      );
       final timeline = [
         find.byKey(const ValueKey('activity-thinking-a')),
         toolCard,
@@ -1740,7 +1741,7 @@ void main() {
     final user = tester.getRect(
       find.byKey(const ValueKey('user-message-session-1-turn-1')),
     );
-    expect(composer.width, conversationContentMaxWidth);
+    expect(composer.width, 864);
     expect(assistant.left, greaterThanOrEqualTo(composer.left));
     expect(assistant.right, lessThanOrEqualTo(composer.right));
     expect(user.left, greaterThanOrEqualTo(composer.left));
@@ -1818,7 +1819,12 @@ Future<void> _pumpApp(
   await tester.binding.setSurfaceSize(const Size(1000, 820));
   addTearDown(() => tester.binding.setSurfaceSize(null));
   await tester.pumpWidget(
-    ZommiApp(core: core, desktop: desktop, artifactLoader: artifactLoader),
+    ZommiApp(
+      core: core,
+      desktop: desktop,
+      artifactLoader: artifactLoader,
+      clock: () => DateTime(2026, 9, 14, 14, 32),
+    ),
   );
   await tester.pumpAndSettle();
   // Keep the full-width transcript fixture; sidebar behavior has its own tests.

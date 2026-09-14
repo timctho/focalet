@@ -182,13 +182,13 @@ void main() {
         await tester.tap(find.byKey(const ValueKey('send-message')));
         await tester.pump();
         await tester.enterText(composer, 'Review the tests once this finishes');
-        await tester.tap(find.byKey(const ValueKey('send-message')));
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
         await tester.pump();
         await tester.enterText(
           composer,
           'Summarize the results and remaining risks',
         );
-        await tester.tap(find.byKey(const ValueKey('send-message')));
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
         await tester.pump(const Duration(milliseconds: 300));
         await capturePreview('queue-light');
         tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;

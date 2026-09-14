@@ -9,11 +9,14 @@ import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/zommi_typography.dart';
 import 'package:zommi_flutter/widgets/content_views.dart';
 import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
+import 'package:zommi_flutter/widgets/message_actions.dart';
+import 'package:zommi_flutter/widgets/thinking_flow_background.dart';
 
-const double userMessageBoxWidth = 416;
-const double assistantMessageBoxWidth = 496;
-const double conversationContentMaxWidth = 720;
-const double _baselineMessageViewportWidth = 720;
+const double _messageContentWidthScale = 1.2;
+const double userMessageBoxWidth = 416 * _messageContentWidthScale;
+const double assistantMessageBoxWidth = 496 * _messageContentWidthScale;
+const double conversationContentMaxWidth = 720 * _messageContentWidthScale;
+const double _baselineMessageViewportWidth = conversationContentMaxWidth;
 const double _transcriptHorizontalInsets = 48;
 
 double responsiveUserMessageBoxWidth(double viewportWidth) {
@@ -434,13 +437,7 @@ class ConversationTurnView extends StatelessWidget {
           block.artifacts.isEmpty) {
         continue;
       }
-      final startsNewActivityPhase =
-          block.kind == TranscriptKind.thinking &&
-          segments.isNotEmpty &&
-          segments.last.first.kind.isFoldedActivity &&
-          segments.last.any((item) => item.kind == TranscriptKind.tool);
       if (block.kind.isFoldedActivity &&
-          !startsNewActivityPhase &&
           segments.isNotEmpty &&
           segments.last.first.kind.isFoldedActivity) {
         segments.last.add(block);
@@ -458,55 +455,75 @@ class ConversationTurnView extends StatelessWidget {
           children: [
             Align(
               alignment: Alignment.centerRight,
-              child: Container(
-                key: ValueKey('user-message-${turn.id}'),
-                constraints: BoxConstraints(
-                  maxWidth: responsiveUserMessageBoxWidth(viewportWidth),
-                ),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 13,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (turn.contextTokens.isNotEmpty &&
-                        turn.attachments.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 5),
-                        child: Text(
-                          turn.contextTokens.join(' '),
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.primary,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
+              child: _EditableUserMessage(
+                turn: turn,
+                controller: controller,
+                width: responsiveUserMessageBoxWidth(viewportWidth),
+                onAttachmentEnter: onAttachmentEnter,
+                onAttachmentExit: onAttachmentExit,
+                child: Container(
+                  key: ValueKey('user-message-${turn.id}'),
+                  constraints: BoxConstraints(
+                    maxWidth: responsiveUserMessageBoxWidth(viewportWidth),
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 13,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primaryContainer
+                        .withValues(alpha: .60),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.primary
+                          .withValues(alpha: .10),
+                    ),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (turn.contextTokens.isNotEmpty &&
+                          turn.attachments.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 5),
+                          child: Text(
+                            turn.contextTokens.join(' '),
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.primary,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
-                      ),
-                    if (turn.attachments.isNotEmpty)
-                      InlineAttachmentMessage(
-                        key: ValueKey('inline-user-message-${turn.id}'),
-                        text:
-                            turn.inlineUserText.contains(inlineAttachmentMarker)
-                            ? turn.inlineUserText
-                            : '${turn.userText}\n${List.filled(turn.attachments.length, inlineAttachmentMarker).join(' ')}',
-                        attachments: turn.attachments,
-                        onAttachmentEnter: onAttachmentEnter,
-                        onAttachmentExit: onAttachmentExit,
-                      )
-                    else
-                      CopyableMarkdown(
-                        text: turn.userText,
-                        compact: true,
-                        onCopy: controller.copyText,
-                        onOpenLink: controller.openExternalLink,
-                      ),
-                  ],
+                      if (turn.attachments.isNotEmpty)
+                        InlineAttachmentMessage(
+                          key: ValueKey('inline-user-message-${turn.id}'),
+                          text:
+                              turn.inlineUserText.contains(
+                                inlineAttachmentMarker,
+                              )
+                              ? turn.inlineUserText
+                              : '${turn.userText}\n${List.filled(turn.attachments.length, inlineAttachmentMarker).join(' ')}',
+                          attachments: turn.attachments,
+                          onAttachmentEnter: onAttachmentEnter,
+                          onAttachmentExit: onAttachmentExit,
+                        )
+                      else
+                        DefaultTextStyle.merge(
+                          // Shrink wrapped paragraphs to their longest visible
+                          // line so both sides keep the same bubble inset.
+                          textWidthBasis: TextWidthBasis.longestLine,
+                          child: CopyableMarkdown(
+                            text: turn.userText,
+                            compact: true,
+                            showCopyAction: false,
+                            onCopy: controller.copyText,
+                            onOpenLink: controller.openExternalLink,
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -571,6 +588,172 @@ class ConversationTurnView extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _EditableUserMessage extends StatefulWidget {
+  const _EditableUserMessage({
+    required this.turn,
+    required this.controller,
+    required this.width,
+    required this.onAttachmentEnter,
+    required this.onAttachmentExit,
+    required this.child,
+  });
+
+  final ConversationTurn turn;
+  final ZommiController controller;
+  final double width;
+  final AttachmentHoverCallback onAttachmentEnter;
+  final ValueChanged<ContextAttachment> onAttachmentExit;
+  final Widget child;
+
+  @override
+  State<_EditableUserMessage> createState() => _EditableUserMessageState();
+}
+
+class _EditableUserMessageState extends State<_EditableUserMessage> {
+  TextEditingController? _editor;
+  bool _sending = false;
+
+  @override
+  void dispose() {
+    _editor?.dispose();
+    super.dispose();
+  }
+
+  void _cancel() {
+    final editor = _editor;
+    setState(() => _editor = null);
+    // The field releases its listener on the next build.
+    WidgetsBinding.instance.addPostFrameCallback((_) => editor?.dispose());
+  }
+
+  Future<void> _send() async {
+    final editor = _editor;
+    if (editor == null ||
+        _sending ||
+        (editor.value.composing.isValid &&
+            !editor.value.composing.isCollapsed)) {
+      return;
+    }
+    setState(() => _sending = true);
+    final accepted = await widget.controller.resendMessage(
+      widget.turn,
+      editor.text,
+    );
+    if (!mounted) return;
+    setState(() => _sending = false);
+    if (accepted) _cancel();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = widget.controller;
+    final editor = _editor;
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        final enabled =
+            !_sending &&
+            !controller.sessionReadOnly &&
+            !controller.sessionBusy &&
+            !controller.runtimeBusy &&
+            !controller.selectingContent &&
+            controller.turns.contains(widget.turn);
+        return ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: widget.width),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (editor == null)
+                widget.child
+              else
+                Container(
+                  key: ValueKey('message-editor-${widget.turn.id}'),
+                  width: widget.width,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surfaceContainerHigh
+                        .withValues(alpha: .80),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.primary
+                          .withValues(alpha: .4),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextField(
+                        key: ValueKey('edit-message-text-${widget.turn.id}'),
+                        controller: editor,
+                        autofocus: true,
+                        enabled: !_sending,
+                        minLines: 1,
+                        maxLines: 8,
+                        style: chatTextStyleOf(context),
+                        decoration: const InputDecoration(
+                          border: InputBorder.none,
+                          isDense: true,
+                        ),
+                      ),
+                      if (widget.turn.attachments.isNotEmpty)
+                        InlineAttachmentMessage(
+                          text: List.filled(
+                            widget.turn.attachments.length,
+                            inlineAttachmentMarker,
+                          ).join(' '),
+                          attachments: widget.turn.attachments,
+                          onAttachmentEnter: widget.onAttachmentEnter,
+                          onAttachmentExit: widget.onAttachmentExit,
+                        ),
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton(
+                            onPressed: _sending ? null : _cancel,
+                            child: const Text('Cancel'),
+                          ),
+                          const SizedBox(width: 6),
+                          ValueListenableBuilder<TextEditingValue>(
+                            valueListenable: editor,
+                            builder: (context, value, _) => FilledButton(
+                              key: ValueKey('resend-message-${widget.turn.id}'),
+                              onPressed: enabled && value.text.trim().isNotEmpty
+                                  ? _send
+                                  : null,
+                              child: Text(_sending ? 'Sending…' : 'Resend'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              if (editor == null)
+                MessageActions(
+                  key: ValueKey('user-actions-${widget.turn.id}'),
+                  text: widget.turn.userText,
+                  timestamp: widget.turn.createdAt,
+                  isUser: true,
+                  onCopy: controller.copyText,
+                  onEdit: enabled
+                      ? () => setState(
+                          () => _editor = TextEditingController(
+                            text: widget.turn.userText,
+                          ),
+                        )
+                      : null,
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -640,6 +823,7 @@ int transcriptContentRevision(
     turns.expand(
       (turn) => <Object?>[
         turn.id,
+        turn.createdAt,
         turn.userText,
         turn.inlineUserText,
         ...turn.attachments.map((attachment) => attachment.id),
@@ -650,12 +834,14 @@ int transcriptContentRevision(
                   block.kind.isFoldedActivity
               ? <Object?>[
                   block.id,
+                  block.createdAt,
                   block.kind,
                   block.completed,
                   block.text.trim().isNotEmpty || block.artifacts.isNotEmpty,
                 ]
               : <Object?>[
                   block.id,
+                  block.createdAt,
                   block.kind,
                   block.text,
                   block.lifecycle,
@@ -851,8 +1037,23 @@ class ThinkingActivityGroup extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final expanded = turn.isActivityGroupExpanded(groupId);
+    // A new reasoning phase closes older tool work without creating another
+    // section. Only the current phase determines whether this group is busy.
+    var activePhaseStart = 0;
+    var sawTool = false;
+    for (var index = 0; index < activities.length; index++) {
+      if (activities[index].kind == TranscriptKind.tool) {
+        sawTool = true;
+      } else if (activities[index].kind == TranscriptKind.thinking && sawTool) {
+        activePhaseStart = index;
+        sawTool = false;
+      }
+    }
     final completed =
-        forceCompleted || activities.every((activity) => activity.completed);
+        forceCompleted ||
+        activities
+            .skip(activePhaseStart)
+            .every((activity) => activity.completed);
     final toolCount = activities
         .where((activity) => activity.kind == TranscriptKind.tool)
         .length;
@@ -872,90 +1073,103 @@ class ThinkingActivityGroup extends StatelessWidget {
                 color: Theme.of(context).colorScheme.outlineVariant,
               ),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+            child: Stack(
               children: [
-                InkWell(
-                  key: ValueKey('thinking-toggle-$id'),
-                  borderRadius: BorderRadius.circular(10),
-                  onTap: () => controller.setTurnActivityExpanded(
-                    turn,
-                    !expanded,
-                    groupId: groupId,
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 4,
+                if (!completed)
+                  Positioned.fill(
+                    child: ThinkingFlowBackground(
+                      key: ValueKey('thinking-flow-$id'),
                     ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.auto_awesome_rounded,
-                          size: 15,
-                          color: Theme.of(context).colorScheme.primary,
+                  ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    InkWell(
+                      key: ValueKey('thinking-toggle-$id'),
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: () => controller.setTurnActivityExpanded(
+                        turn,
+                        !expanded,
+                        groupId: groupId,
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 4,
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Thinking',
-                            style: chatTextStyleOf(context).copyWith(
-                              color: Theme.of(context).colorScheme.onSurface,
-                              fontWeight: FontWeight.w700,
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.auto_awesome_rounded,
+                              size: 15,
+                              color: Theme.of(context).colorScheme.primary,
                             ),
-                          ),
-                        ),
-                        if (toolCount > 0)
-                          Text(
-                            '$toolCount tool${toolCount == 1 ? '' : 's'}',
-                            key: const ValueKey('thinking-tool-count'),
-                            style: chatTextStyleOf(context).copyWith(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurfaceVariant,
-                            ),
-                          ),
-                        if (toolCount > 0) const SizedBox(width: 8),
-                        if (!completed)
-                          const SizedBox.square(
-                            dimension: 13,
-                            child: RepaintBoundary(
-                              child: CircularProgressIndicator(
-                                strokeWidth: 1.5,
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Thinking',
+                                style: chatTextStyleOf(context).copyWith(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurface,
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
                             ),
-                          )
-                        else
-                          const Icon(
-                            Icons.check_circle_outline_rounded,
-                            size: 15,
-                            color: Color(0xff659071),
-                          ),
-                        const SizedBox(width: 5),
-                        Icon(
-                          expanded
-                              ? Icons.expand_less_rounded
-                              : Icons.expand_more_rounded,
-                          size: 17,
+                            if (toolCount > 0)
+                              Text(
+                                '$toolCount tool${toolCount == 1 ? '' : 's'}',
+                                key: const ValueKey('thinking-tool-count'),
+                                style: chatTextStyleOf(context).copyWith(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
+                              ),
+                            if (toolCount > 0) const SizedBox(width: 8),
+                            if (!completed)
+                              const SizedBox.square(
+                                dimension: 13,
+                                child: RepaintBoundary(
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 1.5,
+                                  ),
+                                ),
+                              )
+                            else
+                              const Icon(
+                                Icons.check_circle_outline_rounded,
+                                size: 15,
+                                color: Color(0xff659071),
+                              ),
+                            const SizedBox(width: 5),
+                            Icon(
+                              expanded
+                                  ? Icons.expand_less_rounded
+                                  : Icons.expand_more_rounded,
+                              size: 17,
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
-                _ExpandableActivityBody(
-                  key: ValueKey('thinking-fold-$id'),
-                  expanded: expanded,
-                  duration: completed
-                      ? const Duration(milliseconds: 150)
-                      : Duration.zero,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-                    child: _ActivityList(
-                      activities: activities,
-                      controller: controller,
-                      forceCompleted: forceCompleted,
+                    _ExpandableActivityBody(
+                      key: ValueKey('thinking-fold-$id'),
+                      expanded: expanded,
+                      duration: completed
+                          ? const Duration(milliseconds: 150)
+                          : Duration.zero,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                        child: _ActivityList(
+                          activities: activities,
+                          controller: controller,
+                          forceCompleted: forceCompleted,
+                          completedBefore: activePhaseStart,
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
               ],
             ),
@@ -971,11 +1185,13 @@ class _ActivityList extends StatefulWidget {
     required this.activities,
     required this.controller,
     required this.forceCompleted,
+    required this.completedBefore,
   });
 
   final List<TranscriptBlock> activities;
   final ZommiController controller;
   final bool forceCompleted;
+  final int completedBefore;
 
   @override
   State<_ActivityList> createState() => _ActivityListState();
@@ -996,27 +1212,31 @@ class _ActivityListState extends State<_ActivityList> {
     }
   }
 
-  Widget _item(TranscriptBlock activity) => RepaintBoundary(
-    key: ValueKey(activity.id),
-    child: activity.kind == TranscriptKind.thinking
-        ? _ThinkingActivitySubItem(
-            block: activity,
-            controller: widget.controller,
-            forceCompleted: widget.forceCompleted,
-          )
-        : _ToolActivitySubItem(
-            block: activity,
-            controller: widget.controller,
-            forceCompleted: widget.forceCompleted,
-          ),
-  );
+  Widget _item(int index) {
+    final activity = widget.activities[index];
+    final completed = widget.forceCompleted || index < widget.completedBefore;
+    return RepaintBoundary(
+      key: ValueKey(activity.id),
+      child: activity.kind == TranscriptKind.thinking
+          ? _ThinkingActivitySubItem(
+              block: activity,
+              controller: widget.controller,
+              forceCompleted: completed,
+            )
+          : _ToolActivitySubItem(
+              block: activity,
+              controller: widget.controller,
+              forceCompleted: completed,
+            ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     if (widget.activities.length <= 8) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: widget.activities.map(_item).toList(growable: false),
+        children: List.generate(widget.activities.length, _item),
       );
     }
     return SizedBox(
@@ -1036,7 +1256,7 @@ class _ActivityListState extends State<_ActivityList> {
             return index < 0 ? null : widget.activities.length - 1 - index;
           },
           itemBuilder: (_, index) =>
-              _item(widget.activities[widget.activities.length - 1 - index]),
+              _item(widget.activities.length - 1 - index),
         ),
       ),
     );
@@ -1244,28 +1464,48 @@ class AssistantBlockView extends StatelessWidget {
         alignment: Alignment.centerLeft,
         child: ConstrainedBox(
           constraints: BoxConstraints(maxWidth: width),
-          child: Container(
-            key: ValueKey('assistant-${block.id}'),
-            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 5),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: Theme.of(context).colorScheme.surface),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                CopyableMarkdown(
-                  text: block.text,
-                  onCopy: controller.copyText,
-                  onOpenLink: controller.openExternalLink,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                key: ValueKey('assistant-${block.id}'),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 13,
+                  vertical: 5,
                 ),
-                for (final artifact in block.artifacts)
-                  ArtifactCard(artifact: artifact, controller: controller),
-              ],
-            ),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface
+                      .withValues(alpha: .30),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.onSurface
+                        .withValues(alpha: .04),
+                  ),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    CopyableMarkdown(
+                      text: block.text,
+                      showCopyAction: false,
+                      onCopy: controller.copyText,
+                      onOpenLink: controller.openExternalLink,
+                    ),
+                    for (final artifact in block.artifacts)
+                      ArtifactCard(artifact: artifact, controller: controller),
+                  ],
+                ),
+              ),
+              MessageActions(
+                key: ValueKey('assistant-actions-${block.id}'),
+                text: block.text,
+                timestamp: block.createdAt,
+                onCopy: controller.copyText,
+              ),
+            ],
           ),
         ),
       ),

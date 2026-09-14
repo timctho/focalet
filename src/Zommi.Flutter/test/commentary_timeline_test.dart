@@ -334,8 +334,7 @@ void main() {
         'message:Checking files',
         'thinking:First reasoning',
         'message:Checking files',
-        'thinking:Inspection result',
-        'thinking:Second reasoning',
+        'thinking:Inspection result|Second reasoning',
         'message:Complete',
       ];
       _expectTimeline(tester, timeline);
