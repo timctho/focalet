@@ -1357,9 +1357,8 @@ void main() {
               'activity-section-',
             ),
       );
-      expect(thinkingCards, findsNWidgets(2));
+      expect(thinkingCards, findsOneWidget);
       final thinkingCard = thinkingCards.at(0);
-      final laterThinkingCard = thinkingCards.at(1);
       expect(find.byKey(const ValueKey('activity-tool-1')), findsNothing);
       expect(find.byType(AnimatedCrossFade), findsNothing);
       expect(
@@ -1389,18 +1388,6 @@ void main() {
       await tester.tap(
         find.descendant(
           of: thinkingCard,
-          matching: find.byWidgetPredicate(
-            (widget) =>
-                widget.key is ValueKey<String> &&
-                (widget.key! as ValueKey<String>).value.startsWith(
-                  'thinking-toggle-',
-                ),
-          ),
-        ),
-      );
-      await tester.tap(
-        find.descendant(
-          of: laterThinkingCard,
           matching: find.byWidgetPredicate(
             (widget) =>
                 widget.key is ValueKey<String> &&

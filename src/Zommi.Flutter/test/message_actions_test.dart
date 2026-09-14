@@ -45,6 +45,67 @@ Map<String, Object?> history() => {
 };
 
 void main() {
+  for (final text in [
+    'A short message',
+    'Please check the alignment of this user message and keep the spacing equal on both sides.',
+  ]) {
+    testWidgets('user bubble has equal visible text insets: $text', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(640, 760));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final core = RichFakeCore()
+        ..historyBySession['runtime-codex\u0000session-1'] = {
+          'thread': {
+            'turns': [
+              {
+                'id': 'padding',
+                'items': [
+                  {
+                    'type': 'userMessage',
+                    'content': [
+                      {'type': 'text', 'text': text},
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        };
+      await tester.pumpWidget(
+        ZommiApp(core: core, desktop: FakeDesktopBridge()),
+      );
+      await tester.pumpAndSettle();
+      final bubble = find.byKey(const ValueKey('user-message-padding'));
+      final paragraph = tester.renderObject<RenderParagraph>(
+        find.descendant(
+          of: bubble,
+          matching: find.byWidgetPredicate(
+            (widget) => widget is RichText && widget.text.toPlainText() == text,
+          ),
+        ),
+      );
+      // Selecting whole wrapped lines includes invisible trailing spaces;
+      // compare the visible words, allowing subpixel glyph side bearings.
+      final boxes = [
+        for (final word in RegExp(r'\S+').allMatches(text))
+          ...paragraph.getBoxesForSelection(
+            TextSelection(baseOffset: word.start, extentOffset: word.end),
+          ),
+      ];
+      final left = boxes.map((box) => box.left).reduce((a, b) => a < b ? a : b);
+      final right = boxes
+          .map((box) => box.right)
+          .reduce((a, b) => a > b ? a : b);
+      final origin = paragraph.localToGlobal(Offset.zero).dx;
+      final bounds = tester.getRect(bubble);
+      expect(
+        origin + left - bounds.left,
+        closeTo(bounds.right - origin - right, .5),
+      );
+    });
+  }
+
   test('history preserves timestamps through normalization and refresh', () {
     final original = mapThreadHistory(history()).single;
     expect(original.createdAt, DateTime(2026, 9, 14, 14, 32));

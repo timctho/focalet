@@ -82,7 +82,7 @@ void main() {
       );
       debugOnRebuildDirtyWidget = null;
       final toggle = find.byKey(
-        const ValueKey('thinking-toggle-folded-turn-reasoning'),
+        const ValueKey('thinking-toggle-folded-turn-tool-0'),
       );
       await tester.ensureVisible(toggle);
       await tester.pump(const Duration(milliseconds: 200));

@@ -225,6 +225,7 @@ class InlineAttachmentMessage extends StatelessWidget {
     return SelectionArea(
       child: RichText(
         key: key,
+        textWidthBasis: TextWidthBasis.longestLine,
         text: TextSpan(
           style: style,
           children: inlineAttachmentSpans(

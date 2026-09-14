@@ -226,7 +226,7 @@ void main() {
   });
 
   testWidgets(
-    'Send and Enter queue during a response; Stop and Resume are separate',
+    'response shows only Stop while Enter queues; idle Send and Resume return',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(640, 500));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -244,9 +244,10 @@ void main() {
       await tester.pump();
       expect(core.startedTurns.single['message'], 'one');
       expect(find.byKey(const ValueKey('stop-turn')), findsOneWidget);
-      expect(send, findsOneWidget);
+      expect(send, findsNothing);
+      expect(find.byTooltip('Queue message (Enter)'), findsNothing);
       await tester.enterText(field, 'two');
-      await tester.tap(send);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.pump();
       await tester.enterText(field, 'three');
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
@@ -270,9 +271,11 @@ void main() {
       );
       await tester.pump();
       expect(find.text('Paused'), findsOneWidget);
+      expect(send, findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('resume-message-queue')));
       await tester.pump();
       expect(core.startedTurns.last['message'], 'three');
+      expect(send, findsNothing);
       expect(find.byKey(const ValueKey('message-queue')), findsNothing);
       expect(tester.takeException(), isNull);
     },

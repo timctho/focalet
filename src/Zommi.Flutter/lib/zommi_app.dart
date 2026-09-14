@@ -1077,29 +1077,30 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                         ),
                       ),
                     ),
-                  Semantics(
-                    label: willQueue ? 'Queue message' : 'Send message',
-                    button: true,
-                    child: IconButton.filled(
-                      key: const ValueKey('send-message'),
-                      tooltip: willQueue
-                          ? 'Queue message (Enter)'
-                          : 'Send (Enter)',
-                      onPressed:
-                          (_controller.submitting &&
-                                  _controller.isRuntimeCommand(
-                                    _composer.messageText,
-                                  )) ||
-                              _controller.activeSessionId == null ||
-                              _controller.selectingContent ||
-                              _controller.sessionBusy ||
-                              _controller.sessionReadOnly ||
-                              _controller.runtimeBusy
-                          ? null
-                          : _submit,
-                      icon: const Icon(Icons.arrow_upward_rounded),
+                  if (!_controller.turnActive)
+                    Semantics(
+                      label: willQueue ? 'Queue message' : 'Send message',
+                      button: true,
+                      child: IconButton.filled(
+                        key: const ValueKey('send-message'),
+                        tooltip: willQueue
+                            ? 'Queue message (Enter)'
+                            : 'Send (Enter)',
+                        onPressed:
+                            (_controller.submitting &&
+                                    _controller.isRuntimeCommand(
+                                      _composer.messageText,
+                                    )) ||
+                                _controller.activeSessionId == null ||
+                                _controller.selectingContent ||
+                                _controller.sessionBusy ||
+                                _controller.sessionReadOnly ||
+                                _controller.runtimeBusy
+                            ? null
+                            : _submit,
+                        icon: const Icon(Icons.arrow_upward_rounded),
+                      ),
                     ),
-                  ),
                 ],
               ),
             ),

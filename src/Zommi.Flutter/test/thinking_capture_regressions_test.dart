@@ -163,78 +163,86 @@ void main() {
     expect(find.byType(ThinkingActivityGroup), findsNothing);
   });
 
-  testWidgets(
-    'a newer thinking phase closes stale activity from the previous phase',
-    (tester) async {
-      final controller = ZommiController(
-        core: RichFakeCore(),
-        desktop: FakeDesktopBridge(),
-      );
-      addTearDown(controller.close);
-      final turn = ConversationTurn(
-        id: 'turn',
-        userText: 'Inspect',
-        blocks: [
-          TranscriptBlock(
-            id: 'thinking-1',
-            kind: TranscriptKind.thinking,
-            title: 'Thinking',
-            text: 'First phase',
-          ),
-          TranscriptBlock(
-            id: 'tool-1',
-            kind: TranscriptKind.tool,
-            title: 'Command',
-          ),
-          TranscriptBlock(
-            id: 'thinking-2',
-            kind: TranscriptKind.thinking,
-            title: 'Thinking',
-            text: 'Second phase',
-          ),
-        ],
-      );
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: ConversationTurnView(
-              turn: turn,
-              viewportWidth: 720,
-              runtimeName: 'Codex',
-              controller: controller,
-              isResponding: true,
-              onAttachmentEnter: (_, _) {},
-              onAttachmentExit: (_) {},
-            ),
+  testWidgets('newer thinking closes stale activity inside the same section', (
+    tester,
+  ) async {
+    final controller = ZommiController(
+      core: RichFakeCore(),
+      desktop: FakeDesktopBridge(),
+    );
+    addTearDown(controller.close);
+    final turn = ConversationTurn(
+      id: 'turn',
+      userText: 'Inspect',
+      activityExpanded: true,
+      blocks: [
+        TranscriptBlock(
+          id: 'thinking-1',
+          kind: TranscriptKind.thinking,
+          title: 'Thinking',
+          text: 'First phase',
+        ),
+        TranscriptBlock(
+          id: 'tool-1',
+          kind: TranscriptKind.tool,
+          title: 'Command',
+        ),
+        TranscriptBlock(
+          id: 'thinking-2',
+          kind: TranscriptKind.thinking,
+          title: 'Thinking',
+          text: 'Second phase',
+        ),
+      ],
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ConversationTurnView(
+            turn: turn,
+            viewportWidth: 720,
+            runtimeName: 'Codex',
+            controller: controller,
+            isResponding: true,
+            onAttachmentEnter: (_, _) {},
+            onAttachmentExit: (_) {},
           ),
         ),
-      );
-      await tester.pump();
+      ),
+    );
+    await tester.pump();
 
-      final first = find.byKey(
-        const ValueKey('activity-section-turn-thinking-1'),
-      );
-      final second = find.byKey(
-        const ValueKey('activity-section-turn-thinking-2'),
-      );
-      expect(first, findsOneWidget);
-      expect(second, findsOneWidget);
-      expect(
-        find.descendant(
-          of: first,
-          matching: find.byType(CircularProgressIndicator),
-        ),
-        findsNothing,
-      );
-      expect(
-        find.descendant(
-          of: second,
-          matching: find.byType(CircularProgressIndicator),
-        ),
-        findsOneWidget,
-      );
-    },
-  );
+    final first = find.byKey(
+      const ValueKey('activity-section-turn-thinking-1'),
+    );
+    final second = find.byKey(
+      const ValueKey('activity-section-turn-thinking-2'),
+    );
+    expect(first, findsOneWidget);
+    expect(second, findsNothing);
+    expect(find.byType(ThinkingActivityGroup), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('activity-thinking-1')),
+        matching: find.byType(CircularProgressIndicator),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('activity-tool-1')),
+        matching: find.byType(CircularProgressIndicator),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('activity-thinking-2')),
+        matching: find.byType(CircularProgressIndicator),
+      ),
+      findsOneWidget,
+    );
+  });
 
   testWidgets('large running activity stays lazy and responds during updates', (
     tester,
