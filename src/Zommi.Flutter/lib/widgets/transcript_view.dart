@@ -521,7 +521,7 @@ class ConversationTurnView extends StatelessWidget {
               else
                 Padding(
                   key: ValueKey('activity-segment-${segment.first.id}'),
-                  padding: const EdgeInsets.only(bottom: 9),
+                  padding: const EdgeInsets.only(bottom: 6),
                   child: ThinkingActivityGroup(
                     turn: turn,
                     activities: segment,
@@ -847,7 +847,7 @@ class ThinkingActivityGroup extends StatelessWidget {
             key: ValueKey('activity-section-$id'),
             decoration: BoxDecoration(
               color: Theme.of(context).colorScheme.surface,
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(10),
               border: Border.all(
                 color: Theme.of(context).colorScheme.outlineVariant,
               ),
@@ -857,7 +857,7 @@ class ThinkingActivityGroup extends StatelessWidget {
               children: [
                 InkWell(
                   key: ValueKey('thinking-toggle-$id'),
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(10),
                   onTap: () => controller.setTurnActivityExpanded(
                     turn,
                     !expanded,
@@ -866,7 +866,7 @@ class ThinkingActivityGroup extends StatelessWidget {
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
-                      vertical: 9,
+                      vertical: 4,
                     ),
                     child: Row(
                       children: [
@@ -929,7 +929,7 @@ class ThinkingActivityGroup extends StatelessWidget {
                       ? const Duration(milliseconds: 150)
                       : Duration.zero,
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
                     child: _ActivityList(
                       activities: activities,
                       controller: controller,
@@ -1031,8 +1031,8 @@ class _ThinkingActivitySubItem extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       key: ValueKey('activity-${block.id}'),
-      margin: const EdgeInsets.only(top: 7),
-      padding: const EdgeInsets.fromLTRB(9, 7, 9, 9),
+      margin: const EdgeInsets.only(top: 4),
+      padding: const EdgeInsets.fromLTRB(9, 4, 9, 5),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(10),
@@ -1074,7 +1074,7 @@ class _ThinkingActivitySubItem extends StatelessWidget {
             ],
           ),
           if (block.text.isNotEmpty) ...[
-            const SizedBox(height: 5),
+            const SizedBox(height: 3),
             CopyableMarkdown(
               text: block.text,
               compact: true,
@@ -1100,7 +1100,7 @@ class _ToolActivitySubItem extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       key: ValueKey('activity-${block.id}'),
-      margin: const EdgeInsets.only(top: 7),
+      margin: const EdgeInsets.only(top: 4),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(10),
@@ -1113,7 +1113,7 @@ class _ToolActivitySubItem extends StatelessWidget {
             borderRadius: BorderRadius.circular(10),
             onTap: () => controller.setBlockExpanded(block, !block.expanded),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
               child: Row(
                 children: [
                   Icon(
@@ -1160,7 +1160,7 @@ class _ToolActivitySubItem extends StatelessWidget {
             expanded: block.expanded,
             duration: const Duration(milliseconds: 130),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(9, 0, 9, 9),
+              padding: const EdgeInsets.fromLTRB(9, 0, 9, 5),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
