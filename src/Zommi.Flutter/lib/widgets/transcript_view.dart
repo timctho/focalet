@@ -12,10 +12,11 @@ import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
 import 'package:zommi_flutter/widgets/message_actions.dart';
 import 'package:zommi_flutter/widgets/thinking_flow_background.dart';
 
-const double userMessageBoxWidth = 416;
-const double assistantMessageBoxWidth = 496;
-const double conversationContentMaxWidth = 720;
-const double _baselineMessageViewportWidth = 720;
+const double _messageContentWidthScale = 1.2;
+const double userMessageBoxWidth = 416 * _messageContentWidthScale;
+const double assistantMessageBoxWidth = 496 * _messageContentWidthScale;
+const double conversationContentMaxWidth = 720 * _messageContentWidthScale;
+const double _baselineMessageViewportWidth = conversationContentMaxWidth;
 const double _transcriptHorizontalInsets = 48;
 
 double responsiveUserMessageBoxWidth(double viewportWidth) {

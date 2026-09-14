@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-/// A flowing signal behind the active thinking section. The painter repaints
+/// A soft color glow behind the active thinking section. The painter repaints
 /// independently of the transcript, and stops when motion or tickers are off.
 class ThinkingFlowBackground extends StatefulWidget {
   const ThinkingFlowBackground({super.key});
@@ -15,7 +15,7 @@ class _ThinkingFlowBackgroundState extends State<ThinkingFlowBackground>
     with SingleTickerProviderStateMixin {
   late final AnimationController _phase = AnimationController(
     vsync: this,
-    duration: const Duration(seconds: 6),
+    duration: const Duration(seconds: 8),
   );
 
   @override
@@ -60,60 +60,34 @@ class _ThinkingFlowPainter extends CustomPainter {
   final Animation<double> phase;
   final bool dark;
   static const _colors = [
-    Color(0xff28cdeb),
-    Color(0xff8472f4),
-    Color(0xffed79b5),
+    Color(0xffc3d8d3),
+    Color(0xffcec6df),
+    Color(0xffe1cbd3),
   ];
 
   @override
   void paint(Canvas canvas, Size size) {
     if (size.isEmpty) return;
     final angle = phase.value * math.pi * 2;
-    final height = math.min(size.height, 80.0);
-    for (var index = 0; index < _colors.length; index++) {
-      final offset = angle + index * math.pi * 2 / 3;
-      final center = Offset(
-        size.width * (.5 + .35 * math.sin(offset)),
-        height * (.5 + .2 * math.cos(offset)),
-      );
-      final bounds = Rect.fromCenter(
-        center: center,
-        width: size.width * .95,
-        height: height * 2.4,
-      );
-      canvas.drawRect(
-        bounds,
-        Paint()
-          ..shader = RadialGradient(
-            colors: [
-              _colors[index].withValues(alpha: dark ? .28 : .20),
-              _colors[index].withValues(alpha: 0),
-            ],
-          ).createShader(bounds),
-      );
-      final wave = Path();
-      for (var step = 0; step <= 48; step++) {
-        final x = size.width * step / 48;
-        final y =
-            height *
-            (.58 +
-                .18 * math.sin(step / 48 * math.pi * 2 + offset) +
-                .08 * math.sin(step / 48 * math.pi * 4 - angle));
-        if (step == 0) {
-          wave.moveTo(x, y);
-        } else {
-          wave.lineTo(x, y);
-        }
-      }
-      canvas.drawPath(
-        wave,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = height * .22
-          ..maskFilter = MaskFilter.blur(BlurStyle.normal, height * .15)
-          ..color = _colors[index].withValues(alpha: dark ? .36 : .22),
-      );
-    }
+    final blend = .18 + .14 * math.sin(angle);
+    final opacity = (dark ? .20 : .25) + .015 * math.sin(angle);
+    final bounds = Offset.zero & size;
+    canvas.drawRect(
+      bounds,
+      Paint()
+        ..shader = LinearGradient(
+          begin: const Alignment(-1, -.3),
+          end: const Alignment(1, .3),
+          colors: [
+            for (var index = 0; index < _colors.length; index++)
+              Color.lerp(
+                _colors[index],
+                _colors[(index + 1) % _colors.length],
+                blend,
+              )!.withValues(alpha: opacity),
+          ],
+        ).createShader(bounds),
+    );
   }
 
   @override

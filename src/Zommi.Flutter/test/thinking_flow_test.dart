@@ -214,7 +214,7 @@ void main() {
   testWidgets('render the active thinking signal', (tester) async {
     final directory = Platform.environment['ZOMMI_THINKING_PREVIEW_DIR'];
     if (directory == null) return;
-    await tester.binding.setSurfaceSize(const Size(1000, 680));
+    await tester.binding.setSurfaceSize(const Size(1400, 680));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.runAsync(() async {
       await (FontLoader(codexUiFontFamily)..addFont(
@@ -253,7 +253,7 @@ void main() {
     );
     await tester.enterText(
       find.byKey(const ValueKey('zommi-composer')),
-      'Keep adjacent thinking together and show a flowing signal while the agent is working.',
+      'Make the message panels wider and use a gentle, low-contrast pastel glow while the agent is working.',
     );
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
@@ -312,7 +312,7 @@ void main() {
     await tester.runAsync(
       () => File('$directory/thinking-dark.png').writeAsBytes(first),
     );
-    for (var frame = 0; frame < 36; frame++) {
+    for (var frame = 0; frame < 48; frame++) {
       await tester.pump(const Duration(milliseconds: 166));
       final data = await pixels(tester, find.byKey(screen));
       await tester.runAsync(

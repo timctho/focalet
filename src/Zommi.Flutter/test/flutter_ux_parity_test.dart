@@ -974,8 +974,8 @@ void main() {
         ),
       );
       final assistantBox = find.byKey(const ValueKey('assistant-answer'));
-      expect(userMessageBoxWidth, 520 * 0.8);
-      expect(assistantMessageBoxWidth, 620 * 0.8);
+      expect(userMessageBoxWidth, 416 * 1.2);
+      expect(assistantMessageBoxWidth, 496 * 1.2);
       expect(
         userBox.constraints?.maxWidth,
         responsiveUserMessageBoxWidth(conversationContentMaxWidth),
@@ -1741,7 +1741,7 @@ void main() {
     final user = tester.getRect(
       find.byKey(const ValueKey('user-message-session-1-turn-1')),
     );
-    expect(composer.width, conversationContentMaxWidth);
+    expect(composer.width, 864);
     expect(assistant.left, greaterThanOrEqualTo(composer.left));
     expect(assistant.right, lessThanOrEqualTo(composer.right));
     expect(user.left, greaterThanOrEqualTo(composer.left));
