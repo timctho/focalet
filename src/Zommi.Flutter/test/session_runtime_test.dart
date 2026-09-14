@@ -418,6 +418,17 @@ void main() {
         const ValueKey('session-runtime-runtime-codex-session-1'),
       );
       expect(tester.widget<RuntimeLogo>(logo).runtimeId, 'codex');
+      final workspace = find.byKey(
+        const ValueKey('session-workspace-runtime-codex-session-1'),
+      );
+      final title = find.byKey(
+        const ValueKey('session-title-runtime-codex-session-1'),
+      );
+      expect(tester.getCenter(workspace).dy, tester.getCenter(logo).dy);
+      expect(
+        tester.getCenter(title).dy,
+        greaterThan(tester.getCenter(logo).dy),
+      );
       expect(
         tester.getCenter(logo).dx,
         greaterThan(tester.getRect(original).left + 24),

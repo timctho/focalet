@@ -286,7 +286,7 @@ class _SessionSidebarState extends State<SessionSidebar> {
                           minVerticalPadding: 0,
                           contentPadding: const EdgeInsets.symmetric(
                             horizontal: 8,
-                            vertical: 4,
+                            vertical: 3,
                           ),
                           selected: selected,
                           selectedTileColor: Theme.of(context)
@@ -299,52 +299,6 @@ class _SessionSidebarState extends State<SessionSidebar> {
                             mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Row(
-                                children: [
-                                  Icon(
-                                    Icons.folder_outlined,
-                                    size: 14,
-                                    color: colors.onSurfaceVariant,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Expanded(
-                                    child: Tooltip(
-                                      message:
-                                          session.cwd?.trim().isNotEmpty == true
-                                          ? session.cwd!.trim()
-                                          : workspace,
-                                      child: Text(
-                                        workspace,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          color: colors.onSurfaceVariant,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  if (session.pinned) ...[
-                                    const SizedBox(width: 6),
-                                    Icon(
-                                      Icons.push_pin_rounded,
-                                      size: 13,
-                                      color: colors.primary,
-                                    ),
-                                  ],
-                                ],
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                session.title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              const SizedBox(height: 3),
                               Row(
                                 children: [
                                   Tooltip(
@@ -369,7 +323,36 @@ class _SessionSidebarState extends State<SessionSidebar> {
                                       runtimeId: runtime?.runtimeId ?? '',
                                     ),
                                   ),
-                                  const Spacer(),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Tooltip(
+                                      message:
+                                          session.cwd?.trim().isNotEmpty == true
+                                          ? session.cwd!.trim()
+                                          : workspace,
+                                      child: Text(
+                                        workspace,
+                                        key: ValueKey(
+                                          'session-workspace-${session.runtimeTargetId}-${session.id}',
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: colors.onSurfaceVariant,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  if (session.pinned) ...[
+                                    const SizedBox(width: 6),
+                                    Icon(
+                                      Icons.push_pin_rounded,
+                                      size: 13,
+                                      color: colors.primary,
+                                    ),
+                                  ],
+                                  const SizedBox(width: 8),
                                   Tooltip(
                                     message: updated == null
                                         ? 'Last update unavailable'
@@ -383,6 +366,19 @@ class _SessionSidebarState extends State<SessionSidebar> {
                                     ),
                                   ),
                                 ],
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                session.title,
+                                key: ValueKey(
+                                  'session-title-${session.runtimeTargetId}-${session.id}',
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                ),
                               ),
                             ],
                           ),
