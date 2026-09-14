@@ -270,126 +270,131 @@ class _SessionSidebarState extends State<SessionSidebar> {
                     final updated = session.activityTime?.toLocal();
                     final colors = Theme.of(context).colorScheme;
                     final localizations = MaterialLocalizations.of(context);
-                    return Semantics(
-                      selected: selected,
-                      label:
-                          '${session.title}, ${runtime?.displayName ?? 'Agent'}, ${presence.name} session',
-                      child: SessionContextMenu(
-                        controller: controller,
-                        session: session,
-                        child: ListTile(
-                          key: ValueKey(
-                            'session-${session.runtimeTargetId}-${session.id}',
-                          ),
-                          dense: true,
-                          visualDensity: const VisualDensity(vertical: -3),
-                          minVerticalPadding: 0,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 3,
-                          ),
-                          selected: selected,
-                          selectedTileColor: Theme.of(context)
-                              .colorScheme
-                              .primaryContainer,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          title: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Tooltip(
-                                    message: presence.name,
-                                    child: SizedBox.square(
-                                      dimension: 18,
-                                      child: Center(
-                                        child: _SessionStatusIcon(
-                                          presence: presence,
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Semantics(
+                        selected: selected,
+                        label:
+                            '${session.title}, ${runtime?.displayName ?? 'Agent'}, ${presence.name} session',
+                        child: SessionContextMenu(
+                          controller: controller,
+                          session: session,
+                          child: ListTile(
+                            key: ValueKey(
+                              'session-${session.runtimeTargetId}-${session.id}',
+                            ),
+                            dense: true,
+                            visualDensity: const VisualDensity(vertical: -3),
+                            minVerticalPadding: 0,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
+                            selected: selected,
+                            selectedTileColor: Theme.of(context)
+                                .colorScheme
+                                .primaryContainer,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            title: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Tooltip(
+                                      message: presence.name,
+                                      child: SizedBox.square(
+                                        dimension: 18,
+                                        child: Center(
+                                          child: _SessionStatusIcon(
+                                            presence: presence,
+                                          ),
                                         ),
                                       ),
                                     ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Tooltip(
-                                    message:
-                                        runtime?.displayName ?? 'Agent runtime',
-                                    child: RuntimeLogo(
-                                      key: ValueKey(
-                                        'session-runtime-${session.runtimeTargetId}-${session.id}',
-                                      ),
-                                      runtimeId: runtime?.runtimeId ?? '',
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Expanded(
-                                    child: Tooltip(
+                                    const SizedBox(width: 6),
+                                    Tooltip(
                                       message:
-                                          session.cwd?.trim().isNotEmpty == true
-                                          ? session.cwd!.trim()
-                                          : workspace,
-                                      child: Text(
-                                        workspace,
+                                          runtime?.displayName ??
+                                          'Agent runtime',
+                                      child: RuntimeLogo(
                                         key: ValueKey(
-                                          'session-workspace-${session.runtimeTargetId}-${session.id}',
+                                          'session-runtime-${session.runtimeTargetId}-${session.id}',
                                         ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
+                                        runtimeId: runtime?.runtimeId ?? '',
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: Tooltip(
+                                        message:
+                                            session.cwd?.trim().isNotEmpty ==
+                                                true
+                                            ? session.cwd!.trim()
+                                            : workspace,
+                                        child: Text(
+                                          workspace,
+                                          key: ValueKey(
+                                            'session-workspace-${session.runtimeTargetId}-${session.id}',
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: colors.onSurfaceVariant,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    if (session.pinned) ...[
+                                      const SizedBox(width: 6),
+                                      Icon(
+                                        Icons.push_pin_rounded,
+                                        size: 13,
+                                        color: colors.primary,
+                                      ),
+                                    ],
+                                    const SizedBox(width: 8),
+                                    Tooltip(
+                                      message: updated == null
+                                          ? 'Last update unavailable'
+                                          : 'Last updated ${localizations.formatFullDate(updated)} ${localizations.formatTimeOfDay(TimeOfDay.fromDateTime(updated))}',
+                                      child: Text(
+                                        _sessionUpdatedLabel(updated),
                                         style: TextStyle(
-                                          fontSize: 11,
+                                          fontSize: 10,
                                           color: colors.onSurfaceVariant,
                                         ),
                                       ),
                                     ),
-                                  ),
-                                  if (session.pinned) ...[
-                                    const SizedBox(width: 6),
-                                    Icon(
-                                      Icons.push_pin_rounded,
-                                      size: 13,
-                                      color: colors.primary,
-                                    ),
                                   ],
-                                  const SizedBox(width: 8),
-                                  Tooltip(
-                                    message: updated == null
-                                        ? 'Last update unavailable'
-                                        : 'Last updated ${localizations.formatFullDate(updated)} ${localizations.formatTimeOfDay(TimeOfDay.fromDateTime(updated))}',
-                                    child: Text(
-                                      _sessionUpdatedLabel(updated),
-                                      style: TextStyle(
-                                        fontSize: 10,
-                                        color: colors.onSurfaceVariant,
-                                      ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  session.title,
+                                  key: ValueKey(
+                                    'session-title-${session.runtimeTargetId}-${session.id}',
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            onTap: controller.runtimeBusy
+                                ? null
+                                : () => unawaited(
+                                    controller.switchSession(
+                                      session.id,
+                                      runtimeTargetId: session.runtimeTargetId,
                                     ),
                                   ),
-                                ],
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                session.title,
-                                key: ValueKey(
-                                  'session-title-${session.runtimeTargetId}-${session.id}',
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
                           ),
-                          onTap: controller.runtimeBusy
-                              ? null
-                              : () => unawaited(
-                                  controller.switchSession(
-                                    session.id,
-                                    runtimeTargetId: session.runtimeTargetId,
-                                  ),
-                                ),
                         ),
                       ),
                     );

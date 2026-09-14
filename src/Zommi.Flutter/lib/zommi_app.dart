@@ -741,7 +741,6 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                                 label: 'Exact agent session bound',
                                 child: const SizedBox(width: 1, height: 1),
                               ),
-                            _buildFooter(),
                           ],
                         ),
                       ),
@@ -997,117 +996,127 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
       label: 'Message composer',
       child: Padding(
         padding: const EdgeInsets.fromLTRB(22, 6, 22, 6),
-        child: Container(
-          key: const ValueKey('message-composer-shell'),
-          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-              color: Theme.of(context).colorScheme.outlineVariant,
+        child: Align(
+          alignment: Alignment.center,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              maxWidth: conversationContentMaxWidth,
             ),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x160d172a),
-                blurRadius: 16,
-                offset: Offset(0, 6),
-              ),
-            ],
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              FilledButton.tonalIcon(
-                key: const ValueKey('select-content'),
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  minimumSize: const Size(0, 36),
-                  shape: const StadiumBorder(),
+            child: Container(
+              key: const ValueKey('message-composer-shell'),
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(
+                  color: Theme.of(context).colorScheme.outlineVariant,
                 ),
-                onPressed: _controller.selectingContent
-                    ? null
-                    : () => unawaited(_controller.addPointerContext()),
-                icon: const Icon(Icons.ads_click_rounded, size: 18),
-                label: Text(
-                  _controller.selectingContent ? 'Selecting…' : 'Select',
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                // Undo history belongs to the selected chat too.
-                key: ValueKey((
-                  'composer-session',
-                  _controller.composerSessionKey,
-                )),
-                child: TextField(
-                  key: const ValueKey('zommi-composer'),
-                  focusNode: _composerFocus,
-                  controller: _composer,
-                  scrollController: _composerScroll,
-                  enabled: !_controller.sessionBusy,
-                  minLines: 1,
-                  maxLines: 5,
-                  // Let inline attachment widgets set the height of their own
-                  // line instead of painting across fixed-height text lines.
-                  strutStyle: _composer.inlineAttachments.isEmpty
-                      ? null
-                      : const StrutStyle(forceStrutHeight: false),
-                  keyboardType: TextInputType.multiline,
-                  textInputAction: TextInputAction.newline,
-                  textAlignVertical: TextAlignVertical.center,
-                  style: chatTextStyleOf(context),
-                  decoration: const InputDecoration(
-                    hintText: 'Ask your agent',
-                    border: InputBorder.none,
-                    isDense: true,
-                    // The first line fills the control row. Further lines add
-                    // height immediately, with the row's bottom staying fixed.
-                    contentPadding: EdgeInsets.symmetric(vertical: 20),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x160d172a),
+                    blurRadius: 16,
+                    offset: Offset(0, 6),
                   ),
-                ),
+                ],
               ),
-              const SizedBox(width: 5),
-              if (_controller.turnActive)
-                Semantics(
-                  label: 'Stop active turn',
-                  button: true,
-                  child: IconButton.filledTonal(
-                    key: const ValueKey('stop-turn'),
-                    tooltip: _controller.activeTurnStopping
-                        ? 'Stopping response'
-                        : 'Stop response',
-                    onPressed: _controller.activeTurnStopping
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  FilledButton.tonalIcon(
+                    key: const ValueKey('select-content'),
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      minimumSize: const Size(0, 36),
+                      shape: const StadiumBorder(),
+                    ),
+                    onPressed: _controller.selectingContent
                         ? null
-                        : () => unawaited(_controller.interrupt()),
-                    icon: Icon(
-                      _controller.activeTurnStopping
-                          ? Icons.hourglass_top_rounded
-                          : Icons.stop_rounded,
+                        : () => unawaited(_controller.addPointerContext()),
+                    icon: const Icon(Icons.ads_click_rounded, size: 18),
+                    label: Text(
+                      _controller.selectingContent ? 'Selecting…' : 'Select',
                     ),
                   ),
-                ),
-              Semantics(
-                label: willQueue ? 'Queue message' : 'Send message',
-                button: true,
-                child: IconButton.filled(
-                  key: const ValueKey('send-message'),
-                  tooltip: willQueue ? 'Queue message (Enter)' : 'Send (Enter)',
-                  onPressed:
-                      (_controller.submitting &&
-                              _controller.isRuntimeCommand(
-                                _composer.messageText,
-                              )) ||
-                          _controller.activeSessionId == null ||
-                          _controller.selectingContent ||
-                          _controller.sessionBusy ||
-                          _controller.sessionReadOnly ||
-                          _controller.runtimeBusy
-                      ? null
-                      : _submit,
-                  icon: const Icon(Icons.arrow_upward_rounded),
-                ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    // Undo history belongs to the selected chat too.
+                    key: ValueKey((
+                      'composer-session',
+                      _controller.composerSessionKey,
+                    )),
+                    child: TextField(
+                      key: const ValueKey('zommi-composer'),
+                      focusNode: _composerFocus,
+                      controller: _composer,
+                      scrollController: _composerScroll,
+                      enabled: !_controller.sessionBusy,
+                      minLines: 1,
+                      maxLines: 5,
+                      // Let inline attachment widgets set the height of their own
+                      // line instead of painting across fixed-height text lines.
+                      strutStyle: _composer.inlineAttachments.isEmpty
+                          ? null
+                          : const StrutStyle(forceStrutHeight: false),
+                      keyboardType: TextInputType.multiline,
+                      textInputAction: TextInputAction.newline,
+                      textAlignVertical: TextAlignVertical.center,
+                      style: chatTextStyleOf(context),
+                      decoration: const InputDecoration(
+                        hintText: 'Ask your agent',
+                        border: InputBorder.none,
+                        isDense: true,
+                        // The first line fills the control row. Further lines add
+                        // height immediately, with the row's bottom staying fixed.
+                        contentPadding: EdgeInsets.symmetric(vertical: 20),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 5),
+                  if (_controller.turnActive)
+                    Semantics(
+                      label: 'Stop active turn',
+                      button: true,
+                      child: IconButton.filledTonal(
+                        key: const ValueKey('stop-turn'),
+                        tooltip: _controller.activeTurnStopping
+                            ? 'Stopping response'
+                            : 'Stop response',
+                        onPressed: _controller.activeTurnStopping
+                            ? null
+                            : () => unawaited(_controller.interrupt()),
+                        icon: Icon(
+                          _controller.activeTurnStopping
+                              ? Icons.hourglass_top_rounded
+                              : Icons.stop_rounded,
+                        ),
+                      ),
+                    ),
+                  Semantics(
+                    label: willQueue ? 'Queue message' : 'Send message',
+                    button: true,
+                    child: IconButton.filled(
+                      key: const ValueKey('send-message'),
+                      tooltip: willQueue
+                          ? 'Queue message (Enter)'
+                          : 'Send (Enter)',
+                      onPressed:
+                          (_controller.submitting &&
+                                  _controller.isRuntimeCommand(
+                                    _composer.messageText,
+                                  )) ||
+                              _controller.activeSessionId == null ||
+                              _controller.selectingContent ||
+                              _controller.sessionBusy ||
+                              _controller.sessionReadOnly ||
+                              _controller.runtimeBusy
+                          ? null
+                          : _submit,
+                      icon: const Icon(Icons.arrow_upward_rounded),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
@@ -1130,47 +1139,6 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
           : _controller.resumeQueuedMessages,
     ),
   );
-
-  Widget _buildFooter() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(26, 0, 26, 13),
-      child: Row(
-        children: [
-          Container(
-            width: 7,
-            height: 7,
-            decoration: BoxDecoration(
-              color: _controller.statusWarning
-                  ? const Color(0xffcf805f)
-                  : _controller.turnActive
-                  ? Theme.of(context).colorScheme.primary
-                  : const Color(0xff66a27b),
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 7),
-          Expanded(
-            child: Semantics(
-              liveRegion: true,
-              label: 'Agent status: ${_controller.status}',
-              child: Text(
-                _controller.status,
-                key: const ValueKey('core-status'),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: _controller.statusWarning
-                      ? Theme.of(context).colorScheme.error
-                      : Theme.of(context).colorScheme.onSurfaceVariant,
-                  fontSize: 11,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _HeaderButton extends StatelessWidget {

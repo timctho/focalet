@@ -21,7 +21,7 @@ void main() {
       tester.getSize(find.byKey(const ValueKey('zommi-surface'))),
       const Size(900, 760),
     );
-    expect(find.text('Codex 9.8.7 ready'), findsOneWidget);
+    expect(find.byKey(const ValueKey('core-status')), findsNothing);
   });
 
   testWidgets('composer remains editable while Rust starts the Codex turn', (
@@ -180,7 +180,7 @@ void main() {
     );
     await tester.pump();
     expect(find.byKey(const ValueKey('stop-turn')), findsNothing);
-    expect(find.text('Codex turn stopped'), findsOneWidget);
+    expect(find.byKey(const ValueKey('core-status')), findsNothing);
   });
 
   testWidgets('expanded shell matches the migration UX baseline', (
