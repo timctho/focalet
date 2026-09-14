@@ -12,6 +12,7 @@ import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
 
 const double userMessageBoxWidth = 416;
 const double assistantMessageBoxWidth = 496;
+const double conversationContentMaxWidth = 720;
 const double _baselineMessageViewportWidth = 720;
 const double _transcriptHorizontalInsets = 48;
 
@@ -24,11 +25,7 @@ double responsiveUserMessageBoxWidth(double viewportWidth) {
 }
 
 double responsiveAssistantMessageBoxWidth(double viewportWidth) {
-  final growth = math.max(0, viewportWidth - _baselineMessageViewportWidth);
-  return math.min(
-    math.max(0, viewportWidth - _transcriptHorizontalInsets),
-    assistantMessageBoxWidth + growth * 0.74,
-  );
+  return math.min(conversationContentMaxWidth, math.max(0, viewportWidth));
 }
 
 class TranscriptPane extends StatefulWidget {
@@ -339,7 +336,19 @@ class _TranscriptPaneState extends State<TranscriptPane> {
               findChildIndexCallback: (key) => indices[key],
               itemBuilder: (context, index) {
                 final turn = visible[index];
-                return _turnView(turn, constraints.maxWidth);
+                final contentWidth = math.min(
+                  conversationContentMaxWidth,
+                  math.max(0.0, constraints.maxWidth - 48),
+                );
+                return Align(
+                  alignment: Alignment.topCenter,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      maxWidth: conversationContentMaxWidth,
+                    ),
+                    child: _turnView(turn, contentWidth),
+                  ),
+                );
               },
             ),
           ),
@@ -425,7 +434,13 @@ class ConversationTurnView extends StatelessWidget {
           block.artifacts.isEmpty) {
         continue;
       }
+      final startsNewActivityPhase =
+          block.kind == TranscriptKind.thinking &&
+          segments.isNotEmpty &&
+          segments.last.first.kind.isFoldedActivity &&
+          segments.last.any((item) => item.kind == TranscriptKind.tool);
       if (block.kind.isFoldedActivity &&
+          !startsNewActivityPhase &&
           segments.isNotEmpty &&
           segments.last.first.kind.isFoldedActivity) {
         segments.last.add(block);
@@ -527,6 +542,8 @@ class ConversationTurnView extends StatelessWidget {
                     activities: segment,
                     width: responsiveAssistantMessageBoxWidth(viewportWidth),
                     controller: controller,
+                    forceCompleted:
+                        !isResponding || !identical(segment, segments.last),
                   ),
                 ),
             if (showTyping)
@@ -818,6 +835,7 @@ class ThinkingActivityGroup extends StatelessWidget {
     required this.activities,
     required this.width,
     required this.controller,
+    this.forceCompleted = false,
     super.key,
   });
 
@@ -825,6 +843,7 @@ class ThinkingActivityGroup extends StatelessWidget {
   final List<TranscriptBlock> activities;
   final double width;
   final ZommiController controller;
+  final bool forceCompleted;
 
   String get groupId => activities.first.id;
   String get id => '${turn.id}-$groupId';
@@ -832,7 +851,8 @@ class ThinkingActivityGroup extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final expanded = turn.isActivityGroupExpanded(groupId);
-    final completed = activities.every((activity) => activity.completed);
+    final completed =
+        forceCompleted || activities.every((activity) => activity.completed);
     final toolCount = activities
         .where((activity) => activity.kind == TranscriptKind.tool)
         .length;
@@ -933,6 +953,7 @@ class ThinkingActivityGroup extends StatelessWidget {
                     child: _ActivityList(
                       activities: activities,
                       controller: controller,
+                      forceCompleted: forceCompleted,
                     ),
                   ),
                 ),
@@ -946,10 +967,15 @@ class ThinkingActivityGroup extends StatelessWidget {
 }
 
 class _ActivityList extends StatefulWidget {
-  const _ActivityList({required this.activities, required this.controller});
+  const _ActivityList({
+    required this.activities,
+    required this.controller,
+    required this.forceCompleted,
+  });
 
   final List<TranscriptBlock> activities;
   final ZommiController controller;
+  final bool forceCompleted;
 
   @override
   State<_ActivityList> createState() => _ActivityListState();
@@ -976,8 +1002,13 @@ class _ActivityListState extends State<_ActivityList> {
         ? _ThinkingActivitySubItem(
             block: activity,
             controller: widget.controller,
+            forceCompleted: widget.forceCompleted,
           )
-        : _ToolActivitySubItem(block: activity, controller: widget.controller),
+        : _ToolActivitySubItem(
+            block: activity,
+            controller: widget.controller,
+            forceCompleted: widget.forceCompleted,
+          ),
   );
 
   @override
@@ -1022,10 +1053,12 @@ class _ThinkingActivitySubItem extends StatelessWidget {
   const _ThinkingActivitySubItem({
     required this.block,
     required this.controller,
+    required this.forceCompleted,
   });
 
   final TranscriptBlock block;
   final ZommiController controller;
+  final bool forceCompleted;
 
   @override
   Widget build(BuildContext context) {
@@ -1058,7 +1091,7 @@ class _ThinkingActivitySubItem extends StatelessWidget {
                   ),
                 ),
               ),
-              if (!block.completed)
+              if (!forceCompleted && !block.completed)
                 const SizedBox.square(
                   dimension: 11,
                   child: RepaintBoundary(
@@ -1091,10 +1124,15 @@ class _ThinkingActivitySubItem extends StatelessWidget {
 }
 
 class _ToolActivitySubItem extends StatelessWidget {
-  const _ToolActivitySubItem({required this.block, required this.controller});
+  const _ToolActivitySubItem({
+    required this.block,
+    required this.controller,
+    required this.forceCompleted,
+  });
 
   final TranscriptBlock block;
   final ZommiController controller;
+  final bool forceCompleted;
 
   @override
   Widget build(BuildContext context) {
@@ -1132,7 +1170,7 @@ class _ToolActivitySubItem extends StatelessWidget {
                       ),
                     ),
                   ),
-                  if (!block.completed)
+                  if (!forceCompleted && !block.completed)
                     const SizedBox.square(
                       dimension: 11,
                       child: RepaintBoundary(

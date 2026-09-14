@@ -473,7 +473,7 @@ void main() {
       switchGate.complete();
       await tester.pumpAndSettle();
       expect(core.activeTargetId, 'runtime-pi');
-      expect(find.text('New chat ready'), findsOneWidget);
+      expect(find.byKey(const ValueKey('core-status')), findsNothing);
 
       await tester.tap(find.byKey(const ValueKey('model-summary')));
       await tester.pumpAndSettle();
@@ -978,7 +978,7 @@ void main() {
       expect(assistantMessageBoxWidth, 620 * 0.8);
       expect(
         userBox.constraints?.maxWidth,
-        responsiveUserMessageBoxWidth(1000),
+        responsiveUserMessageBoxWidth(conversationContentMaxWidth),
       );
       expect(
         tester.getSize(assistantBox).width,
@@ -1164,7 +1164,7 @@ void main() {
     final desktop = FakeDesktopBridge();
     await _pumpApp(tester, core: core, desktop: desktop);
     await _expand(tester);
-    expect(find.text('Codex sign-in required'), findsOneWidget);
+    expect(find.byKey(const ValueKey('core-status')), findsNothing);
     await _openNewChatMenu(tester);
     await tester.pumpAndSettle();
     await tester.tap(
@@ -1349,7 +1349,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 200));
 
-      final thinkingCard = find.byWidgetPredicate(
+      final thinkingCards = find.byWidgetPredicate(
         (widget) =>
             widget is Container &&
             widget.key is ValueKey<String> &&
@@ -1357,7 +1357,9 @@ void main() {
               'activity-section-',
             ),
       );
-      expect(thinkingCard, findsOneWidget);
+      expect(thinkingCards, findsNWidgets(2));
+      final thinkingCard = thinkingCards.at(0);
+      final laterThinkingCard = thinkingCards.at(1);
       expect(find.byKey(const ValueKey('activity-tool-1')), findsNothing);
       expect(find.byType(AnimatedCrossFade), findsNothing);
       expect(
@@ -1385,12 +1387,27 @@ void main() {
       );
 
       await tester.tap(
-        find.byWidgetPredicate(
-          (widget) =>
-              widget.key is ValueKey<String> &&
-              (widget.key! as ValueKey<String>).value.startsWith(
-                'thinking-toggle-',
-              ),
+        find.descendant(
+          of: thinkingCard,
+          matching: find.byWidgetPredicate(
+            (widget) =>
+                widget.key is ValueKey<String> &&
+                (widget.key! as ValueKey<String>).value.startsWith(
+                  'thinking-toggle-',
+                ),
+          ),
+        ),
+      );
+      await tester.tap(
+        find.descendant(
+          of: laterThinkingCard,
+          matching: find.byWidgetPredicate(
+            (widget) =>
+                widget.key is ValueKey<String> &&
+                (widget.key! as ValueKey<String>).value.startsWith(
+                  'thinking-toggle-',
+                ),
+          ),
         ),
       );
       await tester.pumpAndSettle();
@@ -1556,7 +1573,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('stop-turn')), findsNothing);
-      expect(find.text('Codex reply complete'), findsOneWidget);
+      expect(find.byKey(const ValueKey('core-status')), findsNothing);
     },
   );
 
@@ -1703,6 +1720,32 @@ void main() {
     );
     expect(largeAssistantWidth, closeTo(normalAssistantWidth, 0.1));
     expect(largeUserWidth, closeTo(normalUserWidth, 0.1));
+  });
+
+  testWidgets('large windows center transcript and composer in one column', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final core = RichFakeCore()..historyCount = 1;
+    await tester.pumpWidget(ZommiApp(core: core, desktop: FakeDesktopBridge()));
+    await tester.pumpAndSettle();
+
+    final composer = tester.getRect(
+      find.byKey(const ValueKey('message-composer-shell')),
+    );
+    final assistant = tester.getRect(
+      find.byKey(const ValueKey('assistant-session-1-answer-1')),
+    );
+    final user = tester.getRect(
+      find.byKey(const ValueKey('user-message-session-1-turn-1')),
+    );
+    expect(composer.width, conversationContentMaxWidth);
+    expect(assistant.left, greaterThanOrEqualTo(composer.left));
+    expect(assistant.right, lessThanOrEqualTo(composer.right));
+    expect(user.left, greaterThanOrEqualTo(composer.left));
+    expect(user.right, lessThanOrEqualTo(composer.right));
+    expect(find.byKey(const ValueKey('core-status')), findsNothing);
   });
 
   testWidgets(
