@@ -1056,6 +1056,7 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
             ),
             child: FrostedSurface(
               key: const ValueKey('message-composer-shell'),
+              opacity: 0,
               showBorder: false,
               // This row is below the transcript and covers only the smooth
               // panel gradient, so a backdrop blur adds no useful detail.

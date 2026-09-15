@@ -178,7 +178,6 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
                         code: base.copyWith(
                           fontFamily: 'monospace',
                           fontSize: chatFontSize,
-                          backgroundColor: inlineCodeBackground,
                         ),
                         codeblockPadding: EdgeInsets.zero,
                         codeblockDecoration: const BoxDecoration(),
@@ -314,10 +313,7 @@ class _CopyableCodeBlockState extends State<_CopyableCodeBlock> {
       key: ValueKey('code-block-${widget.code.hashCode}'),
       margin: const EdgeInsets.symmetric(vertical: 5),
       padding: const EdgeInsets.fromLTRB(11, 9, 5, 9),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(10),
-      ),
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(10)),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -385,21 +381,9 @@ class SafeHtmlView extends StatelessWidget {
           ),
           backgroundColor: const Color(0x00000000),
         ),
-        'th': Style(
-          padding: HtmlPaddings.all(6),
-          fontWeight: FontWeight.w700,
-          backgroundColor: Theme.of(context)
-              .colorScheme
-              .surfaceContainerHighest,
-        ),
+        'th': Style(padding: HtmlPaddings.all(6), fontWeight: FontWeight.w700),
         'td': Style(padding: HtmlPaddings.all(6)),
-        'pre': Style(
-          padding: HtmlPaddings.all(8),
-          backgroundColor: Theme.of(context)
-              .colorScheme
-              .surfaceContainerHighest,
-          whiteSpace: WhiteSpace.pre,
-        ),
+        'pre': Style(padding: HtmlPaddings.all(8), whiteSpace: WhiteSpace.pre),
       },
     );
   }

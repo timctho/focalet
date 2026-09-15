@@ -292,12 +292,19 @@ class _SessionSidebarState extends State<SessionSidebar> {
                               vertical: 3,
                             ),
                             selected: selected,
-                            tileColor: colors.surfaceContainerLow.withValues(
-                              alpha: .65,
+                            // Neutral overlays keep cream/custom accents from
+                            // becoming bright cards in the dark theme.
+                            tileColor: colors.onSurface.withValues(
+                              alpha: colors.brightness == Brightness.dark
+                                  ? .045
+                                  : .075,
                             ),
-                            selectedTileColor: Theme.of(context)
-                                .colorScheme
-                                .primaryContainer,
+                            selectedTileColor: colors.onSurface.withValues(
+                              alpha: colors.brightness == Brightness.dark
+                                  ? .10
+                                  : .13,
+                            ),
+                            selectedColor: colors.onSurface,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
                             ),

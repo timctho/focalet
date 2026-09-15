@@ -70,7 +70,7 @@ class _ThinkingFlowPainter extends CustomPainter {
     if (size.isEmpty) return;
     final angle = phase.value * math.pi * 2;
     final blend = .18 + .14 * math.sin(angle);
-    final opacity = (dark ? .20 : .25) + .015 * math.sin(angle);
+    final opacity = (dark ? .06 : .07) + .01 * math.sin(angle);
     final bounds = Offset.zero & size;
     canvas.drawRect(
       bounds,
@@ -84,7 +84,7 @@ class _ThinkingFlowPainter extends CustomPainter {
                 _colors[index],
                 _colors[(index + 1) % _colors.length],
                 blend,
-              )!.withValues(alpha: opacity),
+              )!.withValues(alpha: index == 1 ? opacity : 0),
           ],
         ).createShader(bounds),
     );

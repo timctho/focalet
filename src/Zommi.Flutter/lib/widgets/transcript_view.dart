@@ -480,8 +480,8 @@ class ConversationTurnView extends StatelessWidget {
                     vertical: 5,
                   ),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.primaryContainer
-                        .withValues(alpha: .60),
+                    color: Theme.of(context).colorScheme.onSurface
+                        .withValues(alpha: .06),
                     borderRadius: BorderRadius.circular(18),
                   ),
                   child: Column(
@@ -586,7 +586,6 @@ class ConversationTurnView extends StatelessWidget {
                         vertical: 6,
                       ),
                       decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surface,
                         borderRadius: BorderRadius.circular(14),
                       ),
                       child: const RepaintBoundary(child: TypingDots()),
@@ -1071,10 +1070,7 @@ class ThinkingActivityGroup extends StatelessWidget {
           constraints: BoxConstraints.tightFor(width: width),
           child: Container(
             key: ValueKey('activity-section-$id'),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
-              borderRadius: BorderRadius.circular(10),
-            ),
+            decoration: BoxDecoration(borderRadius: BorderRadius.circular(10)),
             child: Stack(
               children: [
                 if (!completed)
@@ -1288,10 +1284,7 @@ class _ThinkingActivitySubItem extends StatelessWidget {
       key: ValueKey('activity-${block.id}'),
       margin: const EdgeInsets.only(top: 4),
       padding: const EdgeInsets.fromLTRB(9, 4, 9, 5),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(10),
-      ),
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(10)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1367,10 +1360,7 @@ class _ToolActivitySubItem extends StatelessWidget {
     return Container(
       key: ValueKey('activity-${block.id}'),
       margin: const EdgeInsets.only(top: 4),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(10),
-      ),
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(10)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1552,12 +1542,7 @@ class ActivityBlockView extends StatelessWidget {
           constraints: BoxConstraints(maxWidth: width),
           child: Container(
             key: ValueKey('activity-${block.id}'),
-            decoration: BoxDecoration(
-              color: block.kind == TranscriptKind.error
-                  ? Theme.of(context).colorScheme.errorContainer
-                  : Theme.of(context).colorScheme.surface,
-              borderRadius: BorderRadius.circular(14),
-            ),
+            decoration: BoxDecoration(borderRadius: BorderRadius.circular(14)),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -1575,7 +1560,9 @@ class ActivityBlockView extends StatelessWidget {
                         Icon(
                           icon,
                           size: 15,
-                          color: Theme.of(context).colorScheme.primary,
+                          color: block.kind == TranscriptKind.error
+                              ? Theme.of(context).colorScheme.error
+                              : Theme.of(context).colorScheme.primary,
                         ),
                         const SizedBox(width: 8),
                         Expanded(
@@ -1699,10 +1686,7 @@ class _ArtifactCardState extends State<ArtifactCard> {
       key: ValueKey('artifact-${artifact.id}'),
       margin: const EdgeInsets.only(top: 10),
       clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(14),
-      ),
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(14)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

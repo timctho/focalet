@@ -20,10 +20,7 @@ class MessageQueue extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 7, 7, 7),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(18),
-      ),
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(18)),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [

@@ -430,6 +430,12 @@ void main() {
                   .then(ByteData.sublistView),
             ))
             .load();
+        await (FontLoader('monospace')..addFont(
+              File('/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf')
+                  .readAsBytes()
+                  .then(ByteData.sublistView),
+            ))
+            .load();
         final icons = Platform.environment['ZOMMI_MESSAGE_PREVIEW_ICONS'];
         if (icons != null) {
           await (FontLoader('MaterialIcons')
@@ -437,8 +443,36 @@ void main() {
               .load();
         }
       });
+      final previewHistory = history();
+      final previewTurn =
+          ((previewHistory['thread'] as Map)['turns'] as List).single as Map;
+      previewTurn['items'] = List<Map<String, Object?>>.from(
+        previewTurn['items'] as List,
+      );
+      (previewTurn['items'] as List).insertAll(1, <Map<String, Object?>>[
+        {
+          'id': 'preview-reason',
+          'type': 'reasoning',
+          'summary': [
+            {
+              'type': 'summary_text',
+              'text':
+                  'Checking the response, tool output and session contrast.',
+            },
+          ],
+        },
+        {
+          'id': 'preview-tool',
+          'type': 'commandExecution',
+          'command': 'git status',
+          'aggregatedOutput': 'Working tree clean',
+          'status': 'completed',
+        },
+      ]);
+      final previewAnswer = (previewTurn['items'] as List).last as Map;
+      previewAnswer['text'] = 'The response and activity share the conversation background.\n\n```text\nA code example without a separate card fill.\n```\n\n| Theme | Sessions |\n| --- | --- |\n| Light | Clear separation |\n| Dark | Subtle selection |';
       final core = RichFakeCore()
-        ..historyBySession['runtime-codex\u0000session-1'] = history();
+        ..historyBySession['runtime-codex\u0000session-1'] = previewHistory;
       final key = GlobalKey();
       await tester.pumpWidget(
         RepaintBoundary(
@@ -446,7 +480,12 @@ void main() {
           child: ZommiApp(
             core: core,
             desktop: FakeDesktopBridge(),
-            initialPreferences: AppPreferences(themeMode: mode),
+            initialPreferences: AppPreferences(
+              themeMode: mode,
+              themeColor: ZommiThemeColor.fromId(
+                Platform.environment['ZOMMI_MESSAGE_PREVIEW_THEME'],
+              ),
+            ),
           ),
         ),
       );
@@ -461,6 +500,11 @@ void main() {
             .writeAsBytes(data!.buffer.asUint8List());
         snapshot.dispose();
       });
+      final group = tester.widget<ThinkingActivityGroup>(
+        find.byType(ThinkingActivityGroup),
+      );
+      await tester.tap(find.byKey(ValueKey('thinking-toggle-${group.id}')));
+      await tester.pumpAndSettle();
       await capture('glass-${mode.name}');
       await tester.tap(find.byTooltip('Edit and resend'));
       await tester.pumpAndSettle();
