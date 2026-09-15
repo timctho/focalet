@@ -82,7 +82,16 @@ try
         await Command("Input.dispatchMouseEvent", new { type = "mousePressed", x, y, button = "left", clickCount = 1 });
         await Command("Input.dispatchMouseEvent", new { type = "mouseReleased", x, y, button = "left", clickCount = 1 });
     }
-    void Check(bool condition, string name) { if (!condition) throw new InvalidOperationException(name); passed.Add(name); Console.WriteLine("PASS " + name); }
+    void Check(bool condition, string name, object? details = null)
+    {
+        if (!condition) throw new InvalidOperationException(name + (details is null ? "" : ": " + JsonSerializer.Serialize(details)));
+        passed.Add(name);
+        Console.WriteLine("PASS " + name);
+    }
+    // DOMRect values retain float noise at fractional display scales (for
+    // example, 641.6000366 CSS px * 1.25 = 802.000046 device px). Keep the
+    // one-pixel raster rounding allowance, with a subpixel numeric epsilon.
+    bool WithinOneDevicePixel(int actual, double expected) => Math.Abs(actual - expected) <= 1.001;
     if (OperatingSystem.IsWindows() && Environment.GetEnvironmentVariable("ZOMMI_TEST_CAPTURE_HOST") is { Length: > 0 } nativeHost)
     {
         while (browser.MainWindowHandle == 0 || !browser.MainWindowTitle.StartsWith("Zommi DOM capture acceptance", StringComparison.Ordinal))
@@ -205,6 +214,7 @@ try
                     await policyHost.StandardInput.WriteLineAsync("{\"id\":\"stop\",\"method\":\"shutdown\",\"params\":{}}");
                     await policyHost.StandardInput.FlushAsync(token);
                     await policyHost.WaitForExitAsync(token);
+                    await File.WriteAllTextAsync(Path.Combine(output, "native-input.log"), await errors, token);
                     if (policyHost.ExitCode != 0) throw new Exception(await errors);
                 }
                 finally { if (!policyHost.HasExited) policyHost.Kill(entireProcessTree: true); }
@@ -300,9 +310,11 @@ try
     var cropped = await capture.ReadAsync("region", x, y, region, token);
     var cropImage = await capture.CaptureImageAsync(region, token);
     var deviceScale = (await Evaluate("devicePixelRatio")).GetDouble();
-    Check(cropImage.Stamp == cropped.Stamp && Math.Abs(cropImage.Width - region.Width * deviceScale) <= 1 &&
-        Math.Abs(cropImage.Height - region.Height * deviceScale) <= 1,
-        "The image crop and structural region share the same document, scroll and dimensions");
+    Check(cropImage.Stamp == cropped.Stamp && WithinOneDevicePixel(cropImage.Width, region.Width * deviceScale) &&
+        WithinOneDevicePixel(cropImage.Height, region.Height * deviceScale),
+        "The image crop and structural region share the same document, scroll and dimensions",
+        new { region, deviceScale, cropImage.Width, cropImage.Height,
+            imageStamp = cropImage.Stamp, regionStamp = cropped.Stamp });
     await File.WriteAllBytesAsync(Path.Combine(output, "selected-region.png"), cropImage.Png, token);
     var text = string.Join("\n", cropped.Elements.Select(element => element.Text));
     Check(text.Contains("Review from Mei", StringComparison.Ordinal) && !text.Contains("UNRELATED", StringComparison.Ordinal), "Region text belongs to the chosen comment and excludes the neighboring content");
@@ -361,7 +373,7 @@ try
     await Task.Delay(100, token);
     var tableRegion = await Bounds("#table");
     var tableImage = await capture.CaptureImageAsync(tableRegion, token);
-    Check(tableImage.Stamp.ScrollY > 0 && Math.Abs(tableImage.Width - tableRegion.Width * deviceScale) <= 1,
+    Check(tableImage.Stamp.ScrollY > 0 && WithinOneDevicePixel(tableImage.Width, tableRegion.Width * deviceScale),
         "Scrolled viewport crops retain document offsets and device-pixel scale");
     await File.WriteAllBytesAsync(Path.Combine(output, "scrolled-table.png"), tableImage.Png, token);
     var cell = await Bounds("#table td");
@@ -405,16 +417,26 @@ try
     await Evaluate("document.body.style.height='100vh'; document.body.style.overflowX='hidden'; document.querySelector('#card-grid').scrollIntoView({block:'center'}); true");
     var gridBounds = await Bounds("#card-grid");
     var grid = await capture.ReadAsync("region", gridBounds.X, gridBounds.Y, gridBounds, token);
+    await File.WriteAllTextAsync(Path.Combine(output, "twelve-card-grid.json"), JsonSerializer.Serialize(grid.Context), token);
     Check(grid.Elements.Where(element => element.Href is not null).Select(element => element.Href).Distinct()
         .SequenceEqual(Enumerable.Range(1, 12).Select(number => $"https://cards.example/{number}")),
-        "A scrolled 100vh body does not clip the twelve visible cards or their fractional right edge");
+        "A scrolled 100vh body does not clip the twelve visible cards or their fractional right edge",
+        new { gridBounds, grid.Stamp, links = grid.Elements.Where(element => element.Href is not null).Select(element => element.Href).Distinct() });
     Check(!JsonSerializer.Serialize(grid.Context).Contains("CLIPPED_CARD", StringComparison.Ordinal) &&
         grid.Elements.All(element => element.Href is null || !new[] { "13", "14", "15", "16" }.Any(number => element.Href.EndsWith("/" + number, StringComparison.Ordinal))),
         "The real grid overflow still excludes its clipped next row");
-    await File.WriteAllTextAsync(Path.Combine(output, "twelve-card-grid.json"), JsonSerializer.Serialize(grid.Context), token);
+    var noisyGrid = await capture.ReadAsync("region", gridBounds.X, gridBounds.Y,
+        gridBounds with { Height = gridBounds.Height + 0.0001 }, token);
+    Check(noisyGrid.Elements.Where(element => element.Href is not null).Select(element => element.Href).Distinct()
+        .SequenceEqual(Enumerable.Range(1, 12).Select(number => $"https://cards.example/{number}")),
+        "Float noise at a crop edge does not include an adjacent link");
     await Evaluate("document.body.style.height=''; document.body.style.overflowX=''; true");
     await Evaluate("document.querySelector('#clipped-link-text').scrollIntoView({block:'center'}); true");
     var clippedLinkBounds = await Bounds("#clipped-link-text");
+    var fractionalLink = await capture.ReadAsync("region", clippedLinkBounds.X, clippedLinkBounds.Y + 1,
+        clippedLinkBounds with { Y = clippedLinkBounds.Y + 1, Height = 0.25 }, token);
+    Check(fractionalLink.Elements.Any(element => element.Href == "https://cards.example/clipped"),
+        "A real fractional-pixel intersection still retains the selected link");
     var clippedLink = await capture.ReadAsync("region", clippedLinkBounds.X, clippedLinkBounds.Y,
         clippedLinkBounds with { Width = 700 }, token);
     Check(!JsonSerializer.Serialize(clippedLink.Context).Contains("DO_NOT_CAPTURE_DIRECTLY_CLIPPED_LINK_TEXT", StringComparison.Ordinal),

@@ -22,7 +22,7 @@ use zommi_core::{
     runtime_targets_from_wsl_probe, wsl_runtime_probe_script,
 };
 
-const TRANSPORT_VERSION: u32 = 6;
+const TRANSPORT_VERSION: u32 = 7;
 const ENDPOINT_SCHEMA_VERSION: u32 = 1;
 const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 const CHANNEL_STDOUT: u8 = 1;

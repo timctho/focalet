@@ -1,6 +1,14 @@
 public sealed class ZommiDesktopFrameCapture : System.IDisposable {
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern System.IntPtr SetThreadDpiAwarenessContext(System.IntPtr context);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern System.IntPtr GetDC(System.IntPtr window);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern int ReleaseDC(System.IntPtr window, System.IntPtr context);
+    [System.Runtime.InteropServices.DllImport("gdi32.dll", SetLastError = true)]
+    private static extern bool BitBlt(System.IntPtr target, int x, int y, int width, int height, System.IntPtr source, int sourceX, int sourceY, uint operation);
+    [System.Runtime.InteropServices.DllImport("gdi32.dll", SetLastError = true)]
+    private static extern bool GdiFlush();
 
     private readonly int[] area;
     private bool disposed;
@@ -34,7 +42,17 @@ public sealed class ZommiDesktopFrameCapture : System.IDisposable {
         try {
             frame.Bitmap = new System.Drawing.Bitmap(area[2], area[3], System.Drawing.Imaging.PixelFormat.Format32bppRgb);
             using (var graphics = System.Drawing.Graphics.FromImage(frame.Bitmap)) {
-                graphics.CopyFromScreen(area[0], area[1], 0, 0, frame.Bitmap.Size, System.Drawing.CopyPixelOperation.SourceCopy);
+                var source = GetDC(System.IntPtr.Zero);
+                if (source == System.IntPtr.Zero) throw new System.ComponentModel.Win32Exception();
+                try {
+                    var target = graphics.GetHdc();
+                    try {
+                        // Include layered windows and finish the copy before
+                        // recording its observation timestamp.
+                        const uint sourceCopyWithLayeredWindows = 0x40CC0020;
+                        if (!BitBlt(target, 0, 0, area[2], area[3], source, area[0], area[1], sourceCopyWithLayeredWindows) || !GdiFlush()) throw new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error());
+                    } finally { graphics.ReleaseHdc(target); }
+                } finally { ReleaseDC(System.IntPtr.Zero, source); }
             }
             return frame;
         } catch {

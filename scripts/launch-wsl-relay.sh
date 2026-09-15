@@ -20,6 +20,10 @@ done
 launch_log="${endpoint_file}.launch.log"
 : >"$launch_log"
 
+# Runtime requests supply their own cwd. The persistent daemon must not pin
+# the extracted Windows package directory and prevent its next replacement.
+cd /
+
 if command -v setsid >/dev/null 2>&1; then
   nohup setsid "$node_path" "$relay_script" \
     --endpoint "$endpoint_file" \

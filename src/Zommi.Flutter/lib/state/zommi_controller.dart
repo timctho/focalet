@@ -82,6 +82,7 @@ final class ZommiController extends ChangeNotifier {
   final Map<String, SessionSettings> _sessionSettings = {};
   final Map<String, List<Map<String, Object?>>> _modelCatalogs = {};
   final Map<String, String> _runtimeTargetAliases = {};
+  final Set<String> _detectedRuntimeIds = {};
   final Map<String, RuntimeTarget> _knownRuntimes = {};
   final Map<String, Set<String>> _runtimeCapabilities = {};
   final Map<String, DateTime> _catalogSyncedAt = {};
@@ -2789,6 +2790,7 @@ final class ZommiController extends ChangeNotifier {
 
   void _replaceDiscovery(RuntimeDiscovery discovery) {
     _runtimeTargetAliases.clear();
+    _detectedRuntimeIds.clear();
     final visible = _deduplicateRuntimeTargets(
       discovery.targets,
       aliases: _runtimeTargetAliases,
@@ -2796,6 +2798,7 @@ final class ZommiController extends ChangeNotifier {
     runtimeTargets
       ..clear()
       ..addAll(visible);
+    _detectedRuntimeIds.addAll(visible.map((target) => target.id));
     runtimeSettings = discovery.settings;
     for (final target in visible) {
       _knownRuntimes[target.id] = target;
@@ -2824,7 +2827,13 @@ final class ZommiController extends ChangeNotifier {
     final hasLocator =
         target.executablePath.trim().isNotEmpty ||
         target.endpoint?.trim().isNotEmpty == true;
-    return detected && hasLocator;
+    // Discovery and connection health are different states. A detected CLI
+    // remains available for retry when its process exits; a missing discovery
+    // result must still stay out of the picker.
+    return hasLocator &&
+        (detected ||
+            (status == 'unavailable' &&
+                _detectedRuntimeIds.contains(target.id)));
   }
 
   List<RuntimeTarget> _deduplicateRuntimeTargets(

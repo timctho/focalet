@@ -206,6 +206,15 @@ function failSpoolSession(sessionDirectory, message) {
 }
 
 function handleSpoolSession(sessionDirectory, requestPath) {
+  // Several distributions or overlapping relay instances share this spool.
+  // Only the intended relay may claim a request; claiming first lets another
+  // instance consume it and return an authentication failure to a valid client.
+  try {
+    const pending = JSON.parse(fs.readFileSync(requestPath, 'utf8'));
+    if (!tokenMatches(pending?.token)) return;
+  } catch {
+    return;
+  }
   const claimedPath = path.join(sessionDirectory, 'request.claimed.json');
   try {
     fs.renameSync(requestPath, claimedPath);
@@ -243,6 +252,7 @@ function handleSpoolSession(sessionDirectory, requestPath) {
   let exitCode = null;
   let inputOffset = 0;
   let inputPaused = false;
+  let inputFinished = false;
   let committedInputLength = null;
   let inputTimer;
   let heartbeatValue = null;
@@ -251,6 +261,10 @@ function handleSpoolSession(sessionDirectory, requestPath) {
   let heartbeatError = null;
 
   const stopInput = () => {
+    inputFinished = true;
+  };
+  const stopMonitoring = () => {
+    stopInput();
     if (inputTimer) clearInterval(inputTimer);
     inputTimer = undefined;
   };
@@ -258,7 +272,7 @@ function handleSpoolSession(sessionDirectory, requestPath) {
   const maybeFinish = () => {
     if (!started || finished || exitCode === null || !stdoutClosed || !stderrClosed) return;
     finished = true;
-    stopInput();
+    stopMonitoring();
     const payload = Buffer.allocUnsafe(4);
     payload.writeInt32BE(exitCode, 0);
     tryAppendFrame(outputPath, CHANNEL_EXIT, payload);
@@ -268,7 +282,7 @@ function handleSpoolSession(sessionDirectory, requestPath) {
   };
 
   inputTimer = setInterval(() => {
-    if (!started || finished || inputPaused) return;
+    if (!started || finished) return;
     try {
       const now = performance.now();
       if (now - heartbeatCheckedAt >= 250) {
@@ -291,10 +305,12 @@ function handleSpoolSession(sessionDirectory, requestPath) {
         tryAppendFrame(outputPath, CHANNEL_STDERR, Buffer.from(
           `WSL runtime client heartbeat stopped for 5s${heartbeatError ? ` (${heartbeatError})` : ''}.\n`,
         ));
-        stopInput();
+        stopMonitoring();
         killProcessGroup(child);
         return;
       }
+      // EOF and stdin backpressure must not disable client liveness checks.
+      if (inputFinished || inputPaused) return;
       const size = fs.statSync(inputPath).size;
       if (committedInputLength === null && fs.existsSync(inputClosedPath)) {
         const committed = fs.readFileSync(inputClosedPath, 'utf8').trim();
@@ -326,7 +342,7 @@ function handleSpoolSession(sessionDirectory, requestPath) {
       tryAppendFrame(outputPath, CHANNEL_STDERR, Buffer.from(
         `WSL runtime input relay failed (${error.code || 'I/O error'}).\n`,
       ));
-      stopInput();
+      stopMonitoring();
       killProcessGroup(child);
     }
   }, 5);
@@ -335,6 +351,7 @@ function handleSpoolSession(sessionDirectory, requestPath) {
   child.stdin.on('error', (error) => {
     stopInput();
     if (error.code !== 'EPIPE' && error.code !== 'ERR_STREAM_DESTROYED') {
+      stopMonitoring();
       tryAppendFrame(outputPath, CHANNEL_STDERR, Buffer.from(`WSL runtime input failed: ${error.message}\n`));
       killProcessGroup(child);
     }

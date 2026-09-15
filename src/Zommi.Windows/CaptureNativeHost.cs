@@ -250,19 +250,21 @@ internal static class CaptureNativeHost
 
     private static object SelectImage(uint returnProcessId)
     {
-        using var selector = new RegionSelectionForm(returnProcessId: returnProcessId,
-            captureAlignedRegion: RegionContextCapture.Capture);
+        using var selector = new RegionSelectionForm(returnProcessId);
         var dialogResult = selector.ShowDialog();
         if (dialogResult != DialogResult.OK || selector.Result is not { } selected)
         {
             return new
             {
                 Cancelled = true,
-                selector.ErrorMessage,
             };
         }
 
-        return ImageResult(selected);
+        // The modal selector and its mouse handler have completed. Let the
+        // overlay leave the compositor before reading pixels and UIA context.
+        Application.DoEvents();
+        Thread.Sleep(80);
+        return ImageResult(RegionContextCapture.Capture(selected));
     }
 
     private static object ImageResult(RegionSelectionResult selected) => new

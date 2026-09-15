@@ -1,6 +1,7 @@
 public static class ZommiRenderedSizeProbe {
     public static int[] Area;
     public static string EvidenceDirectory;
+    public static bool SaveMissingFrames = true;
     public static int[] LastBackground;
     public static int[][] LastMarkers;
     public static long LastPresentationTimestamp;
@@ -37,7 +38,7 @@ public static class ZommiRenderedSizeProbe {
         try {
             var marker = FindMarker(bitmap);
             LastBackground = marker == null ? null : Background(bitmap, marker);
-            if (marker == null) {
+            if (marker == null && SaveMissingFrames) {
                 System.IO.Directory.CreateDirectory(EvidenceDirectory);
                 bitmap.Save(System.IO.Path.Combine(EvidenceDirectory, string.Format("missing-{0:D2}-{1:D4}.png", sequence, elapsed)), System.Drawing.Imaging.ImageFormat.Png);
             }

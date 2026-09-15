@@ -24,7 +24,7 @@ try {
         captureHostSha256 = (Get-FileHash -LiteralPath $capture -Algorithm SHA256).Hash.ToLowerInvariant()
         browserExecutable = $BrowserExecutable
         testedAtUtc = [DateTime]::UtcNow.ToString('o')
-        scope = 'Native HWND/viewport binding, shared-helper Ctrl batches driven by window messages, GDI crops and live browser DOM/CDP interactions. OS mouse hit testing and packaged app gestures are covered by accept-windows-capture.ps1.'
+        scope = 'Native HWND/viewport binding, shared-helper Ctrl batches driven by native pointer input, GDI crops and live browser DOM/CDP interactions. Packaged app gestures are covered by accept-windows-capture.ps1.'
     }
     $identity | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $ResultDirectory 'package-identity.json') -Encoding utf8
 } finally {

@@ -620,6 +620,9 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
           key: const ValueKey('zommi-glass-panel'),
           radius: 34,
           opacity: .56,
+          // The backdrop is already a smooth gradient. Blurring the whole
+          // desktop-sized panel adds an expensive pass without useful detail.
+          blurBackground: false,
           child: Stack(
             key: _previewViewportKey,
             fit: StackFit.expand,
@@ -1053,6 +1056,9 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
             ),
             child: FrostedSurface(
               key: const ValueKey('message-composer-shell'),
+              // This row is below the transcript and covers only the smooth
+              // panel gradient, so a backdrop blur adds no useful detail.
+              blurBackground: false,
               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
@@ -1195,14 +1201,19 @@ class _HeaderButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      label: label,
-      child: IconButton(
-        tooltip: label,
-        onPressed: onPressed,
-        icon: customIcon ?? Icon(icon, size: iconSize),
-        visualDensity: VisualDensity.compact,
+    return MergeSemantics(
+      child: Semantics(
+        button: true,
+        label: label,
+        child: Tooltip(
+          message: label,
+          excludeFromSemantics: true,
+          child: IconButton(
+            onPressed: onPressed,
+            icon: customIcon ?? Icon(icon, size: iconSize),
+            visualDensity: VisualDensity.compact,
+          ),
+        ),
       ),
     );
   }

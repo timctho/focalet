@@ -1,3 +1,4 @@
+#requires -Version 7.0
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -16,8 +17,15 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'accept-windows-capture.ps1') -PackageDirectory $PackageDirectory -ResultPath $ResultPath -HelpersOnly
 Add-Type -AssemblyName Accessibility
 Add-Type -AssemblyName System.Drawing
+$probeReferences = @([Accessibility.IAccessible].Assembly.Location, [Drawing.Bitmap].Assembly.Location)
+$probeReferences += Get-ChildItem (Join-Path $PSHOME 'ref') -Filter '*.dll' | ForEach-Object FullName
+$probeReferences += Get-ChildItem $PSHOME -Filter 'System.Private.Windows*.dll' | ForEach-Object FullName
 $desktopCaptureSource = if ($CaptureBackend -eq 'Gdi') { 'windows-desktop-frame-gdi.cs' } else { 'windows-desktop-frame.cs' }
-Add-Type -ReferencedAssemblies @([Accessibility.IAccessible].Assembly.Location, [Drawing.Bitmap].Assembly.Location) -TypeDefinition (@'
+# Accessibility is a Windows interop assembly referencing the System.Runtime
+# facade; .NET resolves that reference to the current runtime.
+# Keep ref Guid calls compatible with older PowerShell 7 runtimes; .NET 10
+# accepts the same calls with its newer equivalent in Guid declaration.
+Add-Type -CompilerOptions '/nowarn:1701,9191' -ReferencedAssemblies $probeReferences -TypeDefinition (@'
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -46,6 +54,16 @@ public static class ZommiWindowSizeAccess {
     private static Stopwatch interactionClock;
     private static long interactionStarted;
     public static long InputTimestamp { get { return interactionStarted; } }
+    private static readonly System.Collections.Concurrent.ConcurrentQueue<string> nativeErrors = new System.Collections.Concurrent.ConcurrentQueue<string>();
+
+    public static void ObserveErrors(Process process) {
+        process.ErrorDataReceived += (sender, args) => {
+            if (args.Data != null && nativeErrors.Count < 1000) nativeErrors.Enqueue(args.Data);
+        };
+        process.BeginErrorReadLine();
+    }
+
+    public static string[] NativeErrors() { return nativeErrors.ToArray(); }
 
     public static bool NativeAnimationsEnabled() {
         var animation = new Animation { Size = 8 };
@@ -155,12 +173,13 @@ Assert-DesktopCaptureSurface
 $probeRoot = Join-Path $env:TEMP ('zommi-window-size-' + [Guid]::NewGuid().ToString('N'))
 $null = New-Item -ItemType Directory -Path $probeRoot
 if (-not $ResultPath) { $ResultPath = Join-Path $probeRoot 'result.json' }
+$ResultPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ResultPath)
 [ZommiRenderedSizeProbe]::EvidenceDirectory = Join-Path ([IO.Path]::GetDirectoryName($ResultPath)) 'rendered-size-frames'
 $log = Join-Path $probeRoot 'events.jsonl'
 $settings = Join-Path $probeRoot 'Zommi\settings.json'
 $null = [IO.Directory]::CreateDirectory((Split-Path -Parent $settings))
 # Window controls are tested after the welcome flow has completed.
-[IO.File]::WriteAllText($settings, '{"runtimeSetupCompleted":true}')
+[IO.File]::WriteAllText($settings, '{"runtimeSetupCompleted":true,"themeMode":"light","themeColor":"custom","customThemeColor":4286675145}')
 $entrypoint = Join-Path $PackageDirectory 'Zommi.exe'
 $result = @{ gitCommit = $ExpectedCommit; package = $PackageDirectory; captureApi = 'dxgi-desktop-duplication'; latencyClock = 'dxgi-present-qpc-from-input-release'; nativeAnimationsEnabled = [ZommiWindowSizeAccess]::NativeAnimationsEnabled(); transitions = @() }
 $result.resizePolicy = 'retained-frame-without-animation'
@@ -180,18 +199,24 @@ function Wait-SizeCondition {
 }
 
 function Get-SizeControl {
-    param([string] $Name)
+    param([string] $Name, [switch] $RuntimeEntry)
     $script:sizeControl = $null
     Wait-SizeCondition -Description "control $Name" -Condition {
-        $script:sizeControl = @([ZommiWindowSizeAccess]::Read($view) | Where-Object { $_.Name -eq $Name -and $_.Bounds[2] -gt 0 } | Select-Object -First 1)
+        $script:view = [ZommiWindowSizeAccess]::FindWindowEx($window, [IntPtr]::Zero, [NullString]::Value, [NullString]::Value)
+        try { $entries = @([ZommiWindowSizeAccess]::Read($view)) }
+        catch [Runtime.InteropServices.COMException] { return $false }
+        catch [ArgumentException] { return $false }
+        $script:sizeControl = @($entries | Where-Object {
+            ($_.Name -eq $Name -or ($RuntimeEntry -and $_.Name -match ('^' + [regex]::Escape($Name) + '\r?\n'))) -and $_.Bounds[2] -gt 0
+        } | Select-Object -First 1)
         $script:sizeControl.Count -eq 1
     }
     return $script:sizeControl[0]
 }
 
 function Click-SizeControl {
-    param([string] $Name)
-    $bounds = (Get-SizeControl $Name).Bounds
+    param([string] $Name, [switch] $RuntimeEntry)
+    $bounds = (Get-SizeControl $Name -RuntimeEntry:$RuntimeEntry).Bounds
     $left = [int]($bounds[0] + $bounds[2] / 2)
     $top = [int]($bounds[1] + $bounds[3] / 2)
     if (-not [ZommiWindowsAcceptanceNative]::IsOwnedWindowAtPoint($window, $left, $top)) { throw "Obscured control: $Name" }
@@ -206,22 +231,20 @@ function Measure-SizeTransition {
     $markerBefore = [ZommiRenderedSizeProbe]::Capture(0, $false)
     $backgroundBefore = [ZommiRenderedSizeProbe]::LastBackground
     if ($null -eq $markerBefore) { throw 'Rendered send control was not visible before resize.' }
-    if ($CaptureBackend -eq 'Gdi') {
-        $scale = [ZommiWindowSizeAccess]::GetDpiForWindow($window) / 96.0
-        $clientBefore = [ZommiWindowsAcceptanceNative]::PhysicalClientBounds($window)
-        $targetWidth = if ($Mode -eq 'wide') { 1100 * $scale } else { 900 * $scale }
-        $targetRight = $workArea[0] + $workArea[2] / 2 + [Math]::Min($targetWidth, $workArea[2]) / 2
-        $targetBottom = $workArea[1] + $workArea[3] - 18 * $scale
-        if ($Mode -eq 'maximized') { $targetRight = $workArea[0] + $workArea[2]; $targetBottom = $workArea[1] + $workArea[3] }
-        $targetMarkerLeft = $targetRight - ($clientBefore[0] + $clientBefore[2] - $markerBefore[0])
-        $targetMarkerTop = $targetBottom - ($clientBefore[1] + $clientBefore[3] - $markerBefore[1])
-        $captureLeft = [Math]::Max($workArea[0], [Math]::Min($markerBefore[0], $targetMarkerLeft) - $markerBefore[2])
-        $captureTop = [Math]::Max($workArea[1], [Math]::Min($markerBefore[1], $targetMarkerTop) - $markerBefore[3])
-        $captureRight = [Math]::Min($workArea[0] + $workArea[2], [Math]::Max($markerBefore[0], $targetMarkerLeft) + 3 * $markerBefore[2])
-        $captureBottom = [Math]::Min($workArea[1] + $workArea[3], [Math]::Max($markerBefore[1], $targetMarkerTop) + 2 * $markerBefore[3])
-        [ZommiRenderedSizeProbe]::Area = @($captureLeft, $captureTop, ($captureRight - $captureLeft), ($captureBottom - $captureTop))
-        $null = [ZommiRenderedSizeProbe]::Capture(0, $false)
-    }
+    $scale = [ZommiWindowSizeAccess]::GetDpiForWindow($window) / 96.0
+    $clientBefore = [ZommiWindowsAcceptanceNative]::PhysicalClientBounds($window)
+    $targetWidth = if ($Mode -eq 'wide') { 1100 * $scale } else { 900 * $scale }
+    $targetRight = $workArea[0] + $workArea[2] / 2 + [Math]::Min($targetWidth, $workArea[2]) / 2
+    $targetBottom = $workArea[1] + $workArea[3] - 18 * $scale
+    if ($Mode -eq 'maximized') { $targetRight = $workArea[0] + $workArea[2]; $targetBottom = $workArea[1] + $workArea[3] }
+    $targetMarkerLeft = $targetRight - ($clientBefore[0] + $clientBefore[2] - $markerBefore[0])
+    $targetMarkerTop = $targetBottom - ($clientBefore[1] + $clientBefore[3] - $markerBefore[1])
+    $captureLeft = [Math]::Max($workArea[0], [Math]::Min($markerBefore[0], $targetMarkerLeft) - $markerBefore[2])
+    $captureTop = [Math]::Max($workArea[1], [Math]::Min($markerBefore[1], $targetMarkerTop) - $markerBefore[3])
+    $captureRight = [Math]::Min($workArea[0] + $workArea[2], [Math]::Max($markerBefore[0], $targetMarkerLeft) + 3 * $markerBefore[2])
+    $captureBottom = [Math]::Min($workArea[1] + $workArea[3], [Math]::Max($markerBefore[1], $targetMarkerTop) + 2 * $markerBefore[3])
+    [ZommiRenderedSizeProbe]::Area = @($captureLeft, $captureTop, ($captureRight - $captureLeft), ($captureBottom - $captureTop))
+    $null = [ZommiRenderedSizeProbe]::Capture(0, $false)
     if ($NativeRestore) { [ZommiWindowSizeAccess]::Restore($window) }
     else { Click-SizeControl $Name }
     $frames = @([ZommiWindowSizeAccess]::Sample($window, 3000))
@@ -232,19 +255,29 @@ function Measure-SizeTransition {
         Wait-SizeCondition -Description "persisted $Mode" -Condition { (Test-Path $settings) -and (Get-Content -Raw $settings | ConvertFrom-Json).windowSize -eq $Mode }
     }
     $markerAfter = [ZommiRenderedSizeProbe]::Capture(0, $false)
+    $backgroundAfter = [ZommiRenderedSizeProbe]::LastBackground
     if ($null -eq $markerAfter) { throw 'Rendered send control was not visible after resize.' }
     $visualDistinct = @($frames | ForEach-Object { $_.marker -join ',' } | Select-Object -Unique)
     $result.lastMeasurement.markerBefore = $markerBefore
     $result.lastMeasurement.markerAfter = $markerAfter
     $result.lastMeasurement.backgroundBefore = $backgroundBefore
+    $result.lastMeasurement.backgroundAfter = $backgroundAfter
     $maximumBackgroundChange = 0
     $firstMotionMs = $null
     $firstObservedMotionMs = $null
     $settledMs = $null
     foreach ($frame in $frames) {
         if ($null -eq $frame.marker -or $null -eq $frame.background) { throw "Rendered control disappeared during $Name." }
+        # The glass gradient has different colors at the two final layouts.
+        # Each retained frame must match the background of its own endpoint;
+        # intermediate colors/flashes still fail the three-level RGB guard.
+        $usesOldFrame = $true
+        foreach ($axis in 0..3) {
+            if ([Math]::Abs($frame.marker[$axis] - $markerBefore[$axis]) -gt 3) { $usesOldFrame = $false }
+        }
+        $expectedBackground = if ($usesOldFrame) { $backgroundBefore } else { $backgroundAfter }
         foreach ($channel in 0..2) {
-            $maximumBackgroundChange = [Math]::Max($maximumBackgroundChange, [Math]::Abs($frame.background[$channel] - $backgroundBefore[$channel]))
+            $maximumBackgroundChange = [Math]::Max($maximumBackgroundChange, [Math]::Abs($frame.background[$channel] - $expectedBackground[$channel]))
         }
         if ($null -eq $firstMotionMs -and ([Math]::Abs($frame.marker[0] - $markerBefore[0]) -gt 3 -or [Math]::Abs($frame.marker[1] - $markerBefore[1]) -gt 3)) {
             $firstMotionMs = $frame.presentedMs
@@ -309,7 +342,7 @@ function Measure-SizeTransition {
         }
     } elseif ([ZommiWindowsAcceptanceNative]::IsZoomed($window)) { throw 'Normal size retained native maximized state.' }
     if (-not [ZommiWindowsAcceptanceNative]::Foreground($window)) { throw "Resize $Name lost foreground ownership." }
-    $result.transitions += @{ mode = $Mode; before = $before; after = $after; distinctBounds = $distinct.Count; renderedPositions = $visualDistinct.Count; markerBefore = $markerBefore; markerAfter = $markerAfter; backgroundBefore = $backgroundBefore; maximumBackgroundChange = $maximumBackgroundChange; firstMotionMs = $firstMotionMs; firstObservedMotionMs = $firstObservedMotionMs; settledMs = $settledMs; frames = $frames }
+    $result.transitions += @{ mode = $Mode; before = $before; after = $after; distinctBounds = $distinct.Count; renderedPositions = $visualDistinct.Count; markerBefore = $markerBefore; markerAfter = $markerAfter; backgroundBefore = $backgroundBefore; backgroundAfter = $backgroundAfter; maximumBackgroundChange = $maximumBackgroundChange; firstMotionMs = $firstMotionMs; firstObservedMotionMs = $firstObservedMotionMs; settledMs = $settledMs; frames = $frames }
     Write-Host "Rendered $Name transition: $($visualDistinct.Count) positions, RGB change $maximumBackgroundChange, response $firstMotionMs ms, settled $settledMs ms"
 }
 
@@ -321,9 +354,11 @@ try {
     $startInfo.FileName = $entrypoint
     $startInfo.WorkingDirectory = $PackageDirectory
     $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardError = $true
     $startInfo.EnvironmentVariables['APPDATA'] = $probeRoot
     $startInfo.EnvironmentVariables['ZOMMI_ACCEPTANCE_LOG'] = $log
     $application = [Diagnostics.Process]::Start($startInfo)
+    [ZommiWindowSizeAccess]::ObserveErrors($application)
     $window = Wait-ForVisibleProcessWindow -ProcessId $application.Id
     $null = Wait-ForAcceptanceEvent -Path $log -Name 'desktop.ready'
     Start-Sleep -Seconds 5
@@ -345,8 +380,29 @@ try {
     if (@([ZommiWindowSizeAccess]::Read($view) | Where-Object Name -eq 'Window size').Count) { throw 'Window size remains in Settings.' }
     Click-SizeControl 'App settings'
     $null = Get-SizeControl 'Maximize Zommi'
+    if (-not @([ZommiWindowSizeAccess]::Read($view) | Where-Object Name -eq 'Exact agent session bound').Count) {
+        # An isolated profile may list history without an active conversation.
+        # Create the blank chat through the same runtime menu as a new user.
+        Click-SizeControl 'Create new chat'
+        Click-SizeControl 'Codex' -RuntimeEntry
+        $null = Get-SizeControl 'Exact agent session bound'
+    }
     $normal = [ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
-    $normalMarker = [ZommiRenderedSizeProbe]::Capture(0, $false)
+    [ZommiRenderedSizeProbe]::Area = [ZommiWindowsAcceptanceNative]::WorkArea($window)
+    # The send button is disabled until the runtime has finished connecting.
+    # Wait for its real rendered color instead of assuming startup takes 5s.
+    [ZommiRenderedSizeProbe]::SaveMissingFrames = $false
+    $markerDeadline = [DateTime]::UtcNow.AddSeconds(90)
+    do {
+        $normalMarker = [ZommiRenderedSizeProbe]::Capture(0, $false)
+        if ($null -ne $normalMarker) { break }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $markerDeadline)
+    [ZommiRenderedSizeProbe]::SaveMissingFrames = $true
+    if ($null -eq $normalMarker) {
+        $null = [ZommiRenderedSizeProbe]::Capture(0, $false)
+        throw 'Rendered send control did not become ready after runtime startup.'
+    }
     Measure-SizeTransition 'Maximize Zommi' 'maximized'
     Measure-SizeTransition 'Restore' 'standard' -NativeRestore
     Wait-SizeCondition -Description 'native Restore retains pre-Max placement' -Condition { ([ZommiWindowsAcceptanceNative]::PhysicalBounds($window) -join ',') -eq ($normal -join ',') }
@@ -361,11 +417,17 @@ try {
     Measure-SizeTransition 'Restore Zommi' 'standard'
     Measure-SizeTransition 'Maximize Zommi' 'maximized'
     Measure-SizeTransition 'Restore Zommi' 'standard'
+    $result.nativeErrors = @([ZommiWindowSizeAccess]::NativeErrors())
+    if (@($result.nativeErrors | Where-Object { $_ -match 'Failed to update ui::AXTree' }).Count) {
+        throw 'Flutter rejected an accessibility tree update during the window-control gate.'
+    }
     $result.passed = $true
 } catch {
     $result.passed = $false
     $result.error = $_.Exception.Message
+    $result.nativeErrors = @([ZommiWindowSizeAccess]::NativeErrors())
     if ($view) {
+        try { @([ZommiWindowSizeAccess]::Read($view)) | ConvertTo-Json -Depth 4 | Set-Content ($ResultPath + '.controls.json') } catch { }
         try { $result.surfaceStatus = @([ZommiWindowSizeAccess]::Read($view) | Where-Object { $_.Name -like 'Agent status:*' } | ForEach-Object Name) } catch { }
     }
     throw

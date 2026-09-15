@@ -304,7 +304,7 @@ class _SessionSidebarState extends State<SessionSidebar> {
                               children: [
                                 Row(
                                   children: [
-                                    Tooltip(
+                                    _SessionTooltip(
                                       message: presence.name,
                                       child: SizedBox.square(
                                         dimension: 18,
@@ -316,7 +316,7 @@ class _SessionSidebarState extends State<SessionSidebar> {
                                       ),
                                     ),
                                     const SizedBox(width: 6),
-                                    Tooltip(
+                                    _SessionTooltip(
                                       message:
                                           runtime?.displayName ??
                                           'Agent runtime',
@@ -329,7 +329,7 @@ class _SessionSidebarState extends State<SessionSidebar> {
                                     ),
                                     const SizedBox(width: 6),
                                     Expanded(
-                                      child: Tooltip(
+                                      child: _SessionTooltip(
                                         message:
                                             session.cwd?.trim().isNotEmpty ==
                                                 true
@@ -358,7 +358,7 @@ class _SessionSidebarState extends State<SessionSidebar> {
                                       ),
                                     ],
                                     const SizedBox(width: 8),
-                                    Tooltip(
+                                    _SessionTooltip(
                                       message: updated == null
                                           ? 'Last update unavailable'
                                           : 'Last updated ${localizations.formatFullDate(updated)} ${localizations.formatTimeOfDay(TimeOfDay.fromDateTime(updated))}',
@@ -2218,4 +2218,20 @@ class _ModalCard extends StatelessWidget {
       ),
     );
   }
+}
+
+// Keep sibling portal anchors separate inside a ListView item. Flutter 3.47
+// can otherwise drop an anchor while merging the item's semantics, freezing
+// the native accessibility tree (flutter/flutter#182444 and #190344).
+class _SessionTooltip extends StatelessWidget {
+  const _SessionTooltip({required this.message, required this.child});
+
+  final String message;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    container: true,
+    child: Tooltip(message: message, child: child),
+  );
 }

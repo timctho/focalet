@@ -284,7 +284,8 @@ class ReleasePackageTests(unittest.TestCase):
         for contract in ("DuplicateOutput", "AcquireFrame", "CopyRegion", "MapTexture", "ReleaseFrame", "SetThreadDpiAwarenessContext", "Dispose()"):
             self.assertIn(contract, desktop_capture)
         workflow = (SCRIPTS.parent / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-        self.assertIn("shell: powershell", workflow)
+        self.assertIn("shell: pwsh", workflow)
+        self.assertIn("#requires -Version 7.0", script)
         self.assertIn("accept-windows-window-size.ps1", workflow)
         self.assertIn("-CaptureBackend Gdi", workflow)
 
@@ -300,7 +301,7 @@ class ReleasePackageTests(unittest.TestCase):
             self.assertIn(contract, script)
         capture = (SCRIPTS / "windows-desktop-frame-gdi.cs").read_text(encoding="utf-8")
         self.assertIn("PresentationTimestamp { get { return 0; } }", capture)
-        self.assertIn("graphics.CopyFromScreen", capture)
+        self.assertIn("BitBlt(target", capture)
         self.assertIn("SetThreadDpiAwarenessContext", capture)
         self.assertIn("frame.Bitmap = null", capture)
         self.assertNotIn("D3D11", capture)

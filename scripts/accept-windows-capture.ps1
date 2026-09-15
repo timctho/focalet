@@ -601,9 +601,14 @@ public static class ZommiWindowsAcceptanceNative
         }
         mouse_event(leftDown, 0, 0, 0, UIntPtr.Zero);
         System.Threading.Thread.Sleep(80);
-        SetPhysicalCursorPos(startX + Math.Sign(endX - startX) * 10, startY);
-        System.Threading.Thread.Sleep(120);
-        SetPhysicalCursorPos(endX, endY);
+        // Flutter first recognizes a pan, then enters the native move loop.
+        // Continue moving after crossing its gesture threshold; jumping only
+        // to the endpoint starts the move loop without any movement left.
+        for (var step = 1; step <= 12; step++) {
+            SetPhysicalCursorPos(startX + (endX - startX) * step / 12,
+                startY + (endY - startY) * step / 12);
+            System.Threading.Thread.Sleep(35);
+        }
         System.Threading.Thread.Sleep(120);
         mouse_event(leftUp, 0, 0, 0, UIntPtr.Zero);
         return true;
@@ -618,17 +623,26 @@ public static class ZommiWindowsAcceptanceNative
             PostMessage(window, keyUp, new IntPtr(escape), IntPtr.Zero);
     }
 
+    [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
+
+    // Directly sent mouse messages must carry the same modifier flags as OS input.
+    private static int MouseModifiers()
+    {
+        return ((GetAsyncKeyState(0x11) & 0x8000) != 0 ? 8 : 0) |
+            ((GetAsyncKeyState(0x10) & 0x8000) != 0 ? 4 : 0);
+    }
+
     public static bool DragSelection(IntPtr window, int startX, int startY, int endX, int endY)
     {
         const uint leftDown = 0x0201;
         const uint mouseMove = 0x0200;
         const uint leftUp = 0x0202;
         const int leftButton = 0x0001;
-        SendMessage(window, leftDown, new IntPtr(leftButton), Point(startX, startY));
+        SendMessage(window, leftDown, new IntPtr(leftButton | MouseModifiers()), Point(startX, startY));
         System.Threading.Thread.Sleep(100);
-        SendMessage(window, mouseMove, new IntPtr(leftButton), Point(endX, endY));
+        SendMessage(window, mouseMove, new IntPtr(leftButton | MouseModifiers()), Point(endX, endY));
         System.Threading.Thread.Sleep(100);
-        SendMessage(window, leftUp, IntPtr.Zero, Point(endX, endY));
+        SendMessage(window, leftUp, new IntPtr(MouseModifiers()), Point(endX, endY));
         return true;
     }
 
@@ -640,9 +654,9 @@ public static class ZommiWindowsAcceptanceNative
         {
             var bounds = PhysicalBounds(window);
             SetCursorPos(startX, startY);
-            SendMessage(window, 0x0201, new IntPtr(1), Point(startX - bounds[0], startY - bounds[1]));
+            SendMessage(window, 0x0201, new IntPtr(1 | MouseModifiers()), Point(startX - bounds[0], startY - bounds[1]));
             SetCursorPos(endX, endY);
-            SendMessage(window, 0x0200, new IntPtr(1), Point(endX - bounds[0], endY - bounds[1]));
+            SendMessage(window, 0x0200, new IntPtr(1 | MouseModifiers()), Point(endX - bounds[0], endY - bounds[1]));
             return timer.ElapsedMilliseconds;
         }
         finally { if (previousDpi != IntPtr.Zero) SetThreadDpiAwarenessContext(previousDpi); }
@@ -654,7 +668,7 @@ public static class ZommiWindowsAcceptanceNative
         try
         {
             var bounds = PhysicalBounds(window);
-            SendMessage(window, 0x0202, IntPtr.Zero, Point(x - bounds[0], y - bounds[1]));
+            SendMessage(window, 0x0202, new IntPtr(MouseModifiers()), Point(x - bounds[0], y - bounds[1]));
         }
         finally { if (previousDpi != IntPtr.Zero) SetThreadDpiAwarenessContext(previousDpi); }
     }
@@ -939,7 +953,10 @@ function Invoke-CaptureRequest {
         } | ConvertTo-Json -Compress
         $process.StandardInput.WriteLine($shutdown)
         $process.StandardInput.Flush()
-        $null = $process.StandardOutput.ReadLine()
+        $shutdownRead = $process.StandardOutput.ReadLineAsync()
+        if (-not $shutdownRead.Wait([TimeSpan]::FromSeconds(5))) {
+            throw 'Capture helper did not acknowledge shutdown.'
+        }
         $process.StandardInput.Close()
         if (-not $process.WaitForExit(5000)) {
             throw 'Capture helper did not stop after shutdown.'
@@ -1427,18 +1444,21 @@ function Invoke-PackagedApplicationAcceptance {
             throw 'Packaged taskbar window did not restore.'
         }
 
-        if (-not [ZommiWindowsAcceptanceNative]::SetCursorPos(300, 300)) {
-            throw 'Could not place the pointer for packaged context capture.'
+        $contentFixture = [ZommiContextFixture]::new()
+        try {
+            $contentFixture.Raise()
+            [ZommiWindowsAcceptanceNative]::SendAltA($false)
+            $selector = Wait-ForPackagedSelector -CaptureExecutable $CaptureExecutable
+            # The content picker instructs the user to draw a rectangle; a
+            # single click intentionally leaves it open without an attachment.
+            [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector, 180, 200, 530, 240)
+            $contextResult = Wait-ForAcceptanceEvent `
+                -Path $acceptanceLog `
+                -Name 'selection.content' `
+                -After $eventCount
+        } finally {
+            $contentFixture.Dispose()
         }
-        [ZommiWindowsAcceptanceNative]::SendAltA($false)
-        $selector = Wait-ForPackagedSelector -CaptureExecutable $CaptureExecutable
-        if (-not [ZommiWindowsAcceptanceNative]::ClickSelection($selector, 300, 300)) {
-            throw 'Could not confirm the packaged content selection.'
-        }
-        $contextResult = Wait-ForAcceptanceEvent `
-            -Path $acceptanceLog `
-            -Name 'selection.content' `
-            -After $eventCount
         $context = $contextResult.Event
         $eventCount = $contextResult.Count
         if ($context.count -lt 1) {
@@ -1550,24 +1570,32 @@ function Invoke-PackagedApplicationAcceptance {
         if ($application.HasExited -or -not [ZommiWindowsAcceptanceNative]::Visible($window)) {
             throw 'Packaged Flutter application did not survive capture acceptance.'
         }
-        $processes = @(Get-CimInstance Win32_Process | Where-Object {
-            $_.ExecutablePath -in $packageExecutables
-        })
-        $coreProcesses = @($processes | Where-Object { $_.ExecutablePath -eq $core })
-        $applicationCoreProcesses = @($coreProcesses | Where-Object {
-            $_.ParentProcessId -eq $application.Id -and
-            $_.CommandLine -notmatch '(?:^|\s)--wsl-proxy(?:\s|$)'
-        })
-        $proxyCoreProcesses = @($coreProcesses | Where-Object {
-            $_.CommandLine -match '(?:^|\s)--wsl-proxy(?:\s|$)'
-        })
-        $captureProcesses = @($processes | Where-Object {
-            $_.ExecutablePath -eq $CaptureExecutable
-        })
+        # Capture can finish while startup is still probing runtimes. Require
+        # the final process topology once discovery/connection has completed.
+        $topologyDeadline = [DateTime]::UtcNow.AddSeconds(90)
+        do {
+            $processes = @(Get-CimInstance Win32_Process | Where-Object {
+                $_.ExecutablePath -in $packageExecutables
+            })
+            $coreProcesses = @($processes | Where-Object { $_.ExecutablePath -eq $core })
+            $applicationCoreProcesses = @($coreProcesses | Where-Object {
+                $_.ParentProcessId -eq $application.Id -and
+                $_.CommandLine -notmatch '(?:^|\s)--wsl-proxy(?:\s|$)'
+            })
+            $proxyCoreProcesses = @($coreProcesses | Where-Object {
+                $_.CommandLine -match '(?:^|\s)--wsl-proxy(?:\s|$)'
+            })
+            $captureProcesses = @($processes | Where-Object {
+                $_.ExecutablePath -eq $CaptureExecutable
+            })
+            if ($applicationCoreProcesses.Count -eq 1 -and
+                $proxyCoreProcesses.Count -ge 1 -and $captureProcesses.Count -eq 1) { break }
+            Start-Sleep -Milliseconds 250
+        } while (-not $application.HasExited -and [DateTime]::UtcNow -lt $topologyDeadline)
         if ($applicationCoreProcesses.Count -ne 1 -or
             $proxyCoreProcesses.Count -lt 1 -or
             $captureProcesses.Count -ne 1) {
-            throw "Unexpected packaged process topology: $($processes | Select-Object Name,ProcessId,ExecutablePath | ConvertTo-Json -Compress)"
+            throw "Unexpected packaged process topology: $($processes | Select-Object Name,ProcessId,ParentProcessId,ExecutablePath,CommandLine | ConvertTo-Json -Compress)"
         }
 
         return @{
@@ -1610,6 +1638,9 @@ function Invoke-PackagedApplicationAcceptance {
             }
             $application.Dispose()
             if (Test-Path -LiteralPath $acceptanceLog) {
+                if (-not [string]::IsNullOrWhiteSpace($ResultPath)) {
+                    Copy-Item -LiteralPath $acceptanceLog -Destination ($ResultPath + '.events.jsonl') -Force
+                }
                 Remove-Item -LiteralPath $acceptanceLog -Force
             }
         }
@@ -1720,6 +1751,10 @@ Assert-DesktopCaptureSurface
 
 $scopeFixture = [ZommiContextFixture]::new()
 try {
+$scopeTargetWindow = $scopeFixture.Window.ToInt64().ToString()
+if (-not [ZommiWindowsAcceptanceNative]::IsOwnedWindowAtPoint($scopeFixture.Window, 220, 220)) {
+    throw "The context scope fixture is covered before capture: $([ZommiWindowsAcceptanceNative]::DescribeWindowAtPoint(220,220))"
+}
 $pointContext = Invoke-CaptureRequest -Executable $capture -Method 'selectContext' -Interact {
     param($process)
     $window = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi context selection'
@@ -1776,6 +1811,9 @@ $pointContext = Invoke-CaptureRequest -Executable $capture -Method 'selectContex
 }
 if ($pointContext.cancelled -eq $true -or $null -eq $pointContext.snapshot) {
     throw 'Context point selector did not capture the clicked desktop target.'
+}
+if ($pointContext.snapshot.source.nativeWindowId -ne $scopeTargetWindow) {
+    throw 'Context point selector captured a different window than the visible fixture.'
 }
 $scopeJson = $pointContext.snapshot.accessibilityTree | ConvertTo-Json -Depth 20 -Compress
 if ($pointContext.snapshot.selectionElements[0].name -ne 'Native comment' -or

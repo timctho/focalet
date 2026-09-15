@@ -20,6 +20,7 @@ internal sealed class ContentSelectionForm : PointSelectionForm
     private Point? anchor;
     private Rectangle dragged;
     private bool additive;
+    private bool controlAtMouseDown;
     private const int MaximumSelections = 8;
 
     public ContentSelectionForm(uint returnProcessId) : base(returnProcessId)
@@ -61,12 +62,21 @@ internal sealed class ContentSelectionForm : PointSelectionForm
         attach.Enabled = selections.Count > 0;
     }
 
+    protected override void WndProc(ref Message message)
+    {
+        // WM_LBUTTONDOWN carries the modifiers for this input event. Reading
+        // thread keyboard state later can lose Ctrl when foreground activation
+        // attaches/detaches input queues, or the user releases it while queued.
+        if (message.Msg is 0x0201 or 0x0203) controlAtMouseDown = (message.WParam.ToInt64() & 0x0008) != 0;
+        base.WndProc(ref message);
+    }
+
     protected override void OnMouseDown(MouseEventArgs e)
     {
         if (e.Button == MouseButtons.Right) { Cancel(); return; }
         if (e.Button != MouseButtons.Left) return;
         anchor = PointToScreen(e.Location);
-        additive = (ModifierKeys & Keys.Control) != 0 || selections.Count > 0;
+        additive = controlAtMouseDown || selections.Count > 0;
         dragged = Rectangle.Empty;
         Capture = true;
     }

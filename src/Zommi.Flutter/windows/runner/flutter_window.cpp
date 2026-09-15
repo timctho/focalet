@@ -1,4 +1,5 @@
 #include "flutter_window.h"
+#include "desktop_snapshot.h"
 
 #include <dwmapi.h>
 #include <dxgi.h>
@@ -20,12 +21,6 @@
 namespace {
 
 constexpr UINT_PTR kSurfaceHandoffTimer = 0x5a41;
-
-UINT SurfaceFrameReadyMessage() {
-  static const UINT message =
-      RegisterWindowMessageW(L"Zommi.SurfaceFrameReady");
-  return message;
-}
 
 std::optional<double> NumberArgument(const flutter::EncodableMap &arguments,
                                      const char *name) {
@@ -78,6 +73,8 @@ bool FlutterWindow::OnCreate() {
         HandleWindowAnimationMethodCall(call, std::move(result));
       });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
+  desktop_snapshot_ = std::make_unique<DesktopSnapshot>();
+  desktop_snapshot_->Prepare(MonitorFromWindow(GetHandle(), MONITOR_DEFAULTTONEAREST));
 
   wchar_t trace_path[32768]{};
   if (GetEnvironmentVariableW(L"ZOMMI_SCROLL_TRACE", trace_path, 32768) > 0) {
@@ -114,6 +111,7 @@ void FlutterWindow::OnDestroy() {
     surface_handoff_result_.reset();
   }
   DestroySurfaceHandoff();
+  desktop_snapshot_.reset();
   window_animation_channel_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
@@ -126,13 +124,6 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
-  if (message == SurfaceFrameReadyMessage()) {
-    if (wparam == surface_handoff_epoch_ && surface_handoff_result_) {
-      if (surface_handoff_applying_) surface_handoff_frame_ready_ = true;
-      else CompleteSurfaceHandoff(false);
-    }
-    return 0;
-  }
   if (message == WM_TIMER && surface_handoff_timer_ != 0 &&
       wparam == surface_handoff_timer_) {
     CompleteSurfaceHandoff(true);
@@ -479,11 +470,13 @@ void FlutterWindow::ResizeSurface(
 void FlutterWindow::AwaitSurfaceFrame() {
   if (!surface_handoff_result_ || surface_handoff_armed_) return;
   surface_handoff_armed_ = true;
-  const auto window = GetHandle();
   const auto epoch = surface_handoff_epoch_;
-  flutter_controller_->engine()->SetNextFrameCallback([window, epoch]() {
-    PostMessage(window, SurfaceFrameReadyMessage(),
-                static_cast<WPARAM>(epoch), 0);
+  // Flutter's Windows wrapper already marshals this callback to the platform
+  // thread. Another window message delays revealing the completed frame.
+  flutter_controller_->engine()->SetNextFrameCallback([this, epoch]() {
+    if (epoch != surface_handoff_epoch_ || !surface_handoff_result_) return;
+    if (surface_handoff_applying_) surface_handoff_frame_ready_ = true;
+    else CompleteSurfaceHandoff(false);
   });
   flutter_controller_->ForceRedraw();
 }
@@ -502,6 +495,12 @@ bool FlutterWindow::BeginSurfaceHandoff(const RECT& target) {
   const int width = visible.right - visible.left;
   const int height = visible.bottom - visible.top;
   if (static_cast<std::int64_t>(width) * height > 64 * 1024 * 1024) return false;
+  if (desktop_snapshot_) {
+    surface_handoff_window_ = desktop_snapshot_->ShowOverlay(GetHandle(), visible);
+    if (surface_handoff_window_) {
+      return true;
+    }
+  }
   HDC desktop = GetDC(nullptr);
   if (desktop == nullptr) return false;
   BITMAPINFO description{};
@@ -514,10 +513,11 @@ bool FlutterWindow::BeginSurfaceHandoff(const RECT& target) {
   void* pixels = nullptr;
   surface_handoff_bitmap_ = CreateDIBSection(
       desktop, &description, DIB_RGB_COLORS, &pixels, nullptr, 0);
-  HDC memory = surface_handoff_bitmap_ == nullptr
-      ? nullptr : CreateCompatibleDC(desktop);
-  bool copied = false;
-  if (memory != nullptr) {
+  bool copied = surface_handoff_bitmap_ != nullptr && desktop_snapshot_ &&
+      desktop_snapshot_->Capture(visible, pixels, static_cast<size_t>(width) * 4);
+  HDC memory = !copied && surface_handoff_bitmap_ != nullptr
+      ? CreateCompatibleDC(desktop) : nullptr;
+  if (!copied && memory != nullptr) {
     const auto previous = SelectObject(memory, surface_handoff_bitmap_);
     if (previous != nullptr && previous != HGDI_ERROR) {
       copied = BitBlt(memory, 0, 0, width, height, desktop,
@@ -599,6 +599,7 @@ void FlutterWindow::DestroySurfaceHandoff() {
     DestroyWindow(surface_handoff_window_);
     surface_handoff_window_ = nullptr;
   }
+  if (desktop_snapshot_) desktop_snapshot_->ReleaseOverlay();
   if (surface_handoff_bitmap_ != nullptr) {
     DeleteObject(surface_handoff_bitmap_);
     surface_handoff_bitmap_ = nullptr;

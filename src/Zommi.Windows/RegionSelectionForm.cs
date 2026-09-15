@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using Zommi.Capture;
@@ -18,19 +17,14 @@ internal sealed class RegionSelectionForm : Form
     private const uint NoActivate = 0x0010;
     private const uint ShowWindow = 0x0040;
 
-    private readonly Func<Rectangle, byte[]> captureRegion;
-    private readonly Func<Rectangle, RegionSelectionResult>? captureAlignedRegion;
     private readonly uint returnProcessId;
     private readonly System.Windows.Forms.Timer topMostGuard;
     private Point? anchor;
     private Rectangle selectedArea;
 
-    public RegionSelectionForm(Func<Rectangle, byte[]>? captureRegion = null, uint returnProcessId = 0,
-        Func<Rectangle, RegionSelectionResult>? captureAlignedRegion = null)
+    public RegionSelectionForm(uint returnProcessId = 0)
     {
         this.returnProcessId = returnProcessId;
-        this.captureRegion = captureRegion ?? (area => ScreenCapture.CapturePng(area));
-        this.captureAlignedRegion = captureAlignedRegion;
         Text = "Zommi image selection";
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
@@ -67,9 +61,7 @@ internal sealed class RegionSelectionForm : Form
         };
     }
 
-    public RegionSelectionResult? Result { get; private set; }
-
-    public string? ErrorMessage { get; private set; }
+    public Rectangle? Result { get; private set; }
 
     protected override CreateParams CreateParams
     {
@@ -162,27 +154,16 @@ internal sealed class RegionSelectionForm : Form
             return;
         }
 
-        var screenArea = new Rectangle(
+        Result = new Rectangle(
             Left + selectedArea.Left,
             Top + selectedArea.Top,
             selectedArea.Width,
             selectedArea.Height);
+        topMostGuard.Stop();
         GrantForeground();
-        Hide();
-        Application.DoEvents();
-        Thread.Sleep(80);
-
-        try
-        {
-            Result = captureAlignedRegion?.Invoke(screenArea) ?? new RegionSelectionResult(screenArea, captureRegion(screenArea));
-            DialogResult = DialogResult.OK;
-        }
-        catch (Exception exception) when (exception is ExternalException or ArgumentException or Win32Exception)
-        {
-            ErrorMessage = exception.Message;
-            DialogResult = DialogResult.Abort;
-        }
-
+        // Finish the input message before the host queries another process's
+        // accessibility provider, which may need the sender's message pump.
+        DialogResult = DialogResult.OK;
         Close();
     }
 

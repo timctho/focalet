@@ -63,6 +63,7 @@ class FrostedSurface extends StatelessWidget {
     this.radius = 24,
     this.padding = EdgeInsets.zero,
     this.opacity,
+    this.blurBackground = true,
     super.key,
   });
 
@@ -70,6 +71,7 @@ class FrostedSurface extends StatelessWidget {
   final double radius;
   final EdgeInsetsGeometry padding;
   final double? opacity;
+  final bool blurBackground;
 
   @override
   Widget build(BuildContext context) {
@@ -80,6 +82,7 @@ class FrostedSurface extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
       child: BackdropFilter(
+        enabled: blurBackground,
         filter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
         child: DecoratedBox(
           decoration: BoxDecoration(

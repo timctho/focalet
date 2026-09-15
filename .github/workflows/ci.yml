@@ -273,7 +273,7 @@ jobs:
 
       - name: Accept retained-frame Windows size controls
         if: github.event_name == 'workflow_dispatch' && inputs.windows_interactive
-        shell: powershell
+        shell: pwsh
         run: ./scripts/accept-windows-window-size.ps1 -PackageDirectory ./artifacts/zommi-windows-x64 -ExpectedCommit '${{ github.sha }}' -CaptureBackend Gdi
 
       - name: Show release identity and signing state

@@ -121,7 +121,7 @@ void main() {
         contains('WindowFromPoint(cursor)'),
         contains('GetAncestor(hit_window, GA_ROOT)'),
         isNot(contains('freezeSurface')),
-        contains('SetNextFrameCallback([window, epoch]()'),
+        contains('SetNextFrameCallback('),
         contains('DWMWA_TRANSITIONS_FORCEDISABLED'),
         isNot(contains('SWP_NOCOPYBITS')),
         isNot(contains('surface_snapshot')),
@@ -213,68 +213,65 @@ void main() {
     expect(nativeHost, contains('case "selectContext"'));
   });
 
-  test(
-    'Windows resize retains one opaque CPU frame without hiding Flutter',
-    () {
-      final source = File('windows/runner/flutter_window.cpp')
-          .readAsStringSync();
-      for (final contract in [
-        'CreateDIBSection(',
-        'description.bmiHeader.biBitCount = 32',
-        'UnionRect(&combined, &bounds, &target)',
-        'IntersectRect(&visible, &combined, &desktop_bounds)',
-        'GdiFlush()',
-        'WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST',
-        'WS_POPUP | SS_NOTIFY',
-        'ULW_OPAQUE',
-        '"surfaceMetricsChanged"',
-        '*width == surface_handoff_size_.cx',
-        'surface_handoff_applying_',
-        'surface_handoff_armed_',
-        'flutter_controller_->ForceRedraw()',
-        'wparam == surface_handoff_epoch_',
-        'wparam == surface_handoff_timer_',
-        'pending_surface_command_ = command',
-        'const auto pending_command = pending_surface_command_',
-        'PostMessage(GetHandle(), WM_SYSCOMMAND, pending_command, 0)',
-        'pending_surface_command_ = 0',
-        '"window_resize_busy"',
-        '"surface_handoff_failed"',
-        'command == SC_RESTORE && IsZoomed(hwnd)',
-        '"toggleSurfaceMaximized"',
-        'KillTimer(GetHandle(), surface_handoff_timer_)',
-        'DestroyWindow(surface_handoff_window_)',
-        'DeleteObject(surface_handoff_bitmap_)',
-      ]) {
-        expect(source, contains(contract));
-      }
-      // Adapter diagnostics use DXGI, but retained-frame capture stays on CPU.
-      final handoff = source.substring(
-        source.indexOf('bool FlutterWindow::BeginSurfaceHandoff('),
-        source.indexOf('void FlutterWindow::CompleteSurfaceHandoff('),
-      );
-      expect(handoff, isNot(contains('IDXGI')));
-      expect(source, isNot(contains('AcquireNextFrame(')));
-      for (final forbidden in [
-        'D3D11CreateDevice',
-        'DWMWA_CLOAK',
-        'AC_SRC_ALPHA',
-        'DwmFlush',
-        'SWP_HIDEWINDOW',
-        'SystemParametersInfo',
-      ]) {
-        expect(source, isNot(contains(forbidden)));
-      }
-      final completed = source
-          .split('void FlutterWindow::CompleteSurfaceHandoff(')
-          .last;
-      expect(completed, isNot(contains('DwmFlush')));
-      expect(RegExp(r'BitBlt\(').allMatches(source), hasLength(1));
-      final bridge = File('lib/desktop/desktop_bridge.dart').readAsStringSync();
-      expect(bridge, contains('WidgetsBinding.instance.addObserver(this)'));
-      expect(bridge, contains('WidgetsBinding.instance.removeObserver(this)'));
-    },
-  );
+  test('Windows resize retains an opaque frame without hiding Flutter', () {
+    final source = File('windows/runner/flutter_window.cpp').readAsStringSync();
+    for (final contract in [
+      'CreateDIBSection(',
+      'description.bmiHeader.biBitCount = 32',
+      'UnionRect(&combined, &bounds, &target)',
+      'IntersectRect(&visible, &combined, &desktop_bounds)',
+      'GdiFlush()',
+      'WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST',
+      'WS_POPUP | SS_NOTIFY',
+      'ULW_OPAQUE',
+      '"surfaceMetricsChanged"',
+      '*width == surface_handoff_size_.cx',
+      'surface_handoff_applying_',
+      'surface_handoff_armed_',
+      'flutter_controller_->ForceRedraw()',
+      'epoch != surface_handoff_epoch_',
+      'wparam == surface_handoff_timer_',
+      'pending_surface_command_ = command',
+      'const auto pending_command = pending_surface_command_',
+      'PostMessage(GetHandle(), WM_SYSCOMMAND, pending_command, 0)',
+      'pending_surface_command_ = 0',
+      '"window_resize_busy"',
+      '"surface_handoff_failed"',
+      'command == SC_RESTORE && IsZoomed(hwnd)',
+      '"toggleSurfaceMaximized"',
+      'KillTimer(GetHandle(), surface_handoff_timer_)',
+      'DestroyWindow(surface_handoff_window_)',
+      'DeleteObject(surface_handoff_bitmap_)',
+    ]) {
+      expect(source, contains(contract));
+    }
+    // GPU snapshot resources stay in their own helper. Packaged pixel and
+    // latency acceptance validates the visible handoff, including fallback.
+    final handoff = source.substring(
+      source.indexOf('bool FlutterWindow::BeginSurfaceHandoff('),
+      source.indexOf('void FlutterWindow::CompleteSurfaceHandoff('),
+    );
+    expect(handoff, isNot(contains('IDXGI')));
+    expect(source, isNot(contains('AcquireNextFrame(')));
+    for (final forbidden in [
+      'D3D11CreateDevice',
+      'DWMWA_CLOAK',
+      'AC_SRC_ALPHA',
+      'DwmFlush',
+      'SWP_HIDEWINDOW',
+      'SystemParametersInfo',
+    ]) {
+      expect(source, isNot(contains(forbidden)));
+    }
+    final completed = source
+        .split('void FlutterWindow::CompleteSurfaceHandoff(')
+        .last;
+    expect(completed, isNot(contains('DwmFlush')));
+    expect(RegExp(r'BitBlt\(').allMatches(source), hasLength(1));
+    final bridge = File('lib/desktop/desktop_bridge.dart').readAsStringSync();
+    expect(bridge, contains('WidgetsBinding.instance.addObserver(this)'));
+    expect(bridge, contains('WidgetsBinding.instance.removeObserver(this)'));
+  });
 
   test(
     'macOS non-App-Store build declares explicit local capture authority',

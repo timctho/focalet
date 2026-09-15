@@ -7,7 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 const TOKEN = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
-const TRANSPORT_VERSION = 6;
+const TRANSPORT_VERSION = 7;
 
 async function waitForEndpoint(endpointPath) {
   const deadline = Date.now() + 5_000;
@@ -148,72 +148,139 @@ test('persistent WSL relay authenticates and frames runtime stdio', async () => 
   assert.equal(Buffer.concat(diagnostics).toString('utf8'), '');
 });
 
-test('spool heartbeat tolerates stale mount timestamps and transient reads, then cleans up a lost client', async () => {
-  const temporary = await mkdtemp(path.join(os.tmpdir(), 'zommi-heartbeat-'));
-  const endpointPath = path.join(temporary, 'endpoints', 'test.json');
-  const relay = spawn(process.execPath, [
-    'scripts/zommi-wsl-relay.js', '--endpoint', endpointPath,
-    '--token', TOKEN, '--version', String(TRANSPORT_VERSION), '--distribution', 'test',
-  ], { stdio: ['ignore', 'ignore', 'pipe'] });
-  const diagnostics = [];
-  relay.stderr.on('data', (chunk) => diagnostics.push(chunk));
-  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  try {
-    await waitForEndpoint(endpointPath);
-    const session = path.join(temporary, 'spool', 'session-heartbeat-test');
-    await mkdir(session, { recursive: true });
-    const heartbeat = path.join(session, 'client-heartbeat');
-    const beat = async (value) => {
-      await writeFile(heartbeat, String(value));
-      await utimes(heartbeat, 1, 1); // stale Windows/WSL metadata
-    };
-    await writeFile(path.join(session, 'stdin.bin'), '');
-    await writeFile(path.join(session, 'output.bin'), '');
-    await beat(1);
-    await writeFile(path.join(session, 'request.tmp'), JSON.stringify({
-      op: 'spawn', token: TOKEN, transportVersion: TRANSPORT_VERSION,
-      command: process.execPath, cwd: temporary,
-      args: ['-e', 'setInterval(() => console.log("alive"), 50)'],
-    }));
-    await rename(path.join(session, 'request.tmp'), path.join(session, 'request.json'));
-    const output = async () => {
-      const data = await readFile(path.join(session, 'output.bin'));
-      const result = { stdout: '', stderr: '', exit: null };
-      for (let offset = 0; offset + 5 <= data.length;) {
-        const length = data.readUInt32BE(offset + 1);
-        if (offset + 5 + length > data.length) break;
-        const payload = data.subarray(offset + 5, offset + 5 + length);
-        if (data[offset] === 1) result.stdout += payload.toString();
-        if (data[offset] === 2) result.stderr += payload.toString();
-        if (data[offset] === 3) result.exit = payload.readInt32BE(0);
-        offset += 5 + length;
+for (const inputMode of ['open', 'closed', 'backpressure']) {
+  test(`spool heartbeat handles stale timestamps, transient reads, and lost clients with ${inputMode} stdin`, async () => {
+    const temporary = await mkdtemp(path.join(os.tmpdir(), 'zommi-heartbeat-'));
+    const endpointPath = path.join(temporary, 'endpoints', 'test.json');
+    const relay = spawn(process.execPath, [
+      'scripts/zommi-wsl-relay.js', '--endpoint', endpointPath,
+      '--token', TOKEN, '--version', String(TRANSPORT_VERSION), '--distribution', 'test',
+    ], { stdio: ['ignore', 'ignore', 'pipe'] });
+    const diagnostics = [];
+    relay.stderr.on('data', (chunk) => diagnostics.push(chunk));
+    const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    try {
+      await waitForEndpoint(endpointPath);
+      const session = path.join(temporary, 'spool', 'session-heartbeat-test');
+      await mkdir(session, { recursive: true });
+      const heartbeat = path.join(session, 'client-heartbeat');
+      const beat = async (value) => {
+        await writeFile(heartbeat, String(value));
+        await utimes(heartbeat, 1, 1); // stale Windows/WSL metadata
+      };
+      await writeFile(path.join(session, 'stdin.bin'), inputMode === 'backpressure' ? Buffer.alloc(1024 * 1024, 120) : '');
+      if (inputMode === 'closed') await writeFile(path.join(session, 'stdin.closed'), '0');
+      await writeFile(path.join(session, 'output.bin'), '');
+      await beat(1);
+      await writeFile(path.join(session, 'request.tmp'), JSON.stringify({
+        op: 'spawn', token: TOKEN, transportVersion: TRANSPORT_VERSION,
+        command: process.execPath, cwd: temporary,
+        args: ['-e', 'setInterval(() => console.log("alive"), 50); setTimeout(() => process.exit(0), 15000)'],
+      }));
+      await rename(path.join(session, 'request.tmp'), path.join(session, 'request.json'));
+      const output = async () => {
+        const data = await readFile(path.join(session, 'output.bin'));
+        const result = { stdout: '', stderr: '', exit: null };
+        for (let offset = 0; offset + 5 <= data.length;) {
+          const length = data.readUInt32BE(offset + 1);
+          if (offset + 5 + length > data.length) break;
+          const payload = data.subarray(offset + 5, offset + 5 + length);
+          if (data[offset] === 1) result.stdout += payload.toString();
+          if (data[offset] === 2) result.stderr += payload.toString();
+          if (data[offset] === 3) result.exit = payload.readInt32BE(0);
+          offset += 5 + length;
+        }
+        return result;
+      };
+      for (let i = 2; i < 7; i++) {
+        await pause(150);
+        await beat(i);
       }
-      return result;
-    };
-    for (let i = 2; i < 7; i++) {
-      await pause(150);
-      await beat(i);
+      assert.ok((await output()).stdout.includes('alive'));
+      assert.equal((await output()).exit, null);
+      await unlink(heartbeat);
+      await pause(400);
+      await beat(7);
+      await pause(300);
+      assert.equal((await output()).exit, null, 'a transient heartbeat read must not kill Codex');
+      const deadline = Date.now() + 8_000;
+      let stopped;
+      do {
+        await pause(50);
+        stopped = await output();
+      } while (stopped.exit === null && Date.now() < deadline);
+      assert.equal(stopped.exit, 128);
+      assert.match(stopped.stderr, /client heartbeat stopped for 5s/);
+    } finally {
+      relay.kill('SIGTERM');
+      await Promise.race([
+        new Promise((resolve) => relay.once('exit', resolve)), pause(1_000),
+      ]);
+      await rm(temporary, { recursive: true, force: true });
     }
-    assert.ok((await output()).stdout.includes('alive'));
-    assert.equal((await output()).exit, null);
-    await unlink(heartbeat);
-    await pause(400);
-    await beat(7);
-    await pause(300);
-    assert.equal((await output()).exit, null, 'a transient heartbeat read must not kill Codex');
-    const deadline = Date.now() + 8_000;
-    let stopped;
+    assert.equal(Buffer.concat(diagnostics).toString(), '');
+  });
+}
+
+test('overlapping relays leave foreign requests for their authenticated owner', async () => {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), 'zommi-relay-ownership-'));
+  const firstEndpoint = path.join(temporary, 'endpoints', 'first.json');
+  const secondEndpoint = path.join(temporary, 'endpoints', 'second.json');
+  const secondToken = 'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789';
+  const relays = [];
+  const diagnostics = [];
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const start = (endpoint, token) => {
+    const relay = spawn(process.execPath, [
+      'scripts/zommi-wsl-relay.js', '--endpoint', endpoint, '--token', token,
+      '--version', String(TRANSPORT_VERSION), '--distribution', 'test',
+    ], { stdio: ['ignore', 'ignore', 'pipe'] });
+    relay.stderr.on('data', (chunk) => diagnostics.push(chunk));
+    relays.push(relay);
+    return waitForEndpoint(endpoint);
+  };
+  try {
+    await start(firstEndpoint, TOKEN);
+    const session = path.join(temporary, 'spool', 'session-foreign-owner');
+    await mkdir(session, { recursive: true });
+    await writeFile(path.join(session, 'stdin.bin'), '');
+    await writeFile(path.join(session, 'stdin.closed'), '0');
+    await writeFile(path.join(session, 'output.bin'), '');
+    await writeFile(path.join(session, 'client-heartbeat'), String(Date.now()));
+    const request = JSON.stringify({
+      op: 'spawn', token: secondToken, transportVersion: TRANSPORT_VERSION,
+      command: '/bin/sh', args: ['-c', 'printf owned-request'], cwd: '/',
+    });
+    await writeFile(path.join(session, 'request.tmp'), request);
+    await rename(path.join(session, 'request.tmp'), path.join(session, 'request.json'));
+    await pause(250);
+    assert.equal(await readFile(path.join(session, 'request.json'), 'utf8'), request,
+      'a different relay must not claim a request it cannot authenticate');
+    assert.equal((await readFile(path.join(session, 'output.bin'))).length, 0);
+
+    await start(secondEndpoint, secondToken);
+    const deadline = Date.now() + 5_000;
+    let output;
     do {
-      await pause(50);
-      stopped = await output();
-    } while (stopped.exit === null && Date.now() < deadline);
-    assert.equal(stopped.exit, 128);
-    assert.match(stopped.stderr, /client heartbeat stopped for 5s/);
+      output = await readFile(path.join(session, 'output.bin'));
+      if (output.includes(Buffer.from('owned-request'))) break;
+      await pause(25);
+    } while (Date.now() < deadline);
+    assert.ok(output.includes(Buffer.from('owned-request')));
+    assert.equal(await readFile(path.join(session, 'request.claimed.json'), 'utf8'), request);
+    for (let round = 0; round < 3; round++) {
+      const results = await Promise.all([runRustProxy(firstEndpoint), runRustProxy(secondEndpoint)]);
+      for (const result of results) {
+        assert.equal(result.code, 9);
+        assert.equal(result.stdout, 'proxy-out:proxy-input-one\n');
+        assert.equal(result.stderr, 'proxy-err:proxy-input-two\n');
+      }
+    }
   } finally {
-    relay.kill('SIGTERM');
-    await Promise.race([
-      new Promise((resolve) => relay.once('exit', resolve)), pause(1_000),
-    ]);
+    await Promise.all(relays.map(async (relay) => {
+      relay.kill('SIGTERM');
+      await Promise.race([new Promise((resolve) => relay.once('exit', resolve)), pause(1_000)]);
+    }));
     await rm(temporary, { recursive: true, force: true });
   }
   assert.equal(Buffer.concat(diagnostics).toString(), '');

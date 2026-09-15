@@ -11,6 +11,8 @@
 #include <cstdint>
 #include "win32_window.h"
 
+class DesktopSnapshot;
+
 // A window that does nothing but host a Flutter view.
 class FlutterWindow : public Win32Window {
 public:
@@ -37,6 +39,7 @@ private:
 
   HWND surface_handoff_window_ = nullptr;
   HBITMAP surface_handoff_bitmap_ = nullptr;
+  std::unique_ptr<DesktopSnapshot> desktop_snapshot_;
   std::uint64_t surface_handoff_epoch_ = 0;
   UINT_PTR surface_handoff_timer_ = 0;
   SIZE surface_handoff_size_{};

@@ -27,8 +27,12 @@
     return a.x >= b.x - tolerance && a.y >= b.y - tolerance &&
       a.x + a.width <= b.x + b.width + tolerance && a.y + a.height <= b.y + b.height + tolerance;
   };
-  const intersects = (a, b) => a.x < b.x + b.width && a.x + a.width > b.x &&
-    a.y < b.y + b.height && a.y + a.height > b.y;
+  // DOMRect endpoints can disagree by a few float ulps at fractional DPI.
+  // An adjacent element's numeric sliver is not visible selected content.
+  const geometryEpsilon = 0.001;
+  const hasArea = bounds => bounds.width > geometryEpsilon && bounds.height > geometryEpsilon;
+  const intersects = (a, b) => Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x) > geometryEpsilon &&
+    Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y) > geometryEpsilon;
   const parent = element => element?.parentElement || element?.getRootNode()?.host || null;
   const sensitive = element => {
     for (let current = element; current; current = parent(current)) {
@@ -209,7 +213,7 @@
             const bounds = box(range.getBoundingClientRect());
             const visibleBounds = intersection(intersection(bounds, clip), region);
             if (rects.length && rects.every(rect => inside(box(rect), clip)) &&
-                visibleBounds.width > 0 && visibleBounds.height > 0 && exposed(parent(child), visibleBounds)) {
+                hasArea(visibleBounds) && exposed(parent(child), visibleBounds)) {
               const text = child.nodeValue;
               add({role: 'text', text, href: linkFor(child.parentElement), bounds, visibleBounds,
                 relation: rects.every(rect => inside(box(rect), region)) ? 'inside' : 'intersects', truncated: false}, parentId);
@@ -224,7 +228,7 @@
             }
             const semantic = child.id || child.hasAttribute('role') || child.hasAttribute('aria-label') ||
               child.matches('button,input,textarea,select,a[href],img,canvas,iframe,table,tr,td,th,article,section,header,form,li,details,summary');
-            if (semantic && visible(child) && visibleBounds.width > 0 && visibleBounds.height > 0 && exposed(child, visibleBounds)) {
+            if (semantic && visible(child) && hasArea(visibleBounds) && exposed(child, visibleBounds)) {
               const entry = describe(child, false);
               // Descendant text is emitted once, in spatially checked text nodes.
               // Container names and native IDs still identify a partially selected control.

@@ -52,6 +52,9 @@ public sealed class ZommiContextFixture : IDisposable
         thread.Start();
         if (!ready.WaitOne(10000)) throw new TimeoutException("The native context fixture did not start.");
         if (failure != null) throw new InvalidOperationException("The native context fixture failed.", failure);
+        // Shown can precede Windows applying the initial topmost style. Apply
+        // it on the running UI thread before the driver starts a selector.
+        Raise();
     }
 
     public void Dispose()

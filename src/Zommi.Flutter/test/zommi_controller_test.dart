@@ -883,31 +883,39 @@ void main() {
     },
   );
 
-  test('selecting an unavailable active runtime reconnects it', () async {
-    final core = RichFakeCore()..historyCount = 0;
-    final controller = ZommiController(
-      core: core,
-      desktop: FakeDesktopBridge(),
-    );
-    await controller.initialize();
-    expect(core.connectCount, 1);
-    core.emit(
-      _event(
-        1,
-        'runtime.status',
-        payload: const {
-          'status': 'unavailable',
-          'message': 'Codex app-server is not running.',
-        },
-      ),
-    );
+  test(
+    'an unavailable detected runtime remains visible and reconnects',
+    () async {
+      final core = RichFakeCore()..historyCount = 0;
+      final controller = ZommiController(
+        core: core,
+        desktop: FakeDesktopBridge(),
+      );
+      await controller.initialize();
+      expect(core.connectCount, 1);
+      core.emit(
+        _event(
+          1,
+          'runtime.status',
+          payload: const {
+            'status': 'unavailable',
+            'message': 'Codex app-server is not running.',
+          },
+        ),
+      );
 
-    await controller.selectRuntime('runtime-codex');
+      expect(
+        controller.visibleRuntimeTargets.map((target) => target.id),
+        contains('runtime-codex'),
+      );
+      expect(controller.activeRuntime?.status, 'unavailable');
+      await controller.selectRuntime('runtime-codex');
 
-    expect(core.connectCount, 2);
-    expect(controller.activeRuntime?.id, 'runtime-codex');
-    await controller.close();
-  });
+      expect(core.connectCount, 2);
+      expect(controller.activeRuntime?.id, 'runtime-codex');
+      await controller.close();
+    },
+  );
 
   test('WSL file picker paths normalize to the CLI path only', () {
     expect(

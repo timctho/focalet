@@ -56,9 +56,7 @@ internal static class NativeContentInput
         if (selector == 0) throw new InvalidOperationException("The shared helper did not show its selector.");
         while (GetForegroundWindow() != selector && watch.Elapsed < TimeSpan.FromSeconds(4)) await Task.Delay(20, token);
         if (GetForegroundWindow() != selector) throw new InvalidOperationException("The native selector did not receive foreground input.");
-        // Visibility/foreground can precede OnShown completing its input-queue
-        // attachment. Wait for the toolbar to reach the UI before
-        // pressing Ctrl; AttachThreadInput resets keyboard state on detach.
+        // Wait for the selection controls before sending the gesture.
         var ready = false;
         while (!ready && watch.Elapsed < TimeSpan.FromSeconds(5))
         {
@@ -98,20 +96,17 @@ internal static class NativeContentInput
         try
         {
             if (!SetCursorPos(x, y)) throw new InvalidOperationException("Could not position the native pointer.");
-            GetWindowRect(window, out var bounds);
-            // Match the native acceptance driver's synchronous window-message
-            // gestures. OS hit testing is checked separately by the desktop
-            // gate; this gate verifies the shared helper and browser pipeline.
-            var buttons = message == 0x202 ? 0 : 1;
-            SendMessage(window, message, buttons, (nint)(((y - bounds.Top) << 16) | ((x - bounds.Left) & 0xffff)));
+            // Queue real pointer input behind the Ctrl key event. Synchronous
+            // SendMessage can overtake that event: GetAsyncKeyState then sees
+            // Ctrl, but the selector's ModifierKeys still sees the old state.
+            if (message == 0x201) mouse_event(0x0002, 0, 0, 0, 0);
+            if (message == 0x202) mouse_event(0x0004, 0, 0, 0, 0);
         }
         finally { SetThreadDpiAwarenessContext(previous); }
     }
 
     private delegate bool WindowCallback(nint window, nint state);
-    [StructLayout(LayoutKind.Sequential)] private struct NativeRect { public int Left, Top, Right, Bottom; }
-    [DllImport("user32.dll")] private static extern bool GetWindowRect(nint window, out NativeRect bounds);
-    [DllImport("user32.dll")] private static extern nint SendMessage(nint window, uint message, nint word, nint data);
+    [DllImport("user32.dll")] private static extern void mouse_event(uint flags, uint dx, uint dy, uint data, nuint extra);
     [StructLayout(LayoutKind.Sequential)] private struct NativePoint { public int X; public int Y; }
     [DllImport("user32.dll")] private static extern nint WindowFromPoint(NativePoint point);
     [DllImport("user32.dll")] private static extern nint GetAncestor(nint window, uint flags);

@@ -1,3 +1,5 @@
+import 'dart:ui' show PointerDeviceKind, SemanticsAction;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -8,6 +10,43 @@ import 'package:zommi_flutter/zommi_app.dart';
 import 'test_support.dart';
 
 void main() {
+  testWidgets('hovered window actions keep their accessible identity', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    try {
+      final desktop = FakeDesktopBridge();
+      await tester.pumpWidget(
+        ZommiApp(core: RichFakeCore()..historyCount = 0, desktop: desktop),
+      );
+      await tester.pumpAndSettle();
+      final action = find.byKey(const ValueKey('maximize-zommi'));
+      final nodeId = tester.getSemantics(action).id;
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer();
+      addTearDown(mouse.removePointer);
+      for (final label in ['Maximize Zommi', 'Restore Zommi']) {
+        await mouse.moveTo(tester.getCenter(action));
+        await tester.pump(const Duration(seconds: 1));
+        final node = tester.getSemantics(action);
+        final data = node.getSemanticsData();
+        expect(node.id, nodeId);
+        expect(data.label, label);
+        expect(data.tooltip, isEmpty);
+        expect(data.flagsCollection.isButton, isTrue);
+        expect(data.hasAction(SemanticsAction.tap), isTrue);
+        await tester.tap(action);
+        await tester.pumpAndSettle();
+      }
+      expect(
+        desktop.calls.where((call) => call == 'toggleMaximized'),
+        hasLength(2),
+      );
+    } finally {
+      semantics.dispose();
+    }
+  });
+
   testWidgets('double-clicking the top bar maximizes and restores', (
     tester,
   ) async {
