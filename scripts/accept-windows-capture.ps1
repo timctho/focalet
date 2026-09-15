@@ -1274,7 +1274,9 @@ function Invoke-PackagedApplicationAcceptance {
     $application = [System.Diagnostics.Process]::new()
     $application.StartInfo = $start
     try {
-        $null = [IO.Directory]::CreateDirectory($acceptanceProfile)
+        $null = [IO.Directory]::CreateDirectory((Join-Path $acceptanceProfile 'Zommi'))
+        # This gate exercises an already-configured capture workflow.
+        [IO.File]::WriteAllText((Join-Path $acceptanceProfile 'Zommi\settings.json'), '{"runtimeSetupCompleted":true}')
         if (-not $application.Start()) {
             throw "Could not start packaged Flutter application $entrypoint."
         }

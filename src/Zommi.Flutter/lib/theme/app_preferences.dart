@@ -32,6 +32,7 @@ final class AppPreferences {
     this.themeMode = ThemeMode.system,
     this.customThemeColor = const Color(0xff8178c9),
     this.windowSize = WindowSizeSetting.standard,
+    this.runtimeSetupCompleted = true,
   });
 
   final bool browserPageDetails;
@@ -43,6 +44,7 @@ final class AppPreferences {
   Color get seedColor =>
       themeColor == ZommiThemeColor.custom ? customThemeColor : themeColor.seed;
   final WindowSizeSetting windowSize;
+  final bool runtimeSetupCompleted;
 
   AppPreferences copyWith({
     bool? browserPageDetails,
@@ -51,6 +53,7 @@ final class AppPreferences {
     ThemeMode? themeMode,
     Color? customThemeColor,
     WindowSizeSetting? windowSize,
+    bool? runtimeSetupCompleted,
   }) => AppPreferences(
     browserPageDetails: browserPageDetails ?? this.browserPageDetails,
     chatFontSize: chatFontSize ?? this.chatFontSize,
@@ -58,6 +61,7 @@ final class AppPreferences {
     themeMode: themeMode ?? this.themeMode,
     customThemeColor: customThemeColor ?? this.customThemeColor,
     windowSize: windowSize ?? this.windowSize,
+    runtimeSetupCompleted: runtimeSetupCompleted ?? this.runtimeSetupCompleted,
   );
 
   Map<String, Object?> toJson() => {
@@ -67,12 +71,17 @@ final class AppPreferences {
     'themeMode': themeMode.name,
     'customThemeColor': customThemeColor.toARGB32(),
     'windowSize': windowSize.name,
+    'runtimeSetupCompleted': runtimeSetupCompleted,
   };
 
   static AppPreferences fromJson(Map<String, Object?> value) {
     final rawFontSize = value['chatFontSize'];
     final fontSize = rawFontSize is num ? rawFontSize.toDouble() : 13.0;
     return AppPreferences(
+      // Settings written before the welcome flow belong to an existing install.
+      runtimeSetupCompleted:
+          !value.containsKey('runtimeSetupCompleted') ||
+          value['runtimeSetupCompleted'] == true,
       browserPageDetails: value['browserPageDetails'] != false,
       chatFontSize: fontSize.clamp(12, 15).toDouble(),
       themeColor:
@@ -109,7 +118,8 @@ final class AppPreferences {
       other.themeColor == themeColor &&
       other.themeMode == themeMode &&
       other.customThemeColor == customThemeColor &&
-      other.windowSize == windowSize;
+      other.windowSize == windowSize &&
+      other.runtimeSetupCompleted == runtimeSetupCompleted;
 
   @override
   int get hashCode => Object.hash(
@@ -119,6 +129,7 @@ final class AppPreferences {
     themeMode,
     customThemeColor,
     windowSize,
+    runtimeSetupCompleted,
   );
 }
 
@@ -150,12 +161,16 @@ final class FileAppPreferencesStore implements AppPreferencesStore {
   Future<AppPreferences> load() async {
     try {
       final file = File(path);
-      if (!await file.exists()) return const AppPreferences();
+      if (!await file.exists()) {
+        return const AppPreferences(runtimeSetupCompleted: false);
+      }
       final decoded = jsonDecode(await file.readAsString());
-      if (decoded is! Map) return const AppPreferences();
+      if (decoded is! Map) {
+        return const AppPreferences(runtimeSetupCompleted: false);
+      }
       return AppPreferences.fromJson(decoded.cast<String, Object?>());
     } on Object {
-      return const AppPreferences();
+      return const AppPreferences(runtimeSetupCompleted: false);
     }
   }
 

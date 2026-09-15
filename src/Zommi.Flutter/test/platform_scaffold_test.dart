@@ -57,7 +57,7 @@ void main() {
       'Zommi.Capture.exe',
       "'selectImage',",
       "'returnProcessId': pid",
-      "Process.run('osascript'",
+      "_runCommand('osascript'",
       'LinuxCaptureProvider',
       'zommi-x11-capture',
       'portal-shortcuts',
@@ -89,7 +89,7 @@ void main() {
         contains('CreateMutexW(nullptr, TRUE, kZommiInstanceMutexName)'),
         contains('ERROR_ALREADY_EXISTS'),
         contains('PostMessageW(HWND_BROADCAST, ZommiShowWindowMessage()'),
-        contains('Win32Window::Size size(720, 620)'),
+        contains('Win32Window::Size size(900, 760)'),
       ),
     );
     expect(windowsInstance, contains('Zommi.Desktop.SingleInstance'));
@@ -329,9 +329,9 @@ void main() {
       'Verify local .NET capture publisher',
       'cache: false',
       'bash scripts/package-unix.sh macos',
-      'Native release (macOS, temporarily skipped)',
-      r'if: ${{ false }}',
-      'runs-on: [self-hosted, macOS, zommi-release]',
+      'Native release (macOS)',
+      'macos-15-intel',
+      'macos_arch:',
       './scripts/package-windows.ps1 -Runtime win-x64',
       'Accept Windows non-visual capture contracts',
       '-NonVisualOnly',
@@ -348,7 +348,7 @@ void main() {
     expect(workflow, isNot(contains('npm ')));
     expect(workflow, isNot(contains('src/Zommi.Electron')));
     expect(workflow, isNot(contains('windows-2025')));
-    expect(workflow, isNot(contains('macos-15')));
+    expect(workflow, isNot(contains('temporarily skipped')));
 
     final verifier = File('${repository.path}/scripts/verify_release.py')
         .readAsStringSync();

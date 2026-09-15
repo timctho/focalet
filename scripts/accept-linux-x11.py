@@ -489,6 +489,11 @@ def run_case(
     environment["LIBGL_ALWAYS_SOFTWARE"] = "1"
     environment["ZOMMI_ACCEPTANCE_LOG"] = str(trace)
     environment["XDG_STATE_HOME"] = str(temporary / f"{name}-state")
+    config = temporary / f"{name}-config"
+    environment["XDG_CONFIG_HOME"] = str(config)
+    (config / "zommi").mkdir(parents=True)
+    # This gate exercises capture after explicit first-run completion.
+    (config / "zommi/settings.json").write_text('{"runtimeSetupCompleted":true}')
     with runtime_log.open("w", encoding="utf-8") as output:
         process = subprocess.Popen(
             [str(package / "zommi")],

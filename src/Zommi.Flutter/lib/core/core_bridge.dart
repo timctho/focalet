@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:zommi_flutter/core/runtime_environment.dart';
+
 const int coreProtocolVersion = 1;
 
 abstract interface class CoreBridge {
@@ -819,7 +821,7 @@ final class ProcessCoreBridge
       _resolveExecutablePath(),
       _catalogWorker ? const ['--session-catalog-worker'] : const [],
       runInShell: false,
-      environment: environment,
+      environment: coreRuntimeEnvironment(overrides: environment),
       includeParentEnvironment: true,
     );
     _process = process;

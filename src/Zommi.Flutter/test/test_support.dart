@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/desktop/artifact_loader.dart';
+import 'package:zommi_flutter/desktop/capture_permissions.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 
@@ -585,7 +586,28 @@ class RichFakeCore
   }
 }
 
-final class FakeDesktopBridge implements DesktopBridge, BrowserCaptureSettings {
+final class FakeDesktopBridge
+    implements DesktopBridge, BrowserCaptureSettings, CapturePermissionBridge {
+  @override
+  bool supportsCapturePermissions = false;
+  final List<String> permissionRequests = [];
+  @override
+  Future<CapturePermissionStatus> capturePermissions() async =>
+      const CapturePermissionStatus(
+        accessibility: false,
+        screenRecording: false,
+      );
+  @override
+  Future<CapturePermissionStatus> requestCapturePermission(
+    CapturePermission permission,
+  ) async {
+    permissionRequests.add(permission.name);
+    return CapturePermissionStatus(
+      accessibility: permission == CapturePermission.accessibility,
+      screenRecording: permission == CapturePermission.screenRecording,
+    );
+  }
+
   @override
   bool supportsBrowserPageDetails = false;
   bool browserPageDetails = true;

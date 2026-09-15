@@ -158,6 +158,9 @@ if (-not $ResultPath) { $ResultPath = Join-Path $probeRoot 'result.json' }
 [ZommiRenderedSizeProbe]::EvidenceDirectory = Join-Path ([IO.Path]::GetDirectoryName($ResultPath)) 'rendered-size-frames'
 $log = Join-Path $probeRoot 'events.jsonl'
 $settings = Join-Path $probeRoot 'Zommi\settings.json'
+$null = [IO.Directory]::CreateDirectory((Split-Path -Parent $settings))
+# Window controls are tested after the welcome flow has completed.
+[IO.File]::WriteAllText($settings, '{"runtimeSetupCompleted":true}')
 $entrypoint = Join-Path $PackageDirectory 'Zommi.exe'
 $result = @{ gitCommit = $ExpectedCommit; package = $PackageDirectory; captureApi = 'dxgi-desktop-duplication'; latencyClock = 'dxgi-present-qpc-from-input-release'; nativeAnimationsEnabled = [ZommiWindowSizeAccess]::NativeAnimationsEnabled(); transitions = @() }
 $result.resizePolicy = 'retained-frame-without-animation'
@@ -206,7 +209,7 @@ function Measure-SizeTransition {
     if ($CaptureBackend -eq 'Gdi') {
         $scale = [ZommiWindowSizeAccess]::GetDpiForWindow($window) / 96.0
         $clientBefore = [ZommiWindowsAcceptanceNative]::PhysicalClientBounds($window)
-        $targetWidth = if ($Mode -eq 'wide') { 920 * $scale } else { 720 * $scale }
+        $targetWidth = if ($Mode -eq 'wide') { 1100 * $scale } else { 900 * $scale }
         $targetRight = $workArea[0] + $workArea[2] / 2 + [Math]::Min($targetWidth, $workArea[2]) / 2
         $targetBottom = $workArea[1] + $workArea[3] - 18 * $scale
         if ($Mode -eq 'maximized') { $targetRight = $workArea[0] + $workArea[2]; $targetBottom = $workArea[1] + $workArea[3] }

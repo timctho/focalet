@@ -15,11 +15,12 @@ import 'package:tray_manager/tray_manager.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
+import 'package:zommi_flutter/desktop/capture_permissions.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 
 const Size compactWindowSize = Size(56, 56);
-const Size normalWindowSize = Size(720, 620);
-const Size largeWindowSize = Size(920, 760);
+const Size normalWindowSize = Size(900, 760);
+const Size largeWindowSize = Size(1100, 860);
 const double windowBottomInset = 18;
 const Duration surfaceTransitionDuration = Duration(milliseconds: 280);
 const int surfaceTransitionFrameCount = 16;
@@ -240,7 +241,7 @@ final class NoopDesktopBridge implements DesktopBridge {
 
 final class FlutterDesktopBridge
     with WindowListener, TrayListener, WidgetsBindingObserver
-    implements DesktopBridge, BrowserCaptureSettings {
+    implements DesktopBridge, BrowserCaptureSettings, CapturePermissionBridge {
   FlutterDesktopBridge({
     CaptureProvider? captureProvider,
     DesktopAcceptanceRecorder? acceptanceRecorder,
@@ -260,6 +261,20 @@ final class FlutterDesktopBridge
            FileDesktopAcceptanceRecorder.fromEnvironment();
 
   final bool _useNativeSurface;
+  final MacCapturePermissions _capturePermissions = MacCapturePermissions();
+
+  @override
+  bool get supportsCapturePermissions =>
+      _capturePermissions.supportsCapturePermissions;
+
+  @override
+  Future<CapturePermissionStatus> capturePermissions() =>
+      _capturePermissions.capturePermissions();
+
+  @override
+  Future<CapturePermissionStatus> requestCapturePermission(
+    CapturePermission permission,
+  ) => _capturePermissions.requestCapturePermission(permission);
 
   static Future<FlutterDesktopBridge> bootstrap() async {
     await windowManager.ensureInitialized();
@@ -413,7 +428,7 @@ final class FlutterDesktopBridge
     if (!hidePanel) return _capturePointerContext();
     final wasVisible = await windowManager.isVisible();
     final wasMinimized = await windowManager.isMinimized();
-    await windowManager.hide();
+    await hideDesktopForCapture();
     try {
       // Let the compositor expose the application underneath Zommi before
       // resolving the window and accessibility element at the pointer.
@@ -431,7 +446,7 @@ final class FlutterDesktopBridge
   Future<List<ContextAttachment>> selectPointerContext() async {
     final wasVisible = await windowManager.isVisible();
     final wasMinimized = await windowManager.isMinimized();
-    await windowManager.hide();
+    await hideDesktopForCapture();
     try {
       // The explicit picker owns the next click and changes the system cursor,
       // so selecting context from the composer cannot feel like an immediate,
@@ -521,7 +536,7 @@ final class FlutterDesktopBridge
   }) async {
     final wasVisible = await windowManager.isVisible();
     final wasMinimized = await windowManager.isMinimized();
-    await windowManager.hide();
+    await hideDesktopForCapture();
     try {
       // Structural context belongs to the final image region. The pointer at
       // shortcut time may be in a different window entirely.
@@ -691,7 +706,8 @@ final class FlutterDesktopBridge
   Future<void> hide() => windowManager.minimize();
 
   @override
-  Future<void> closeWindow() => windowManager.close();
+  Future<void> closeWindow() =>
+      Platform.isMacOS ? windowManager.destroy() : windowManager.close();
 
   @override
   Future<bool> toggleMaximized() async {
@@ -1664,7 +1680,28 @@ final class LinuxCaptureProvider implements CaptureProvider {
   Future<void> close() async {}
 }
 
+Future<void> hideDesktopForCapture() => Platform.isMacOS
+    ? MacCapturePermissions.channel.invokeMethod<void>('hideForCapture')
+    : windowManager.hide();
+
 final class PortableCaptureProvider implements CaptureProvider {
+  PortableCaptureProvider({
+    CaptureCommandRunner? runCommand,
+    Future<bool> Function()? screenAccessAllowed,
+    Future<void> Function()? requestScreenAccess,
+    Future<ImageSelection?> Function()? selectRegion,
+  }) : _runCommand = runCommand ?? _runProcess,
+       _screenAccessAllowed =
+           screenAccessAllowed ?? screenCapturer.isAccessAllowed,
+       _requestScreenAccess =
+           requestScreenAccess ?? screenCapturer.requestAccess,
+       _selectRegion = selectRegion ?? _captureRegion;
+
+  final CaptureCommandRunner _runCommand;
+  final Future<bool> Function() _screenAccessAllowed;
+  final Future<void> Function() _requestScreenAccess;
+  final Future<ImageSelection?> Function() _selectRegion;
+
   @override
   Future<void> initialize() async {}
 
@@ -1678,46 +1715,85 @@ final class PortableCaptureProvider implements CaptureProvider {
 
   @override
   Future<List<CaptureResult>> selectContext() async {
+    CaptureResult? context;
+    try {
+      // Read the foreground app before the system selector takes activation.
+      context = await _captureMac();
+    } on Object {
+      // Missing Accessibility/Automation must not discard permitted pixels.
+    }
     final image = await selectImage();
-    return image == null ? const [] : [CaptureResult(image: image)];
+    if (image == null) return const [];
+    return [
+      CaptureResult(
+        image: ImageSelection(
+          dataUrl: image.dataUrl,
+          bounds: image.bounds,
+          alignment: image.alignment,
+          snapshot: image.snapshot ?? context?.snapshot,
+          previewText: image.previewText ?? context?.previewText,
+        ),
+      ),
+    ];
   }
 
   Future<CaptureResult> _captureMac() async {
-    const script = '''
-tell application "System Events"
-  set frontProcess to first application process whose frontmost is true
-  set appName to name of frontProcess
-  set windowTitle to ""
-  try
-    set windowTitle to name of front window of frontProcess
-  end try
-end tell
-set pageUrl to ""
-if appName is "Safari" then
-  tell application "Safari" to set pageUrl to URL of front document
-else if appName is "Google Chrome" or appName is "Microsoft Edge" or appName is "Brave Browser" then
-  tell application appName to set pageUrl to URL of active tab of front window
-end if
-return appName & linefeed & windowTitle & linefeed & pageUrl
-''';
-    final result = await Process.run('osascript', const [
+    const script = macosForegroundScript;
+    final result = await _runCommand('osascript', const [
       '-e',
       script,
-    ]).timeout(const Duration(seconds: 5));
+    ], const Duration(seconds: 5));
     if (result.exitCode != 0) {
-      throw StateError('macOS foreground capture failed: ${result.stderr}');
+      throw StateError(
+        'Allow Zommi in System Settings > Privacy & Security > Accessibility and Automation, then try capture again. ${result.stderr}',
+      );
     }
     final fields = result.stdout.toString().trimRight().split('\n');
+    final application = fields.isEmpty ? 'macOS application' : fields[0];
+    if (application == 'Zommi') {
+      throw StateError('Focus an external application and try capture again.');
+    }
+    var url = '';
+    final browserScript = macosBrowserUrlScripts[application];
+    if (browserScript != null) {
+      try {
+        final browser = await _runCommand('osascript', [
+          '-e',
+          browserScript,
+        ], const Duration(seconds: 5));
+        if (browser.exitCode == 0) url = browser.stdout.toString().trim();
+      } on Object {
+        // Browser Automation may be denied or time out. Keep the app context.
+      }
+    }
     return portableCaptureResult(
-      application: fields.isEmpty ? 'macOS application' : fields[0],
+      application: application,
       windowTitle: fields.length > 1 ? fields[1] : '',
-      url: fields.length > 2 ? fields[2] : '',
-      limitation: 'macOS captures the front application, title, and supported browser URL. Accessibility enrichment depends on permission.',
+      url: url,
+      limitation: 'macOS captures the front application, title, and supported browser URL. Accessibility and Automation permissions control which details are available.',
     );
   }
 
+  static Future<ProcessResult> _runProcess(
+    String executable,
+    List<String> arguments,
+    Duration timeout,
+  ) => Process.run(executable, arguments).timeout(timeout);
+
   @override
   Future<ImageSelection?> selectImage() async {
+    if (!await _screenAccessAllowed()) {
+      await _requestScreenAccess();
+      if (!await _screenAccessAllowed()) {
+        throw StateError(
+          'Allow Screen Recording for Zommi in System Settings > Privacy & Security, then restart Zommi and try again.',
+        );
+      }
+    }
+    return _selectRegion();
+  }
+
+  static Future<ImageSelection?> _captureRegion() async {
     final temporary = File(
       '${Directory.systemTemp.path}${Platform.pathSeparator}'
       'zommi-region-${DateTime.now().microsecondsSinceEpoch}.png',
@@ -1744,6 +1820,27 @@ return appName & linefeed & windowTitle & linefeed & pageUrl
   @override
   Future<void> close() async {}
 }
+
+const macosForegroundScript = '''
+tell application "System Events"
+  set frontProcess to first application process whose frontmost is true
+  set appName to name of frontProcess
+  set windowTitle to ""
+  try
+    set windowTitle to name of front window of frontProcess
+  end try
+end tell
+return appName & linefeed & windowTitle
+''';
+
+// Browser dictionaries must be selected before AppleScript compiles the query.
+// A dynamic `tell application appName` cannot resolve Chromium's tab terms.
+const macosBrowserUrlScripts = <String, String>{
+  'Safari': 'tell application "Safari" to return URL of front document',
+  'Google Chrome': 'tell application "Google Chrome" to return URL of active tab of front window',
+  'Microsoft Edge': 'tell application "Microsoft Edge" to return URL of active tab of front window',
+  'Brave Browser': 'tell application "Brave Browser" to return URL of active tab of front window',
+};
 
 CaptureResult portableCaptureResult({
   required String application,

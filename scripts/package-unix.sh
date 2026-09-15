@@ -94,6 +94,11 @@ assembler_arguments=(
   --document "$repository_root/README.md"
   --document "$repository_root/docs/flutter-rust-migration.md"
 )
+if [[ "$target_platform" == macos ]]; then
+  assembler_arguments+=(--document "$repository_root/docs/macos-testing.md")
+  assembler_arguments+=(--document "$repository_root/scripts/accept-macos.py")
+  assembler_arguments+=(--document "$repository_root/scripts/macos-capture-input.swift")
+fi
 if [[ "$target_platform" == macos && -n "${ZOMMI_MACOS_SIGNING_IDENTITY:-}" ]]; then
   assembler_arguments+=(--macos-signing-identity "$ZOMMI_MACOS_SIGNING_IDENTITY")
 elif [[ "$target_platform" == linux ]]; then

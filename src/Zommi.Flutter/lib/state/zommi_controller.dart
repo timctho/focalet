@@ -38,6 +38,7 @@ final class ZommiController extends ChangeNotifier {
     ArtifactLoader? artifactLoader,
     this.sessionCatalogStore = const NoopSessionCatalogStore(),
     this.catalogStartupDelay = Duration.zero,
+    this.runtimeSetupPending = false,
     DateTime Function()? clock,
     WindowSizeSetting initialWindowSize = WindowSizeSetting.standard,
   }) : artifactLoader = artifactLoader ?? const LocalArtifactLoader(),
@@ -140,6 +141,7 @@ final class ZommiController extends ChangeNotifier {
   int _visibleSessionLimit = sessionPageSize;
   bool _loadingMoreSessions = false;
   bool runtimeSetupPanelOpen = false;
+  bool runtimeSetupPending;
   bool modelPanelOpen = false;
   bool workspacePanelOpen = false;
   bool appSettingsPanelOpen = false;
@@ -445,6 +447,10 @@ final class ZommiController extends ChangeNotifier {
       final discovery = await core.discoverRuntimeTargets();
       if (_closed) return;
       _replaceDiscovery(discovery);
+      if (runtimeSetupPending) {
+        _setStatus('Choose an agent to get started');
+        return;
+      }
       final targetId = _visibleSelectedTargetId(discovery.selectedTargetId);
       if (targetId == null || targetId.isEmpty) {
         _setStatus(
@@ -510,7 +516,7 @@ final class ZommiController extends ChangeNotifier {
       );
       _replaceDiscovery(discovery);
       final selected = _visibleSelectedTargetId(discovery.selectedTargetId);
-      if (activeRuntime == null && selected != null) {
+      if (!runtimeSetupPending && activeRuntime == null && selected != null) {
         await _connectRuntime(selected);
       } else if (runtimeTargets.isEmpty) {
         _setStatus(
@@ -554,7 +560,34 @@ final class ZommiController extends ChangeNotifier {
     }
   }
 
+  Future<bool> connectRuntimeForSetup(String targetId) async {
+    if (starting || runtimeBusy || runtimeOverrideBusy) return false;
+    runtimeBusy = true;
+    _setStatus('Connecting to agent…');
+    try {
+      await _connectRuntime(targetId);
+      return activeRuntime?.id == targetId && activeSessionId != null;
+    } on Object catch (error) {
+      if (!_applyConnectionError(targetId, error, activateTarget: false)) {
+        _setStatus('Could not connect · $error', warning: true);
+      }
+      return false;
+    } finally {
+      runtimeBusy = false;
+      _notify();
+    }
+  }
+
+  void completeRuntimeSetup() {
+    runtimeSetupPending = false;
+    runtimeSetupPanelOpen = false;
+    focusComposerEpoch++;
+    _notify();
+    _scheduleStartupCatalogRefresh();
+  }
+
   void _scheduleStartupCatalogRefresh() {
+    if (runtimeSetupPending) return;
     if (_closed) return;
     if (sessionCatalogStore is! NoopSessionCatalogStore) {
       _catalogRetentionTimer = Timer.periodic(const Duration(hours: 1), (_) {

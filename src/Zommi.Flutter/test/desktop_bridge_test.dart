@@ -795,7 +795,7 @@ void main() {
     expect(initial.center.dx, workArea.center.dx);
     expect(initial.bottom, workArea.bottom - windowBottomInset);
 
-    const anchor = Offset(650, 800);
+    const anchor = Offset(650, 820);
     final expanded = anchoredSurfaceBounds(
       anchor: anchor,
       workArea: workArea,

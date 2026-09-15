@@ -203,7 +203,9 @@ class ReleasePackageTests(unittest.TestCase):
         )[1].split("function Read-PngDimension {", 1)[0]
         for contract in (
             "$acceptanceProfile = Join-Path $env:TEMP",
-            "[IO.Directory]::CreateDirectory($acceptanceProfile)",
+            "[IO.Directory]::CreateDirectory((Join-Path $acceptanceProfile 'Zommi'))",
+            "'Zommi\\settings.json'",
+            '\"runtimeSetupCompleted\":true',
             "$start.EnvironmentVariables['APPDATA'] = $acceptanceProfile",
             "Packaged application did not start in the isolated normal window mode",
         ):

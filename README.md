@@ -201,13 +201,19 @@ On Windows PowerShell:
 ```
 
 To require real signing, set `ZOMMI_WINDOWS_SIGNING_THUMBPRINT` or
-`ZOMMI_MACOS_SIGNING_IDENTITY` in the native build environment. CI builds and
-verifies native Windows and Linux releases on separate local runners. To publish
+`ZOMMI_MACOS_SIGNING_IDENTITY` in the native build environment. Shared Linux and
+Windows CI runners are disabled by default. Run the checks and native package
+commands above locally; skipped CI jobs do not establish validation. An operator
+can explicitly resume shared jobs for one dispatch with `run_shared_runners: true`.
+To publish
 the archives and checksums to GitHub Actions storage, dispatch CI with
 `upload_packages: true`; those artifacts are retained for three days. Ordinary
-push and pull-request runs validate packages without uploading them, avoiding
-recurring artifact-quota failures. Manual uploads still require available quota.
-The native macOS job is explicitly skipped until a local macOS builder is available.
+Windows/Linux push and pull-request jobs stay skipped. Manual uploads still require available quota.
+macOS CI uses a native Apple Silicon hosted runner by default; dispatch with
+`macos_arch: x64` for Intel. Manual `upload_packages` uploads retain Mac packages
+and evidence for seven days. With `macos_draft_release: true`, a dispatch stores
+them in a draft release instead; `macos_only: true` runs only the Mac job. See [Mac testing](docs/macos-testing.md) for
+installation, signing, permissions and interactive capture checks.
 
 ## Launch
 
@@ -215,8 +221,12 @@ The native macOS job is explicitly skipped until a local macOS builder is availa
 - Linux: extract the tarball and run `./zommi` from the extracted directory.
 - macOS: extract the ZIP and open `Zommi.app`.
 
-At least one supported agent CLI must already be installed and authenticated in
-its own environment. Zommi discovers native and WSL targets, or accepts an
+A fresh install opens runtime setup before connecting: select a detected agent,
+sign in, scan again, configure its executable, or choose Set up later. Existing
+settings skip this flow. The standard window is 900×760 and large is 1100×860,
+clamped to the display work area.
+
+To chat, install and authenticate a supported agent CLI in its own environment. Zommi discovers native and WSL targets, or accepts an
 explicit credential-free path/endpoint override. It never copies runtime
 credentials into its own settings.
 

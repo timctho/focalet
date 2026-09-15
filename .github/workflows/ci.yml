@@ -7,11 +7,31 @@ on:
       - main
   workflow_dispatch:
     inputs:
+      run_shared_runners:
+        description: Opt in to shared Linux and Windows runners (disabled by default; validate locally)
+        required: false
+        default: false
+        type: boolean
       upload_packages:
         description: Upload verified native packages to GitHub artifact storage
         required: false
         default: false
         type: boolean
+      macos_arch:
+        description: Architecture for the macOS test package
+        type: choice
+        options:
+          - arm64
+          - x64
+        default: arm64
+      macos_only:
+        description: Build only the macOS package on this dispatch
+        type: boolean
+        default: false
+      macos_draft_release:
+        description: Store the Mac test package in a draft release instead of Actions artifacts
+        type: boolean
+        default: false
       windows_interactive:
         description: Run the full Windows desktop shortcut and capture gate
         required: false
@@ -33,7 +53,11 @@ concurrency:
 jobs:
   test:
     name: Flutter and Rust contracts
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    env:
+      CARGO_BUILD_JOBS: '4'
+    # Shared runners are paused. Local checks cover these contracts until an
+    # operator explicitly opts in on a manual dispatch.
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_shared_runners && !inputs.macos_only }}
     runs-on: [self-hosted, Linux, X64, zommi-ci]
     timeout-minutes: 20
     steps:
@@ -50,7 +74,8 @@ jobs:
         with:
           channel: stable
           flutter-version: 3.47.2
-          cache: true
+          # The persistent runner already holds this pinned SDK and pub cache.
+          cache: false
 
       - name: Set up .NET capture build
         uses: actions/setup-dotnet@v6
@@ -82,7 +107,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/zommi-sqlite"
           ln -sf "$sqlite_library" "$RUNNER_TEMP/zommi-sqlite/libsqlite3.so"
           export LD_LIBRARY_PATH="$RUNNER_TEMP/zommi-sqlite${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-          flutter test --no-pub
+          flutter test --no-pub --concurrency=4
 
       - name: Test release package contracts
         run: |
@@ -106,6 +131,9 @@ jobs:
 
   release_linux:
     name: Native release (linux)
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_shared_runners && !inputs.macos_only }}
+    env:
+      CARGO_BUILD_JOBS: '4'
     needs: test
     runs-on: [self-hosted, Linux, X64, zommi-release]
     timeout-minutes: 45
@@ -126,7 +154,8 @@ jobs:
         with:
           channel: stable
           flutter-version: 3.47.2
-          cache: true
+          # The persistent runner already holds this pinned SDK and pub cache.
+          cache: false
 
       - name: Build and verify Linux release
         env:
@@ -158,6 +187,7 @@ jobs:
 
   release_windows:
     name: Native release (windows)
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_shared_runners && !inputs.macos_only }}
     needs: test
     runs-on: [self-hosted, Windows, X64, zommi-release]
     timeout-minutes: 45
@@ -272,7 +302,7 @@ jobs:
   verify_windows_deployment:
     name: Verify deployed Windows process
     needs: release_windows
-    if: github.event_name == 'workflow_dispatch' && inputs.windows_deploy_downloads
+    if: github.event_name == 'workflow_dispatch' && inputs.run_shared_runners && !inputs.macos_only && inputs.windows_deploy_downloads
     runs-on: [self-hosted, Windows, X64, zommi-release]
     timeout-minutes: 5
     steps:
@@ -459,12 +489,11 @@ jobs:
           } | ConvertTo-Json
 
   release_macos:
-    name: Native release (macOS, temporarily skipped)
-    needs: test
-    # User-approved boundary on 2026-08-31: no local macOS builder is available.
-    # Keep the native job visible as skipped instead of scheduling a hosted runner.
-    if: ${{ false }}
-    runs-on: [self-hosted, macOS, zommi-release]
+    name: Native release (macOS)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: write
+    runs-on: ${{ inputs.macos_arch == 'x64' && 'macos-15-intel' || 'macos-15' }}
     timeout-minutes: 45
     steps:
       - name: Check out source
@@ -486,12 +515,25 @@ jobs:
           cache: true
 
       - name: Build and verify macOS release
+        id: package
         env:
           ZOMMI_MACOS_SIGNING_IDENTITY: ${{ secrets.ZOMMI_MACOS_SIGNING_IDENTITY }}
         run: bash scripts/package-unix.sh macos
 
+      - name: Probe packaged macOS startup and capture permissions
+        run: python3 scripts/accept-macos.py artifacts/zommi-macos-${{ inputs.macos_arch == 'x64' && 'x64' || 'arm64' }} --output artifacts/macos-acceptance --interactive
+
+      - name: Upload macOS acceptance evidence
+        if: always() && inputs.upload_packages && !inputs.macos_draft_release
+        uses: actions/upload-artifact@v7
+        with:
+          name: zommi-macos-evidence-${{ runner.arch }}-${{ github.sha }}
+          path: artifacts/macos-acceptance
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Upload native release
-        if: github.event_name == 'workflow_dispatch' && inputs.upload_packages
+        if: inputs.upload_packages && !inputs.macos_draft_release
         uses: actions/upload-artifact@v7
         with:
           name: zommi-macos-${{ runner.arch }}-${{ github.sha }}
@@ -500,4 +542,27 @@ jobs:
             artifacts/zommi-macos-*.zip.sha256
           if-no-files-found: error
           compression-level: 0
-          retention-days: 3
+          retention-days: 7
+
+      - name: Save Mac test package in a draft release
+        if: always() && inputs.macos_draft_release && steps.package.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MACOS_ARCH: ${{ inputs.macos_arch == 'x64' && 'x64' || 'arm64' }}
+        run: |
+          tag="macos-test-${GITHUB_SHA:0:12}-$MACOS_ARCH"
+          python3 - <<'PYNOTE'
+          import os
+          from pathlib import Path
+          Path('/tmp/macos-release-notes.md').write_text(
+              'macOS test package built from ' + os.environ['GITHUB_SHA'] + '.\n\n'
+              'Ad-hoc signed; not notarized. See docs/macos-testing.md inside the archive. '
+              'Capture verification is recorded in the evidence archive and CI log; '
+              'permission-limited probes do not establish interactive capture acceptance.\n\n'
+              'CI: https://github.com/' + os.environ['GITHUB_REPOSITORY'] + '/actions/runs/' + os.environ['GITHUB_RUN_ID'] + '\n')
+          PYNOTE
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --draft --target "$GITHUB_SHA" --title "Mac test $MACOS_ARCH ${GITHUB_SHA:0:12}" --notes-file /tmp/macos-release-notes.md
+          fi
+          tar -czf "artifacts/zommi-macos-evidence-$MACOS_ARCH.tar.gz" -C artifacts macos-acceptance
+          gh release upload "$tag" "artifacts/zommi-macos-$MACOS_ARCH.zip" "artifacts/zommi-macos-$MACOS_ARCH.zip.sha256" "artifacts/zommi-macos-evidence-$MACOS_ARCH.tar.gz" --clobber

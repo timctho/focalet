@@ -28,6 +28,10 @@
 	<string>Zommi reads the active application title and supported browser URL only when you invoke capture.</string>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>Zommi captures only the screen region you explicitly select.</string>
+	<!-- Flutter 3.47 macOS wide-gamut Impeller blits produce a black window. -->
+	<!-- Keep GPU rendering through the supported Skia Metal backend. -->
+	<key>FLTEnableImpeller</key>
+	<false/>
 	<key>NSMainNibFile</key>
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
