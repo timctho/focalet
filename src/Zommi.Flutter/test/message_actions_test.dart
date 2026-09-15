@@ -503,6 +503,12 @@ void main() {
       final group = tester.widget<ThinkingActivityGroup>(
         find.byType(ThinkingActivityGroup),
       );
+      await tester.runAsync(
+        () => precacheImage(
+          const AssetImage('assets/runtime_icons/codex.png'),
+          tester.element(find.byType(ZommiShell)),
+        ),
+      );
       await tester.tap(find.byKey(ValueKey('thinking-toggle-${group.id}')));
       await tester.pumpAndSettle();
       await capture('glass-${mode.name}');

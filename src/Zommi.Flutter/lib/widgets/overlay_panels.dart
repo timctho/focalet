@@ -294,15 +294,11 @@ class _SessionSidebarState extends State<SessionSidebar> {
                             selected: selected,
                             // Neutral overlays keep cream/custom accents from
                             // becoming bright cards in the dark theme.
-                            tileColor: colors.onSurface.withValues(
-                              alpha: colors.brightness == Brightness.dark
-                                  ? .045
-                                  : .075,
-                            ),
+                            tileColor: colors.onSurface.withValues(alpha: .045),
                             selectedTileColor: colors.onSurface.withValues(
                               alpha: colors.brightness == Brightness.dark
                                   ? .10
-                                  : .13,
+                                  : .085,
                             ),
                             selectedColor: colors.onSurface,
                             shape: RoundedRectangleBorder(
@@ -392,7 +388,7 @@ class _SessionSidebarState extends State<SessionSidebar> {
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
                                     fontSize: 13,
-                                    fontWeight: FontWeight.w500,
+                                    fontWeight: FontWeight.normal,
                                   ),
                                 ),
                               ],

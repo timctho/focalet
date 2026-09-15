@@ -19,14 +19,14 @@ class ZommiGlassBackdrop extends StatelessWidget {
           end: Alignment.bottomRight,
           colors: dark
               ? [
-                  const Color(0xff515f7e),
-                  const Color(0xff373950),
-                  const Color(0xff242936),
+                  const Color(0xff333336),
+                  const Color(0xff29292c),
+                  const Color(0xff202022),
                 ]
               : [
-                  const Color(0xffdce6fa),
-                  const Color(0xffeeebfa),
-                  const Color(0xffe4edf2),
+                  const Color(0xfff4f4f6),
+                  const Color(0xffeeeef0),
+                  const Color(0xffe8e8eb),
                 ],
         ),
       ),
@@ -41,8 +41,8 @@ class ZommiGlassBackdrop extends StatelessWidget {
                     center: const Alignment(.9, -.85),
                     radius: 1.15,
                     colors: [
-                      scheme.primary.withValues(alpha: dark ? .28 : .14),
-                      scheme.primary.withValues(alpha: 0),
+                      Colors.white.withValues(alpha: dark ? .05 : .38),
+                      Colors.white.withValues(alpha: 0),
                     ],
                   ),
                 ),

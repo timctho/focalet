@@ -80,7 +80,38 @@ struct Inner {
 
 struct PendingRequest {
     method: String,
+    requested_session_id: Option<String>,
     completion: oneshot::Sender<Result<Value, CodexError>>,
+}
+
+impl PendingRequest {
+    async fn complete(self, result: Result<Value, CodexError>, state: &Mutex<State>) {
+        // Bind on the socket reader before it can process the next event. A
+        // woken request caller may otherwise run after an immediate stream frame.
+        let result = match result {
+            Ok(value) if self.method == "session.create" || self.method == "session.resume" => {
+                let session_id = if self.method == "session.create" {
+                    value_string(
+                        value
+                            .get("stored_session_id")
+                            .or_else(|| value.get("session_key")),
+                    )
+                } else {
+                    value
+                        .get("session_key")
+                        .or_else(|| value.get("resumed"))
+                        .and_then(Value::as_str)
+                        .or(self.requested_session_id.as_deref())
+                        .unwrap_or_default()
+                        .to_owned()
+                };
+                let binding = state.lock().await.bind_session(&value, &session_id);
+                binding.map(|()| value)
+            }
+            result => result,
+        };
+        let _ = self.completion.send(result);
+    }
 }
 
 #[derive(Default)]
@@ -107,6 +138,52 @@ struct State {
     questions: HashMap<String, PendingQuestion>,
     stopping: bool,
     exited: bool,
+}
+
+impl State {
+    fn bind_session(&mut self, result: &Value, session_id: &str) -> Result<(), CodexError> {
+        let runtime_session_id = result
+            .get("session_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                gateway_error(
+                    "invalid-response",
+                    "Hermes Gateway returned an invalid runtime session binding.",
+                )
+            })?;
+        if session_id.is_empty() {
+            return Err(gateway_error(
+                "invalid-response",
+                "Hermes Gateway returned an invalid stored session binding.",
+            ));
+        }
+        self.active_session_id = Some(session_id.into());
+        self.runtime_session_id = Some(runtime_session_id.into());
+        self.runtime_session_ids
+            .insert(runtime_session_id.into(), session_id.into());
+        // A resume snapshot can lag events already received by this adapter.
+        // Keep the local timeline and turn identity while its stream is live.
+        if !self.streamed_assistant.contains_key(session_id) {
+            self.histories.insert(
+                session_id.into(),
+                messages_to_turns(
+                    &result
+                        .get("messages")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default(),
+                ),
+            );
+        }
+        self.session_info = result.get("info").cloned().unwrap_or_else(|| json!({}));
+        if result.get("running").and_then(Value::as_bool) == Some(true) {
+            self.active_turns
+                .entry(session_id.into())
+                .or_insert_with(|| format!("gateway-inflight-{session_id}"));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Default)]
@@ -1059,13 +1136,8 @@ impl HermesGatewayAdapter {
         if let Some(profile) = profile.filter(|value| !value.trim().is_empty()) {
             params["profile"] = Value::String(profile.into());
         }
-        let result = self.inner.request("session.create", params).await?;
-        let session_id = value_string(
-            result
-                .get("stored_session_id")
-                .or_else(|| result.get("session_key")),
-        );
-        self.bind_session(&result, &session_id).await
+        self.inner.request("session.create", params).await?;
+        Ok(())
     }
 
     async fn resume_session(
@@ -1081,60 +1153,7 @@ impl HermesGatewayAdapter {
         if let Some(profile) = profile.filter(|value| !value.trim().is_empty()) {
             params["profile"] = Value::String(profile.into());
         }
-        let result = self.inner.request("session.resume", params).await?;
-        let stored_id = result
-            .get("session_key")
-            .or_else(|| result.get("resumed"))
-            .and_then(Value::as_str)
-            .unwrap_or(session_id)
-            .to_owned();
-        self.bind_session(&result, &stored_id).await
-    }
-
-    async fn bind_session(&self, result: &Value, session_id: &str) -> Result<(), CodexError> {
-        let runtime_session_id = result
-            .get("session_id")
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| {
-                gateway_error(
-                    "invalid-response",
-                    "Hermes Gateway returned an invalid runtime session binding.",
-                )
-            })?;
-        if session_id.is_empty() {
-            return Err(gateway_error(
-                "invalid-response",
-                "Hermes Gateway returned an invalid stored session binding.",
-            ));
-        }
-        let mut state = self.inner.state.lock().await;
-        state.active_session_id = Some(session_id.into());
-        state.runtime_session_id = Some(runtime_session_id.into());
-        state
-            .runtime_session_ids
-            .insert(runtime_session_id.into(), session_id.into());
-        // A resume snapshot can lag events already received by this adapter.
-        // Keep the local timeline and turn identity while its stream is live.
-        if !state.streamed_assistant.contains_key(session_id) {
-            state.histories.insert(
-                session_id.into(),
-                messages_to_turns(
-                    &result
-                        .get("messages")
-                        .and_then(Value::as_array)
-                        .cloned()
-                        .unwrap_or_default(),
-                ),
-            );
-        }
-        state.session_info = result.get("info").cloned().unwrap_or_else(|| json!({}));
-        if result.get("running").and_then(Value::as_bool) == Some(true) {
-            state
-                .active_turns
-                .entry(session_id.into())
-                .or_insert_with(|| format!("gateway-inflight-{session_id}"));
-        }
+        self.inner.request("session.resume", params).await?;
         Ok(())
     }
 
@@ -1282,6 +1301,10 @@ impl Inner {
             id.clone(),
             PendingRequest {
                 method: method.into(),
+                requested_session_id: params
+                    .get("session_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
                 completion,
             },
         );
@@ -1334,7 +1357,7 @@ impl Inner {
             } else {
                 Ok(frame.get("result").cloned().unwrap_or_else(|| json!({})))
             };
-            let _ = pending.completion.send(result);
+            pending.complete(result, &self.state).await;
             return;
         }
         if frame.get("method").and_then(Value::as_str) == Some("event") {
@@ -2397,7 +2420,76 @@ fn hermes_gateway_arguments(
 
 #[cfg(test)]
 mod tests {
-    use super::hermes_gateway_arguments;
+    use super::{PendingRequest, State, StreamedTurn, hermes_gateway_arguments};
+    use serde_json::json;
+    use tokio::sync::{Mutex, oneshot};
+
+    #[tokio::test]
+    async fn resume_binds_before_the_request_caller_wakes_and_preserves_live_history() {
+        let mut initial = State::default();
+        initial
+            .runtime_session_ids
+            .insert("runtime".into(), "away".into());
+        initial
+            .active_turns
+            .insert("chat".into(), "live-turn".into());
+        initial
+            .streamed_assistant
+            .insert("chat".into(), StreamedTurn::default());
+        let live = vec![json!({"id":"live-turn", "items":[{"text":"First reasoning"}]})];
+        initial.histories.insert("chat".into(), live.clone());
+        let state = Mutex::new(initial);
+        let (completion, receiver) = oneshot::channel();
+        PendingRequest {
+            method: "session.resume".into(),
+            requested_session_id: Some("chat".into()),
+            completion,
+        }
+        .complete(
+            Ok(json!({"session_id":"runtime", "running":true, "messages":[]})),
+            &state,
+        )
+        .await;
+
+        // The socket reader can receive thinking.delta now, while the request
+        // caller has not yet polled its result. Routing must already be ready.
+        let bound = state.lock().await;
+        let session = &bound.runtime_session_ids["runtime"];
+        assert_eq!(session, "chat");
+        assert_eq!(bound.active_turns[session], "live-turn");
+        assert_eq!(bound.histories[session], live);
+        drop(bound);
+        assert!(receiver.await.expect("response delivered").is_ok());
+    }
+
+    #[tokio::test]
+    async fn create_binds_before_completion_and_invalid_binding_returns_an_error() {
+        let state = Mutex::new(State::default());
+        for (response, expected_ok) in [
+            (
+                json!({"session_id":"runtime", "stored_session_id":"chat"}),
+                true,
+            ),
+            (json!({"stored_session_id":"other"}), false),
+        ] {
+            let (completion, receiver) = oneshot::channel();
+            PendingRequest {
+                method: "session.create".into(),
+                requested_session_id: None,
+                completion,
+            }
+            .complete(Ok(response), &state)
+            .await;
+            assert_eq!(
+                state.lock().await.active_session_id.as_deref(),
+                Some("chat")
+            );
+            assert_eq!(
+                receiver.await.expect("response delivered").is_ok(),
+                expected_ok
+            );
+        }
+    }
 
     #[test]
     fn wsl_launch_injects_dashboard_token_inside_the_distribution() {

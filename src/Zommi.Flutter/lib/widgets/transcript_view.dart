@@ -1103,27 +1103,29 @@ class ThinkingActivityGroup extends StatelessWidget {
                               color: Theme.of(context).colorScheme.primary,
                             ),
                             const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'Thinking',
-                                style: chatTextStyleOf(context).copyWith(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurface,
-                                  fontWeight: FontWeight.w700,
-                                ),
+                            Text(
+                              'Thinking',
+                              style: chatTextStyleOf(context).copyWith(
+                                color: Theme.of(context).colorScheme.onSurface,
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
+                            if (toolCount > 0) const SizedBox(width: 10),
                             if (toolCount > 0)
-                              Text(
-                                '$toolCount tool${toolCount == 1 ? '' : 's'}',
-                                key: const ValueKey('thinking-tool-count'),
-                                style: chatTextStyleOf(context).copyWith(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurfaceVariant,
+                              Expanded(
+                                child: Text(
+                                  '$toolCount tool${toolCount == 1 ? '' : 's'}',
+                                  key: const ValueKey('thinking-tool-count'),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: chatTextStyleOf(context).copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                                  ),
                                 ),
                               ),
+                            if (toolCount == 0) const Spacer(),
                             if (toolCount > 0) const SizedBox(width: 8),
                             if (!completed)
                               const SizedBox.square(

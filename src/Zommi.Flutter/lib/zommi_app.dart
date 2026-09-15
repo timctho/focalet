@@ -103,15 +103,27 @@ class _ZommiAppState extends State<ZommiApp> {
       );
       if (brightness == Brightness.dark) {
         scheme = scheme.copyWith(
-          surface: const Color(0xff2b2d31),
-          surfaceDim: const Color(0xff26282c),
-          surfaceBright: const Color(0xff484b52),
-          surfaceContainerLowest: const Color(0xff24262a),
-          surfaceContainerLow: const Color(0xff303238),
-          surfaceContainer: const Color(0xff35383e),
-          surfaceContainerHigh: const Color(0xff3d4047),
-          surfaceContainerHighest: const Color(0xff454850),
-          outlineVariant: const Color(0xff555a63),
+          surface: const Color(0xff242426),
+          surfaceDim: const Color(0xff202022),
+          surfaceBright: const Color(0xff454548),
+          surfaceContainerLowest: const Color(0xff1c1c1e),
+          surfaceContainerLow: const Color(0xff28282b),
+          surfaceContainer: const Color(0xff2e2e31),
+          surfaceContainerHigh: const Color(0xff363639),
+          surfaceContainerHighest: const Color(0xff3e3e42),
+          outlineVariant: const Color(0xff515155),
+        );
+      } else {
+        scheme = scheme.copyWith(
+          surface: const Color(0xfff5f5f7),
+          surfaceDim: const Color(0xffe4e4e7),
+          surfaceBright: const Color(0xfffdfdfe),
+          surfaceContainerLowest: const Color(0xffffffff),
+          surfaceContainerLow: const Color(0xfff0f0f2),
+          surfaceContainer: const Color(0xffeaeaed),
+          surfaceContainerHigh: const Color(0xffe4e4e7),
+          surfaceContainerHighest: const Color(0xffdddde1),
+          outlineVariant: const Color(0xffd2d2d7),
         );
       }
       final theme = ThemeData(
@@ -1056,7 +1068,6 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
             ),
             child: FrostedSurface(
               key: const ValueKey('message-composer-shell'),
-              opacity: 0,
               showBorder: false,
               // This row is below the transcript and covers only the smooth
               // panel gradient, so a backdrop blur adds no useful detail.
