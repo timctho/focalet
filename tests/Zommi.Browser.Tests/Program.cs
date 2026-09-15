@@ -545,12 +545,22 @@ try
             Check(proxy.AcceptedConnections == 1, "Page reload rebinds without another browser WebSocket");
         }
         var newTab = await driver.CallAsync("Target.createTarget", new { url = fixture }, null, token);
-        await Task.Delay(150, token);
+        // Tab creation returns before the fixture has loaded and become visible.
+        // Observe that state under the existing test deadline before rebinding.
+        var newTabAttachment = await driver.CallAsync("Target.attachToTarget", new { targetId = newTab.GetProperty("targetId").GetString(), flatten = true }, null, token);
+        var newTabSession = newTabAttachment.GetProperty("sessionId").GetString()!;
+        while (true)
+        {
+            var ready = await driver.CallAsync("Runtime.evaluate", new { expression = visibleFixture, returnByValue = true }, newTabSession, token);
+            if (ready.GetProperty("result").GetProperty("value").GetBoolean()) break;
+            await Task.Delay(20, token);
+        }
+        await driver.CallAsync("Target.detachFromTarget", new { sessionId = newTabSession }, null, token);
         using (var switchedCapture = await Reopen())
             Check(switchedCapture.TabId == newTab.GetProperty("targetId").GetString() && proxy.AcceptedConnections == 1,
                 "A retained connection binds the newly active tab without reconnecting");
         await CloseTarget(newTab.GetProperty("targetId").GetString()!);
-        await Task.Delay(100, token);
+        while (!(await Evaluate(visibleFixture)).GetBoolean()) await Task.Delay(20, token);
         proxy.DisconnectClients();
         using (var recovered = await Reopen())
         {

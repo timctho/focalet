@@ -23,7 +23,6 @@ class MessageQueue extends StatelessWidget {
       decoration: BoxDecoration(
         color: scheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: scheme.outlineVariant.withValues(alpha: .6)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,

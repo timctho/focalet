@@ -7,6 +7,7 @@ import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/zommi_app.dart';
+import 'package:zommi_flutter/widgets/transcript_view.dart';
 
 import 'test_support.dart';
 
@@ -278,6 +279,49 @@ void main() {
       expect(send, findsNothing);
       expect(find.byKey(const ValueKey('message-queue')), findsNothing);
       expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets(
+    'queue aligns with the transcript and composer at narrow and wide sizes',
+    (tester) async {
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final core = RichFakeCore()..historyCount = 0;
+      await tester.binding.setSurfaceSize(const Size(1500, 900));
+      await tester.pumpWidget(
+        ZommiApp(core: core, desktop: FakeDesktopBridge()),
+      );
+      await tester.pumpAndSettle();
+      final field = find.byKey(const ValueKey('zommi-composer'));
+      await tester.enterText(field, 'Active request');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      await tester.enterText(field, 'Queued request');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      for (final width in [1500.0, 640.0]) {
+        await tester.binding.setSurfaceSize(Size(width, 900));
+        await tester.pump();
+        final queue = tester.getRect(
+          find.byKey(const ValueKey('message-queue')),
+        );
+        final composer = tester.getRect(
+          find.byKey(const ValueKey('message-composer-shell')),
+        );
+        final user = tester.getRect(
+          find.byKey(
+            ValueKey(
+              'user-message-${tester.widget<ConversationTurnView>(find.byType(ConversationTurnView)).turn.id}',
+            ),
+          ),
+        );
+        expect(queue.left, closeTo(composer.left, .1));
+        expect(queue.right, closeTo(composer.right, .1));
+        expect(queue.right, closeTo(user.right, .1));
+        expect(queue.width, lessThanOrEqualTo(864));
+        expect(tester.takeException(), isNull);
+      }
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
     },
   );
 }

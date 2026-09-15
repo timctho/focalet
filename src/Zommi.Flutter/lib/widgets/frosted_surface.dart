@@ -64,6 +64,7 @@ class FrostedSurface extends StatelessWidget {
     this.padding = EdgeInsets.zero,
     this.opacity,
     this.blurBackground = true,
+    this.showBorder = true,
     super.key,
   });
 
@@ -72,6 +73,7 @@ class FrostedSurface extends StatelessWidget {
   final EdgeInsetsGeometry padding;
   final double? opacity;
   final bool blurBackground;
+  final bool showBorder;
 
   @override
   Widget build(BuildContext context) {
@@ -95,9 +97,11 @@ class FrostedSurface extends StatelessWidget {
                 tint.withValues(alpha: (alpha - .12).clamp(0, 1)),
               ],
             ),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: dark ? .13 : .65),
-            ),
+            border: showBorder
+                ? Border.all(
+                    color: Colors.white.withValues(alpha: dark ? .13 : .65),
+                  )
+                : null,
           ),
           child: Material(
             type: MaterialType.transparency,

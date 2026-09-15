@@ -292,6 +292,9 @@ class _SessionSidebarState extends State<SessionSidebar> {
                               vertical: 3,
                             ),
                             selected: selected,
+                            tileColor: colors.surfaceContainerLow.withValues(
+                              alpha: .65,
+                            ),
                             selectedTileColor: Theme.of(context)
                                 .colorScheme
                                 .primaryContainer,

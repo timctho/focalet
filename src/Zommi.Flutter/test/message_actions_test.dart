@@ -11,6 +11,7 @@ import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
+import 'package:zommi_flutter/widgets/transcript_view.dart';
 import 'package:zommi_flutter/zommi_app.dart';
 
 import 'test_support.dart';
@@ -245,6 +246,7 @@ void main() {
       expect(agentActions.left, closeTo(agent.left, .1));
       expect(find.text('14:32'), findsOneWidget);
       expect(find.text('14:33'), findsOneWidget);
+      expect(find.byTooltip('Copy response'), findsOneWidget);
       await tester.tap(find.byTooltip('Copy message'));
       await tester.pump();
       expect(desktop.copiedText, contains('Polish the message controls'));
@@ -278,6 +280,103 @@ void main() {
         findsOneWidget,
       );
       expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    },
+  );
+
+  testWidgets(
+    'only the final answer gets a copy action after turn completion',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1100, 1000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final core = RichFakeCore()..historyCount = 0;
+      final desktop = FakeDesktopBridge();
+      await tester.pumpWidget(ZommiApp(core: core, desktop: desktop));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('zommi-composer')),
+        'Inspect',
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      var sequence = 0;
+      void emit(String kind, String id, String text, {bool completed = true}) {
+        core.emit(
+          CoreEvent(
+            name: 'item.update',
+            sequence: ++sequence,
+            runtimeTargetId: 'runtime-codex',
+            sessionId: 'session-1',
+            turnId: 'session-1-live-turn',
+            payload: {
+              'kind': kind,
+              'itemId': id,
+              'text': text,
+              'lifecycle': completed ? 'completed' : 'delta',
+              'replace': true,
+            },
+          ),
+        );
+      }
+
+      const answer = 'Verified.\n\n```text\nfinal code\n```';
+      emit('commentary', 'progress', 'Checking files');
+      emit('assistant', 'early', answer);
+      emit('thinking', 'reason', 'Inspecting\n\n```text\nreasoning code\n```');
+      emit('tool', 'tool', '```text\ntool output\n```');
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      final group = tester.widget<ThinkingActivityGroup>(
+        find.byType(ThinkingActivityGroup),
+      );
+      await tester.tap(find.byKey(ValueKey('thinking-toggle-${group.id}')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.byKey(const ValueKey('tool-toggle-tool')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.textContaining('reasoning code'), findsOneWidget);
+      expect(find.textContaining('tool output'), findsOneWidget);
+      expect(find.byTooltip('Copy response'), findsNothing);
+      expect(find.byTooltip('Copy code'), findsNothing);
+
+      emit('assistant', 'final', answer, completed: false);
+      await tester.pump();
+      expect(find.byTooltip('Copy response'), findsNothing);
+      emit('assistant', 'final', answer);
+      await tester.pump();
+      expect(find.byTooltip('Copy response'), findsNothing);
+      core.emit(
+        CoreEvent(
+          name: 'turn.completed',
+          sequence: ++sequence,
+          runtimeTargetId: 'runtime-codex',
+          sessionId: 'session-1',
+          turnId: 'session-1-live-turn',
+          payload: const {'status': 'completed'},
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Copy response'), findsOneWidget);
+      expect(find.byTooltip('Copy code'), findsNothing);
+      expect(
+        find.byKey(const ValueKey('assistant-actions-early')),
+        findsNothing,
+      );
+      final footer = find.byKey(const ValueKey('assistant-actions-final'));
+      expect(footer, findsOneWidget);
+      expect(
+        tester.getTopLeft(footer).dy,
+        greaterThanOrEqualTo(
+          tester
+              .getBottomLeft(find.byKey(const ValueKey('assistant-final')))
+              .dy,
+        ),
+      );
+      await tester.tap(find.byTooltip('Copy response'));
+      await tester.pump();
+      expect(desktop.copiedText, answer);
       await tester.pumpWidget(const SizedBox());
       await tester.pump();
     },

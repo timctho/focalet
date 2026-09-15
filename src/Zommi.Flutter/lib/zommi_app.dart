@@ -1047,7 +1047,7 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
       container: true,
       label: 'Message composer',
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(22, 6, 22, 6),
+        padding: const EdgeInsets.fromLTRB(24, 6, 24, 6),
         child: Align(
           alignment: Alignment.center,
           child: ConstrainedBox(
@@ -1056,6 +1056,7 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
             ),
             child: FrostedSurface(
               key: const ValueKey('message-composer-shell'),
+              showBorder: false,
               // This row is below the transcript and covers only the smooth
               // panel gradient, so a backdrop blur adds no useful detail.
               blurBackground: false,
@@ -1166,19 +1167,27 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
   }
 
   Widget _buildMessageQueue() => Padding(
-    padding: const EdgeInsets.fromLTRB(22, 4, 22, 2),
-    child: MessageQueue(
-      key: const ValueKey('message-queue'),
-      messages: _controller.queuedMessages,
-      paused: _controller.queuePaused,
-      onRemove: _controller.removeQueuedMessage,
-      onResume:
-          _controller.turnActive ||
-              _controller.sessionBusy ||
-              _controller.sessionReadOnly ||
-              _controller.runtimeBusy
-          ? null
-          : _controller.resumeQueuedMessages,
+    padding: const EdgeInsets.fromLTRB(24, 4, 24, 2),
+    child: Align(
+      alignment: Alignment.center,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(
+          maxWidth: conversationContentMaxWidth,
+        ),
+        child: MessageQueue(
+          key: const ValueKey('message-queue'),
+          messages: _controller.queuedMessages,
+          paused: _controller.queuePaused,
+          onRemove: _controller.removeQueuedMessage,
+          onResume:
+              _controller.turnActive ||
+                  _controller.sessionBusy ||
+                  _controller.sessionReadOnly ||
+                  _controller.runtimeBusy
+              ? null
+              : _controller.resumeQueuedMessages,
+        ),
+      ),
     ),
   );
 }
@@ -1230,7 +1239,6 @@ class _LoadingPill extends StatelessWidget {
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
         boxShadow: const [
           BoxShadow(
             color: Color(0x1f554b7a),

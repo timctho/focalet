@@ -19,6 +19,7 @@ class CopyableMarkdown extends StatefulWidget {
     required this.onOpenLink,
     this.compact = false,
     this.showCopyAction = true,
+    this.showCodeCopyAction = true,
     super.key,
   });
 
@@ -27,6 +28,7 @@ class CopyableMarkdown extends StatefulWidget {
   final Future<void> Function(String value) onOpenLink;
   final bool compact;
   final bool showCopyAction;
+  final bool showCodeCopyAction;
 
   @override
   State<CopyableMarkdown> createState() => _CopyableMarkdownState();
@@ -74,6 +76,7 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
     super.didUpdateWidget(oldWidget);
     if (widget.text != oldWidget.text ||
         widget.compact != oldWidget.compact ||
+        widget.showCodeCopyAction != oldWidget.showCodeCopyAction ||
         widget.onCopy != oldWidget.onCopy ||
         widget.onOpenLink != oldWidget.onOpenLink) {
       _markdown = null;
@@ -132,7 +135,11 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
                         if (href != null) unawaited(widget.onOpenLink(href));
                       },
                       builders: {
-                        'pre': _CodeBlockBuilder(onCopy: widget.onCopy),
+                        'pre': _CodeBlockBuilder(
+                          onCopy: widget.showCodeCopyAction
+                              ? widget.onCopy
+                              : null,
+                        ),
                         'a': _TooltipLinkBuilder(
                           onOpen: widget.onOpenLink,
                           onHover: (link) => _hoveredLink = link,
@@ -175,18 +182,9 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
                         ),
                         codeblockPadding: EdgeInsets.zero,
                         codeblockDecoration: const BoxDecoration(),
-                        blockquoteDecoration: BoxDecoration(
-                          border: Border(
-                            left: BorderSide(
-                              color: Theme.of(context).colorScheme.primary,
-                              width: 3,
-                            ),
-                          ),
-                        ),
+                        blockquoteDecoration: const BoxDecoration(),
                         blockquotePadding: const EdgeInsets.only(left: 12),
-                        tableBorder: TableBorder.all(
-                          color: Theme.of(context).colorScheme.outlineVariant,
-                        ),
+                        tableBorder: const TableBorder(),
                         tableCellsPadding: const EdgeInsets.all(7),
                       ),
                     ),
@@ -287,7 +285,7 @@ final class _TooltipLinkBuilder extends MarkdownElementBuilder {
 final class _CodeBlockBuilder extends MarkdownElementBuilder {
   _CodeBlockBuilder({required this.onCopy});
 
-  final Future<void> Function(String value) onCopy;
+  final Future<void> Function(String value)? onCopy;
 
   @override
   bool isBlockElement() => true;
@@ -301,7 +299,7 @@ class _CopyableCodeBlock extends StatefulWidget {
   const _CopyableCodeBlock({required this.code, required this.onCopy});
 
   final String code;
-  final Future<void> Function(String value) onCopy;
+  final Future<void> Function(String value)? onCopy;
 
   @override
   State<_CopyableCodeBlock> createState() => _CopyableCodeBlockState();
@@ -319,7 +317,6 @@ class _CopyableCodeBlockState extends State<_CopyableCodeBlock> {
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -338,29 +335,30 @@ class _CopyableCodeBlockState extends State<_CopyableCodeBlock> {
               ),
             ),
           ),
-          IconButton(
-            key: ValueKey('copy-code-${widget.code.hashCode}'),
-            visualDensity: VisualDensity.compact,
-            constraints: const BoxConstraints.tightFor(width: 30, height: 30),
-            style: IconButton.styleFrom(
-              fixedSize: const Size(30, 30),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          if (widget.onCopy != null)
+            IconButton(
+              key: ValueKey('copy-code-${widget.code.hashCode}'),
+              visualDensity: VisualDensity.compact,
+              constraints: const BoxConstraints.tightFor(width: 30, height: 30),
+              style: IconButton.styleFrom(
+                fixedSize: const Size(30, 30),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              padding: EdgeInsets.zero,
+              splashRadius: 16,
+              tooltip: _copied ? 'Copied code' : 'Copy code',
+              onPressed: () async {
+                await widget.onCopy!(widget.code);
+                if (!mounted) return;
+                setState(() => _copied = true);
+                await Future<void>.delayed(const Duration(seconds: 1));
+                if (mounted) setState(() => _copied = false);
+              },
+              icon: Icon(
+                _copied ? Icons.check_rounded : Icons.copy_rounded,
+                size: 16,
+              ),
             ),
-            padding: EdgeInsets.zero,
-            splashRadius: 16,
-            tooltip: _copied ? 'Copied code' : 'Copy code',
-            onPressed: () async {
-              await widget.onCopy(widget.code);
-              if (!mounted) return;
-              setState(() => _copied = true);
-              await Future<void>.delayed(const Duration(seconds: 1));
-              if (mounted) setState(() => _copied = false);
-            },
-            icon: Icon(
-              _copied ? Icons.check_rounded : Icons.copy_rounded,
-              size: 16,
-            ),
-          ),
         ],
       ),
     );
@@ -387,11 +385,6 @@ class SafeHtmlView extends StatelessWidget {
           ),
           backgroundColor: const Color(0x00000000),
         ),
-        'table': Style(
-          border: Border.all(
-            color: Theme.of(context).colorScheme.outlineVariant,
-          ),
-        ),
         'th': Style(
           padding: HtmlPaddings.all(6),
           fontWeight: FontWeight.w700,
@@ -399,14 +392,7 @@ class SafeHtmlView extends StatelessWidget {
               .colorScheme
               .surfaceContainerHighest,
         ),
-        'td': Style(
-          padding: HtmlPaddings.all(6),
-          border: Border(
-            bottom: BorderSide(
-              color: Theme.of(context).colorScheme.outlineVariant,
-            ),
-          ),
-        ),
+        'td': Style(padding: HtmlPaddings.all(6)),
         'pre': Style(
           padding: HtmlPaddings.all(8),
           backgroundColor: Theme.of(context)

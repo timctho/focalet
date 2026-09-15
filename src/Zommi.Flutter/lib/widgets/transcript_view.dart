@@ -445,6 +445,15 @@ class ConversationTurnView extends StatelessWidget {
         segments.add([block]);
       }
     }
+    // Item completion also occurs for progress updates. Wait for the turn to
+    // finish before exposing the final assistant answer's single copy action.
+    final finalResponse = blocks
+        .where(
+          (block) =>
+              block.kind == TranscriptKind.assistant &&
+              (block.text.trim().isNotEmpty || block.artifacts.isNotEmpty),
+        )
+        .lastOrNull;
     return Semantics(
       container: true,
       label: 'Conversation turn ${turn.number}',
@@ -474,10 +483,6 @@ class ConversationTurnView extends StatelessWidget {
                     color: Theme.of(context).colorScheme.primaryContainer
                         .withValues(alpha: .60),
                     borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: Theme.of(context).colorScheme.primary
-                          .withValues(alpha: .10),
-                    ),
                   ),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -541,6 +546,10 @@ class ConversationTurnView extends StatelessWidget {
                           ),
                           runtimeName: runtimeName,
                           controller: controller,
+                          showActions:
+                              !isResponding &&
+                              identical(segment.first, finalResponse) &&
+                              segment.first.completed,
                         )
                       : ActivityBlockView(
                           block: segment.first,
@@ -679,10 +688,6 @@ class _EditableUserMessageState extends State<_EditableUserMessage> {
                     color: Theme.of(context).colorScheme.surfaceContainerHigh
                         .withValues(alpha: .80),
                     borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: Theme.of(context).colorScheme.primary
-                          .withValues(alpha: .4),
-                    ),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1069,9 +1074,6 @@ class ThinkingActivityGroup extends StatelessWidget {
             decoration: BoxDecoration(
               color: Theme.of(context).colorScheme.surface,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: Theme.of(context).colorScheme.outlineVariant,
-              ),
             ),
             child: Stack(
               children: [
@@ -1331,12 +1333,18 @@ class _ThinkingActivitySubItem extends StatelessWidget {
             CopyableMarkdown(
               text: block.text,
               compact: true,
+              showCopyAction: false,
+              showCodeCopyAction: false,
               onCopy: controller.copyText,
               onOpenLink: controller.openExternalLink,
             ),
           ],
           for (final artifact in block.artifacts)
-            ArtifactCard(artifact: artifact, controller: controller),
+            ArtifactCard(
+              artifact: artifact,
+              controller: controller,
+              showCopyAction: false,
+            ),
         ],
       ),
     );
@@ -1426,11 +1434,17 @@ class _ToolActivitySubItem extends StatelessWidget {
                     CopyableMarkdown(
                       text: block.text,
                       compact: true,
+                      showCopyAction: false,
+                      showCodeCopyAction: false,
                       onCopy: controller.copyText,
                       onOpenLink: controller.openExternalLink,
                     ),
                   for (final artifact in block.artifacts)
-                    ArtifactCard(artifact: artifact, controller: controller),
+                    ArtifactCard(
+                      artifact: artifact,
+                      controller: controller,
+                      showCopyAction: false,
+                    ),
                 ],
               ),
             ),
@@ -1447,6 +1461,7 @@ class AssistantBlockView extends StatelessWidget {
     required this.width,
     required this.runtimeName,
     required this.controller,
+    this.showActions = false,
     super.key,
   });
 
@@ -1454,6 +1469,7 @@ class AssistantBlockView extends StatelessWidget {
   final double width;
   final String runtimeName;
   final ZommiController controller;
+  final bool showActions;
 
   @override
   Widget build(BuildContext context) {
@@ -1474,15 +1490,6 @@ class AssistantBlockView extends StatelessWidget {
                   horizontal: 13,
                   vertical: 5,
                 ),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface
-                      .withValues(alpha: .30),
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(
-                    color: Theme.of(context).colorScheme.onSurface
-                        .withValues(alpha: .04),
-                  ),
-                ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -1491,6 +1498,7 @@ class AssistantBlockView extends StatelessWidget {
                     CopyableMarkdown(
                       text: block.text,
                       showCopyAction: false,
+                      showCodeCopyAction: false,
                       onCopy: controller.copyText,
                       onOpenLink: controller.openExternalLink,
                     ),
@@ -1499,12 +1507,13 @@ class AssistantBlockView extends StatelessWidget {
                   ],
                 ),
               ),
-              MessageActions(
-                key: ValueKey('assistant-actions-${block.id}'),
-                text: block.text,
-                timestamp: block.createdAt,
-                onCopy: controller.copyText,
-              ),
+              if (showActions)
+                MessageActions(
+                  key: ValueKey('assistant-actions-${block.id}'),
+                  text: block.text,
+                  timestamp: block.createdAt,
+                  onCopy: controller.copyText,
+                ),
             ],
           ),
         ),
@@ -1548,11 +1557,6 @@ class ActivityBlockView extends StatelessWidget {
                   ? Theme.of(context).colorScheme.errorContainer
                   : Theme.of(context).colorScheme.surface,
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: block.kind == TranscriptKind.error
-                    ? Theme.of(context).colorScheme.error
-                    : Theme.of(context).colorScheme.outlineVariant,
-              ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1625,6 +1629,8 @@ class ActivityBlockView extends StatelessWidget {
                             CopyableMarkdown(
                               text: block.text,
                               compact: true,
+                              showCopyAction: false,
+                              showCodeCopyAction: false,
                               onCopy: controller.copyText,
                               onOpenLink: controller.openExternalLink,
                             ),
@@ -1632,6 +1638,7 @@ class ActivityBlockView extends StatelessWidget {
                             ArtifactCard(
                               artifact: artifact,
                               controller: controller,
+                              showCopyAction: false,
                             ),
                         ],
                       ),
@@ -1651,11 +1658,13 @@ class ArtifactCard extends StatefulWidget {
   const ArtifactCard({
     required this.artifact,
     required this.controller,
+    this.showCopyAction = true,
     super.key,
   });
 
   final ArtifactPreview artifact;
   final ZommiController controller;
+  final bool showCopyAction;
 
   @override
   State<ArtifactCard> createState() => _ArtifactCardState();
@@ -1693,7 +1702,6 @@ class _ArtifactCardState extends State<ArtifactCard> {
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1750,7 +1758,9 @@ class _ArtifactCardState extends State<ArtifactCard> {
                     ),
                   ),
                 ),
-                if (artifact.kind == 'image' && artifact.dataUrl != null)
+                if (widget.showCopyAction &&
+                    artifact.kind == 'image' &&
+                    artifact.dataUrl != null)
                   IconButton(
                     tooltip: 'Copy image',
                     onPressed: () => unawaited(

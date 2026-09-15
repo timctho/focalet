@@ -367,13 +367,11 @@ class _InlineAttachmentTileState extends State<InlineAttachmentTile> {
             constraints: const BoxConstraints(maxWidth: 290),
             padding: const EdgeInsets.only(left: 6, right: 2),
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.primaryContainer,
+              color: _hovered
+                  ? Theme.of(context).colorScheme.primaryContainer
+                        .withValues(alpha: .75)
+                  : Theme.of(context).colorScheme.primaryContainer,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: _hovered
-                    ? Theme.of(context).colorScheme.primary
-                    : Theme.of(context).colorScheme.primaryContainer,
-              ),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,

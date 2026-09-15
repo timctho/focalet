@@ -1455,13 +1455,8 @@ void main() {
         find.byKey(const ValueKey('artifact-image-artifact-1')),
         findsOneWidget,
       );
-      expect(find.byTooltip('Copy code'), findsOneWidget);
-      await tester.ensureVisible(find.byTooltip('Copy code'));
-      await tester.pump(const Duration(milliseconds: 200));
-      await tester.tap(find.byTooltip('Copy code'));
-      await tester.pump();
-      expect(desktop.copiedText, contains('copy me'));
-      await tester.pump(const Duration(seconds: 1));
+      expect(find.byTooltip('Copy code'), findsNothing);
+      expect(find.byTooltip('Copy response'), findsNothing);
       final copyImageButton = tester.widget<IconButton>(
         find.ancestor(
           of: find.byTooltip('Copy image'),
@@ -1575,6 +1570,16 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('stop-turn')), findsNothing);
       expect(find.byKey(const ValueKey('core-status')), findsNothing);
+      expect(find.byTooltip('Copy response'), findsOneWidget);
+      await tester.ensureVisible(find.byTooltip('Copy response'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Copy response'));
+      await tester.pump();
+      expect(
+        desktop.copiedText,
+        '## Result\n\n- first\n- second\n\n```text\ncopy me\n```',
+      );
+      await tester.pump(const Duration(seconds: 1));
     },
   );
 
