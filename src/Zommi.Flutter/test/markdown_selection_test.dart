@@ -10,6 +10,65 @@ import 'package:zommi_flutter/theme/zommi_typography.dart';
 
 void main() {
   testWidgets(
+    'short tables keep prose alignment and wider tables grow centered',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1100, 650));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 1000,
+              child: CopyableMarkdown(
+                proseWidth: 400,
+                proseInset: 300,
+                showCopyAction: false,
+                text:
+                    'A paragraph.\n\n'
+                    '| Small | Value |\n| --- | --- |\n| Short | Text |\n\n'
+                    'A wider table.\n\n'
+                    '| Wide | Value |\n| --- | --- |\n| ${'W' * 35} | Text |\n\n'
+                    'A scrolling table.\n\n'
+                    '| Huge | Value |\n| --- | --- |\n| ${'W' * 100} | Text |',
+                onCopy: (_) async {},
+                onOpenLink: (_) async {},
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final prose = tester.getRect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is RichText && widget.text.toPlainText() == 'A paragraph.',
+        ),
+      );
+      final tables = find.byType(Table);
+      final small = tester.getRect(tables.at(0));
+      final wide = tester.getRect(tables.at(1));
+      expect(small.width, lessThan(400));
+      expect(small.left, closeTo(prose.left, .01));
+      expect(wide.width, inExclusiveRange(400, 1000));
+      expect(wide.center.dx, closeTo(prose.left + 200, .01));
+      expect(
+        prose.left - wide.left,
+        closeTo(wide.right - (prose.left + 400), .01),
+      );
+      final scroll = find.byWidgetPredicate(
+        (widget) =>
+            widget is SingleChildScrollView &&
+            widget.scrollDirection == Axis.horizontal,
+      );
+      final overflow = tester.getRect(scroll.at(2));
+      expect(overflow.width, 1000);
+      expect(overflow.center.dx, closeTo(prose.left + 200, .01));
+      expect(tester.getSize(tables.at(2)).width, greaterThan(overflow.width));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'wide table cells stay on one line and scroll to linked content',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(1100, 650));

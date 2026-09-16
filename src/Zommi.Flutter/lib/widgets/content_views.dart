@@ -363,8 +363,19 @@ class _WideMarkdownBodyState extends State<_WideMarkdownBody>
     children: [
       for (var index = 0; index < _blocks.length; index++) ...[
         if (index > 0) SizedBox(height: _style.blockSpacing),
-        if (_blocks[index].table || widget.proseWidth == null)
+        if (widget.proseWidth == null)
           _blocks[index].child
+        else if (_blocks[index].table)
+          Align(
+            alignment: Alignment.topCenter,
+            heightFactor: 1,
+            child: ConstrainedBox(
+              // A short table stays at the prose column's left edge. Wider
+              // tables grow around its center until the panel needs scrolling.
+              constraints: BoxConstraints(minWidth: widget.proseWidth!),
+              child: _blocks[index].child,
+            ),
+          )
         else
           Padding(
             padding: EdgeInsets.symmetric(horizontal: widget.proseInset),

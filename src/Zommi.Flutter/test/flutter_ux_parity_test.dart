@@ -1854,6 +1854,7 @@ void main() {
     expect(prose.left, closeTo(composer.left + 13, .01));
     expect(table.left, lessThan(composer.left));
     expect(table.right, greaterThan(composer.right));
+    expect(table.center.dx, closeTo(composer.center.dx, .01));
     expect(table.right, lessThan(1800 - 24));
     expect(position.maxScrollExtent, 0);
     final leftLink = find.byKey(
