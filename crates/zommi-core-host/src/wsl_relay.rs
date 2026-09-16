@@ -268,7 +268,7 @@ pub fn resolve_runtime_executable(distribution: &str, path: &str) -> io::Result<
         command: "/bin/sh".into(),
         args: vec![
             "-c".into(),
-            RESOLVE_EXECUTABLE_SOURCE.into(),
+            normalize_shell_script(RESOLVE_EXECUTABLE_SOURCE),
             "zommi-resolve-cli".into(),
             path.into(),
         ],
@@ -497,7 +497,7 @@ fn start_relay(distribution: &str, endpoint_path: &Path) -> io::Result<()> {
     let relay = root.join("zommi-wsl-relay.js");
     let launcher = root.join("launch-wsl-relay.sh");
     let relay_source = RELAY_SOURCE.replace("\r\n", "\n");
-    let launcher_source = LAUNCHER_SOURCE.replace("\r\n", "\n");
+    let launcher_source = normalize_shell_script(LAUNCHER_SOURCE);
     write_if_changed(&relay, relay_source.as_bytes())?;
     write_if_changed(&launcher, launcher_source.as_bytes())?;
     match fs::remove_file(endpoint_path) {
@@ -540,6 +540,11 @@ fn start_relay(distribution: &str, endpoint_path: &Path) -> io::Result<()> {
         )));
     }
     Ok(())
+}
+
+fn normalize_shell_script(source: &str) -> String {
+    // Windows Git checkouts may use CRLF; /bin/sh must receive Unix lines.
+    source.replace("\r\n", "\n")
 }
 
 fn write_if_changed(path: &Path, bytes: &[u8]) -> io::Result<()> {
@@ -911,14 +916,15 @@ mod tests {
         let executable = bin.join("codex with spaces $(touch injected) `touch injected-too`");
         fs::write(&executable, "#!/bin/sh\nexit 0\n").unwrap();
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        // Exercise the line endings embedded by a Windows Git checkout even
+        // when the regression runs on a Unix build host.
+        let windows_script = super::RESOLVE_EXECUTABLE_SOURCE
+            .replace("\r\n", "\n")
+            .replace('\n', "\r\n");
+        let script = super::normalize_shell_script(&windows_script);
         let probe = |path: &str| {
             Command::new("/bin/sh")
-                .args([
-                    "-c",
-                    super::RESOLVE_EXECUTABLE_SOURCE,
-                    "zommi-resolve-cli",
-                    path,
-                ])
+                .args(["-c", &script, "zommi-resolve-cli", path])
                 .env("HOME", &root)
                 .current_dir(&root)
                 .output()
