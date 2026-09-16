@@ -352,15 +352,7 @@ class _TranscriptPaneState extends State<TranscriptPane> {
                   math.max(0.0, constraints.maxWidth - 48),
                 );
                 final availableWidth = math.max(0.0, constraints.maxWidth - 48);
-                final leftInset = (availableWidth - contentWidth) / 2;
-                return Padding(
-                  padding: EdgeInsets.only(left: leftInset),
-                  child: _turnView(
-                    turn,
-                    contentWidth,
-                    availableWidth - leftInset,
-                  ),
-                );
+                return _turnView(turn, contentWidth, availableWidth);
               },
             ),
           ),
@@ -428,6 +420,10 @@ class ConversationTurnView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     ScrollPerformance.count('turnBuild');
+    final proseInset = math.max(
+      0.0,
+      ((availableWidth ?? viewportWidth) - viewportWidth) / 2,
+    );
     final blocks = ScrollPerformance.measure(
       'normalizeBlocks',
       () => distinctTranscriptBlocks(turn.blocks),
@@ -477,7 +473,7 @@ class ConversationTurnView extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Align(
-              alignment: Alignment.centerLeft,
+              alignment: Alignment.topCenter,
               child: SizedBox(
                 width: viewportWidth,
                 child: Align(
@@ -557,7 +553,11 @@ class ConversationTurnView extends StatelessWidget {
               if (!segment.first.kind.isFoldedActivity)
                 Padding(
                   key: ValueKey('message-segment-${segment.first.id}'),
-                  padding: const EdgeInsets.only(bottom: 9),
+                  padding: EdgeInsets.only(
+                    bottom: 9,
+                    left: segment.first.kind.isMessage ? 0 : proseInset,
+                    right: segment.first.kind.isMessage ? 0 : proseInset,
+                  ),
                   child: segment.first.kind.isMessage
                       ? AssistantBlockView(
                           block: segment.first,
@@ -565,6 +565,7 @@ class ConversationTurnView extends StatelessWidget {
                             viewportWidth,
                           ),
                           tableWidth: availableWidth,
+                          proseInset: proseInset,
                           runtimeName: runtimeName,
                           controller: controller,
                           showActions:
@@ -583,7 +584,7 @@ class ConversationTurnView extends StatelessWidget {
               else
                 Padding(
                   key: ValueKey('activity-segment-${segment.first.id}'),
-                  padding: const EdgeInsets.only(bottom: 6),
+                  padding: EdgeInsets.fromLTRB(proseInset, 0, proseInset, 6),
                   child: ThinkingActivityGroup(
                     turn: turn,
                     activities: segment,
@@ -596,22 +597,25 @@ class ConversationTurnView extends StatelessWidget {
                   ),
                 ),
             if (showTyping)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Semantics(
-                  label: '$runtimeName is typing',
-                  liveRegion: true,
-                  child: ExcludeSemantics(
-                    child: Container(
-                      key: ValueKey('typing-indicator-${turn.id}'),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 6,
+              Padding(
+                padding: EdgeInsets.only(left: proseInset),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Semantics(
+                    label: '$runtimeName is typing',
+                    liveRegion: true,
+                    child: ExcludeSemantics(
+                      child: Container(
+                        key: ValueKey('typing-indicator-${turn.id}'),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: const RepaintBoundary(child: TypingDots()),
                       ),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: const RepaintBoundary(child: TypingDots()),
                     ),
                   ),
                 ),
@@ -1484,12 +1488,14 @@ class AssistantBlockView extends StatelessWidget {
     required this.controller,
     this.showActions = false,
     this.tableWidth,
+    this.proseInset = 0,
     super.key,
   });
 
   final TranscriptBlock block;
   final double width;
   final double? tableWidth;
+  final double proseInset;
   final String runtimeName;
   final ZommiController controller;
   final bool showActions;
@@ -1521,28 +1527,35 @@ class AssistantBlockView extends StatelessWidget {
                     CopyableMarkdown(
                       text: block.text,
                       proseWidth: math.max(0, width - 26),
+                      proseInset: proseInset,
                       showCopyAction: false,
                       showCodeCopyAction: false,
                       onCopy: controller.copyText,
                       onOpenLink: controller.openExternalLink,
                     ),
                     for (final artifact in block.artifacts)
-                      ConstrainedBox(
-                        constraints: BoxConstraints(maxWidth: width - 26),
-                        child: ArtifactCard(
-                          artifact: artifact,
-                          controller: controller,
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: proseInset),
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(maxWidth: width - 26),
+                          child: ArtifactCard(
+                            artifact: artifact,
+                            controller: controller,
+                          ),
                         ),
                       ),
                   ],
                 ),
               ),
               if (showActions)
-                MessageActions(
-                  key: ValueKey('assistant-actions-${block.id}'),
-                  text: block.text,
-                  timestamp: block.createdAt,
-                  onCopy: controller.copyText,
+                Padding(
+                  padding: EdgeInsets.only(left: proseInset),
+                  child: MessageActions(
+                    key: ValueKey('assistant-actions-${block.id}'),
+                    text: block.text,
+                    timestamp: block.createdAt,
+                    onCopy: controller.copyText,
+                  ),
                 ),
             ],
           ),

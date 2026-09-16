@@ -21,6 +21,7 @@ class CopyableMarkdown extends StatefulWidget {
     this.showCopyAction = true,
     this.showCodeCopyAction = true,
     this.proseWidth,
+    this.proseInset = 0,
     super.key,
   });
 
@@ -33,6 +34,9 @@ class CopyableMarkdown extends StatefulWidget {
 
   /// Keep prose readable while allowing tables to use the parent's full width.
   final double? proseWidth;
+
+  /// Leave the centered prose margins available to full-width tables.
+  final double proseInset;
 
   @override
   State<CopyableMarkdown> createState() => _CopyableMarkdownState();
@@ -82,6 +86,7 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
         widget.compact != oldWidget.compact ||
         widget.showCodeCopyAction != oldWidget.showCodeCopyAction ||
         widget.proseWidth != oldWidget.proseWidth ||
+        widget.proseInset != oldWidget.proseInset ||
         widget.onCopy != oldWidget.onCopy ||
         widget.onOpenLink != oldWidget.onOpenLink) {
       _markdown = null;
@@ -134,6 +139,7 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
                     child: _markdown ??= _WideMarkdownBody(
                       data: widget.text,
                       proseWidth: widget.proseWidth,
+                      proseInset: widget.proseInset,
                       // All paragraphs and links participate in the same
                       // selection region, including compact user messages.
                       selectable: false,
@@ -286,9 +292,11 @@ class _WideMarkdownBody extends MarkdownBody {
     required super.builders,
     required super.styleSheet,
     required this.proseWidth,
+    required this.proseInset,
   });
 
   final double? proseWidth;
+  final double proseInset;
 
   @override
   State<MarkdownWidget> createState() => _WideMarkdownBodyState();
@@ -358,9 +366,12 @@ class _WideMarkdownBodyState extends State<_WideMarkdownBody>
         if (_blocks[index].table || widget.proseWidth == null)
           _blocks[index].child
         else
-          ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: widget.proseWidth!),
-            child: _blocks[index].child,
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: widget.proseInset),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: widget.proseWidth!),
+              child: _blocks[index].child,
+            ),
           ),
       ],
     ],

@@ -23,6 +23,7 @@ void main() {
               width: 1000,
               child: CopyableMarkdown(
                 proseWidth: 400,
+                proseInset: 300,
                 showCopyAction: false,
                 text:
                     'A paragraph.\n\n'
@@ -56,6 +57,13 @@ void main() {
       );
       final bounds = tester.getRect(scroll);
       expect(bounds.width, 1000);
+      final prose = tester.getRect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is RichText && widget.text.toPlainText() == 'A paragraph.',
+        ),
+      );
+      expect(prose.left, bounds.left + 300);
       // Start beyond the prose column to cover hit testing in the extra space.
       await tester.dragFrom(
         bounds.topRight + const Offset(-20, 30),

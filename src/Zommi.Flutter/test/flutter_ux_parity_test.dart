@@ -1748,8 +1748,9 @@ void main() {
     final core = RichFakeCore()..historyCount = 1;
     await tester.pumpWidget(ZommiApp(core: core, desktop: FakeDesktopBridge()));
     await tester.pumpAndSettle();
-    final assistant = find.byKey(
-      const ValueKey('assistant-session-1-answer-1'),
+    final assistant = find.descendant(
+      of: find.byKey(const ValueKey('assistant-session-1-answer-1')),
+      matching: find.byType(RichText),
     );
     final user = find.byKey(const ValueKey('user-message-session-1-turn-1'));
     final normalAssistantWidth = tester.getSize(assistant).width;
@@ -1790,7 +1791,10 @@ void main() {
       find.byKey(const ValueKey('message-composer-shell')),
     );
     final assistant = tester.getRect(
-      find.byKey(const ValueKey('assistant-session-1-answer-1')),
+      find.descendant(
+        of: find.byKey(const ValueKey('assistant-session-1-answer-1')),
+        matching: find.byType(RichText),
+      ),
     );
     final user = tester.getRect(
       find.byKey(const ValueKey('user-message-session-1-turn-1')),
@@ -1803,7 +1807,7 @@ void main() {
     expect(find.byKey(const ValueKey('core-status')), findsNothing);
   });
 
-  testWidgets('tables use the right panel space and scroll after resizing', (
+  testWidgets('tables use both panel margins and scroll after resizing', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(1800, 900));
@@ -1820,8 +1824,9 @@ void main() {
     ).join(' ');
     ((turn['items'] as List).last as Map)['text'] =
         '$text\n\n'
-        '| Description | Reference |\n| --- | --- |\n'
-        '| ${'A' * 58} | [Open source](https://example.com/wide) |';
+        '| Reference | Description | Reference |\n| --- | --- | --- |\n'
+        '| [Left source](https://example.com/left) | ${'A' * 70} | '
+        '[Right source](https://example.com/wide) |';
     core.historyBySession['runtime-codex\u0000session-1'] = history;
     final desktop = FakeDesktopBridge();
     await tester.pumpWidget(ZommiApp(core: core, desktop: desktop));
@@ -1846,10 +1851,18 @@ void main() {
         .position;
     final table = tester.getRect(scroll);
     expect(prose.width, lessThanOrEqualTo(composer.width - 26));
-    expect(table.left, closeTo(prose.left, .01));
+    expect(prose.left, closeTo(composer.left + 13, .01));
+    expect(table.left, lessThan(composer.left));
     expect(table.right, greaterThan(composer.right));
     expect(table.right, lessThan(1800 - 24));
     expect(position.maxScrollExtent, 0);
+    final leftLink = find.byKey(
+      const ValueKey('markdown-link-https://example.com/left'),
+    );
+    expect(tester.getCenter(leftLink).dx, lessThan(composer.left));
+    await tester.tap(leftLink);
+    await tester.pump();
+    expect(desktop.openedUrl.toString(), 'https://example.com/left');
     final link = find.byKey(
       const ValueKey('markdown-link-https://example.com/wide'),
     );
@@ -1861,6 +1874,10 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(1100, 900));
     await tester.pumpAndSettle();
     expect(position.maxScrollExtent, greaterThan(0));
+    final narrowComposer = tester.getRect(
+      find.byKey(const ValueKey('message-composer-shell')),
+    );
+    expect(tester.getRect(scroll).left, closeTo(narrowComposer.left + 13, .01));
     expect(tester.getRect(scroll).right, lessThan(1100 - 24));
     await tester.drag(scroll, const Offset(-1000, 0));
     await tester.pumpAndSettle();
