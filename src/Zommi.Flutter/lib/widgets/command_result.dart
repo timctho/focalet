@@ -8,8 +8,9 @@ class CommandResult extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 4),
+    padding: const EdgeInsets.symmetric(vertical: 4),
     child: Card(
+      margin: EdgeInsets.zero,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

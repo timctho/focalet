@@ -20,6 +20,7 @@ class CopyableMarkdown extends StatefulWidget {
     this.compact = false,
     this.showCopyAction = true,
     this.showCodeCopyAction = true,
+    this.proseWidth,
     super.key,
   });
 
@@ -29,6 +30,9 @@ class CopyableMarkdown extends StatefulWidget {
   final bool compact;
   final bool showCopyAction;
   final bool showCodeCopyAction;
+
+  /// Keep prose readable while allowing tables to use the parent's full width.
+  final double? proseWidth;
 
   @override
   State<CopyableMarkdown> createState() => _CopyableMarkdownState();
@@ -77,6 +81,7 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
     if (widget.text != oldWidget.text ||
         widget.compact != oldWidget.compact ||
         widget.showCodeCopyAction != oldWidget.showCodeCopyAction ||
+        widget.proseWidth != oldWidget.proseWidth ||
         widget.onCopy != oldWidget.onCopy ||
         widget.onOpenLink != oldWidget.onOpenLink) {
       _markdown = null;
@@ -89,6 +94,7 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
     if (_markdown == null) ScrollPerformance.count('markdownWidgetCreated');
     final chatFontSize = chatFontSizeOf(context);
     final headingDelta = chatFontSize - topBarAndChatFontSize;
+    final colors = Theme.of(context).colorScheme;
     final base = DefaultTextStyle.of(context).style
         .merge(chatTextStyleOf(context))
         .copyWith(color: Theme.of(context).colorScheme.onSurface, height: 1.38);
@@ -125,8 +131,9 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
                   ),
                   child: SelectionArea(
                     contextMenuBuilder: _selectionMenu,
-                    child: _markdown ??= MarkdownBody(
+                    child: _markdown ??= _WideMarkdownBody(
                       data: widget.text,
+                      proseWidth: widget.proseWidth,
                       // All paragraphs and links participate in the same
                       // selection region, including compact user messages.
                       selectable: false,
@@ -176,15 +183,46 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
                         tableHead: base.copyWith(fontWeight: FontWeight.w700),
                         tableBody: base,
                         code: base.copyWith(
-                          fontFamily: 'monospace',
+                          fontFamily: chatCodeFontFamily,
+                          fontFamilyFallback: chatCodeFontFallback,
                           fontSize: chatFontSize,
+                          backgroundColor: colors.onSurface.withValues(
+                            alpha: .06,
+                          ),
                         ),
                         codeblockPadding: EdgeInsets.zero,
                         codeblockDecoration: const BoxDecoration(),
-                        blockquoteDecoration: const BoxDecoration(),
-                        blockquotePadding: const EdgeInsets.only(left: 12),
-                        tableBorder: const TableBorder(),
-                        tableCellsPadding: const EdgeInsets.all(7),
+                        blockquoteDecoration: BoxDecoration(
+                          border: Border(
+                            left: BorderSide(
+                              color: colors.outlineVariant,
+                              width: 3,
+                            ),
+                          ),
+                        ),
+                        blockquotePadding: const EdgeInsets.fromLTRB(
+                          14,
+                          4,
+                          0,
+                          4,
+                        ),
+                        tableHeadAlign: TextAlign.left,
+                        tableColumnWidth: const IntrinsicColumnWidth(),
+                        tableScrollbarThumbVisibility: true,
+                        tablePadding: const EdgeInsets.only(bottom: 10),
+                        tableVerticalAlignment: TableCellVerticalAlignment.top,
+                        tableBorder: TableBorder.all(
+                          color: colors.outlineVariant,
+                          width: .75,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        tableHeadCellsDecoration: BoxDecoration(
+                          color: colors.onSurface.withValues(alpha: .045),
+                        ),
+                        tableCellsPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 9,
+                        ),
                       ),
                     ),
                   ),
@@ -237,6 +275,125 @@ class _CopyableMarkdownState extends State<CopyableMarkdown> {
   }
 }
 
+/// Render parsed top-level blocks separately so a table can use the available
+/// panel width without widening prose or breaking shared text selection.
+class _WideMarkdownBody extends MarkdownBody {
+  const _WideMarkdownBody({
+    required super.data,
+    required super.selectable,
+    required super.fitContent,
+    required super.onTapLink,
+    required super.builders,
+    required super.styleSheet,
+    required this.proseWidth,
+  });
+
+  final double? proseWidth;
+
+  @override
+  State<MarkdownWidget> createState() => _WideMarkdownBodyState();
+}
+
+class _WideMarkdownBodyState extends State<_WideMarkdownBody>
+    implements MarkdownBuilderDelegate {
+  final _recognizers = <GestureRecognizer>[];
+  List<({bool table, Widget child})> _blocks = [];
+  late MarkdownStyleSheet _style;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _parse();
+  }
+
+  @override
+  void didUpdateWidget(covariant _WideMarkdownBody oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.data != oldWidget.data ||
+        widget.styleSheet != oldWidget.styleSheet ||
+        widget.builders != oldWidget.builders) {
+      _parse();
+    }
+  }
+
+  void _parse() {
+    _disposeRecognizers();
+    _style = MarkdownStyleSheet.fromTheme(Theme.of(context))
+        .merge(widget.styleSheet);
+    final document = md.Document(
+      extensionSet: md.ExtensionSet.gitHubFlavored,
+      encodeHtml: false,
+    );
+    // Parse the complete document once so reference links keep their context.
+    final nodes = document.parseLines(
+      const LineSplitter().convert(widget.data),
+    );
+    final builder = MarkdownBuilder(
+      delegate: this,
+      selectable: false,
+      fitContent: true,
+      styleSheet: _style,
+      imageDirectory: null,
+      imageBuilder: null,
+      checkboxBuilder: null,
+      bulletBuilder: null,
+      builders: widget.builders,
+      paddingBuilders: const {},
+      listItemCrossAxisAlignment: MarkdownListItemCrossAxisAlignment.baseline,
+    );
+    _blocks = [
+      for (final node in nodes)
+        for (final child in builder.build([node]))
+          (table: node is md.Element && node.tag == 'table', child: child),
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      for (var index = 0; index < _blocks.length; index++) ...[
+        if (index > 0) SizedBox(height: _style.blockSpacing),
+        if (_blocks[index].table || widget.proseWidth == null)
+          _blocks[index].child
+        else
+          ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: widget.proseWidth!),
+            child: _blocks[index].child,
+          ),
+      ],
+    ],
+  );
+
+  @override
+  GestureRecognizer createLink(String text, String? href, String title) {
+    final recognizer = TapGestureRecognizer()
+      ..onTap = () => widget.onTapLink?.call(text, href, title);
+    _recognizers.add(recognizer);
+    return recognizer;
+  }
+
+  @override
+  TextSpan formatText(MarkdownStyleSheet styleSheet, String code) => TextSpan(
+    style: styleSheet.code,
+    text: code.replaceFirst(RegExp(r'\n$'), ''),
+  );
+
+  void _disposeRecognizers() {
+    for (final recognizer in _recognizers) {
+      recognizer.dispose();
+    }
+    _recognizers.clear();
+  }
+
+  @override
+  void dispose() {
+    _disposeRecognizers();
+    super.dispose();
+  }
+}
+
 final class _TooltipLinkBuilder extends MarkdownElementBuilder {
   _TooltipLinkBuilder({required this.onOpen, required this.onHover});
 
@@ -251,6 +408,24 @@ final class _TooltipLinkBuilder extends MarkdownElementBuilder {
     TextStyle? parentStyle,
   ) {
     final destination = element.attributes['href'] ?? '';
+    final colors = Theme.of(context).colorScheme;
+    final file = _fileLink(destination, element.textContent);
+    final label = Text.rich(
+      file == null || file == element.textContent
+          ? _linkText(element)
+          : TextSpan(text: file, mouseCursor: SystemMouseCursors.click),
+      style: (preferredStyle ?? parentStyle ?? chatTextStyleOf(context))
+          .copyWith(
+            color: file == null ? colors.primary : colors.onSurface,
+            fontFamily: file == null ? null : chatCodeFontFamily,
+            fontFamilyFallback: file == null ? null : chatCodeFontFallback,
+            decoration: file == null
+                ? TextDecoration.underline
+                : TextDecoration.none,
+            decorationColor: colors.primary.withValues(alpha: .65),
+            decorationThickness: .8,
+          ),
+    );
     return Tooltip(
       key: ValueKey('markdown-link-$destination'),
       message: destination,
@@ -264,21 +439,94 @@ final class _TooltipLinkBuilder extends MarkdownElementBuilder {
           onTap: destination.isEmpty
               ? null
               : () => unawaited(onOpen(destination)),
-          child: Text.rich(
-            TextSpan(
-              text: element.textContent,
-              mouseCursor: SystemMouseCursors.click,
-            ),
-            style: (preferredStyle ?? parentStyle ?? chatTextStyleOf(context))
-                .copyWith(
-                  color: Theme.of(context).colorScheme.primary,
-                  decoration: TextDecoration.underline,
+          child: file == null
+              ? label
+              : DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: colors.onSurface.withValues(alpha: .06),
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 5,
+                      vertical: 1,
+                    ),
+                    child: label,
+                  ),
                 ),
-          ),
         ),
       ),
     );
   }
+}
+
+// Retain inline formatting inside link labels, and keep selectable glyphs on
+// the same hand cursor as the rest of the link.
+TextSpan _linkText(md.Node node) {
+  if (node is md.Text) {
+    return TextSpan(text: node.text, mouseCursor: SystemMouseCursors.click);
+  }
+  final element = node as md.Element;
+  if (element.tag == 'br') return const TextSpan(text: '\n');
+  return TextSpan(
+    mouseCursor: SystemMouseCursors.click,
+    style: switch (element.tag) {
+      'strong' => const TextStyle(fontWeight: FontWeight.w700),
+      'em' => const TextStyle(fontStyle: FontStyle.italic),
+      'code' => const TextStyle(
+        fontFamily: chatCodeFontFamily,
+        fontFamilyFallback: chatCodeFontFallback,
+      ),
+      'del' => const TextStyle(decoration: TextDecoration.lineThrough),
+      _ => null,
+    },
+    children: element.children?.map(_linkText).toList(),
+  );
+}
+
+String? _fileLink(String destination, String label) {
+  final uri = Uri.tryParse(destination);
+  final windowsPath = RegExp(r'^[a-zA-Z]:[\\/]').hasMatch(destination);
+  final fileWithLine = RegExp(r'^[^:/\\]*\.[a-zA-Z0-9]+:\d+(?::\d+)?$')
+      .hasMatch(destination);
+  if (uri == null ||
+      (!windowsPath &&
+          !fileWithLine &&
+          uri.hasScheme &&
+          uri.scheme != 'file') ||
+      destination.startsWith('#') ||
+      destination.startsWith('//')) {
+    return null;
+  }
+  var path = windowsPath || fileWithLine ? destination : uri.path;
+  try {
+    path = Uri.decodeComponent(path);
+  } on FormatException {
+    // A literal percent sign in a filename is still useful as a display label.
+  }
+  if (!windowsPath &&
+      uri.scheme != 'file' &&
+      !path.contains('/') &&
+      !path.contains(r'\') &&
+      !RegExp(r'\.[a-zA-Z0-9]+(?::\d+(?::\d+)?)?$').hasMatch(path)) {
+    return null;
+  }
+  final line = RegExp(r':(\d+)(?::\d+)?$').firstMatch(path);
+  if (line != null) path = path.substring(0, line.start);
+  final name = path.replaceAll(r'\', '/').split('/').last;
+  if (name.isEmpty) return label;
+  final anchor = RegExp(r'^L(\d+)(?:C\d+)?(?:-L?(\d+)(?:C\d+)?)?$')
+      .firstMatch(uri.fragment);
+  final location = anchor == null
+      ? line?.group(1)
+      : '${anchor.group(1)}${anchor.group(2) == null ? '' : '-${anchor.group(2)}'}';
+  // Keep authored descriptive labels; abbreviate paths and file references.
+  final pathLabel =
+      label == destination ||
+      label == uri.path ||
+      label.replaceAll(r'\', '/').split('/').last == name ||
+      label.startsWith('$name:');
+  return pathLabel ? '$name${location == null ? '' : ':$location'}' : label;
 }
 
 final class _CodeBlockBuilder extends MarkdownElementBuilder {
@@ -290,14 +538,26 @@ final class _CodeBlockBuilder extends MarkdownElementBuilder {
   bool isBlockElement() => true;
 
   @override
-  Widget? visitElementAfter(md.Element element, TextStyle? preferredStyle) =>
-      _CopyableCodeBlock(code: element.textContent, onCopy: onCopy);
+  Widget? visitElementAfter(md.Element element, TextStyle? preferredStyle) {
+    final code = element.children?.whereType<md.Element>().firstOrNull;
+    final language = code?.attributes['class']?.replaceFirst('language-', '');
+    return _CopyableCodeBlock(
+      code: element.textContent,
+      language: language,
+      onCopy: onCopy,
+    );
+  }
 }
 
 class _CopyableCodeBlock extends StatefulWidget {
-  const _CopyableCodeBlock({required this.code, required this.onCopy});
+  const _CopyableCodeBlock({
+    required this.code,
+    required this.language,
+    required this.onCopy,
+  });
 
   final String code;
+  final String? language;
   final Future<void> Function(String value)? onCopy;
 
   @override
@@ -309,56 +569,77 @@ class _CopyableCodeBlockState extends State<_CopyableCodeBlock> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Container(
       key: ValueKey('code-block-${widget.code.hashCode}'),
       margin: const EdgeInsets.symmetric(vertical: 5),
-      padding: const EdgeInsets.fromLTRB(11, 9, 5, 9),
-      decoration: BoxDecoration(borderRadius: BorderRadius.circular(10)),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      decoration: BoxDecoration(
+        color: colors.onSurface.withValues(alpha: .035),
+        border: Border.all(color: colors.outlineVariant, width: .75),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
+          if (widget.language?.isNotEmpty == true || widget.onCopy != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 5, 0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      widget.language ?? 'code',
+                      style: chatTextStyleOf(context).copyWith(
+                        color: colors.onSurfaceVariant,
+                        fontSize: chatFontSizeOf(context) - 1,
+                      ),
+                    ),
+                  ),
+                  if (widget.onCopy != null) _copyButton(),
+                ],
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.all(12),
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Text(
-                widget.code,
+                widget.code.replaceFirst(RegExp(r'\n$'), ''),
                 style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurface,
-                  fontFamily: 'monospace',
+                  color: colors.onSurface,
+                  fontFamily: chatCodeFontFamily,
+                  fontFamilyFallback: chatCodeFontFallback,
                   fontSize: chatFontSizeOf(context),
-                  height: 1.35,
+                  height: 1.45,
                 ),
               ),
             ),
           ),
-          if (widget.onCopy != null)
-            IconButton(
-              key: ValueKey('copy-code-${widget.code.hashCode}'),
-              visualDensity: VisualDensity.compact,
-              constraints: const BoxConstraints.tightFor(width: 30, height: 30),
-              style: IconButton.styleFrom(
-                fixedSize: const Size(30, 30),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              padding: EdgeInsets.zero,
-              splashRadius: 16,
-              tooltip: _copied ? 'Copied code' : 'Copy code',
-              onPressed: () async {
-                await widget.onCopy!(widget.code);
-                if (!mounted) return;
-                setState(() => _copied = true);
-                await Future<void>.delayed(const Duration(seconds: 1));
-                if (mounted) setState(() => _copied = false);
-              },
-              icon: Icon(
-                _copied ? Icons.check_rounded : Icons.copy_rounded,
-                size: 16,
-              ),
-            ),
         ],
       ),
     );
   }
+
+  Widget _copyButton() => IconButton(
+    key: ValueKey('copy-code-${widget.code.hashCode}'),
+    visualDensity: VisualDensity.compact,
+    constraints: const BoxConstraints.tightFor(width: 30, height: 30),
+    style: IconButton.styleFrom(
+      fixedSize: const Size(30, 30),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    ),
+    padding: EdgeInsets.zero,
+    splashRadius: 16,
+    tooltip: _copied ? 'Copied code' : 'Copy code',
+    onPressed: () async {
+      await widget.onCopy!(widget.code);
+      if (!mounted) return;
+      setState(() => _copied = true);
+      await Future<void>.delayed(const Duration(seconds: 1));
+      if (mounted) setState(() => _copied = false);
+    },
+    icon: Icon(_copied ? Icons.check_rounded : Icons.copy_rounded, size: 16),
+  );
 }
 
 class SafeHtmlView extends StatelessWidget {

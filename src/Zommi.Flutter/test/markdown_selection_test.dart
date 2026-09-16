@@ -9,14 +9,98 @@ import 'package:zommi_flutter/widgets/content_views.dart';
 import 'package:zommi_flutter/theme/zommi_typography.dart';
 
 void main() {
+  testWidgets(
+    'wide table cells stay on one line and scroll to linked content',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1100, 650));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final description = List.filled(18, 'unwrapped text').join(' ');
+      final opened = <String>[];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 1000,
+              child: CopyableMarkdown(
+                proseWidth: 400,
+                showCopyAction: false,
+                text:
+                    'A paragraph.\n\n'
+                    '| Description | Reference |\n| --- | ---: |\n'
+                    '| $description | [Open source][source] |\n\n'
+                    '[source]: https://example.com/table',
+                onCopy: (_) async {},
+                onOpenLink: (value) async => opened.add(value),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final paragraph = tester.renderObject<RenderParagraph>(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is RichText && widget.text.toPlainText() == description,
+        ),
+      );
+      expect(
+        paragraph.getBoxesForSelection(
+          TextSelection(baseOffset: 0, extentOffset: description.length),
+        ),
+        hasLength(1),
+      );
+      final scroll = find.byWidgetPredicate(
+        (widget) =>
+            widget is SingleChildScrollView &&
+            widget.scrollDirection == Axis.horizontal,
+      );
+      final bounds = tester.getRect(scroll);
+      expect(bounds.width, 1000);
+      // Start beyond the prose column to cover hit testing in the extra space.
+      await tester.dragFrom(
+        bounds.topRight + const Offset(-20, 30),
+        const Offset(-6000, 0),
+      );
+      await tester.pumpAndSettle();
+      final link = find.byKey(
+        const ValueKey('markdown-link-https://example.com/table'),
+      );
+      expect(bounds.contains(tester.getCenter(link)), isTrue);
+      await tester.tap(link);
+      await tester.pump();
+      expect(opened, ['https://example.com/table']);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   const destination =
       'https://example.com/source?q=one%20two&mode=full#section';
   const plainDestination = 'https://example.com/source?q=one&mode=full#section';
   for (final compact in [false, true]) {
-    for (final (linkText, target) in [
-      ('[Source]($destination)', destination),
-      ('<$destination>', destination),
-      (plainDestination, plainDestination),
+    for (final (linkText, target, visibleLabel) in [
+      ('[Source]($destination)', destination, 'Source'),
+      ('<$destination>', destination, destination),
+      (plainDestination, plainDestination, plainDestination),
+      (
+        '[**Source** with `code`]($destination)',
+        destination,
+        'Source with code',
+      ),
+      (
+        '[src/app.dart](/workspace/src/app.dart#L42)',
+        '/workspace/src/app.dart#L42',
+        'app.dart:42',
+      ),
+      (
+        '[My File.md](file:///workspace/My%20File.md#L7-L9)',
+        'file:///workspace/My%20File.md#L7-L9',
+        'My File.md:7-9',
+      ),
+      (
+        '[`main.dart`](C:/repo/main.dart:12)',
+        'C:/repo/main.dart:12',
+        'main.dart:12',
+      ),
     ]) {
       testWidgets(
         'right-click copies the link destination without opening it: $compact $linkText',
@@ -101,10 +185,7 @@ void main() {
           await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
           await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
           await tester.pump();
-          expect(
-            clipboard,
-            'Plain ${linkText.startsWith('[Source]') ? 'Source' : target}',
-          );
+          expect(clipboard, 'Plain $visibleLabel');
           // Copy now applies to the selected message, using the same menu.
           await tester.tap(
             link,

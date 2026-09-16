@@ -114,6 +114,8 @@ final class ZommiController extends ChangeNotifier {
   bool initialized = false;
   bool starting = true;
   bool runtimeBusy = false;
+  bool runtimeDiscoveryBusy = false;
+  String? runtimeDiscoveryError;
   String? switchingRuntimeId;
   bool runtimeOverrideBusy = false;
   bool sessionBusy = false;
@@ -507,32 +509,30 @@ final class ZommiController extends ChangeNotifier {
   }
 
   Future<void> refreshRuntimes() async {
-    if (runtimeBusy) return;
-    runtimeBusy = true;
-    _setStatus('Finding agent runtimes…');
+    if (_closed ||
+        starting ||
+        runtimeBusy ||
+        runtimeDiscoveryBusy ||
+        runtimeOverrideBusy) {
+      return;
+    }
+    runtimeDiscoveryBusy = true;
+    runtimeDiscoveryError = null;
+    _notify();
     try {
       final discovery = await core.discoverRuntimeTargets(
         lastSelectedTargetId: activeRuntime?.id,
         force: true,
       );
+      if (_closed) return;
       _replaceDiscovery(discovery);
-      final selected = _visibleSelectedTargetId(discovery.selectedTargetId);
-      if (!runtimeSetupPending && activeRuntime == null && selected != null) {
-        await _connectRuntime(selected);
-      } else if (runtimeTargets.isEmpty) {
-        _setStatus(
-          'No supported agent found. Capture remains available.',
-          warning: true,
-        );
-      } else {
-        _setStatus('${runtimeTargets.length} agent targets found');
+    } on Object {
+      if (!_closed) {
+        runtimeDiscoveryError = 'Could not refresh agents. Try again.';
       }
-    } on Object catch (error) {
-      _setStatus('Agent discovery failed · $error', warning: true);
     } finally {
-      runtimeBusy = false;
+      runtimeDiscoveryBusy = false;
       _notify();
-      unawaited(refreshSessionCatalog(force: true));
     }
   }
 

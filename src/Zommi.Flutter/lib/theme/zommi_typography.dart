@@ -13,6 +13,17 @@ const List<String> codexUiFontFallback = [
   'Arial',
 ];
 
+// Flutter desktop does not resolve CSS's generic `monospace` family. Avoid
+// inheriting the UI fallback stack for code and file-reference labels.
+const String chatCodeFontFamily = 'Consolas';
+const List<String> chatCodeFontFallback = [
+  'Cascadia Code',
+  'SFMono-Regular',
+  'Menlo',
+  'DejaVu Sans Mono',
+  'Noto Sans Mono',
+];
+
 const double topBarAndChatFontSize = 12;
 const double userMessageFontSize = topBarAndChatFontSize;
 const double assistantMessageFontSize = topBarAndChatFontSize;

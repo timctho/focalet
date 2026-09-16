@@ -95,7 +95,9 @@ void main() {
     }
     expect(
       tester
-          .widgetList<MarkdownBody>(find.byType(MarkdownBody))
+          .widgetList<MarkdownBody>(
+            find.byWidgetPredicate((widget) => widget is MarkdownBody),
+          )
           .any((body) => body.data.contains('Live step 59.')),
       isTrue,
     );
@@ -269,14 +271,23 @@ void main() {
       ),
     );
     await _pumpTurn(tester, controller, turn);
-    expect(find.byType(MarkdownBody), findsOneWidget);
+    expect(
+      find.byWidgetPredicate((widget) => widget is MarkdownBody),
+      findsOneWidget,
+    );
     final clock = Stopwatch()..start();
     await tester.tap(
       find.byKey(const ValueKey('thinking-toggle-long-turn-step-0')),
     );
     await tester.pump();
     expect(clock.elapsed, lessThan(const Duration(seconds: 2)));
-    expect(find.byType(MarkdownBody).evaluate().length, lessThan(25));
+    expect(
+      find
+          .byWidgetPredicate((widget) => widget is MarkdownBody)
+          .evaluate()
+          .length,
+      lessThan(25),
+    );
     final activityList = find.byKey(const ValueKey('thinking-activity-list'));
     expect(activityList, findsOneWidget);
     expect(find.byKey(const ValueKey('activity-step-1999')), findsOneWidget);
@@ -286,7 +297,13 @@ void main() {
       await tester.pump(const Duration(milliseconds: 16));
     }
     expect(find.text('Live update 39'), findsOneWidget);
-    expect(find.byType(MarkdownBody).evaluate().length, lessThan(25));
+    expect(
+      find
+          .byWidgetPredicate((widget) => widget is MarkdownBody)
+          .evaluate()
+          .length,
+      lessThan(25),
+    );
     await tester.tap(
       find.byKey(const ValueKey('thinking-toggle-long-turn-step-0')),
     );
@@ -306,20 +323,35 @@ void main() {
       ),
     );
     await tester.pumpWidget(view('**Stable** reasoning'));
-    final original = tester.widget<MarkdownBody>(find.byType(MarkdownBody));
-    final originalElement = tester.element(find.byType(MarkdownBody));
+    final original = tester.widget<MarkdownBody>(
+      find.byWidgetPredicate((widget) => widget is MarkdownBody),
+    );
+    final originalElement = tester.element(
+      find.byWidgetPredicate((widget) => widget is MarkdownBody),
+    );
     final selection = tester.element(find.byType(SelectionArea));
     await tester.pumpWidget(view('**Stable** reasoning'));
     expect(
-      tester.widget<MarkdownBody>(find.byType(MarkdownBody)),
+      tester.widget<MarkdownBody>(
+        find.byWidgetPredicate((widget) => widget is MarkdownBody),
+      ),
       same(original),
     );
     await tester.pumpWidget(view('**New** reasoning'));
     expect(
-      tester.widget<MarkdownBody>(find.byType(MarkdownBody)).data,
+      tester
+          .widget<MarkdownBody>(
+            find.byWidgetPredicate((widget) => widget is MarkdownBody),
+          )
+          .data,
       '**New** reasoning',
     );
-    expect(tester.element(find.byType(MarkdownBody)), same(originalElement));
+    expect(
+      tester.element(
+        find.byWidgetPredicate((widget) => widget is MarkdownBody),
+      ),
+      same(originalElement),
+    );
     expect(tester.element(find.byType(SelectionArea)), same(selection));
   });
 

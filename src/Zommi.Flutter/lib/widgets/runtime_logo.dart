@@ -15,9 +15,9 @@ class RuntimeLogo extends StatelessWidget {
             width: size,
             height: size,
             excludeFromSemantics: true,
-            // The monochrome Codex mark needs a light foreground on dark rows.
+            // Monochrome marks need a light foreground on dark rows.
             color:
-                runtimeId == 'codex' &&
+                (runtimeId == 'codex' || runtimeId == 'pi') &&
                     Theme.of(context).brightness == Brightness.dark
                 ? Theme.of(context).colorScheme.onSurface
                 : null,

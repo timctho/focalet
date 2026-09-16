@@ -66,6 +66,7 @@ class _TranscriptPaneState extends State<TranscriptPane> {
         ({
           int revision,
           double width,
+          double availableWidth,
           String runtimeName,
           ConversationTurnView view,
         })
@@ -200,7 +201,11 @@ class _TranscriptPaneState extends State<TranscriptPane> {
   void _attachmentExit(ContextAttachment attachment) =>
       widget.onAttachmentExit(attachment);
 
-  Widget _turnView(ConversationTurn turn, double viewportWidth) {
+  Widget _turnView(
+    ConversationTurn turn,
+    double viewportWidth,
+    double availableWidth,
+  ) {
     // Only visible rows are fingerprinted. Keep completed rows' widget trees
     // unchanged when another row streams, while preserving folds and updates.
     final isResponding =
@@ -232,6 +237,7 @@ class _TranscriptPaneState extends State<TranscriptPane> {
         identical(cached.view.controller, widget.controller) &&
         cached.revision == revision &&
         cached.width == viewportWidth &&
+        cached.availableWidth == availableWidth &&
         cached.runtimeName == runtimeName) {
       return _retain(turn, cached.view);
     }
@@ -239,6 +245,7 @@ class _TranscriptPaneState extends State<TranscriptPane> {
       key: ValueKey('turn-${turn.id}'),
       turn: turn,
       viewportWidth: viewportWidth,
+      availableWidth: availableWidth,
       runtimeName: runtimeName,
       controller: widget.controller,
       isResponding: isResponding,
@@ -248,6 +255,7 @@ class _TranscriptPaneState extends State<TranscriptPane> {
     _turnViews[turn.id] = (
       revision: revision,
       width: viewportWidth,
+      availableWidth: availableWidth,
       runtimeName: runtimeName,
       view: view,
     );
@@ -343,13 +351,14 @@ class _TranscriptPaneState extends State<TranscriptPane> {
                   conversationContentMaxWidth,
                   math.max(0.0, constraints.maxWidth - 48),
                 );
-                return Align(
-                  alignment: Alignment.topCenter,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(
-                      maxWidth: conversationContentMaxWidth,
-                    ),
-                    child: _turnView(turn, contentWidth),
+                final availableWidth = math.max(0.0, constraints.maxWidth - 48);
+                final leftInset = (availableWidth - contentWidth) / 2;
+                return Padding(
+                  padding: EdgeInsets.only(left: leftInset),
+                  child: _turnView(
+                    turn,
+                    contentWidth,
+                    availableWidth - leftInset,
                   ),
                 );
               },
@@ -403,11 +412,13 @@ class ConversationTurnView extends StatelessWidget {
     required this.onAttachmentEnter,
     required this.onAttachmentExit,
     this.isResponding = false,
+    this.availableWidth,
     super.key,
   });
 
   final ConversationTurn turn;
   final double viewportWidth;
+  final double? availableWidth;
   final String runtimeName;
   final ZommiController controller;
   final AttachmentHoverCallback onAttachmentEnter;
@@ -445,6 +456,9 @@ class ConversationTurnView extends StatelessWidget {
         segments.add([block]);
       }
     }
+    final lastActivity = segments
+        .where((segment) => segment.first.kind.isFoldedActivity)
+        .lastOrNull;
     // Item completion also occurs for progress updates. Wait for the turn to
     // finish before exposing the final assistant answer's single copy action.
     final finalResponse = blocks
@@ -463,71 +477,77 @@ class ConversationTurnView extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Align(
-              alignment: Alignment.centerRight,
-              child: _EditableUserMessage(
-                turn: turn,
-                controller: controller,
-                width: responsiveUserMessageBoxWidth(viewportWidth),
-                onAttachmentEnter: onAttachmentEnter,
-                onAttachmentExit: onAttachmentExit,
-                child: Container(
-                  key: ValueKey('user-message-${turn.id}'),
-                  constraints: BoxConstraints(
-                    maxWidth: responsiveUserMessageBoxWidth(viewportWidth),
-                  ),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 13,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.onSurface
-                        .withValues(alpha: .06),
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (turn.contextTokens.isNotEmpty &&
-                          turn.attachments.isEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 5),
-                          child: Text(
-                            turn.contextTokens.join(' '),
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.primary,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
+              alignment: Alignment.centerLeft,
+              child: SizedBox(
+                width: viewportWidth,
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: _EditableUserMessage(
+                    turn: turn,
+                    controller: controller,
+                    width: responsiveUserMessageBoxWidth(viewportWidth),
+                    onAttachmentEnter: onAttachmentEnter,
+                    onAttachmentExit: onAttachmentExit,
+                    child: Container(
+                      key: ValueKey('user-message-${turn.id}'),
+                      constraints: BoxConstraints(
+                        maxWidth: responsiveUserMessageBoxWidth(viewportWidth),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 13,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.onSurface
+                            .withValues(alpha: .06),
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (turn.contextTokens.isNotEmpty &&
+                              turn.attachments.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 5),
+                              child: Text(
+                                turn.contextTokens.join(' '),
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.primary,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
-                      if (turn.attachments.isNotEmpty)
-                        InlineAttachmentMessage(
-                          key: ValueKey('inline-user-message-${turn.id}'),
-                          text:
-                              turn.inlineUserText.contains(
-                                inlineAttachmentMarker,
-                              )
-                              ? turn.inlineUserText
-                              : '${turn.userText}\n${List.filled(turn.attachments.length, inlineAttachmentMarker).join(' ')}',
-                          attachments: turn.attachments,
-                          onAttachmentEnter: onAttachmentEnter,
-                          onAttachmentExit: onAttachmentExit,
-                        )
-                      else
-                        DefaultTextStyle.merge(
-                          // Shrink wrapped paragraphs to their longest visible
-                          // line so both sides keep the same bubble inset.
-                          textWidthBasis: TextWidthBasis.longestLine,
-                          child: CopyableMarkdown(
-                            text: turn.userText,
-                            compact: true,
-                            showCopyAction: false,
-                            onCopy: controller.copyText,
-                            onOpenLink: controller.openExternalLink,
-                          ),
-                        ),
-                    ],
+                          if (turn.attachments.isNotEmpty)
+                            InlineAttachmentMessage(
+                              key: ValueKey('inline-user-message-${turn.id}'),
+                              text:
+                                  turn.inlineUserText.contains(
+                                    inlineAttachmentMarker,
+                                  )
+                                  ? turn.inlineUserText
+                                  : '${turn.userText}\n${List.filled(turn.attachments.length, inlineAttachmentMarker).join(' ')}',
+                              attachments: turn.attachments,
+                              onAttachmentEnter: onAttachmentEnter,
+                              onAttachmentExit: onAttachmentExit,
+                            )
+                          else
+                            DefaultTextStyle.merge(
+                              // Shrink wrapped paragraphs to their longest visible
+                              // line so both sides keep the same bubble inset.
+                              textWidthBasis: TextWidthBasis.longestLine,
+                              child: CopyableMarkdown(
+                                text: turn.userText,
+                                compact: true,
+                                showCopyAction: false,
+                                onCopy: controller.copyText,
+                                onOpenLink: controller.openExternalLink,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -544,6 +564,7 @@ class ConversationTurnView extends StatelessWidget {
                           width: responsiveAssistantMessageBoxWidth(
                             viewportWidth,
                           ),
+                          tableWidth: availableWidth,
                           runtimeName: runtimeName,
                           controller: controller,
                           showActions:
@@ -568,6 +589,8 @@ class ConversationTurnView extends StatelessWidget {
                     activities: segment,
                     width: responsiveAssistantMessageBoxWidth(viewportWidth),
                     controller: controller,
+                    isResponding:
+                        isResponding && identical(segment, lastActivity),
                     forceCompleted:
                         !isResponding || !identical(segment, segments.last),
                   ),
@@ -1025,6 +1048,7 @@ class ThinkingActivityGroup extends StatelessWidget {
     required this.activities,
     required this.width,
     required this.controller,
+    required this.isResponding,
     this.forceCompleted = false,
     super.key,
   });
@@ -1033,6 +1057,7 @@ class ThinkingActivityGroup extends StatelessWidget {
   final List<TranscriptBlock> activities;
   final double width;
   final ZommiController controller;
+  final bool isResponding;
   final bool forceCompleted;
 
   String get groupId => activities.first.id;
@@ -1042,7 +1067,7 @@ class ThinkingActivityGroup extends StatelessWidget {
   Widget build(BuildContext context) {
     final expanded = turn.isActivityGroupExpanded(groupId);
     // A new reasoning phase closes older tool work without creating another
-    // section. Only the current phase determines whether this group is busy.
+    // section. Individual items retain their own completion state.
     var activePhaseStart = 0;
     var sawTool = false;
     for (var index = 0; index < activities.length; index++) {
@@ -1053,11 +1078,9 @@ class ThinkingActivityGroup extends StatelessWidget {
         sawTool = false;
       }
     }
-    final completed =
-        forceCompleted ||
-        activities
-            .skip(activePhaseStart)
-            .every((activity) => activity.completed);
+    // Keep the last section active through gaps and answer streaming until the
+    // response ends, even when every thinking/tool item has already completed.
+    final completed = !isResponding;
     final toolCount = activities
         .where((activity) => activity.kind == TranscriptKind.tool)
         .length;
@@ -1460,11 +1483,13 @@ class AssistantBlockView extends StatelessWidget {
     required this.runtimeName,
     required this.controller,
     this.showActions = false,
+    this.tableWidth,
     super.key,
   });
 
   final TranscriptBlock block;
   final double width;
+  final double? tableWidth;
   final String runtimeName;
   final ZommiController controller;
   final bool showActions;
@@ -1477,7 +1502,7 @@ class AssistantBlockView extends StatelessWidget {
       child: Align(
         alignment: Alignment.centerLeft,
         child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: width),
+          constraints: BoxConstraints(maxWidth: tableWidth ?? width),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1495,13 +1520,20 @@ class AssistantBlockView extends StatelessWidget {
                   children: [
                     CopyableMarkdown(
                       text: block.text,
+                      proseWidth: math.max(0, width - 26),
                       showCopyAction: false,
                       showCodeCopyAction: false,
                       onCopy: controller.copyText,
                       onOpenLink: controller.openExternalLink,
                     ),
                     for (final artifact in block.artifacts)
-                      ArtifactCard(artifact: artifact, controller: controller),
+                      ConstrainedBox(
+                        constraints: BoxConstraints(maxWidth: width - 26),
+                        child: ArtifactCard(
+                          artifact: artifact,
+                          controller: controller,
+                        ),
+                      ),
                   ],
                 ),
               ),

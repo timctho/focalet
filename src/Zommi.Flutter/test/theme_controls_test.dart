@@ -88,10 +88,15 @@ void main() {
       );
       await tester.pumpAndSettle();
       ThemeData theme() => Theme.of(tester.element(find.byType(ZommiShell)));
+      Color sidebarColor() => tester
+          .widget<Material>(find.byKey(const ValueKey('session-sidebar')))
+          .color!;
+      final oceanLightSidebar = sidebarColor();
       expect(theme().brightness, Brightness.light);
       tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
       await tester.pumpAndSettle();
       expect(theme().brightness, Brightness.dark);
+      final oceanDarkSidebar = sidebarColor();
       final editable = tester.widget<EditableText>(
         find.byType(EditableText).first,
       );
@@ -135,6 +140,8 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('theme-color-cream')));
       await tester.pumpAndSettle();
       expect(store.saved.themeColor, ZommiThemeColor.cream);
+      final creamSidebar = sidebarColor();
+      expect(creamSidebar, isNot(oceanLightSidebar));
       await tester.tap(find.byKey(const ValueKey('theme-color-custom')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('theme-color-picker')), findsOneWidget);
@@ -145,15 +152,27 @@ void main() {
       await tester.pumpAndSettle();
       expect(store.saved.customThemeColor, const Color(0xff1ea37b));
       expect(store.saved.themeColor, ZommiThemeColor.custom);
+      final customLightSidebar = sidebarColor();
+      expect(customLightSidebar, isNot(creamSidebar));
+      expect(
+        customLightSidebar.computeLuminance(),
+        lessThan(theme().colorScheme.surface.computeLuminance()),
+      );
       await tester.tap(find.byKey(const ValueKey('theme-color-custom')));
       await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const ValueKey('color-hex')), 'FF0000');
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
       expect(store.saved.customThemeColor, const Color(0xff1ea37b));
+      expect(sidebarColor(), customLightSidebar);
       await tester.tap(find.text('System'));
       await tester.pumpAndSettle();
       expect(theme().brightness, Brightness.dark);
+      expect(sidebarColor(), isNot(oceanDarkSidebar));
+      expect(
+        sidebarColor().computeLuminance(),
+        lessThan(theme().colorScheme.surface.computeLuminance()),
+      );
       tester.platformDispatcher.platformBrightnessTestValue = Brightness.light;
       await tester.pumpAndSettle();
       expect(theme().brightness, Brightness.light);

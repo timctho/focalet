@@ -1,6 +1,3 @@
-import 'dart:io';
-import 'dart:ui' as ui;
-
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -9,7 +6,6 @@ import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/state/history_mapper.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
-import 'package:zommi_flutter/theme/app_preferences.dart';
 import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
 import 'package:zommi_flutter/widgets/transcript_view.dart';
 import 'package:zommi_flutter/zommi_app.dart';
@@ -28,7 +24,8 @@ Map<String, Object?> history() => {
             'content': [
               {
                 'type': 'text',
-                'text': 'Polish the message controls and give the app a softer glass background.',
+                'text':
+                    'Polish the message controls and improve panel contrast.',
               },
             ],
           },
@@ -36,7 +33,7 @@ Map<String, Object?> history() => {
             'id': 'answer',
             'type': 'agentMessage',
             'createdAt': DateTime(2026, 9, 14, 14, 33).toIso8601String(),
-            'text': 'The message controls now sit below each message.\n\nYou can **copy**, edit and resend your messages, with the time beside the controls.\n\nThe new glass surfaces use soft light, subtle borders and your selected theme color.',
+            'text': 'The message controls now sit below each message.\n\nYou can **copy**, edit and resend your messages, with the time beside the controls.\n\nThe panels use clear contrast, subtle borders and your selected theme color.',
             'status': 'completed',
           },
         ],
@@ -414,110 +411,4 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
   });
-
-  for (final mode in [ThemeMode.dark, ThemeMode.light]) {
-    testWidgets('render glass and message controls in ${mode.name}', (
-      tester,
-    ) async {
-      final directory = Platform.environment['ZOMMI_MESSAGE_PREVIEW_DIR'];
-      if (directory == null) return;
-      await tester.binding.setSurfaceSize(const Size(1000, 760));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      await tester.runAsync(() async {
-        await (FontLoader(codexUiFontFamily)..addFont(
-              File('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf')
-                  .readAsBytes()
-                  .then(ByteData.sublistView),
-            ))
-            .load();
-        await (FontLoader('monospace')..addFont(
-              File('/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf')
-                  .readAsBytes()
-                  .then(ByteData.sublistView),
-            ))
-            .load();
-        final icons = Platform.environment['ZOMMI_MESSAGE_PREVIEW_ICONS'];
-        if (icons != null) {
-          await (FontLoader('MaterialIcons')
-                ..addFont(File(icons).readAsBytes().then(ByteData.sublistView)))
-              .load();
-        }
-      });
-      final previewHistory = history();
-      final previewTurn =
-          ((previewHistory['thread'] as Map)['turns'] as List).single as Map;
-      previewTurn['items'] = List<Map<String, Object?>>.from(
-        previewTurn['items'] as List,
-      );
-      (previewTurn['items'] as List).insertAll(1, <Map<String, Object?>>[
-        {
-          'id': 'preview-reason',
-          'type': 'reasoning',
-          'summary': [
-            {
-              'type': 'summary_text',
-              'text':
-                  'Checking the response, tool output and session contrast.',
-            },
-          ],
-        },
-        {
-          'id': 'preview-tool',
-          'type': 'commandExecution',
-          'command': 'git status',
-          'aggregatedOutput': 'Working tree clean',
-          'status': 'completed',
-        },
-      ]);
-      final previewAnswer = (previewTurn['items'] as List).last as Map;
-      previewAnswer['text'] = 'The response and activity share the conversation background.\n\n```text\nA code example without a separate card fill.\n```\n\n| Theme | Sessions |\n| --- | --- |\n| Light | Clear separation |\n| Dark | Subtle selection |';
-      final core = RichFakeCore()
-        ..historyBySession['runtime-codex\u0000session-1'] = previewHistory;
-      final key = GlobalKey();
-      await tester.pumpWidget(
-        RepaintBoundary(
-          key: key,
-          child: ZommiApp(
-            core: core,
-            desktop: FakeDesktopBridge(),
-            initialPreferences: AppPreferences(
-              themeMode: mode,
-              themeColor: ZommiThemeColor.fromId(
-                Platform.environment['ZOMMI_MESSAGE_PREVIEW_THEME'],
-              ),
-            ),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      Future<void> capture(String name) => tester.runAsync(() async {
-        final boundary =
-            key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
-        final snapshot = await boundary.toImage(pixelRatio: 1.5);
-        final data = await snapshot.toByteData(format: ui.ImageByteFormat.png);
-        await Directory(directory).create(recursive: true);
-        await File('$directory/$name.png')
-            .writeAsBytes(data!.buffer.asUint8List());
-        snapshot.dispose();
-      });
-      final group = tester.widget<ThinkingActivityGroup>(
-        find.byType(ThinkingActivityGroup),
-      );
-      await tester.runAsync(
-        () => precacheImage(
-          const AssetImage('assets/runtime_icons/codex.png'),
-          tester.element(find.byType(ZommiShell)),
-        ),
-      );
-      await tester.tap(find.byKey(ValueKey('thinking-toggle-${group.id}')));
-      await tester.pumpAndSettle();
-      await capture('glass-${mode.name}');
-      await tester.tap(find.byTooltip('Edit and resend'));
-      await tester.pumpAndSettle();
-      await capture('edit-${mode.name}');
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox());
-      await tester.pump();
-    });
-  }
 }

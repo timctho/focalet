@@ -101,29 +101,36 @@ class _ZommiAppState extends State<ZommiApp> {
             ? DynamicSchemeVariant.fidelity
             : DynamicSchemeVariant.tonalSpot,
       );
+      // Keep the sidebar darker than the main pane while following the theme hue.
+      final sidebarSeed = HSLColor.fromColor(_preferences.seedColor);
+      final sidebarColor = sidebarSeed
+          .withSaturation(sidebarSeed.saturation * .55)
+          .withLightness(brightness == Brightness.dark ? .105 : .94)
+          .toColor();
+      // Codex-style neutral surfaces with clearer dark panel separation.
       if (brightness == Brightness.dark) {
         scheme = scheme.copyWith(
-          surface: const Color(0xff242426),
-          surfaceDim: const Color(0xff202022),
-          surfaceBright: const Color(0xff454548),
-          surfaceContainerLowest: const Color(0xff1c1c1e),
-          surfaceContainerLow: const Color(0xff28282b),
-          surfaceContainer: const Color(0xff2e2e31),
-          surfaceContainerHigh: const Color(0xff363639),
-          surfaceContainerHighest: const Color(0xff3e3e42),
-          outlineVariant: const Color(0xff515155),
+          surface: const Color(0xff2a2a2a),
+          surfaceDim: const Color(0xff1b1b1b),
+          surfaceBright: const Color(0xff3a3a3a),
+          surfaceContainerLowest: sidebarColor,
+          surfaceContainerLow: const Color(0xff282828),
+          surfaceContainer: const Color(0xff2a2a2a),
+          surfaceContainerHigh: const Color(0xff2f2f2f),
+          surfaceContainerHighest: const Color(0xff373737),
+          outlineVariant: const Color(0xff474747),
         );
       } else {
         scheme = scheme.copyWith(
-          surface: const Color(0xfff5f5f7),
-          surfaceDim: const Color(0xffe4e4e7),
-          surfaceBright: const Color(0xfffdfdfe),
-          surfaceContainerLowest: const Color(0xffffffff),
-          surfaceContainerLow: const Color(0xfff0f0f2),
-          surfaceContainer: const Color(0xffeaeaed),
-          surfaceContainerHigh: const Color(0xffe4e4e7),
-          surfaceContainerHighest: const Color(0xffdddde1),
-          outlineVariant: const Color(0xffd2d2d7),
+          surface: const Color(0xffffffff),
+          surfaceDim: const Color(0xfff6f6f6),
+          surfaceBright: const Color(0xffffffff),
+          surfaceContainerLowest: sidebarColor,
+          surfaceContainerLow: const Color(0xfff9f9f9),
+          surfaceContainer: const Color(0xfff6f6f6),
+          surfaceContainerHigh: const Color(0xfff0f0f0),
+          surfaceContainerHighest: const Color(0xffededed),
+          outlineVariant: const Color(0xffdddddd),
         );
       }
       final theme = ThemeData(
@@ -635,13 +642,9 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
     return ClipRRect(
       borderRadius: BorderRadius.circular(34),
       child: ZommiGlassBackdrop(
-        child: FrostedSurface(
+        child: Material(
           key: const ValueKey('zommi-glass-panel'),
-          radius: 34,
-          opacity: .56,
-          // The backdrop is already a smooth gradient. Blurring the whole
-          // desktop-sized panel adds an expensive pass without useful detail.
-          blurBackground: false,
+          type: MaterialType.transparency,
           child: Stack(
             key: _previewViewportKey,
             fit: StackFit.expand,
@@ -758,26 +761,34 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                                             'pty-compatibility' &&
                                         !_controller.sessionBusy &&
                                         _dismissedCommandText != '/'))
-                                  RuntimeCommandMenu(
-                                    key: const ValueKey('runtime-command-menu'),
-                                    commands: _commandSuggestions,
-                                    selectedIndex: _commandSuggestions.isEmpty
-                                        ? 0
-                                        : _selectedCommand.clamp(
-                                            0,
-                                            _commandSuggestions.length - 1,
-                                          ),
-                                    onRefresh: () => unawaited(
-                                      _controller.refreshCommands(force: true),
+                                  _alignCommandPanel(
+                                    RuntimeCommandMenu(
+                                      key: const ValueKey(
+                                        'runtime-command-menu',
+                                      ),
+                                      commands: _commandSuggestions,
+                                      selectedIndex: _commandSuggestions.isEmpty
+                                          ? 0
+                                          : _selectedCommand.clamp(
+                                              0,
+                                              _commandSuggestions.length - 1,
+                                            ),
+                                      onRefresh: () => unawaited(
+                                        _controller.refreshCommands(
+                                          force: true,
+                                        ),
+                                      ),
+                                      onSelected: _chooseCommand,
                                     ),
-                                    onSelected: _chooseCommand,
                                   )
                                 else if (_controller.commandResult
                                     case final result?)
-                                  CommandResult(
-                                    key: const ValueKey('command-result'),
-                                    text: result,
-                                    onClose: _controller.dismissCommandResult,
+                                  _alignCommandPanel(
+                                    CommandResult(
+                                      key: const ValueKey('command-result'),
+                                      text: result,
+                                      onClose: _controller.dismissCommandResult,
+                                    ),
                                   ),
                                 if (_controller.queuedMessages.isNotEmpty)
                                   _buildMessageQueue(),
@@ -898,7 +909,8 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
   }
 
   Widget _buildSessionSidebar(double width) {
-    final sidebarWidth = (width * .32).clamp(200.0, 260.0);
+    final extraWidth = ((width - normalWindowSize.width) * .2).clamp(0.0, 40.0);
+    final sidebarWidth = (width * .32).clamp(200.0, 260.0 + extraWidth);
     return TweenAnimationBuilder<double>(
       tween: Tween(end: _controller.sessionPanelOpen ? 1 : 0),
       duration: MediaQuery.disableAnimationsOf(context)
@@ -1057,6 +1069,19 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
       ),
     );
   }
+
+  Widget _alignCommandPanel(Widget child) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 24),
+    child: Align(
+      alignment: Alignment.center,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(
+          maxWidth: conversationContentMaxWidth,
+        ),
+        child: child,
+      ),
+    ),
+  );
 
   Widget _buildComposer() {
     final colors = Theme.of(context).colorScheme;

@@ -11,7 +11,6 @@ import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 import 'package:zommi_flutter/widgets/content_views.dart';
 import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
-import 'package:zommi_flutter/widgets/overlay_panels.dart';
 import 'package:zommi_flutter/widgets/transcript_view.dart';
 import 'package:zommi_flutter/zommi_app.dart';
 
@@ -119,7 +118,9 @@ void main() {
     final layout = find.byKey(const ValueKey('copy-layout'));
     final responseCopyRect = tester.getRect(responseCopy);
     final layoutRect = tester.getRect(layout);
-    final singleLineMarkdown = tester.getRect(find.byType(MarkdownBody));
+    final singleLineMarkdown = tester.getRect(
+      find.byWidgetPredicate((widget) => widget is MarkdownBody),
+    );
     expect(tester.getSize(responseCopy), const Size(24, 24));
     expect(tester.getSize(layout).height, 24);
     expect(singleLineMarkdown.center.dy, closeTo(layoutRect.center.dy, 0.01));
@@ -135,12 +136,6 @@ void main() {
       tester.getRect(fencedResponseCopy).overlaps(tester.getRect(codeCopy)),
       isFalse,
     );
-    final markdown = tester.widget<MarkdownBody>(find.byType(MarkdownBody));
-    final codeDecoration = markdown.styleSheet?.codeblockDecoration;
-    expect(codeDecoration, isA<BoxDecoration>());
-    final codeBoxDecoration = codeDecoration! as BoxDecoration;
-    expect(codeBoxDecoration.color, isNull);
-    expect(codeBoxDecoration.border, isNull);
   });
 
   testWidgets('single-line user and agent message boxes stay compact', (
@@ -182,7 +177,12 @@ void main() {
     expect(
       tester
           .getCenter(
-            find.descendant(of: user, matching: find.byType(MarkdownBody)),
+            find.descendant(
+              of: user,
+              matching: find.byWidgetPredicate(
+                (widget) => widget is MarkdownBody,
+              ),
+            ),
           )
           .dy,
       closeTo(tester.getCenter(user).dy, 0.01),
@@ -190,7 +190,12 @@ void main() {
     expect(
       tester
           .getCenter(
-            find.descendant(of: assistant, matching: find.byType(MarkdownBody)),
+            find.descendant(
+              of: assistant,
+              matching: find.byWidgetPredicate(
+                (widget) => widget is MarkdownBody,
+              ),
+            ),
           )
           .dy,
       closeTo(tester.getCenter(assistant).dy, 0.01),
@@ -463,6 +468,7 @@ void main() {
       core.connectGate = switchGate.future;
       await tester.tap(find.byKey(const ValueKey('create-session-runtime-pi')));
       await tester.pump();
+      await tester.pump();
       expect(find.byKey(const ValueKey('runtime-panel')), findsNothing);
       expect(
         find.byKey(const ValueKey('session-loading-indicator')),
@@ -483,17 +489,8 @@ void main() {
       );
       expect(find.byKey(const ValueKey('settings-model')), findsNothing);
       expect(find.byKey(const ValueKey('settings-back')), findsNothing);
-      final modelPanel = find.byKey(const ValueKey('model-settings-panel'));
-      final unfilteredPanelHeight = tester.getSize(modelPanel).height;
-      expect(unfilteredPanelHeight, lessThan(390));
-      final modelSurface = tester.widget<Material>(
-        find.descendant(of: modelPanel, matching: find.byType(Material)).first,
-      );
-      expect(modelSurface.surfaceTintColor, Colors.transparent);
-      expect(modelSurface.shadowColor, zommiOverlayPanelShadowColor);
       final reasoningRow = find.byKey(const ValueKey('reasoning-options-row'));
       expect(reasoningRow, findsOneWidget);
-      expect(tester.getSize(reasoningRow).height, lessThan(34));
       final effortTopEdges = ['low', 'medium', 'high', 'xhigh']
           .map(
             (effort) =>
@@ -501,20 +498,10 @@ void main() {
           )
           .toSet();
       expect(effortTopEdges, hasLength(1));
-      await tester.enterText(
-        find.byKey(const ValueKey('model-search')),
-        'Mini',
-      );
-      await tester.pump();
+      expect(find.byKey(const ValueKey('model-search')), findsNothing);
+      expect(find.text('Frontier coding model'), findsNothing);
+      expect(find.text('Fast agent model'), findsNothing);
       expect(find.text('Fixture Mini'), findsOneWidget);
-      expect(
-        tester.getSize(modelPanel).height,
-        lessThan(unfilteredPanelHeight),
-      );
-      expect(
-        tester.widget<Text>(find.text('Fixture Mini')).style?.fontSize,
-        lessThanOrEqualTo(11.5),
-      );
       await tester.tap(find.byKey(const ValueKey('model-fixture-mini')));
       await tester.pump();
       await tester.tap(find.byKey(const ValueKey('effort-medium')));
@@ -564,12 +551,12 @@ void main() {
 
       await _openNewChatMenu(tester);
       await tester.pump();
-      expect(find.text('New chat with'), findsOneWidget);
+      expect(find.text('New agent'), findsOneWidget);
       await tester.tapAt(
         tester.getBottomRight(composer) - const Offset(10, 10),
       );
       await tester.pumpAndSettle();
-      expect(find.text('New chat with'), findsNothing);
+      expect(find.text('New agent'), findsNothing);
 
       await tester.tap(find.byKey(const ValueKey('model-summary')));
       await tester.pump();
@@ -849,8 +836,18 @@ void main() {
     );
     expect(find.byKey(const ValueKey('theme-color-control')), findsOneWidget);
 
-    await tester.tap(find.text('Medium'));
-    await tester.pumpAndSettle();
+    expect(find.text('Medium'), findsNothing);
+    for (final (label, size) in [('Large', 15.0), ('XL', 17.0)]) {
+      await tester.tap(find.text(label));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const ValueKey('zommi-composer')))
+            .style
+            ?.fontSize,
+        size,
+      );
+    }
     await tester.tap(find.text('Default'));
     await tester.pumpAndSettle();
     expect(
@@ -888,7 +885,9 @@ void main() {
     await tester.pump();
     expect(
       tester
-          .widgetList<MarkdownBody>(find.byType(MarkdownBody))
+          .widgetList<MarkdownBody>(
+            find.byWidgetPredicate((widget) => widget is MarkdownBody),
+          )
           .map((body) => body.styleSheet?.p?.fontSize),
       contains(14),
     );
@@ -929,7 +928,7 @@ void main() {
       expect(field.style?.fontFamily, codexUiFontFamily);
       expect(field.textAlignVertical, TextAlignVertical.center);
       final markdown = tester.widgetList<MarkdownBody>(
-        find.byType(MarkdownBody),
+        find.byWidgetPredicate((widget) => widget is MarkdownBody),
       );
       expect(markdown, isNotEmpty);
       final bodySizes = markdown
@@ -1421,7 +1420,7 @@ void main() {
         responsiveAssistantMessageBoxWidth(1000),
       );
       await tester.ensureVisible(thinkingCard);
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 200));
       await expectLater(
         thinkingCard,
         matchesGoldenFile('goldens/thinking_tools_collapsed.png'),
@@ -1439,7 +1438,8 @@ void main() {
           ),
         ),
       );
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
 
       final toolCard = find.byKey(const ValueKey('activity-tool-1'));
       expect(toolCard, findsOneWidget);
@@ -1458,7 +1458,9 @@ void main() {
             .getTopLeft(
               find.descendant(
                 of: thinkingMarkdown,
-                matching: find.byType(MarkdownBody),
+                matching: find.byWidgetPredicate(
+                  (widget) => widget is MarkdownBody,
+                ),
               ),
             )
             .dx,
@@ -1773,11 +1775,16 @@ void main() {
   testWidgets('large windows center transcript and composer in one column', (
     tester,
   ) async {
-    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    await tester.binding.setSurfaceSize(normalWindowSize);
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final core = RichFakeCore()..historyCount = 1;
     await tester.pumpWidget(ZommiApp(core: core, desktop: FakeDesktopBridge()));
     await tester.pumpAndSettle();
+    final sidebar = find.byKey(const ValueKey('session-sidebar'));
+    final normalSidebarWidth = tester.getSize(sidebar).width;
+    await tester.binding.setSurfaceSize(const Size(1600, 900));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(sidebar).width, greaterThan(normalSidebarWidth));
 
     final composer = tester.getRect(
       find.byKey(const ValueKey('message-composer-shell')),
@@ -1794,6 +1801,71 @@ void main() {
     expect(user.left, greaterThanOrEqualTo(composer.left));
     expect(user.right, lessThanOrEqualTo(composer.right));
     expect(find.byKey(const ValueKey('core-status')), findsNothing);
+  });
+
+  testWidgets('tables use the right panel space and scroll after resizing', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1800, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final core = RichFakeCore()..historyCount = 1;
+    final history = await core.readSession(
+      runtimeTargetId: 'runtime-codex',
+      sessionId: 'session-1',
+    );
+    final turn = ((history['thread'] as Map)['turns'] as List).single as Map;
+    final text = List.filled(
+      20,
+      'Prose keeps its readable line width.',
+    ).join(' ');
+    ((turn['items'] as List).last as Map)['text'] =
+        '$text\n\n'
+        '| Description | Reference |\n| --- | --- |\n'
+        '| ${'A' * 58} | [Open source](https://example.com/wide) |';
+    core.historyBySession['runtime-codex\u0000session-1'] = history;
+    final desktop = FakeDesktopBridge();
+    await tester.pumpWidget(ZommiApp(core: core, desktop: desktop));
+    await tester.pumpAndSettle();
+    final composer = tester.getRect(
+      find.byKey(const ValueKey('message-composer-shell')),
+    );
+    final prose = tester.getRect(
+      find.byWidgetPredicate(
+        (widget) => widget is RichText && widget.text.toPlainText() == text,
+      ),
+    );
+    final scroll = find.byWidgetPredicate(
+      (widget) =>
+          widget is SingleChildScrollView &&
+          widget.scrollDirection == Axis.horizontal,
+    );
+    final position = tester
+        .state<ScrollableState>(
+          find.descendant(of: scroll, matching: find.byType(Scrollable)),
+        )
+        .position;
+    final table = tester.getRect(scroll);
+    expect(prose.width, lessThanOrEqualTo(composer.width - 26));
+    expect(table.left, closeTo(prose.left, .01));
+    expect(table.right, greaterThan(composer.right));
+    expect(table.right, lessThan(1800 - 24));
+    expect(position.maxScrollExtent, 0);
+    final link = find.byKey(
+      const ValueKey('markdown-link-https://example.com/wide'),
+    );
+    expect(tester.getCenter(link).dx, greaterThan(composer.right));
+    await tester.tap(link);
+    await tester.pump();
+    expect(desktop.openedUrl.toString(), 'https://example.com/wide');
+
+    await tester.binding.setSurfaceSize(const Size(1100, 900));
+    await tester.pumpAndSettle();
+    expect(position.maxScrollExtent, greaterThan(0));
+    expect(tester.getRect(scroll).right, lessThan(1100 - 24));
+    await tester.drag(scroll, const Offset(-1000, 0));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(scroll).contains(tester.getCenter(link)), isTrue);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets(

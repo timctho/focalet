@@ -78,20 +78,61 @@ void main() {
     },
   );
 
-  test('manual runtime refresh bypasses the WSL discovery backoff', () async {
+  test('runtime refresh only discovers, coalesces clicks, and preserves the active chat', () async {
     final core = RichFakeCore()..historyCount = 0;
     final controller = ZommiController(
       core: core,
       desktop: FakeDesktopBridge(),
     );
+    addTearDown(controller.close);
     await controller.initialize();
     expect(core.lastDiscoveryForce, isFalse);
+    await Future<void>.delayed(Duration.zero);
+    final requests = [...core.catalogRequests];
+    final connections = core.connectCount;
+    final discoveries = core.discoveryCount;
+    final session = controller.activeSessionId;
+    final status = controller.status;
+    final gate = Completer<void>();
+    core.discoveryGate = gate.future;
 
-    await controller.refreshRuntimes();
-
+    final refresh = controller.refreshRuntimes();
+    expect(controller.runtimeDiscoveryBusy, isTrue);
     expect(core.lastDiscoveryForce, isTrue);
-    await controller.close();
+    expect(controller.runtimeBusy, isFalse);
+    await controller.refreshRuntimes();
+    expect(core.discoveryCount, discoveries + 1);
+    gate.complete();
+    await refresh;
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.runtimeDiscoveryBusy, isFalse);
+    expect(core.catalogRequests, requests);
+    expect(core.connectCount, connections);
+    expect(core.createdSessions, isEmpty);
+    expect(core.openedSessions, isEmpty);
+    expect(controller.activeSessionId, session);
+    expect(controller.status, status);
   });
+
+  test(
+    'runtime refresh discovers new options without connecting an idle app',
+    () async {
+      final core = RichFakeCore()..discoveredTargets.clear();
+      final controller = ZommiController(
+        core: core,
+        desktop: FakeDesktopBridge(),
+      );
+      addTearDown(controller.close);
+      await controller.initialize();
+      core.discoveredTargets.add(RichFakeCore.targets.first);
+      await controller.refreshRuntimes();
+      expect(controller.visibleRuntimeTargets, hasLength(1));
+      expect(controller.activeRuntime, isNull);
+      expect(core.connectCount, 0);
+      expect(core.catalogRequests, isEmpty);
+    },
+  );
 
   test('portal authorization does not block Rust runtime discovery', () async {
     final core = RichFakeCore()..historyCount = 0;

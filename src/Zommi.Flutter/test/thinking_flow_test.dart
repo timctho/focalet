@@ -26,7 +26,7 @@ Future<Uint8List> pixels(WidgetTester tester, Finder finder) async {
 
 void main() {
   testWidgets(
-    'only the final running group glows and consecutive activity stays together',
+    'last thinking glows through completed items and response streaming',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(900, 820));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -65,7 +65,7 @@ void main() {
       emit('thinking', 'r1', 'First step', completed: true);
       emit('tool', 't1', 'Read files', completed: true);
       emit('assistant', 'empty', '', completed: true);
-      emit('thinking', 'r2', 'Next step');
+      emit('thinking', 'r2', 'Next step', completed: true);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 250));
       final groups = find.byType(ThinkingActivityGroup);
@@ -84,7 +84,7 @@ void main() {
 
       emit('commentary', 'reply', 'Progress update');
       await tester.pump();
-      expect(find.byType(ThinkingFlowBackground), findsNothing);
+      expect(find.byType(ThinkingFlowBackground), findsOneWidget);
       emit('thinking', 'r3', 'Verify results');
       await tester.pump();
       expect(groups, findsNWidgets(2));
@@ -112,6 +112,24 @@ void main() {
       );
       emit('thinking', 'r3', 'Verify results', completed: true);
       await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byType(ThinkingFlowBackground), findsOneWidget);
+      emit('assistant', 'answer', 'The result is');
+      await tester.pump();
+      expect(find.byType(ThinkingFlowBackground), findsOneWidget);
+      emit('assistant', 'answer', ' ready.', completed: true);
+      await tester.pump();
+      expect(find.byType(ThinkingFlowBackground), findsOneWidget);
+      core.emit(
+        CoreEvent(
+          name: 'turn.completed',
+          sequence: ++sequence,
+          runtimeTargetId: 'runtime-codex',
+          sessionId: 'session-1',
+          turnId: 'session-1-live-turn',
+          payload: const {'status': 'completed'},
+        ),
+      );
+      await tester.pumpAndSettle();
       expect(find.byType(ThinkingFlowBackground), findsNothing);
       expect(
         find.descendant(
@@ -149,7 +167,7 @@ void main() {
             'kind': 'thinking',
             'itemId': 'r1',
             'text': 'Working',
-            'lifecycle': 'delta',
+            'lifecycle': 'completed',
           },
         ),
       );
@@ -312,7 +330,7 @@ void main() {
     await tester.runAsync(
       () => File('$directory/thinking-dark.png').writeAsBytes(first),
     );
-    for (var frame = 0; frame < 48; frame++) {
+    for (var frame = 0; frame < 72; frame++) {
       await tester.pump(const Duration(milliseconds: 166));
       final data = await pixels(tester, find.byKey(screen));
       await tester.runAsync(

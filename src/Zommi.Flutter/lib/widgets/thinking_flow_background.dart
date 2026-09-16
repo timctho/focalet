@@ -15,7 +15,7 @@ class _ThinkingFlowBackgroundState extends State<ThinkingFlowBackground>
     with SingleTickerProviderStateMixin {
   late final AnimationController _phase = AnimationController(
     vsync: this,
-    duration: const Duration(seconds: 8),
+    duration: const Duration(seconds: 12),
   );
 
   @override
@@ -55,10 +55,22 @@ class _ThinkingFlowBackgroundState extends State<ThinkingFlowBackground>
 
 class _ThinkingFlowPainter extends CustomPainter {
   _ThinkingFlowPainter({required this.phase, required this.dark})
-    : super(repaint: phase);
+    : _glows = [
+        for (final color in _colors)
+          RadialGradient(
+            radius: .62,
+            colors: [
+              for (final strength in [1.0, .90, .54, .19, .035, 0.0])
+                color.withValues(alpha: strength * (dark ? .24 : .18)),
+            ],
+            stops: const [0, .2, .4, .6, .8, 1],
+          ),
+      ],
+      super(repaint: phase);
 
   final Animation<double> phase;
   final bool dark;
+  final List<RadialGradient> _glows;
   static const _colors = [
     Color(0xff75c9bc),
     Color(0xffa89ae4),
@@ -69,25 +81,27 @@ class _ThinkingFlowPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (size.isEmpty) return;
     final angle = phase.value * math.pi * 2;
-    final blend = .18 + .14 * math.sin(angle);
-    final opacity = (dark ? .30 : .24) + .06 * math.sin(angle);
-    final bounds = Offset.zero & size;
-    canvas.drawRect(
-      bounds,
-      Paint()
-        ..shader = LinearGradient(
-          begin: const Alignment(-1, -.3),
-          end: const Alignment(1, .3),
-          colors: [
-            for (var index = 0; index < _colors.length; index++)
-              Color.lerp(
-                _colors[index],
-                _colors[(index + 1) % _colors.length],
-                blend,
-              )!.withValues(alpha: index == 1 ? opacity : 0),
-          ],
-        ).createShader(bounds),
-    );
+    const bounds = Rect.fromLTWH(0, 0, 1, 1);
+    final paint = Paint();
+
+    // Normalized coordinates stretch the soft radial falloff into broad glows
+    // at any panel size, without a blur filter or an offscreen saveLayer.
+    canvas.save();
+    canvas.scale(size.width, size.height);
+    for (var index = 0; index < _glows.length; index++) {
+      final orbit = angle + index * math.pi * 2 / _glows.length;
+      final center = Offset(
+        .18 + index * .32 + .13 * math.sin(orbit),
+        .50 + .16 * math.cos(orbit),
+      );
+      // Sine/cosine preserve position and velocity at the loop boundary.
+      // Constant opacity avoids a distracting pulse as the colors drift.
+      paint.shader = _glows[index].createShader(
+        bounds.shift(center - const Offset(.5, .5)),
+      );
+      canvas.drawRect(bounds, paint);
+    }
+    canvas.restore();
   }
 
   @override

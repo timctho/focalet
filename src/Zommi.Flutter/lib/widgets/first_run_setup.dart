@@ -58,7 +58,11 @@ class _FirstRunSetupState extends State<FirstRunSetup> {
     final selected = targets.any((target) => target.id == _selectedTarget)
         ? _selectedTarget
         : targets.firstOrNull?.id;
-    final busy = controller.starting || controller.runtimeBusy || _saving;
+    final busy =
+        controller.starting ||
+        controller.runtimeBusy ||
+        controller.runtimeDiscoveryBusy ||
+        _saving;
     final colors = Theme.of(context).colorScheme;
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 520, maxHeight: 640),
@@ -183,8 +187,19 @@ class _FirstRunSetupState extends State<FirstRunSetup> {
                         TextButton.icon(
                           key: const ValueKey('setup-rescan'),
                           onPressed: busy ? null : controller.refreshRuntimes,
-                          icon: const Icon(Icons.refresh_rounded, size: 17),
-                          label: const Text('Scan again'),
+                          icon: controller.runtimeDiscoveryBusy
+                              ? const SizedBox.square(
+                                  dimension: 17,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 1.5,
+                                  ),
+                                )
+                              : const Icon(Icons.refresh_rounded, size: 17),
+                          label: Text(
+                            controller.runtimeDiscoveryBusy
+                                ? 'Scanning…'
+                                : 'Scan again',
+                          ),
                         ),
                         TextButton.icon(
                           key: const ValueKey('setup-configure'),
@@ -196,11 +211,15 @@ class _FirstRunSetupState extends State<FirstRunSetup> {
                         ),
                       ],
                     ),
-                    if (_error != null || controller.statusWarning)
+                    if (_error != null ||
+                        controller.runtimeDiscoveryError != null ||
+                        controller.statusWarning)
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         child: Text(
-                          _error ?? controller.status,
+                          _error ??
+                              controller.runtimeDiscoveryError ??
+                              controller.status,
                           key: const ValueKey('setup-error'),
                           style: TextStyle(color: colors.error),
                         ),

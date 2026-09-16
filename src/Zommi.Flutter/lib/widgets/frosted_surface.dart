@@ -2,61 +2,19 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
-/// A static, softly lit backdrop. Messages scroll above this single layer.
+/// An opaque app surface; desktop content cannot affect the panel colors.
 class ZommiGlassBackdrop extends StatelessWidget {
   const ZommiGlassBackdrop({required this.child, super.key});
 
   final Widget child;
 
   @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final dark = scheme.brightness == Brightness.dark;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: dark
-              ? [
-                  const Color(0xff333336),
-                  const Color(0xff29292c),
-                  const Color(0xff202022),
-                ]
-              : [
-                  const Color(0xfff4f4f6),
-                  const Color(0xffeeeef0),
-                  const Color(0xffe8e8eb),
-                ],
-        ),
-      ),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          Positioned.fill(
-            child: IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: RadialGradient(
-                    center: const Alignment(.9, -.85),
-                    radius: 1.15,
-                    colors: [
-                      Colors.white.withValues(alpha: dark ? .05 : .38),
-                      Colors.white.withValues(alpha: 0),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-          child,
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) =>
+      ColoredBox(color: Theme.of(context).colorScheme.surface, child: child);
 }
 
-/// Blur only bounded chrome surfaces, never individual transcript rows.
+/// Static tint and highlights give glass depth without animated refraction.
+/// Only floating panels blur content behind them; the shell and composer don't.
 class FrostedSurface extends StatelessWidget {
   const FrostedSurface({
     required this.child,
@@ -89,7 +47,7 @@ class FrostedSurface extends StatelessWidget {
       borderRadius: BorderRadius.circular(radius),
       child: BackdropFilter(
         enabled: blurBackground,
-        filter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+        filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
         child: DecoratedBox(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(radius),
@@ -97,9 +55,15 @@ class FrostedSurface extends StatelessWidget {
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
+                Color.lerp(
+                  tint,
+                  Colors.white,
+                  dark ? .07 : .12,
+                )!.withValues(alpha: alpha),
                 tint.withValues(alpha: alpha),
                 tint.withValues(alpha: (alpha - .12).clamp(0, 1)),
               ],
+              stops: const [0, .4, 1],
             ),
             border: showBorder
                 ? Border.fromBorderSide(
@@ -112,9 +76,21 @@ class FrostedSurface extends StatelessWidget {
                   )
                 : null,
           ),
-          child: Material(
-            type: MaterialType.transparency,
-            child: Padding(padding: padding, child: child),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: RadialGradient(
+                center: const Alignment(-.85, -1),
+                radius: 1.25,
+                colors: [
+                  Colors.white.withValues(alpha: dark ? .06 : .22),
+                  Colors.white.withValues(alpha: 0),
+                ],
+              ),
+            ),
+            child: Material(
+              type: MaterialType.transparency,
+              child: Padding(padding: padding, child: child),
+            ),
           ),
         ),
       ),

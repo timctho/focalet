@@ -62,7 +62,9 @@ void main() {
       final transcript = find.byKey(const ValueKey('zommi-transcript'));
       final position = tester.widget<ListView>(transcript).controller!.position;
       final originalBodies = tester
-          .elementList(find.byType(MarkdownBody))
+          .elementList(
+            find.byWidgetPredicate((widget) => widget is MarkdownBody),
+          )
           .toList();
       var messageBuilds = 0;
       debugOnRebuildDirtyWidget = (element, _) {
@@ -75,7 +77,12 @@ void main() {
         expect(position.isScrollingNotifier.value, isFalse);
       }
       expect(messageBuilds, 0);
-      expect(tester.elementList(find.byType(MarkdownBody)), originalBodies);
+      expect(
+        tester.elementList(
+          find.byWidgetPredicate((widget) => widget is MarkdownBody),
+        ),
+        originalBodies,
+      );
       expect(
         find.byKey(const ValueKey('thinking-activity-list')),
         findsNothing,
@@ -90,7 +97,9 @@ void main() {
       await tester.pump();
       expect(
         tester
-            .widgetList<MarkdownBody>(find.byType(MarkdownBody))
+            .widgetList<MarkdownBody>(
+              find.byWidgetPredicate((widget) => widget is MarkdownBody),
+            )
             .any((body) => body.data.contains('Hidden delta 19.')),
         isTrue,
       );

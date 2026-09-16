@@ -8,6 +8,7 @@ import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 import 'package:zommi_flutter/theme/zommi_typography.dart';
 import 'package:zommi_flutter/widgets/content_views.dart';
+import 'package:zommi_flutter/widgets/frosted_surface.dart';
 import 'package:zommi_flutter/widgets/runtime_logo.dart';
 import 'package:zommi_flutter/widgets/session_context_menu.dart';
 import 'package:zommi_flutter/widgets/theme_color_picker.dart';
@@ -32,13 +33,18 @@ class ZommiOverlayPanelSurface extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Theme.of(context).colorScheme.surfaceContainerLow,
+      color: Colors.transparent,
       surfaceTintColor: Colors.transparent,
       shadowColor: zommiOverlayPanelShadowColor,
       elevation: zommiOverlayPanelElevation,
       borderRadius: BorderRadius.circular(zommiOverlayPanelRadius),
       clipBehavior: Clip.antiAlias,
-      child: SizedBox(width: width, height: height, child: child),
+      child: FrostedSurface(
+        radius: zommiOverlayPanelRadius,
+        color: Theme.of(context).colorScheme.surfaceContainerHigh,
+        opacity: .94,
+        child: SizedBox(width: width, height: height, child: child),
+      ),
     );
   }
 }
@@ -79,7 +85,7 @@ class _SessionSidebarState extends State<SessionSidebar> {
       label: 'Chat sessions',
       child: Material(
         key: const ValueKey('session-sidebar'),
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
+        color: Theme.of(context).colorScheme.surfaceContainerLowest,
         elevation: 0,
         child: Column(
           children: [
@@ -89,126 +95,11 @@ class _SessionSidebarState extends State<SessionSidebar> {
                 children: [
                   const Expanded(
                     child: Text(
-                      'Chats',
+                      'Agents',
                       style: TextStyle(fontWeight: FontWeight.w700),
                     ),
                   ),
-                  PopupMenuButton<String>(
-                    key: const ValueKey('new-session'),
-                    tooltip: 'Create new chat',
-                    enabled: !controller.sessionBusy && !controller.runtimeBusy,
-                    position: PopupMenuPosition.under,
-                    color: Theme.of(context).colorScheme.surfaceContainerLow,
-                    surfaceTintColor: Colors.transparent,
-                    elevation: zommiOverlayPanelElevation,
-                    shadowColor: zommiOverlayPanelShadowColor,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(
-                        zommiOverlayPanelRadius,
-                      ),
-                    ),
-                    constraints: const BoxConstraints(
-                      minWidth: 250,
-                      maxWidth: 320,
-                    ),
-                    onSelected: (id) {
-                      if (id == 'action:refresh') {
-                        unawaited(controller.refreshRuntimes());
-                      } else if (id == 'action:setup') {
-                        controller.toggleRuntimeSetupPanel(true);
-                      } else if (id.startsWith('sign-in:')) {
-                        unawaited(
-                          controller.openRuntimeSignIn(
-                            runtimeTargetId: id.substring('sign-in:'.length),
-                          ),
-                        );
-                      } else {
-                        unawaited(
-                          controller.createSession(runtimeTargetId: id),
-                        );
-                      }
-                    },
-                    itemBuilder: (context) => [
-                      PopupMenuItem<String>(
-                        enabled: false,
-                        height: 36,
-                        child: Text(
-                          'New chat with',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            color: Theme.of(context).colorScheme.onSurface,
-                          ),
-                        ),
-                      ),
-                      for (final target in controller.visibleRuntimeTargets)
-                        PopupMenuItem<String>(
-                          key: ValueKey('create-session-${target.id}'),
-                          value: target.id,
-                          enabled: controller.canCreateSession(target),
-                          child: Row(
-                            children: [
-                              RuntimeLogo(
-                                runtimeId: target.runtimeId,
-                                size: 16,
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      target.displayName,
-                                      style: const TextStyle(fontSize: 12),
-                                    ),
-                                    Text(
-                                      controller.canCreateSession(target)
-                                          ? '${target.protocolName} · ${target.executionHost['displayName'] ?? 'Local'}'
-                                          : 'New chats unavailable',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        fontSize: 10,
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .onSurfaceVariant,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      const PopupMenuDivider(),
-                      for (final target in controller.visibleRuntimeTargets)
-                        if (target.status == 'sign-in-required')
-                          PopupMenuItem<String>(
-                            key: ValueKey('runtime-sign-in-${target.id}'),
-                            value: 'sign-in:${target.id}',
-                            child: Text('Sign in to ${target.displayName}'),
-                          ),
-                      const PopupMenuItem<String>(
-                        key: ValueKey('refresh-runtimes'),
-                        value: 'action:refresh',
-                        child: Text('Refresh agents'),
-                      ),
-                      if (controller.runtimeOverridesSupported)
-                        const PopupMenuItem<String>(
-                          key: ValueKey('open-runtime-setup'),
-                          value: 'action:setup',
-                          child: Text('Agent setup'),
-                        ),
-                    ],
-                    icon: controller.sessionBusy || controller.runtimeBusy
-                        ? const SizedBox.square(
-                            key: ValueKey('session-loading-indicator'),
-                            dimension: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.add_rounded, size: 20),
-                  ),
+                  _NewAgentMenu(controller: controller),
                 ],
               ),
             ),
@@ -293,10 +184,30 @@ class _SessionSidebarState extends State<SessionSidebar> {
                             ),
                             selected: selected,
                             tileColor: Colors.transparent,
-                            selectedTileColor: Colors.transparent,
+                            selectedTileColor: colors.primary.withValues(
+                              alpha: colors.brightness == Brightness.dark
+                                  ? .18
+                                  : .10,
+                            ),
                             selectedColor: colors.onSurface,
+                            hoverColor: colors.brightness == Brightness.dark
+                                ? colors.primary.withValues(alpha: .16)
+                                : null,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
+                            ),
+                            minLeadingWidth: 28.8,
+                            horizontalTitleGap: 10,
+                            titleAlignment: ListTileTitleAlignment.center,
+                            leading: _SessionTooltip(
+                              message: runtime?.displayName ?? 'Agent runtime',
+                              child: RuntimeLogo(
+                                key: ValueKey(
+                                  'session-runtime-${session.runtimeTargetId}-${session.id}',
+                                ),
+                                runtimeId: runtime?.runtimeId ?? '',
+                                size: 28.8,
+                              ),
                             ),
                             title: Column(
                               mainAxisSize: MainAxisSize.min,
@@ -316,36 +227,17 @@ class _SessionSidebarState extends State<SessionSidebar> {
                                       ),
                                     ),
                                     const SizedBox(width: 6),
-                                    _SessionTooltip(
-                                      message:
-                                          runtime?.displayName ??
-                                          'Agent runtime',
-                                      child: RuntimeLogo(
-                                        key: ValueKey(
-                                          'session-runtime-${session.runtimeTargetId}-${session.id}',
-                                        ),
-                                        runtimeId: runtime?.runtimeId ?? '',
-                                      ),
-                                    ),
-                                    const SizedBox(width: 6),
                                     Expanded(
-                                      child: _SessionTooltip(
-                                        message:
-                                            session.cwd?.trim().isNotEmpty ==
-                                                true
-                                            ? session.cwd!.trim()
-                                            : workspace,
-                                        child: Text(
-                                          workspace,
-                                          key: ValueKey(
-                                            'session-workspace-${session.runtimeTargetId}-${session.id}',
-                                          ),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            color: colors.onSurfaceVariant,
-                                          ),
+                                      child: Text(
+                                        workspace,
+                                        key: ValueKey(
+                                          'session-workspace-${session.runtimeTargetId}-${session.id}',
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: colors.onSurfaceVariant,
                                         ),
                                       ),
                                     ),
@@ -409,6 +301,190 @@ class _SessionSidebarState extends State<SessionSidebar> {
       ),
     );
   }
+}
+
+class _NewAgentMenu extends StatelessWidget {
+  const _NewAgentMenu({required this.controller});
+
+  final ZommiController controller;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: controller,
+    builder: (context, _) {
+      final colors = Theme.of(context).colorScheme;
+      final busy = controller.sessionBusy || controller.runtimeBusy;
+      final targets = controller.visibleRuntimeTargets;
+      final firstCreatable = targets
+          .where(controller.canCreateSession)
+          .firstOrNull;
+      final runtimeStyle = MenuItemButton.styleFrom(
+        minimumSize: const Size(0, kMinInteractiveDimension),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        visualDensity: VisualDensity.standard,
+      );
+      final actionStyle = MenuItemButton.styleFrom(
+        minimumSize: const Size(0, 30),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+        visualDensity: VisualDensity.compact,
+      );
+      return MenuAnchor(
+        consumeOutsideTap: true,
+        style: MenuStyle(
+          backgroundColor: WidgetStatePropertyAll(colors.surfaceContainerLow),
+          surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+          shadowColor: const WidgetStatePropertyAll(
+            zommiOverlayPanelShadowColor,
+          ),
+          elevation: const WidgetStatePropertyAll(zommiOverlayPanelElevation),
+          padding: const WidgetStatePropertyAll(
+            EdgeInsets.symmetric(vertical: 4),
+          ),
+          shape: WidgetStatePropertyAll(
+            RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(zommiOverlayPanelRadius),
+            ),
+          ),
+        ),
+        menuChildren: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 7, 12, 7),
+            child: Row(
+              children: [
+                const Text(
+                  'New agent',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                ),
+                const Spacer(),
+                Text(
+                  '${targets.length} available',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: colors.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          for (final target in targets)
+            MenuItemButton(
+              key: ValueKey('create-session-${target.id}'),
+              autofocus: target.id == firstCreatable?.id,
+              onPressed: busy || !controller.canCreateSession(target)
+                  ? null
+                  : () => unawaited(
+                      controller.createSession(runtimeTargetId: target.id),
+                    ),
+              style: runtimeStyle,
+              child: SizedBox(
+                width: 256,
+                child: Row(
+                  children: [
+                    RuntimeLogo(runtimeId: target.runtimeId, size: 16),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            target.displayName,
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          Text(
+                            controller.canCreateSession(target)
+                                ? '${target.protocolName} · ${target.executionHost['displayName'] ?? 'Local'}'
+                                : 'New chats unavailable',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: colors.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          const Divider(height: 9),
+          for (final target in targets)
+            if (target.status == 'sign-in-required')
+              MenuItemButton(
+                key: ValueKey('runtime-sign-in-${target.id}'),
+                style: runtimeStyle,
+                onPressed: busy
+                    ? null
+                    : () => unawaited(
+                        controller.openRuntimeSignIn(
+                          runtimeTargetId: target.id,
+                        ),
+                      ),
+                child: Text('Sign in to ${target.displayName}'),
+              ),
+          if (controller.runtimeDiscoveryError case final error?)
+            SizedBox(
+              width: 280,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 3, 12, 5),
+                child: Text(
+                  error,
+                  key: const ValueKey('runtime-discovery-error'),
+                  style: TextStyle(fontSize: 11, color: colors.error),
+                ),
+              ),
+            ),
+          MenuItemButton(
+            key: const ValueKey('refresh-runtimes'),
+            autofocus: firstCreatable == null,
+            closeOnActivate: false,
+            style: actionStyle,
+            onPressed: busy || controller.runtimeDiscoveryBusy
+                ? null
+                : () => unawaited(controller.refreshRuntimes()),
+            leadingIcon: controller.runtimeDiscoveryBusy
+                ? const SizedBox.square(
+                    key: ValueKey('runtime-discovery-progress'),
+                    dimension: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh_rounded, size: 16),
+            child: Text(
+              controller.runtimeDiscoveryBusy
+                  ? 'Refreshing agents…'
+                  : 'Refresh agents',
+            ),
+          ),
+          if (controller.runtimeOverridesSupported)
+            MenuItemButton(
+              key: const ValueKey('open-runtime-setup'),
+              style: actionStyle,
+              onPressed: busy
+                  ? null
+                  : () => controller.toggleRuntimeSetupPanel(true),
+              leadingIcon: const Icon(Icons.tune_rounded, size: 16),
+              child: const Text('Agent setup'),
+            ),
+        ],
+        builder: (context, menu, _) => IconButton(
+          key: const ValueKey('new-session'),
+          tooltip: 'New agent',
+          onPressed: busy
+              ? null
+              : () => menu.isOpen ? menu.close() : menu.open(),
+          icon: busy
+              ? const SizedBox.square(
+                  key: ValueKey('session-loading-indicator'),
+                  dimension: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.add_rounded, size: 20),
+        ),
+      );
+    },
+  );
 }
 
 String _sessionWorkspaceLabel(String? cwd) {
@@ -1101,9 +1177,9 @@ class AppSettingsPanel extends StatelessWidget {
               showSelectedIcon: false,
               segments: const [
                 ButtonSegment(value: 12, label: Text('Small')),
-                ButtonSegment(value: 13, label: Text('Medium')),
                 ButtonSegment(value: 14, label: Text('Default')),
-                ButtonSegment(value: 15, label: Text('XL')),
+                ButtonSegment(value: 15, label: Text('Large')),
+                ButtonSegment(value: 17, label: Text('XL')),
               ],
               selected: {preferences.chatFontSize},
               onSelectionChanged: (selection) => onChanged(
@@ -1111,7 +1187,9 @@ class AppSettingsPanel extends StatelessWidget {
               ),
               style: const ButtonStyle(
                 visualDensity: VisualDensity(horizontal: -3, vertical: -3),
-                textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 10)),
+                textStyle: WidgetStatePropertyAll(
+                  TextStyle(fontSize: 10, fontFamily: codexUiFontFamily),
+                ),
               ),
             ),
             const SizedBox(height: 14),
@@ -1527,20 +1605,23 @@ class _SettingsDetailShell extends StatelessWidget {
     required this.title,
     required this.onBack,
     required this.child,
+    this.width = 390,
     this.height = 390,
   });
 
   final String title;
   final VoidCallback? onBack;
   final Widget child;
-  final double height;
+  final double width;
+  final double? height;
 
   @override
   Widget build(BuildContext context) {
     return ZommiOverlayPanelSurface(
-      width: 390,
+      width: width,
       height: height,
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           SizedBox(
             height: 48,
@@ -1573,15 +1654,6 @@ class _SettingsDetailShell extends StatelessWidget {
   }
 }
 
-double modelSettingsPanelHeight(
-  int optionCount, {
-  required bool showReasoning,
-}) {
-  final visibleRows = optionCount.clamp(1, 5);
-  final height = 110 + (visibleRows * 48) + (showReasoning ? 72 : 12);
-  return height.clamp(190, 390).toDouble();
-}
-
 class ModelPanel extends StatefulWidget {
   const ModelPanel({required this.controller, this.onBack, super.key});
 
@@ -1593,163 +1665,136 @@ class ModelPanel extends StatefulWidget {
 }
 
 class _ModelPanelState extends State<ModelPanel> {
-  final TextEditingController _search = TextEditingController();
-
-  @override
-  void dispose() {
-    _search.dispose();
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
-    final query = _search.text.trim().toLowerCase();
-    final models = widget.controller.models
-        .where((model) {
-          if (query.isEmpty) return true;
-          final name =
-              '${model['displayName'] ?? ''} ${model['model'] ?? model['id'] ?? ''}'
-                  .toLowerCase();
-          return name.contains(query);
-        })
-        .toList(growable: false);
-    return _SettingsDetailShell(
-      title: 'Model / reasoning',
-      onBack: widget.onBack,
-      height: modelSettingsPanelHeight(
-        models.length,
-        showReasoning: widget.controller.selectedModelEfforts.isNotEmpty,
+    final models = widget.controller.models;
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        maxHeight: (MediaQuery.sizeOf(context).height - 90).clamp(160.0, 390.0),
       ),
-      child: Expanded(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: TextField(
-                key: const ValueKey('model-search'),
-                controller: _search,
-                autofocus: true,
-                onChanged: (_) => setState(() {}),
-                style: const TextStyle(fontSize: 11.5),
-                decoration: const InputDecoration(
-                  prefixIcon: Icon(Icons.search_rounded, size: 17),
-                  prefixIconConstraints: BoxConstraints(minWidth: 34),
-                  hintText: 'Search models',
-                  isDense: true,
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 9,
-                  ),
-                  border: OutlineInputBorder(),
-                ),
+      child: _SettingsDetailShell(
+        title: 'Model / reasoning',
+        onBack: widget.onBack,
+        width: 320,
+        height: null,
+        child: Flexible(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: models.isEmpty
+                    ? const Padding(
+                        padding: EdgeInsets.all(16),
+                        child: Text('No models available'),
+                      )
+                    : ListView.builder(
+                        key: const ValueKey('model-list'),
+                        shrinkWrap: true,
+                        primary: false,
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        itemCount: models.length,
+                        itemBuilder: (context, index) {
+                          final model = models[index];
+                          final id =
+                              model['model']?.toString() ??
+                              model['id']?.toString() ??
+                              '';
+                          final selected =
+                              id == widget.controller.selectedModel;
+                          return RadioGroup<String>(
+                            groupValue: widget.controller.selectedModel,
+                            onChanged: (value) {
+                              if (value != null) {
+                                widget.controller.setModel(value);
+                                setState(() {});
+                              }
+                            },
+                            child: RadioListTile<String>(
+                              key: ValueKey('model-$id'),
+                              value: id,
+                              dense: true,
+                              visualDensity: const VisualDensity(
+                                horizontal: -4,
+                                vertical: -4,
+                              ),
+                              materialTapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
+                              title: Text(
+                                model['displayName']?.toString() ?? id,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 11.5),
+                              ),
+                              selected: selected,
+                            ),
+                          );
+                        },
+                      ),
               ),
-            ),
-            Expanded(
-              child: models.isEmpty
-                  ? const Center(child: Text('No matching models'))
-                  : ListView.builder(
-                      key: const ValueKey('model-list'),
-                      itemCount: models.length,
-                      itemBuilder: (context, index) {
-                        final model = models[index];
-                        final id =
-                            model['model']?.toString() ??
-                            model['id']?.toString() ??
-                            '';
-                        final selected = id == widget.controller.selectedModel;
-                        return RadioGroup<String>(
-                          groupValue: widget.controller.selectedModel,
-                          onChanged: (value) {
-                            if (value != null) {
-                              widget.controller.setModel(value);
-                              setState(() {});
-                            }
-                          },
-                          child: RadioListTile<String>(
-                            key: ValueKey('model-$id'),
-                            value: id,
-                            dense: true,
-                            visualDensity: const VisualDensity(vertical: -3),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                            ),
-                            title: Text(
-                              model['displayName']?.toString() ?? id,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 11.5),
-                            ),
-                            subtitle: model['description'] == null
-                                ? null
-                                : Text(
-                                    model['description'].toString(),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(fontSize: 10),
-                                  ),
-                            selected: selected,
-                          ),
-                        );
-                      },
+              if (widget.controller.selectedModelEfforts.isNotEmpty) ...[
+                const Divider(height: 1),
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(16, 10, 16, 4),
+                    child: Text(
+                      'Reasoning',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
-            ),
-            if (widget.controller.selectedModelEfforts.isNotEmpty) ...[
-              const Divider(height: 1),
-              const Align(
-                alignment: Alignment.centerLeft,
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(16, 10, 16, 4),
-                  child: Text(
-                    'Reasoning',
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
                   ),
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    key: const ValueKey('reasoning-options-row'),
-                    children: [
-                      for (
-                        var index = 0;
-                        index < widget.controller.selectedModelEfforts.length;
-                        index++
-                      ) ...[
-                        if (index > 0) const SizedBox(width: 5),
-                        ChoiceChip(
-                          key: ValueKey(
-                            'effort-${widget.controller.selectedModelEfforts[index]}',
-                          ),
-                          label: Text(
-                            widget.controller.selectedModelEfforts[index],
-                          ),
-                          labelStyle: const TextStyle(fontSize: 10),
-                          visualDensity: const VisualDensity(
-                            horizontal: -3,
-                            vertical: -3,
-                          ),
-                          materialTapTargetSize:
-                              MaterialTapTargetSize.shrinkWrap,
-                          padding: const EdgeInsets.symmetric(horizontal: 3),
-                          selected:
-                              widget.controller.selectedModelEfforts[index] ==
-                              widget.controller.selectedEffort,
-                          onSelected: (_) {
-                            widget.controller.setEffort(
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      key: const ValueKey('reasoning-options-row'),
+                      children: [
+                        for (
+                          var index = 0;
+                          index < widget.controller.selectedModelEfforts.length;
+                          index++
+                        ) ...[
+                          if (index > 0) const SizedBox(width: 5),
+                          ChoiceChip(
+                            key: ValueKey(
+                              'effort-${widget.controller.selectedModelEfforts[index]}',
+                            ),
+                            label: Text(
                               widget.controller.selectedModelEfforts[index],
-                            );
-                            setState(() {});
-                          },
-                        ),
+                            ),
+                            labelStyle: const TextStyle(fontSize: 10),
+                            visualDensity: const VisualDensity(
+                              horizontal: -3,
+                              vertical: -3,
+                            ),
+                            materialTapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
+                            padding: const EdgeInsets.symmetric(horizontal: 3),
+                            selected:
+                                widget.controller.selectedModelEfforts[index] ==
+                                widget.controller.selectedEffort,
+                            onSelected: (_) {
+                              widget.controller.setEffort(
+                                widget.controller.selectedModelEfforts[index],
+                              );
+                              setState(() {});
+                            },
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
                 ),
-              ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );

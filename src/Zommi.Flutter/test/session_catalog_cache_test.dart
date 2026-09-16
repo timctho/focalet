@@ -353,6 +353,7 @@ void main() {
     expect(core.catalogRequests, ['runtime-2', 'runtime-0']);
     core.discoveredTargets.add(target(4));
     await controller.refreshRuntimes();
+    unawaited(controller.refreshSessionCatalog(force: true));
     expect(core.catalogRequests, hasLength(2));
     gates['runtime-0']!.complete();
     await Future<void>.delayed(Duration.zero);

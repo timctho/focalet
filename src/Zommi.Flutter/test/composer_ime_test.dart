@@ -113,7 +113,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('XL'));
       await tester.pumpAndSettle();
-      expect(tester.widget<TextField>(field).style?.fontSize, 15);
+      expect(tester.widget<TextField>(field).style?.fontSize, 17);
       expect(
         editable.widget.controller.value.composing,
         const TextRange(start: 2, end: 4),

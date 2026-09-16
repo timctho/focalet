@@ -47,7 +47,7 @@ void main() {
       expect(AppPreferences.fromJson(const {}).chatFontSize, 14);
       expect(
         AppPreferences.fromJson(const {'chatFontSize': 13}).chatFontSize,
-        13,
+        14,
       );
       expect(
         AppPreferences.fromJson(const {'chatFontSize': 2}).chatFontSize,
@@ -55,7 +55,7 @@ void main() {
       );
       expect(
         AppPreferences.fromJson(const {'chatFontSize': 99}).chatFontSize,
-        15,
+        17,
       );
     },
   );
@@ -67,7 +67,7 @@ void main() {
     addTearDown(() => directory.delete(recursive: true));
     final store = FileAppPreferencesStore('${directory.path}/settings.json');
     const expected = AppPreferences(
-      chatFontSize: 14,
+      chatFontSize: 17,
       themeColor: ZommiThemeColor.ocean,
       windowSize: WindowSizeSetting.wide,
     );
@@ -75,7 +75,7 @@ void main() {
     await store.save(expected);
     final restored = await store.load();
 
-    expect(restored.chatFontSize, 14);
+    expect(restored.chatFontSize, 17);
     expect(restored.themeColor, ZommiThemeColor.ocean);
     expect(restored.windowSize, WindowSizeSetting.wide);
   });

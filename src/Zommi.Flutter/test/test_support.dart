@@ -82,6 +82,9 @@ class RichFakeCore
   String? connectErrorCode;
   String connectErrorMessage = 'Authentication required';
   bool? lastDiscoveryForce;
+  Future<void>? discoveryGate;
+  bool discoveryFails = false;
+  int discoveryCount = 0;
   Future<void>? initializeGate;
   Future<void>? connectGate;
   Future<void>? startTurnGate;
@@ -222,6 +225,9 @@ class RichFakeCore
     bool force = false,
   }) async {
     lastDiscoveryForce = force;
+    discoveryCount++;
+    if (discoveryGate case final gate?) await gate;
+    if (discoveryFails) throw StateError('Discovery unavailable');
     return RuntimeDiscovery(
       targets: discoveredTargets,
       selectedTargetId: lastSelectedTargetId ?? activeTargetId,

@@ -51,7 +51,7 @@ class _RuntimeCommandMenuState extends State<RuntimeCommandMenu> {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(22, 4, 22, 2),
+    padding: const EdgeInsets.only(top: 4, bottom: 2),
     child: Material(
       elevation: 5,
       color: Theme.of(context).colorScheme.surface,

@@ -320,6 +320,23 @@ void main() {
       find.byKey(const ValueKey('runtime-command-/inspect')),
       findsOneWidget,
     );
+    for (final width in [960.0, 1600.0]) {
+      await tester.binding.setSurfaceSize(Size(width, 760));
+      await tester.pumpAndSettle();
+      final panel = tester.getRect(
+        find
+            .descendant(
+              of: find.byKey(const ValueKey('runtime-command-menu')),
+              matching: find.byType(Material),
+            )
+            .first,
+      );
+      final composer = tester.getRect(
+        find.byKey(const ValueKey('message-composer-shell')),
+      );
+      expect(panel.left, closeTo(composer.left, .1));
+      expect(panel.right, closeTo(composer.right, .1));
+    }
     await tester.sendKeyEvent(LogicalKeyboardKey.tab);
     await tester.pump();
     expect(tester.widget<TextField>(field).controller!.text, '/inspect ');

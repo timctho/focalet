@@ -150,30 +150,35 @@ void main() {
     },
   );
 
-  testWidgets('failed catalogs stay quiet and Refresh agents can retry', (
-    tester,
-  ) async {
-    final core = multiRuntimeCore()
-      ..catalogFailures.add(hermes.id)
-      ..sessionsByRuntime[hermes.id] = savedHermesChats;
-    await tester.pumpWidget(ZommiApp(core: core, desktop: FakeDesktopBridge()));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('chats could not be loaded'), findsNothing);
-    expect(find.byKey(const ValueKey('retry-session-catalog')), findsNothing);
-    expect(
-      find.byKey(const ValueKey('session-runtime-codex-session-1')),
-      findsOneWidget,
-    );
-    core.catalogFailures.clear();
-    await tester.tap(find.byKey(const ValueKey('new-session')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('refresh-runtimes')));
-    await tester.pumpAndSettle();
-    expect(find.text('Hermes chats could not be loaded'), findsNothing);
-    expect(find.text('Recent Hermes work'), findsOneWidget);
-    expect(core.createdSessions, isEmpty);
-    expect(core.activeTargetId, 'runtime-codex');
-  });
+  test(
+    'failed catalogs retry only through an explicit catalog refresh',
+    () async {
+      final core = multiRuntimeCore()
+        ..catalogFailures.add(hermes.id)
+        ..sessionsByRuntime[hermes.id] = savedHermesChats;
+      final controller = ZommiController(
+        core: core,
+        desktop: FakeDesktopBridge(),
+      );
+      addTearDown(controller.close);
+      await controller.initialize();
+      await Future<void>.delayed(Duration.zero);
+      final requests = [...core.catalogRequests];
+      core.catalogFailures.clear();
+      await controller.refreshRuntimes();
+      await Future<void>.delayed(Duration.zero);
+      expect(core.catalogRequests, requests);
+      await controller.refreshSessionCatalog(force: true);
+      expect(
+        controller.sessions.where(
+          (session) => session.runtimeTargetId == hermes.id,
+        ),
+        hasLength(2),
+      );
+      expect(core.createdSessions, isEmpty);
+      expect(core.activeTargetId, 'runtime-codex');
+    },
+  );
 
   test(
     'late catalog replies are ignored after the controller closes',
@@ -199,26 +204,30 @@ void main() {
     },
   );
 
-  test('refresh discovers saved chats for a newly available runtime', () async {
-    final core = RichFakeCore()..historyCount = 0;
-    final controller = ZommiController(
-      core: core,
-      desktop: FakeDesktopBridge(),
-    );
-    addTearDown(controller.close);
-    await controller.initialize();
-    await Future<void>.delayed(Duration.zero);
-    core.discoveredTargets.add(hermes);
-    core.sessionsByRuntime[hermes.id] = savedHermesChats;
-    await controller.refreshRuntimes();
-    await Future<void>.delayed(Duration.zero);
-    expect(
-      controller.sessions.where(
-        (session) => session.runtimeTargetId == hermes.id,
-      ),
-      hasLength(2),
-    );
-    expect(core.createdSessions, isEmpty);
-    expect(controller.activeRuntime?.id, 'runtime-codex');
-  });
+  test(
+    'catalog refresh finds saved chats after discovering a runtime',
+    () async {
+      final core = RichFakeCore()..historyCount = 0;
+      final controller = ZommiController(
+        core: core,
+        desktop: FakeDesktopBridge(),
+      );
+      addTearDown(controller.close);
+      await controller.initialize();
+      await Future<void>.delayed(Duration.zero);
+      core.discoveredTargets.add(hermes);
+      core.sessionsByRuntime[hermes.id] = savedHermesChats;
+      await controller.refreshRuntimes();
+      expect(core.catalogRequests, isNot(contains(hermes.id)));
+      await controller.refreshSessionCatalog(force: true);
+      expect(
+        controller.sessions.where(
+          (session) => session.runtimeTargetId == hermes.id,
+        ),
+        hasLength(2),
+      );
+      expect(core.createdSessions, isEmpty);
+      expect(controller.activeRuntime?.id, 'runtime-codex');
+    },
+  );
 }

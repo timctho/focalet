@@ -83,7 +83,8 @@ final class AppPreferences {
           !value.containsKey('runtimeSetupCompleted') ||
           value['runtimeSetupCompleted'] == true,
       browserPageDetails: value['browserPageDetails'] != false,
-      chatFontSize: fontSize.clamp(12, 15).toDouble(),
+      // The retired Medium preset follows Default on existing installs.
+      chatFontSize: fontSize == 13 ? 14 : fontSize.clamp(12, 17).toDouble(),
       themeColor:
           const ['violet', 'forest', 'ember'].contains(value['themeColor'])
           ? ZommiThemeColor.custom

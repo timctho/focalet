@@ -344,7 +344,7 @@ void main() {
   });
 
   test(
-    'Chats remains reachable from a runtime without session navigation',
+    'Agents remains reachable from a runtime without session navigation',
     () async {
       final core = multiRuntimeCore();
       final controller = ZommiController(
@@ -383,7 +383,7 @@ void main() {
       final add = find.byKey(const ValueKey('new-session'));
       await tester.tap(add);
       await tester.pumpAndSettle();
-      expect(find.text('New chat with'), findsOneWidget);
+      expect(find.text('New agent'), findsOneWidget);
       expect(core.createdSessions, isEmpty);
       final choice = find.byKey(
         const ValueKey('create-session-runtime-hermes'),
@@ -394,14 +394,16 @@ void main() {
       expect(bounds.bottom, lessThanOrEqualTo(size.height));
       expect(
         tester
-            .widget<PopupMenuItem<String>>(
+            .widget<MenuItemButton>(
               find.byKey(const ValueKey('create-session-runtime-claude')),
             )
-            .enabled,
-        isFalse,
+            .onPressed,
+        isNull,
       );
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
+      expect(find.text('New agent'), findsNothing);
+      expect(find.byKey(const ValueKey('session-sidebar')), findsOneWidget);
       expect(core.createdSessions, isEmpty);
       await tester.tap(add);
       await tester.pumpAndSettle();
@@ -424,15 +426,15 @@ void main() {
       final title = find.byKey(
         const ValueKey('session-title-runtime-codex-session-1'),
       );
-      expect(tester.getCenter(workspace).dy, tester.getCenter(logo).dy);
+      expect(
+        tester.getCenter(workspace).dy,
+        lessThan(tester.getCenter(logo).dy),
+      );
       expect(
         tester.getCenter(title).dy,
         greaterThan(tester.getCenter(logo).dy),
       );
-      expect(
-        tester.getCenter(logo).dx,
-        greaterThan(tester.getRect(original).left + 24),
-      );
+      expect(tester.getRect(logo).right, lessThan(tester.getRect(title).left));
       await tester.tap(original);
       await tester.pumpAndSettle();
       expect(core.openedSessions.last, ('runtime-codex', 'session-1'));
@@ -443,6 +445,120 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets(
+    'refresh keeps the menu open through detection, failure, and retry',
+    (tester) async {
+      final core = RichFakeCore()..historyCount = 0;
+      await tester.pumpWidget(
+        ZommiApp(core: core, desktop: FakeDesktopBridge()),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('new-session')));
+      await tester.pumpAndSettle();
+      final gate = Completer<void>();
+      core.discoveryGate = gate.future;
+      core.discoveryFails = true;
+      final refresh = find.byKey(const ValueKey('refresh-runtimes'));
+      await tester.tap(refresh);
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 2));
+      expect(find.text('New agent'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('runtime-discovery-progress')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('create-session-runtime-codex')),
+        findsOneWidget,
+      );
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('runtime-discovery-error')),
+        findsOneWidget,
+      );
+      expect(find.text('New agent'), findsOneWidget);
+
+      final retryGate = Completer<void>();
+      core.discoveryGate = retryGate.future;
+      core.discoveryFails = false;
+      await tester.tap(refresh);
+      await tester.pump();
+      core.discoveredTargets.add(hermes);
+      retryGate.complete();
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('runtime-discovery-error')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('runtime-discovery-progress')),
+        findsNothing,
+      );
+      expect(find.text('4 available'), findsOneWidget);
+      await tester.tap(
+        find.byKey(const ValueKey('create-session-runtime-hermes')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('New agent'), findsNothing);
+      expect(core.activeTargetId, hermes.id);
+      expect(core.createdSessions, hasLength(1));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'model list fits short catalogs and scrolls long catalogs in a small window',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(640, 500));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      for (final count in [1, 30]) {
+        final core = RichFakeCore()
+          ..historyCount = 0
+          ..modelCatalogByRuntime['runtime-codex'] = [
+            for (var i = 0; i < count; i++)
+              {
+                'model': 'model-$i',
+                'displayName': 'Model $i',
+                'isDefault': i == 0,
+              },
+          ];
+        await tester.pumpWidget(
+          ZommiApp(
+            key: ValueKey(count),
+            core: core,
+            desktop: FakeDesktopBridge(),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('model-summary')));
+        await tester.pumpAndSettle();
+        final panel = find.byKey(const ValueKey('model-settings-panel'));
+        final last = find.byKey(ValueKey('model-model-${count - 1}'));
+        if (count == 1) {
+          expect(
+            tester.getBottomRight(panel).dy - tester.getBottomRight(last).dy,
+            lessThan(14),
+          );
+        } else {
+          await tester.scrollUntilVisible(
+            last,
+            200,
+            scrollable: find.descendant(
+              of: find.byKey(const ValueKey('model-list')),
+              matching: find.byType(Scrollable),
+            ),
+          );
+          await tester.tap(last);
+          await tester.pumpAndSettle();
+          expect(find.textContaining('Model 29'), findsWidgets);
+        }
+        expect(tester.getRect(panel).bottom, lessThanOrEqualTo(500));
+        expect(tester.takeException(), isNull);
+      }
+    },
+  );
 
   testWidgets('right window controls call minimize and close separately', (
     tester,
