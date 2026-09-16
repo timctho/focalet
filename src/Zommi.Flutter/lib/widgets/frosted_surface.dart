@@ -66,6 +66,7 @@ class FrostedSurface extends StatelessWidget {
     this.color,
     this.blurBackground = true,
     this.showBorder = true,
+    this.borderSide,
     super.key,
   });
 
@@ -76,6 +77,7 @@ class FrostedSurface extends StatelessWidget {
   final Color? color;
   final bool blurBackground;
   final bool showBorder;
+  final BorderSide? borderSide;
 
   @override
   Widget build(BuildContext context) {
@@ -100,8 +102,13 @@ class FrostedSurface extends StatelessWidget {
               ],
             ),
             border: showBorder
-                ? Border.all(
-                    color: Colors.white.withValues(alpha: dark ? .13 : .65),
+                ? Border.fromBorderSide(
+                    borderSide ??
+                        BorderSide(
+                          color: Colors.white.withValues(
+                            alpha: dark ? .13 : .65,
+                          ),
+                        ),
                   )
                 : null,
           ),

@@ -82,7 +82,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   Win32Window::Point origin(10, 10);
   // The taskbar-first UI starts as the complete chat surface; there is no
   // compact orb bootstrap frame to morph away from.
-  Win32Window::Size size(900, 760);
+  Win32Window::Size size(1120, 820);
   if (!window.Create(L"Zommi", origin, size)) {
     if (instance_mutex != nullptr) {
       ReleaseMutex(instance_mutex);

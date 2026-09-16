@@ -10,6 +10,78 @@ import 'package:zommi_flutter/theme/app_preferences.dart';
 
 void main() {
   testWidgets(
+    'startup centers and fits the saved window size before showing it',
+    (tester) async {
+      const window = MethodChannel('window_manager');
+      const screen = MethodChannel('dev.leanflutter.plugins/screen_retriever');
+      var bounds = const Rect.fromLTWH(10, 10, 900, 760);
+      var workArea = const Rect.fromLTWH(-1600, 40, 1600, 1000);
+      var shown = false;
+      final messenger = tester.binding.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(window, (call) async {
+        if (call.method == 'getBounds') {
+          return {
+            'x': bounds.left,
+            'y': bounds.top,
+            'width': bounds.width,
+            'height': bounds.height,
+          };
+        }
+        if (call.method == 'setBounds') {
+          final args = call.arguments as Map;
+          bounds = Rect.fromLTWH(
+            args['x'] as double? ?? bounds.left,
+            args['y'] as double? ?? bounds.top,
+            args['width'] as double? ?? bounds.width,
+            args['height'] as double? ?? bounds.height,
+          );
+        }
+        if (call.method == 'show') shown = true;
+        return false;
+      });
+      messenger.setMockMethodCallHandler(screen, (call) async {
+        if (call.method == 'getCursorScreenPoint') {
+          return {'dx': workArea.center.dx, 'dy': workArea.center.dy};
+        }
+        final display = {
+          'id': 'test-screen',
+          'size': {'width': workArea.width, 'height': workArea.height},
+          'visiblePosition': {'dx': workArea.left, 'dy': workArea.top},
+          'visibleSize': {'width': workArea.width, 'height': workArea.height},
+        };
+        return call.method == 'getAllDisplays'
+            ? {
+                'displays': [display],
+              }
+            : display;
+      });
+      addTearDown(() {
+        messenger.setMockMethodCallHandler(window, null);
+        messenger.setMockMethodCallHandler(screen, null);
+      });
+      for (final setting in [
+        WindowSizeSetting.standard,
+        WindowSizeSetting.wide,
+      ]) {
+        await FlutterDesktopBridge.bootstrap(windowSize: setting);
+        expect(bounds.center, workArea.center);
+        expect(
+          bounds.size,
+          setting == WindowSizeSetting.wide
+              ? largeWindowSize
+              : normalWindowSize,
+        );
+        expect(shown, isFalse);
+      }
+      workArea = const Rect.fromLTWH(0, 0, 1024, 700);
+      await FlutterDesktopBridge.bootstrap();
+      expect(bounds, workArea);
+      expect(shown, isFalse);
+    },
+    skip: !Platform.isLinux,
+  );
+
+  testWidgets(
     'desktop registers only Alt+A and removes that registration on close',
     (tester) async {
       await tester.runAsync(() async {
@@ -276,7 +348,7 @@ void main() {
       });
       if (!maximized) {
         expect(bounds.center.dx, 800);
-        expect(bounds.bottom, 982);
+        expect(bounds.bottom, 500 + normalWindowSize.height / 2);
       }
     }
   });
@@ -786,16 +858,16 @@ void main() {
   });
 
   test('surface bounds preserve one bottom-center anchor across morphs', () {
-    const workArea = Rect.fromLTWH(100, 50, 1200, 800);
+    const workArea = Rect.fromLTWH(100, 50, 1600, 1000);
     final initial = anchoredSurfaceBounds(
-      anchor: Offset(workArea.center.dx, workArea.bottom - windowBottomInset),
+      anchor: initialSurfaceAnchor(workArea, normalWindowSize),
       workArea: workArea,
-      size: compactWindowSize,
+      size: normalWindowSize,
     );
     expect(initial.center.dx, workArea.center.dx);
-    expect(initial.bottom, workArea.bottom - windowBottomInset);
+    expect(initial.center, workArea.center);
 
-    const anchor = Offset(650, 820);
+    const anchor = Offset(800, 950);
     final expanded = anchoredSurfaceBounds(
       anchor: anchor,
       workArea: workArea,

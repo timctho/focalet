@@ -136,6 +136,13 @@ class _ZommiAppState extends State<ZommiApp> {
       return theme.copyWith(
         textTheme: _compactTextTheme(theme.textTheme),
         visualDensity: VisualDensity.compact,
+        popupMenuTheme: PopupMenuThemeData(
+          color: scheme.surfaceContainerLow,
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(zommiOverlayPanelRadius),
+          ),
+        ),
         extensions: [
           ZommiVisualSettings(
             chatFontSize: _preferences.chatFontSize,
@@ -1052,6 +1059,8 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
   }
 
   Widget _buildComposer() {
+    final colors = Theme.of(context).colorScheme;
+    final light = colors.brightness == Brightness.light;
     final willQueue =
         !_controller.isRuntimeCommand(_composer.messageText) &&
         (_controller.turnActive || _controller.queuedMessages.isNotEmpty);
@@ -1068,9 +1077,10 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
             ),
             child: FrostedSurface(
               key: const ValueKey('message-composer-shell'),
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              opacity: .85,
-              showBorder: false,
+              color: light ? colors.surface : colors.surfaceContainerHighest,
+              opacity: light ? .65 : .85,
+              showBorder: light,
+              borderSide: BorderSide(color: colors.outlineVariant, width: .75),
               // This row is below the transcript and covers only the smooth
               // panel gradient, so a backdrop blur adds no useful detail.
               blurBackground: false,

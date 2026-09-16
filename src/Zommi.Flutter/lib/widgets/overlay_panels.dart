@@ -79,8 +79,7 @@ class _SessionSidebarState extends State<SessionSidebar> {
       label: 'Chat sessions',
       child: Material(
         key: const ValueKey('session-sidebar'),
-        color: Theme.of(context).colorScheme.surfaceContainerLow
-            .withValues(alpha: .38),
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
         elevation: 0,
         child: Column(
           children: [
@@ -273,7 +272,7 @@ class _SessionSidebarState extends State<SessionSidebar> {
                     final colors = Theme.of(context).colorScheme;
                     final localizations = MaterialLocalizations.of(context);
                     return Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
+                      padding: const EdgeInsets.only(bottom: 8),
                       child: Semantics(
                         selected: selected,
                         label:
@@ -293,14 +292,8 @@ class _SessionSidebarState extends State<SessionSidebar> {
                               vertical: 3,
                             ),
                             selected: selected,
-                            // Neutral overlays keep cream/custom accents from
-                            // becoming bright cards in the dark theme.
-                            tileColor: colors.onSurface.withValues(alpha: .045),
-                            selectedTileColor: colors.onSurface.withValues(
-                              alpha: colors.brightness == Brightness.dark
-                                  ? .10
-                                  : .085,
-                            ),
+                            tileColor: Colors.transparent,
+                            selectedTileColor: Colors.transparent,
                             selectedColor: colors.onSurface,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
@@ -387,7 +380,11 @@ class _SessionSidebarState extends State<SessionSidebar> {
                                   ),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: chatTextStyleOf(context),
+                                  style: chatTextStyleOf(context).copyWith(
+                                    fontWeight: selected
+                                        ? FontWeight.w600
+                                        : FontWeight.w400,
+                                  ),
                                 ),
                               ],
                             ),
@@ -477,6 +474,13 @@ class _RuntimeSetupPanelState extends State<RuntimeSetupPanel> {
   String _adapterId = '';
   String _hostId = '';
   String? _executablePath;
+  final _wslPath = TextEditingController();
+
+  @override
+  void dispose() {
+    _wslPath.dispose();
+    super.dispose();
+  }
 
   Map<String, Object?>? get _adapter {
     final adapters = widget.controller.configurableRuntimeAdapters;
@@ -505,6 +509,9 @@ class _RuntimeSetupPanelState extends State<RuntimeSetupPanel> {
     final selectedHost = hosts.any((host) => host['id'] == _hostId)
         ? _hostId
         : (hosts.isEmpty ? '' : hosts.first['id']?.toString() ?? '');
+    final wslHost = hosts.any(
+      (host) => host['id'] == selectedHost && host['kind'] == 'wsl',
+    );
     return Material(
       key: const ValueKey('runtime-setup-panel'),
       color: Theme.of(context).colorScheme.surfaceContainerLow,
@@ -579,6 +586,7 @@ class _RuntimeSetupPanelState extends State<RuntimeSetupPanel> {
                             _adapterId = value ?? '';
                             _hostId = '';
                             _executablePath = null;
+                            _wslPath.clear();
                           }),
                           child: Column(
                             key: const ValueKey('runtime-setup-adapter-list'),
@@ -607,6 +615,7 @@ class _RuntimeSetupPanelState extends State<RuntimeSetupPanel> {
                           onChanged: (value) => setState(() {
                             _hostId = value ?? '';
                             _executablePath = null;
+                            _wslPath.clear();
                           }),
                           child: Column(
                             key: const ValueKey('runtime-setup-host-list'),
@@ -628,61 +637,87 @@ class _RuntimeSetupPanelState extends State<RuntimeSetupPanel> {
                         ),
                         const SizedBox(height: 10),
                         const _RuntimeSetupSectionLabel('CLI executable'),
-                        Container(
-                          key: const ValueKey('runtime-override-path'),
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context)
-                                .colorScheme
-                                .surfaceContainerHighest,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.terminal_rounded, size: 17),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  _executablePath ??
-                                      'Choose the installed CLI executable',
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 10.5,
-                                    color: _executablePath == null
-                                        ? Theme.of(context)
-                                              .colorScheme
-                                              .onSurfaceVariant
-                                        : Theme.of(context)
-                                              .colorScheme
-                                              .onSurface,
+                        if (wslHost)
+                          TextFormField(
+                            key: ValueKey(
+                              'runtime-wsl-path-$adapterId-$selectedHost',
+                            ),
+                            controller: _wslPath,
+                            style: const TextStyle(fontSize: 12),
+                            autocorrect: false,
+                            enableSuggestions: false,
+                            decoration: const InputDecoration(
+                              hintText: '~/.hermes/bin/codex',
+                              labelText: 'Path in WSL',
+                              isDense: true,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.all(
+                                  Radius.circular(12),
+                                ),
+                              ),
+                            ),
+                            onChanged: (value) => setState(() {
+                              _executablePath = value.trim().isEmpty
+                                  ? null
+                                  : value.trim();
+                            }),
+                          )
+                        else
+                          Container(
+                            key: const ValueKey('runtime-override-path'),
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .surfaceContainerHighest,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.terminal_rounded, size: 17),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    _executablePath ??
+                                        'Choose the installed CLI executable',
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 10.5,
+                                      color: _executablePath == null
+                                          ? Theme.of(context)
+                                                .colorScheme
+                                                .onSurfaceVariant
+                                          : Theme.of(context)
+                                                .colorScheme
+                                                .onSurface,
+                                    ),
                                   ),
                                 ),
-                              ),
-                              const SizedBox(width: 8),
-                              OutlinedButton(
-                                key: const ValueKey(
-                                  'select-runtime-executable',
-                                ),
-                                onPressed: selectedHost.isEmpty
-                                    ? null
-                                    : () async {
-                                        final path = await widget.controller
-                                            .chooseRuntimeExecutable(
-                                              executionHostId: selectedHost,
+                                const SizedBox(width: 8),
+                                OutlinedButton(
+                                  key: const ValueKey(
+                                    'select-runtime-executable',
+                                  ),
+                                  onPressed: selectedHost.isEmpty
+                                      ? null
+                                      : () async {
+                                          final path = await widget.controller
+                                              .chooseRuntimeExecutable(
+                                                executionHostId: selectedHost,
+                                              );
+                                          if (mounted && path != null) {
+                                            setState(
+                                              () => _executablePath = path,
                                             );
-                                        if (mounted && path != null) {
-                                          setState(
-                                            () => _executablePath = path,
-                                          );
-                                        }
-                                      },
-                                child: const Text('Choose…'),
-                              ),
-                            ],
+                                          }
+                                        },
+                                  child: const Text('Choose…'),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
                         const SizedBox(height: 10),
                         Align(
                           alignment: Alignment.centerRight,
@@ -695,13 +730,23 @@ class _RuntimeSetupPanelState extends State<RuntimeSetupPanel> {
                                     selectedHost.isEmpty
                                 ? null
                                 : () async {
+                                    final previousCount = widget
+                                        .controller
+                                        .runtimeOverrides
+                                        .length;
                                     await widget.controller.saveRuntimeOverride(
                                       adapterId: adapterId,
                                       locator: _executablePath!,
                                       executionHostId: selectedHost,
                                     );
-                                    if (mounted) {
+                                    if (mounted &&
+                                        widget
+                                                .controller
+                                                .runtimeOverrides
+                                                .length >
+                                            previousCount) {
                                       setState(() => _executablePath = null);
+                                      _wslPath.clear();
                                     }
                                   },
                             child: const Text('Add runtime'),
@@ -800,25 +845,30 @@ class _RuntimeSetupOption extends StatelessWidget {
   final bool selected;
 
   @override
-  Widget build(BuildContext context) => RadioListTile<String>(
-    value: value,
-    dense: true,
-    visualDensity: const VisualDensity(vertical: -3),
-    contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-    selected: selected,
-    selectedTileColor: Theme.of(context).colorScheme.primaryContainer,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-    title: Text(
-      title,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: const TextStyle(fontSize: 11.5),
-    ),
-    subtitle: Text(
-      subtitle,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: const TextStyle(fontSize: 10),
+  Widget build(BuildContext context) => Material(
+    type: MaterialType.transparency,
+    borderRadius: BorderRadius.circular(12),
+    clipBehavior: Clip.antiAlias,
+    child: RadioListTile<String>(
+      value: value,
+      dense: true,
+      visualDensity: const VisualDensity(vertical: -3),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+      selected: selected,
+      selectedTileColor: Theme.of(context).colorScheme.primaryContainer,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      title: Text(
+        title,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 11.5),
+      ),
+      subtitle: Text(
+        subtitle,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 10),
+      ),
     ),
   );
 }
@@ -869,6 +919,13 @@ class _ModelSettingsPanelState extends State<ModelSettingsPanel> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.controller.modelSelectionSupported &&
+        !widget.controller.profileSelectionSupported) {
+      return ModelPanel(
+        key: const ValueKey('model-settings-panel'),
+        controller: widget.controller,
+      );
+    }
     final detail = switch (_page) {
       _ModelSettingsPage.model => ModelPanel(
         key: const ValueKey('model-panel'),
@@ -1044,8 +1101,8 @@ class AppSettingsPanel extends StatelessWidget {
               showSelectedIcon: false,
               segments: const [
                 ButtonSegment(value: 12, label: Text('Small')),
-                ButtonSegment(value: 13, label: Text('Default')),
-                ButtonSegment(value: 14, label: Text('Large')),
+                ButtonSegment(value: 13, label: Text('Medium')),
+                ButtonSegment(value: 14, label: Text('Default')),
                 ButtonSegment(value: 15, label: Text('XL')),
               ],
               selected: {preferences.chatFontSize},
@@ -1474,7 +1531,7 @@ class _SettingsDetailShell extends StatelessWidget {
   });
 
   final String title;
-  final VoidCallback onBack;
+  final VoidCallback? onBack;
   final Widget child;
   final double height;
 
@@ -1489,12 +1546,15 @@ class _SettingsDetailShell extends StatelessWidget {
             height: 48,
             child: Row(
               children: [
-                IconButton(
-                  key: const ValueKey('settings-back'),
-                  tooltip: 'Back to model settings',
-                  onPressed: onBack,
-                  icon: const Icon(Icons.arrow_back_rounded, size: 17),
-                ),
+                if (onBack != null)
+                  IconButton(
+                    key: const ValueKey('settings-back'),
+                    tooltip: 'Back to model settings',
+                    onPressed: onBack,
+                    icon: const Icon(Icons.arrow_back_rounded, size: 17),
+                  )
+                else
+                  const SizedBox(width: 16),
                 Text(
                   title,
                   style: const TextStyle(
@@ -1523,10 +1583,10 @@ double modelSettingsPanelHeight(
 }
 
 class ModelPanel extends StatefulWidget {
-  const ModelPanel({required this.controller, required this.onBack, super.key});
+  const ModelPanel({required this.controller, this.onBack, super.key});
 
   final ZommiController controller;
-  final VoidCallback onBack;
+  final VoidCallback? onBack;
 
   @override
   State<ModelPanel> createState() => _ModelPanelState();

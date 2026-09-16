@@ -220,8 +220,19 @@ impl HostState {
                         Value::String(format!("override-{}", Uuid::new_v4())),
                     );
                 }
-                let configured: ConfiguredRuntimeOverride = serde_json::from_value(value)
+                let mut configured: ConfiguredRuntimeOverride = serde_json::from_value(value)
                     .map_err(|error| HostError::new("invalid-request", error.to_string()))?;
+                if cfg!(windows) && configured.execution_host.kind == "wsl" {
+                    let distribution = configured.execution_host.name.clone().unwrap_or_default();
+                    let path = configured.executable_path.clone().unwrap_or_default();
+                    let resolved = tokio::task::spawn_blocking(move || {
+                        wsl_relay::resolve_runtime_executable(&distribution, path.trim())
+                    })
+                    .await
+                    .map_err(|error| HostError::new("invalid-configuration", error.to_string()))?
+                    .map_err(|error| HostError::new("invalid-configuration", error.to_string()))?;
+                    configured.executable_path = Some(resolved);
+                }
                 target_from_override(&configured, env::consts::OS)
                     .map_err(|message| HostError::new("invalid-configuration", message))?;
                 self.overrides

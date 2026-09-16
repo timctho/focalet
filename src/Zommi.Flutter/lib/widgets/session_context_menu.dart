@@ -26,16 +26,19 @@ class SessionContextMenu extends StatelessWidget {
       key: ValueKey('session-action-$action'),
       value: action,
       enabled: enabled,
+      height: 30,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       child: Row(
         children: [
-          Icon(icon, size: 16),
-          const SizedBox(width: 12),
-          Text(label),
+          Icon(icon, size: 14),
+          const SizedBox(width: 8),
+          Text(label, style: const TextStyle(fontSize: 11)),
         ],
       ),
     );
     final action = await showMenu<String>(
       context: context,
+      menuPadding: const EdgeInsets.symmetric(vertical: 5),
       position: RelativeRect.fromSize(
         Rect.fromLTWH(local.dx, local.dy, 0, 0),
         overlay.size,
@@ -55,7 +58,7 @@ class SessionContextMenu extends StatelessWidget {
           Icons.fork_right_rounded,
           enabled: controller.canForkSession(session),
         ),
-        const PopupMenuDivider(),
+        const PopupMenuDivider(height: 9),
         item(
           'delete',
           'Delete',

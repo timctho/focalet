@@ -43,7 +43,12 @@ void main() {
   test(
     'readable message size is the default and persisted values stay valid',
     () {
-      expect(const AppPreferences().chatFontSize, 13);
+      expect(const AppPreferences().chatFontSize, 14);
+      expect(AppPreferences.fromJson(const {}).chatFontSize, 14);
+      expect(
+        AppPreferences.fromJson(const {'chatFontSize': 13}).chatFontSize,
+        13,
+      );
       expect(
         AppPreferences.fromJson(const {'chatFontSize': 2}).chatFontSize,
         12,

@@ -226,12 +226,15 @@ installation, signing, permissions and interactive capture checks.
 
 A fresh install opens runtime setup before connecting: select a detected agent,
 sign in, scan again, configure its executable, or choose Set up later. Existing
-settings skip this flow. The standard window is 900×760 and large is 1100×860,
-clamped to the display work area.
+settings skip this flow. The standard window is 1120×820 and large is 1320×900,
+centered at startup and clamped to the display work area.
 
 To chat, install and authenticate a supported agent CLI in its own environment. Zommi discovers native and WSL targets, or accepts an
 explicit credential-free path/endpoint override. It never copies runtime
 credentials into its own settings.
+For WSL, enter the CLI's Linux path directly in Advanced agent runtime, such as
+`~/.hermes/bin/codex` or `/home/you/.hermes/bin/codex`. `~` refers to the selected
+distribution's user home; a leading `/` refers to its filesystem root.
 
 Windows build and manual native acceptance details are in
 [docs/windows-prototype.md](docs/windows-prototype.md) and

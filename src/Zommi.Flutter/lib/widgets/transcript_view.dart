@@ -1284,7 +1284,11 @@ class _ThinkingActivitySubItem extends StatelessWidget {
       key: ValueKey('activity-${block.id}'),
       margin: const EdgeInsets.only(top: 4),
       padding: const EdgeInsets.fromLTRB(9, 4, 9, 5),
-      decoration: BoxDecoration(borderRadius: BorderRadius.circular(10)),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHigh
+            .withValues(alpha: .65),
+        borderRadius: BorderRadius.circular(10),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1360,7 +1364,11 @@ class _ToolActivitySubItem extends StatelessWidget {
     return Container(
       key: ValueKey('activity-${block.id}'),
       margin: const EdgeInsets.only(top: 4),
-      decoration: BoxDecoration(borderRadius: BorderRadius.circular(10)),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHigh
+            .withValues(alpha: .65),
+        borderRadius: BorderRadius.circular(10),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

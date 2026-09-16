@@ -44,7 +44,7 @@ void main() {
       expect(pubspec, contains(dependency));
     }
     final main = File('${root.path}/lib/main.dart').readAsStringSync();
-    expect(main, contains('FlutterDesktopBridge.bootstrap()'));
+    expect(main, contains('FlutterDesktopBridge.bootstrap('));
     final bridge = File('${root.path}/lib/desktop/desktop_bridge.dart')
         .readAsStringSync();
     for (final contract in [
@@ -89,7 +89,7 @@ void main() {
         contains('CreateMutexW(nullptr, TRUE, kZommiInstanceMutexName)'),
         contains('ERROR_ALREADY_EXISTS'),
         contains('PostMessageW(HWND_BROADCAST, ZommiShowWindowMessage()'),
-        contains('Win32Window::Size size(900, 760)'),
+        contains('Win32Window::Size size(1120, 820)'),
       ),
     );
     expect(windowsInstance, contains('Zommi.Desktop.SingleInstance'));

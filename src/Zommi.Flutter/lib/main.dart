@@ -12,9 +12,11 @@ import 'package:zommi_flutter/zommi_app.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   ScrollPerformance.initialize();
-  final desktop = await FlutterDesktopBridge.bootstrap();
   final preferencesStore = FileAppPreferencesStore.platform();
   final preferences = await preferencesStore.load();
+  final desktop = await FlutterDesktopBridge.bootstrap(
+    windowSize: preferences.windowSize,
+  );
   runApp(
     ZommiApp(
       core: ProcessCoreBridge(),

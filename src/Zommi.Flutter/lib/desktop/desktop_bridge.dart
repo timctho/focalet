@@ -17,10 +17,11 @@ import 'package:window_manager/window_manager.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/desktop/capture_permissions.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
+import 'package:zommi_flutter/theme/app_preferences.dart';
 
 const Size compactWindowSize = Size(56, 56);
-const Size normalWindowSize = Size(900, 760);
-const Size largeWindowSize = Size(1100, 860);
+const Size normalWindowSize = Size(1120, 820);
+const Size largeWindowSize = Size(1320, 900);
 const double windowBottomInset = 18;
 const Duration surfaceTransitionDuration = Duration(milliseconds: 280);
 const int surfaceTransitionFrameCount = 16;
@@ -276,30 +277,42 @@ final class FlutterDesktopBridge
     CapturePermission permission,
   ) => _capturePermissions.requestCapturePermission(permission);
 
-  static Future<FlutterDesktopBridge> bootstrap() async {
+  static Future<FlutterDesktopBridge> bootstrap({
+    WindowSizeSetting windowSize = WindowSizeSetting.standard,
+  }) async {
     await windowManager.ensureInitialized();
-    const options = WindowOptions(
-      size: normalWindowSize,
-      minimumSize: Size(640, 500),
-      backgroundColor: Color(0x00000000),
+    final size = windowSize == WindowSizeSetting.wide
+        ? largeWindowSize
+        : normalWindowSize;
+    final options = WindowOptions(
+      size: size,
+      center: true,
+      minimumSize: const Size(640, 500),
+      backgroundColor: const Color(0x00000000),
       alwaysOnTop: false,
       skipTaskbar: false,
       title: 'Zommi',
       titleBarStyle: TitleBarStyle.hidden,
       windowButtonVisibility: false,
     );
-    await windowManager.waitUntilReadyToShow(options, () async {
-      await windowManager.setAsFrameless();
-      if (supportsNativeWindowShadow(Platform.operatingSystem)) {
-        await windowManager.setHasShadow(false);
-      }
-      await windowManager.setResizable(true);
-      await configureNativeSurfaceWindow();
-      await windowManager.setSize(normalWindowSize, animate: false);
-      await windowManager.setAlwaysOnTop(false);
-      await windowManager.setSkipTaskbar(false);
-    });
-    return FlutterDesktopBridge();
+    await windowManager.waitUntilReadyToShow(options);
+    await windowManager.setAsFrameless();
+    if (supportsNativeWindowShadow(Platform.operatingSystem)) {
+      await windowManager.setHasShadow(false);
+    }
+    await windowManager.setResizable(true);
+    await configureNativeSurfaceWindow();
+    await windowManager.setAlwaysOnTop(false);
+    await windowManager.setSkipTaskbar(false);
+    final desktop = FlutterDesktopBridge();
+    // Size and position the first visible frame within the monitor work area.
+    await desktop.setSurface(
+      expanded: true,
+      large: windowSize == WindowSizeSetting.wide,
+      maximized: windowSize == WindowSizeSetting.maximized,
+      animate: false,
+    );
+    return desktop;
   }
 
   @override
@@ -628,10 +641,7 @@ final class FlutterDesktopBridge
         _surfaceAnchor ??
         (_surfacePositionInitialized
             ? Offset(current.center.dx, current.bottom)
-            : Offset(
-                workAreaBounds.center.dx,
-                workAreaBounds.bottom - windowBottomInset,
-              ));
+            : initialSurfaceAnchor(workAreaBounds, Size(width, height)));
     _surfaceAnchor = anchor;
     final bounds = expanded && maximized
         ? workAreaBounds
@@ -1024,6 +1034,11 @@ Future<bool?> presentNativePanel({
     return null;
   }
 }
+
+Offset initialSurfaceAnchor(Rect workArea, Size size) => Offset(
+  workArea.center.dx,
+  workArea.center.dy + size.height.clamp(0, workArea.height) / 2,
+);
 
 Rect anchoredSurfaceBounds({
   required Offset anchor,

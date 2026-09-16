@@ -481,9 +481,9 @@ void main() {
         find.byKey(const ValueKey('model-settings-panel')),
         findsOneWidget,
       );
-      await tester.tap(find.byKey(const ValueKey('settings-model')));
-      await tester.pumpAndSettle();
-      final modelPanel = find.byKey(const ValueKey('model-panel'));
+      expect(find.byKey(const ValueKey('settings-model')), findsNothing);
+      expect(find.byKey(const ValueKey('settings-back')), findsNothing);
+      final modelPanel = find.byKey(const ValueKey('model-settings-panel'));
       final unfilteredPanelHeight = tester.getSize(modelPanel).height;
       expect(unfilteredPanelHeight, lessThan(390));
       final modelSurface = tester.widget<Material>(
@@ -849,7 +849,9 @@ void main() {
     );
     expect(find.byKey(const ValueKey('theme-color-control')), findsOneWidget);
 
-    await tester.tap(find.text('Large'));
+    await tester.tap(find.text('Medium'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Default'));
     await tester.pumpAndSettle();
     expect(
       tester
@@ -922,7 +924,7 @@ void main() {
       final field = tester.widget<TextField>(
         find.byKey(const ValueKey('zommi-composer')),
       );
-      expect(field.style?.fontSize, 13);
+      expect(field.style?.fontSize, 14);
       expect(field.style?.fontWeight, FontWeight.w400);
       expect(field.style?.fontFamily, codexUiFontFamily);
       expect(field.textAlignVertical, TextAlignVertical.center);
@@ -934,7 +936,7 @@ void main() {
           .map((body) => body.styleSheet?.p?.fontSize)
           .whereType<double>()
           .toSet();
-      expect(bodySizes, <double>{13});
+      expect(bodySizes, <double>{14});
       expect(bodySizes, {field.style?.fontSize});
       expect(
         markdown.map((body) => body.styleSheet?.p?.fontWeight),
@@ -1152,6 +1154,46 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('close-runtime-setup')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('runtime-setup-panel')), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'WSL setup accepts Linux paths without opening a Windows picker',
+    (tester) async {
+      final core = RichFakeCore()..historyCount = 0;
+      final desktop = FakeDesktopBridge();
+      await _pumpApp(tester, core: core, desktop: desktop);
+      await _openNewChatMenu(tester);
+      await tester.tap(find.byKey(const ValueKey('open-runtime-setup')));
+      await tester.pumpAndSettle();
+      final host = find.byKey(const ValueKey('runtime-setup-host-wsl:ubuntu'));
+      await tester.ensureVisible(host);
+      await tester.tap(host);
+      await tester.pumpAndSettle();
+      final field = find.byKey(
+        const ValueKey('runtime-wsl-path-codex-app-server-wsl:ubuntu'),
+      );
+      for (final path in [
+        '~/.hermes/bin/codex',
+        '/.hermes/bin/codex',
+        '/home/agent/My Tools/codex',
+      ]) {
+        await tester.ensureVisible(field);
+        await tester.enterText(field, path);
+        await tester.pump();
+        final save = find.byKey(const ValueKey('save-runtime-override'));
+        await tester.ensureVisible(save);
+        await tester.tap(save);
+        await tester.pumpAndSettle();
+        expect(core.configuredOverrides.last['executablePath'], path);
+        expect(
+          (core.configuredOverrides.last['executionHost'] as Map)['id'],
+          'wsl:ubuntu',
+        );
+        expect(tester.widget<TextFormField>(field).controller!.text, isEmpty);
+      }
+      expect(desktop.calls, isNot(contains('selectRuntimeExecutable')));
+      expect(tester.takeException(), isNull);
     },
   );
 

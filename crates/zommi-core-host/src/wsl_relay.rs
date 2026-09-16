@@ -30,6 +30,7 @@ const CHANNEL_STDERR: u8 = 2;
 const CHANNEL_EXIT: u8 = 3;
 const RELAY_SOURCE: &str = include_str!("../../../scripts/zommi-wsl-relay.js");
 const LAUNCHER_SOURCE: &str = include_str!("../../../scripts/launch-wsl-relay.sh");
+const RESOLVE_EXECUTABLE_SOURCE: &str = include_str!("../../../scripts/resolve-wsl-executable.sh");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -244,6 +245,55 @@ pub fn workspace_directory_exists(target: &RuntimeTarget, path: &str) -> io::Res
             bounded_text(&stderr)
         ))),
     }
+}
+
+/// Resolve a configured CLI inside its distribution, never against Windows.
+/// Persist the absolute result so runtime launches and sign-in use the same path.
+pub fn resolve_runtime_executable(distribution: &str, path: &str) -> io::Result<String> {
+    if !valid_distribution(distribution)
+        || !(path.starts_with('/') || path.starts_with("~/"))
+        || path.len() > 4096
+        || path.contains('\0')
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Choose a WSL distribution and an absolute Linux path or ~/path for the CLI.",
+        ));
+    }
+    let endpoint_path = endpoint_path(distribution)?;
+    let endpoint = ensure_relay(distribution, &endpoint_path)?;
+    let invocation = ProxyInvocation {
+        distribution: distribution.into(),
+        cwd: "/".into(),
+        command: "/bin/sh".into(),
+        args: vec![
+            "-c".into(),
+            RESOLVE_EXECUTABLE_SOURCE.into(),
+            "zommi-resolve-cli".into(),
+            path.into(),
+        ],
+    };
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let status = proxy_runtime_spool_to(
+        endpoint,
+        &endpoint_path,
+        invocation,
+        false,
+        &mut stdout,
+        &mut stderr,
+    )?;
+    let resolved = String::from_utf8(stdout).map_err(io::Error::other)?;
+    if status != 0 {
+        return Err(io::Error::other(format!(
+            "{distribution}: {}",
+            bounded_text(&stderr)
+        )));
+    }
+    if !resolved.starts_with('/') || resolved.contains('\0') || resolved.len() > 4096 {
+        return Err(io::Error::other("WSL returned an invalid CLI path."));
+    }
+    Ok(resolved)
 }
 
 struct ProxyInvocation {
@@ -849,6 +899,58 @@ fn read_json_line(reader: &mut BufReader<TcpStream>) -> io::Result<Value> {
 mod tests {
     use super::{LAUNCHER_SOURCE, ProxyInvocation, RELAY_SOURCE, hex_name, wrap_wsl_command};
     use zommi_core::{ExecutionHost, RuntimeCommand, RuntimeTarget};
+
+    #[cfg(unix)]
+    #[test]
+    fn resolves_wsl_cli_paths_in_the_linux_home_without_shell_interpolation() {
+        use std::{fs, os::unix::fs::PermissionsExt, process::Command};
+
+        let root = std::env::temp_dir().join(format!("zommi-cli-path-{}", uuid::Uuid::new_v4()));
+        let bin = root.join(".hermes/bin");
+        fs::create_dir_all(&bin).unwrap();
+        let executable = bin.join("codex with spaces $(touch injected) `touch injected-too`");
+        fs::write(&executable, "#!/bin/sh\nexit 0\n").unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        let probe = |path: &str| {
+            Command::new("/bin/sh")
+                .args([
+                    "-c",
+                    super::RESOLVE_EXECUTABLE_SOURCE,
+                    "zommi-resolve-cli",
+                    path,
+                ])
+                .env("HOME", &root)
+                .current_dir(&root)
+                .output()
+                .unwrap()
+        };
+        let relative = format!(
+            "~/.hermes/bin/{}",
+            executable.file_name().unwrap().to_str().unwrap()
+        );
+        for path in [relative.as_str(), executable.to_str().unwrap()] {
+            let result = probe(path);
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            assert_eq!(
+                String::from_utf8(result.stdout).unwrap(),
+                executable.to_str().unwrap()
+            );
+        }
+        assert!(!root.join("injected").exists());
+        assert!(!root.join("injected-too").exists());
+        let missing = probe("~/.hermes/bin/missing");
+        assert_eq!(missing.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&missing.stderr).contains("CLI file not found in WSL:"));
+        assert_eq!(probe(".hermes/bin/codex").status.code(), Some(64));
+        assert_eq!(probe(bin.to_str().unwrap()).status.code(), Some(2));
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(probe(&relative).status.code(), Some(126));
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn wraps_wsl_runtime_in_the_persistent_proxy() {

@@ -60,9 +60,9 @@ class _ThinkingFlowPainter extends CustomPainter {
   final Animation<double> phase;
   final bool dark;
   static const _colors = [
-    Color(0xffc3d8d3),
-    Color(0xffcec6df),
-    Color(0xffe1cbd3),
+    Color(0xff75c9bc),
+    Color(0xffa89ae4),
+    Color(0xffdb9fbd),
   ];
 
   @override
@@ -70,7 +70,7 @@ class _ThinkingFlowPainter extends CustomPainter {
     if (size.isEmpty) return;
     final angle = phase.value * math.pi * 2;
     final blend = .18 + .14 * math.sin(angle);
-    final opacity = (dark ? .06 : .07) + .01 * math.sin(angle);
+    final opacity = (dark ? .30 : .24) + .06 * math.sin(angle);
     final bounds = Offset.zero & size;
     canvas.drawRect(
       bounds,

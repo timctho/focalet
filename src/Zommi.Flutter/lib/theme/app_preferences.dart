@@ -26,7 +26,7 @@ enum ZommiThemeColor {
 @immutable
 final class AppPreferences {
   const AppPreferences({
-    this.chatFontSize = 13,
+    this.chatFontSize = 14,
     this.browserPageDetails = true,
     this.themeColor = ZommiThemeColor.ocean,
     this.themeMode = ThemeMode.system,
@@ -76,7 +76,7 @@ final class AppPreferences {
 
   static AppPreferences fromJson(Map<String, Object?> value) {
     final rawFontSize = value['chatFontSize'];
-    final fontSize = rawFontSize is num ? rawFontSize.toDouble() : 13.0;
+    final fontSize = rawFontSize is num ? rawFontSize.toDouble() : 14.0;
     return AppPreferences(
       // Settings written before the welcome flow belong to an existing install.
       runtimeSetupCompleted:

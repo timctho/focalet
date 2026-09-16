@@ -111,9 +111,9 @@ void main() {
       expect(composingSpan.style?.decoration, TextDecoration.underline);
       await tester.tap(find.byKey(const ValueKey('app-settings')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Large'));
+      await tester.tap(find.text('XL'));
       await tester.pumpAndSettle();
-      expect(tester.widget<TextField>(field).style?.fontSize, 14);
+      expect(tester.widget<TextField>(field).style?.fontSize, 15);
       expect(
         editable.widget.controller.value.composing,
         const TextRange(start: 2, end: 4),

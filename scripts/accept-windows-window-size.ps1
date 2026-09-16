@@ -233,9 +233,9 @@ function Measure-SizeTransition {
     if ($null -eq $markerBefore) { throw 'Rendered send control was not visible before resize.' }
     $scale = [ZommiWindowSizeAccess]::GetDpiForWindow($window) / 96.0
     $clientBefore = [ZommiWindowsAcceptanceNative]::PhysicalClientBounds($window)
-    $targetWidth = if ($Mode -eq 'wide') { 1100 * $scale } else { 900 * $scale }
+    $targetWidth = if ($Mode -eq 'wide') { 1320 * $scale } else { 1120 * $scale }
     $targetRight = $workArea[0] + $workArea[2] / 2 + [Math]::Min($targetWidth, $workArea[2]) / 2
-    $targetBottom = $workArea[1] + $workArea[3] - 18 * $scale
+    $targetBottom = [Math]::Min($before[1] + $before[3], $workArea[1] + $workArea[3])
     if ($Mode -eq 'maximized') { $targetRight = $workArea[0] + $workArea[2]; $targetBottom = $workArea[1] + $workArea[3] }
     $targetMarkerLeft = $targetRight - ($clientBefore[0] + $clientBefore[2] - $markerBefore[0])
     $targetMarkerTop = $targetBottom - ($clientBefore[1] + $clientBefore[3] - $markerBefore[1])
