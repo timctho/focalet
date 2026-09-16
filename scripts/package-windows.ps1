@@ -188,6 +188,7 @@ $assemblerArguments = @(
     '--output-root', (Join-Path $repositoryRoot 'artifacts'),
     '--git-commit', $gitCommit,
     '--document', (Join-Path $repositoryRoot 'README.md'),
+    '--document', (Join-Path $repositoryRoot 'docs/install.md'),
     '--document', (Join-Path $repositoryRoot 'docs/flutter-rust-migration.md'),
     '--signing-status', $signingStatus,
     '--signing-mechanism', $signingMechanism

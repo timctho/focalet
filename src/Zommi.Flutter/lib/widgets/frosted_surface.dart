@@ -63,6 +63,7 @@ class FrostedSurface extends StatelessWidget {
     this.radius = 24,
     this.padding = EdgeInsets.zero,
     this.opacity,
+    this.color,
     this.blurBackground = true,
     this.showBorder = true,
     super.key,
@@ -72,6 +73,7 @@ class FrostedSurface extends StatelessWidget {
   final double radius;
   final EdgeInsetsGeometry padding;
   final double? opacity;
+  final Color? color;
   final bool blurBackground;
   final bool showBorder;
 
@@ -79,7 +81,7 @@ class FrostedSurface extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final dark = scheme.brightness == Brightness.dark;
-    final tint = scheme.surface;
+    final tint = color ?? scheme.surface;
     final alpha = opacity ?? (dark ? .66 : .72);
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),

@@ -102,6 +102,17 @@ class ReleasePackageTests(unittest.TestCase):
         manifest["components"]["wslTransport"] = "persistent-authenticated-relay"
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
         self._write_checksums()
+        with self.assertRaisesRegex(
+            verify_release.ReleaseValidationError, "Bundled Windows runtime library is missing"
+        ):
+            verify_release.verify_package(self.root, smoke_processes=False)
+        for name in verify_release.WINDOWS_RUNTIME_LIBRARIES:
+            (self.root / name).write_text("redistributable", encoding="utf-8")
+        self._write_checksums()
+        with self.assertRaisesRegex(verify_release.ReleaseValidationError, "vcruntime140_1"):
+            verify_release.verify_package(self.root, smoke_processes=False)
+        (self.root / "vcruntime140_1.dll").write_text("redistributable", encoding="utf-8")
+        self._write_checksums()
         result = verify_release.verify_package(self.root, smoke_processes=False)
         self.assertEqual(result["platform"], "windows")
 

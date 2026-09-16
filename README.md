@@ -2,6 +2,9 @@
 
 [![CI](https://github.com/timctho/zommi/actions/workflows/ci.yml/badge.svg)](https://github.com/timctho/zommi/actions/workflows/ci.yml)
 
+Download Windows and Mac installers from [Zommi Releases](https://github.com/timctho/zommi-releases/releases).
+See [installation instructions](docs/install.md) and [release publishing](docs/public-releases.md).
+
 Zommi is a local floating context companion for existing agent runtimes. Its
 Flutter desktop shell rests as a small orb above the work area, expands into
 chat on hover, and talks to a separate Rust runtime core over versioned JSONL.

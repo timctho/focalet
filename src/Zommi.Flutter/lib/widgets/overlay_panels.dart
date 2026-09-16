@@ -6,6 +6,7 @@ import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
+import 'package:zommi_flutter/theme/zommi_typography.dart';
 import 'package:zommi_flutter/widgets/content_views.dart';
 import 'package:zommi_flutter/widgets/runtime_logo.dart';
 import 'package:zommi_flutter/widgets/session_context_menu.dart';
@@ -386,10 +387,7 @@ class _SessionSidebarState extends State<SessionSidebar> {
                                   ),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.normal,
-                                  ),
+                                  style: chatTextStyleOf(context),
                                 ),
                               ],
                             ),

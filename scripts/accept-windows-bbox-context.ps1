@@ -36,7 +36,9 @@ foreach ($case in $cases) {
             if (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector, 'Cancel')) { throw 'Rectangle selector did not become ready.' }
             if ([ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector, 'Larger') -or
                 [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector, 'Whole window')) { throw 'Element scope controls remain in the user selector.' }
-            if ($case -eq 'click-then-drag') { [ZommiWindowsAcceptanceNative]::ClickSelection($selector, 220, 220) | Out-Null }
+            # Use the same physical-coordinate message path as the drag cases,
+            # keeping press/release at one point for the zero-area selection.
+            if ($case -eq 'click-then-drag') { [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector, 220, 220, 220, 220) }
             if ($case -eq 'thin-then-drag') { [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector, 220, 220, 300, 222) }
             if ($case -in @('click-then-drag', 'thin-then-drag')) {
                 Start-Sleep -Milliseconds 100

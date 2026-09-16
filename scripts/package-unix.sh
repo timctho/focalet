@@ -92,6 +92,7 @@ assembler_arguments=(
   --output-root "$repository_root/artifacts"
   --git-commit "$git_commit"
   --document "$repository_root/README.md"
+  --document "$repository_root/docs/install.md"
   --document "$repository_root/docs/flutter-rust-migration.md"
 )
 if [[ "$target_platform" == macos ]]; then

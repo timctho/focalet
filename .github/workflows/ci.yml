@@ -47,7 +47,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ inputs.macos_arch || 'arm64' }}
   cancel-in-progress: true
 
 jobs:
@@ -115,6 +115,7 @@ jobs:
           node --test tests/wsl_relay.test.mjs
           python3 -m py_compile scripts/assemble_release.py scripts/verify_release.py tests/test_release_package.py
           python3 tests/test_release_package.py -v
+          python3 tests/test_public_release.py -v
           python3 tests/test_linux_startup_smoke.py -v
           python3 tests/test_codex_history_repair.py -v
           python3 tests/test_codex_home_persistence.py -v
@@ -523,6 +524,9 @@ jobs:
       - name: Probe packaged macOS startup and capture permissions
         run: python3 scripts/accept-macos.py artifacts/zommi-macos-${{ inputs.macos_arch == 'x64' && 'x64' || 'arm64' }} --output artifacts/macos-acceptance --interactive
 
+      - name: Build and verify Mac installer
+        run: python3 scripts/build_installer.py artifacts/zommi-macos-${{ inputs.macos_arch == 'x64' && 'x64' || 'arm64' }} --expected-commit "$GITHUB_SHA" --output artifacts/installers
+
       - name: Upload macOS acceptance evidence
         if: always() && inputs.upload_packages && !inputs.macos_draft_release
         uses: actions/upload-artifact@v7
@@ -540,6 +544,7 @@ jobs:
           path: |
             artifacts/zommi-macos-*.zip
             artifacts/zommi-macos-*.zip.sha256
+            artifacts/installers/*
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
@@ -566,3 +571,6 @@ jobs:
           fi
           tar -czf "artifacts/zommi-macos-evidence-$MACOS_ARCH.tar.gz" -C artifacts macos-acceptance
           gh release upload "$tag" "artifacts/zommi-macos-$MACOS_ARCH.zip" "artifacts/zommi-macos-$MACOS_ARCH.zip.sha256" "artifacts/zommi-macos-evidence-$MACOS_ARCH.tar.gz" --clobber
+          if [[ -f "artifacts/installers/Zommi-macOS-$MACOS_ARCH.dmg" ]]; then
+            gh release upload "$tag" artifacts/installers/* --clobber
+          fi

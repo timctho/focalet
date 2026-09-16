@@ -24,6 +24,8 @@ LINUX_RUNTIME_LIBRARIES = (
     "lib/libsqlite3.so",
 )
 
+WINDOWS_RUNTIME_LIBRARIES = ("msvcp140.dll", "vcruntime140.dll")
+
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -220,6 +222,10 @@ def verify_package(
     capture_host = None
     if manifest.get("platform") == "windows":
         capture_host = _inside(root, str(manifest.get("captureHost", "")), "Windows capture host")
+        for relative in WINDOWS_RUNTIME_LIBRARIES:
+            _inside(root, relative, "Bundled Windows runtime library")
+        if manifest.get("architecture") == "x64":
+            _inside(root, "vcruntime140_1.dll", "Bundled Windows runtime library")
     if manifest.get("platform") == "linux":
         _inside(root, "zommi-bin", "Packaged Linux Flutter binary")
         capture_host = _inside(

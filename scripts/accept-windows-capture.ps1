@@ -852,7 +852,8 @@ function Wait-ForPackagedSelector {
                 $lastWindow = $window
                 $lastTopMost = [ZommiWindowsAcceptanceNative]::TopMost($window)
                 $lastForeground = [ZommiWindowsAcceptanceNative]::Foreground($window)
-                if ($lastTopMost -and $lastForeground) {
+                if ($lastTopMost -and $lastForeground -and
+                    [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($window, 'Cancel')) {
                     return $window
                 }
             }
@@ -1536,17 +1537,25 @@ function Invoke-PackagedApplicationAcceptance {
             throw 'Cancelled Alt+A did not restore, show, and focus the minimized packaged taskbar window.'
         }
 
-        [ZommiWindowsAcceptanceNative]::SendAltA($false)
-        $selector = Wait-ForPackagedSelector -CaptureExecutable $CaptureExecutable
-        if (-not [ZommiWindowsAcceptanceNative]::TopMost($selector) -or
-            -not [ZommiWindowsAcceptanceNative]::Foreground($selector)) {
-            throw 'Packaged image selector lost its topmost foreground state.'
+        # Keep the size probe over a known, responsive source window. A crop
+        # of the user's desktop can hit an unrelated browser/UIA provider.
+        $imageFixture = [ZommiContextFixture]::new()
+        try {
+            $imageFixture.Raise()
+            [ZommiWindowsAcceptanceNative]::SendAltA($false)
+            $selector = Wait-ForPackagedSelector -CaptureExecutable $CaptureExecutable
+            if (-not [ZommiWindowsAcceptanceNative]::TopMost($selector) -or
+                -not [ZommiWindowsAcceptanceNative]::Foreground($selector)) {
+                throw 'Packaged image selector lost its topmost foreground state.'
+            }
+            [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector, 180, 200, 220, 230)
+            $imageResult = Wait-ForAcceptanceEvent `
+                -Path $acceptanceLog `
+                -Name 'selection.content' `
+                -After $eventCount
+        } finally {
+            $imageFixture.Dispose()
         }
-        [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector, 100, 100, 140, 130)
-        $imageResult = Wait-ForAcceptanceEvent `
-            -Path $acceptanceLog `
-            -Name 'selection.content' `
-            -After $eventCount
         if ($imageResult.Event.count -ne 1) { throw 'Region selection did not attach one item.' }
         $image = $imageResult.Event.items[0]
         Assert-ProbeRegionSize `
