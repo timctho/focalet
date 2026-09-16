@@ -22,7 +22,9 @@ use zommi_core::{
     runtime_targets_from_wsl_probe, wsl_runtime_probe_script,
 };
 
-const TRANSPORT_VERSION: u32 = 7;
+// A new version starts a daemon with the fixed CLI environment instead of
+// reusing an older daemon that is still serving existing chats.
+const TRANSPORT_VERSION: u32 = 8;
 const ENDPOINT_SCHEMA_VERSION: u32 = 1;
 const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 const CHANNEL_STDOUT: u8 = 1;

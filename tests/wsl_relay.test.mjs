@@ -7,7 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 const TOKEN = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
-const TRANSPORT_VERSION = 7;
+const TRANSPORT_VERSION = 8;
 
 async function waitForEndpoint(endpointPath) {
   const deadline = Date.now() + 5_000;
@@ -23,7 +23,7 @@ async function waitForEndpoint(endpointPath) {
   throw lastError ?? new Error('Relay endpoint was not written.');
 }
 
-function runRuntime(endpoint) {
+function runRuntime(endpoint, invocation = {}) {
   return new Promise((resolve, reject) => {
     const socket = net.createConnection({ host: endpoint.host, port: endpoint.port });
     let buffer = Buffer.alloc(0);
@@ -70,13 +70,63 @@ function runRuntime(endpoint) {
           'read value; printf "out:%s\\n" "$value"; [ -z "${PARENT_APP_LEAK_PROBE+x}" ] || printf "parent-app-env-leaked\\n"; printf "err:%s\\n" "$value" >&2; exit 7',
         ],
         cwd: '/',
+        ...invocation,
       };
       socket.end(`${JSON.stringify(request)}\nrelay-input\n`);
     });
   });
 }
 
-function runRustProxy(endpointPath) {
+test('configured npm CLI launches when Node is absent from the WSL PATH', async () => {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), 'zommi-wsl-node-'));
+  const endpointPath = path.join(temporary, 'endpoints', 'test.json');
+  const cli = path.join(temporary, 'codex with spaces');
+  await writeFile(cli, `#!/usr/bin/env node
+process.stdin.resume();
+process.stdin.on('end', () => console.log(JSON.stringify({
+  args: process.argv.slice(2),
+  home: process.env.CODEX_HOME,
+  leaked: process.env.PARENT_APP_LEAK_PROBE,
+})));
+`, { mode: 0o755 });
+  const relay = spawn(process.execPath, [
+    'scripts/zommi-wsl-relay.js', '--endpoint', endpointPath,
+    '--token', TOKEN, '--version', String(TRANSPORT_VERSION), '--distribution', 'test',
+  ], {
+    // The relay can find Node by absolute path, just like the launcher does for
+    // nvm installations. Its children still need Node for npm CLI shebangs.
+    env: { ...process.env, PATH: temporary, PARENT_APP_LEAK_PROBE: 'must-not-reach-runtime' },
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  try {
+    const endpoint = await waitForEndpoint(endpointPath);
+    const result = await runRuntime(endpoint, {
+      command: '/usr/bin/env',
+      args: ['CODEX_HOME=/home/test/Agent Data', cli, 'app-server'],
+    });
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      args: ['app-server'], home: '/home/test/Agent Data',
+    });
+    const proxy = await runRustProxy(endpointPath, [
+      '/usr/bin/env', 'CODEX_HOME=/home/test/Agent Data', cli, 'app-server',
+    ]);
+    assert.equal(proxy.code, 0, proxy.stderr);
+    assert.deepEqual(JSON.parse(proxy.stdout), JSON.parse(result.stdout));
+  } finally {
+    if (relay.exitCode === null && relay.signalCode === null) {
+      const exited = new Promise((resolve) => relay.once('exit', resolve));
+      relay.kill('SIGTERM');
+      await exited;
+    }
+    await rm(temporary, { recursive: true, force: true });
+  }
+});
+
+function runRustProxy(endpointPath, runtime = [
+  '/bin/sh', '-c',
+  'read first; printf "proxy-out:%s\\n" "$first"; read second; printf "proxy-err:%s\\n" "$second" >&2; exit 9',
+]) {
   return new Promise((resolve, reject) => {
     const targetRoot = process.env.CARGO_TARGET_DIR || 'target';
     const executable = path.resolve(targetRoot, 'debug', `zommi-core-host${process.platform === 'win32' ? '.exe' : ''}`);
@@ -84,8 +134,7 @@ function runRustProxy(endpointPath) {
       '--wsl-proxy',
       '--distribution', 'test',
       '--cwd', '/',
-      '--', '/bin/sh', '-c',
-      'read first; printf "proxy-out:%s\\n" "$first"; read second; printf "proxy-err:%s\\n" "$second" >&2; exit 9',
+      '--', ...runtime,
     ], {
       env: { ...process.env, ZOMMI_WSL_RELAY_ENDPOINT: endpointPath },
       stdio: ['pipe', 'pipe', 'pipe'],

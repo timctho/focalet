@@ -33,6 +33,11 @@ const activeSpoolSessions = new Set();
 
 function runtimeEnvironment() {
   const environment = { ...process.env };
+  // WSL starts the relay without an interactive shell. The launcher may have
+  // found Node in nvm by absolute path, while npm CLIs still use env node.
+  // Give both transports the same working interpreter without shell startup
+  // scripts, and preserve the rest of the distribution's search path.
+  environment.PATH = [path.dirname(process.execPath), environment.PATH].filter(Boolean).join(path.delimiter);
   for (const key of Object.keys(environment)) {
     if (key.startsWith('PARENT_APP_')) delete environment[key];
   }

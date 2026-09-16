@@ -232,6 +232,10 @@ void main() {
   testWidgets('render the active thinking signal', (tester) async {
     final directory = Platform.environment['ZOMMI_THINKING_PREVIEW_DIR'];
     if (directory == null) return;
+    final theme =
+        Platform.environment['ZOMMI_THINKING_PREVIEW_THEME'] == 'light'
+        ? ThemeMode.light
+        : ThemeMode.dark;
     await tester.binding.setSurfaceSize(const Size(1400, 680));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.runAsync(() async {
@@ -257,7 +261,7 @@ void main() {
         child: ZommiApp(
           core: core,
           desktop: FakeDesktopBridge(),
-          initialPreferences: const AppPreferences(themeMode: ThemeMode.dark),
+          initialPreferences: AppPreferences(themeMode: theme),
           clock: () => DateTime(2026, 9, 14, 14, 32),
         ),
       ),
@@ -328,7 +332,7 @@ void main() {
     await tester.pump();
     final first = await pixels(tester, find.byKey(screen));
     await tester.runAsync(
-      () => File('$directory/thinking-dark.png').writeAsBytes(first),
+      () => File('$directory/thinking-${theme.name}.png').writeAsBytes(first),
     );
     for (var frame = 0; frame < 72; frame++) {
       await tester.pump(const Duration(milliseconds: 166));

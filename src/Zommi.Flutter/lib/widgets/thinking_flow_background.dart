@@ -2,7 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-/// A soft color glow behind the active thinking section. The painter repaints
+/// A soft, flowing edge light around the active thinking section. It repaints
 /// independently of the transcript, and stops when motion or tickers are off.
 class ThinkingFlowBackground extends StatefulWidget {
   const ThinkingFlowBackground({super.key});
@@ -15,7 +15,7 @@ class _ThinkingFlowBackgroundState extends State<ThinkingFlowBackground>
     with SingleTickerProviderStateMixin {
   late final AnimationController _phase = AnimationController(
     vsync: this,
-    duration: const Duration(seconds: 12),
+    duration: const Duration(seconds: 10),
   );
 
   @override
@@ -44,7 +44,7 @@ class _ThinkingFlowBackgroundState extends State<ThinkingFlowBackground>
           child: CustomPaint(
             painter: _ThinkingFlowPainter(
               phase: _phase,
-              dark: Theme.of(context).brightness == Brightness.dark,
+              colors: Theme.of(context).colorScheme,
             ),
           ),
         ),
@@ -54,57 +54,65 @@ class _ThinkingFlowBackgroundState extends State<ThinkingFlowBackground>
 }
 
 class _ThinkingFlowPainter extends CustomPainter {
-  _ThinkingFlowPainter({required this.phase, required this.dark})
-    : _glows = [
-        for (final color in _colors)
-          RadialGradient(
-            radius: .62,
-            colors: [
-              for (final strength in [1.0, .90, .54, .19, .035, 0.0])
-                color.withValues(alpha: strength * (dark ? .24 : .18)),
-            ],
-            stops: const [0, .2, .4, .6, .8, 1],
-          ),
-      ],
-      super(repaint: phase);
+  _ThinkingFlowPainter({required this.phase, required this.colors})
+    : super(repaint: phase);
 
   final Animation<double> phase;
-  final bool dark;
-  final List<RadialGradient> _glows;
+  final ColorScheme colors;
   static const _colors = [
-    Color(0xff75c9bc),
-    Color(0xffa89ae4),
-    Color(0xffdb9fbd),
+    Color(0xff63b6f5),
+    Color(0xff9c8aef),
+    Color(0xffdb9acb),
+    Color(0xffe7b394),
+    Color(0xff9c8aef),
+    Color(0xff63b6f5),
   ];
 
   @override
   void paint(Canvas canvas, Size size) {
     if (size.isEmpty) return;
+    final dark = colors.brightness == Brightness.dark;
     final angle = phase.value * math.pi * 2;
-    const bounds = Rect.fromLTWH(0, 0, 1, 1);
-    final paint = Paint();
+    final bounds = Offset.zero & size;
+    final outline = RRect.fromRectAndRadius(
+      bounds.deflate(1),
+      const Radius.circular(9),
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(bounds, const Radius.circular(10)),
+      Paint()..color = colors.surfaceContainerLow,
+    );
 
-    // Normalized coordinates stretch the soft radial falloff into broad glows
-    // at any panel size, without a blur filter or an offscreen saveLayer.
-    canvas.save();
-    canvas.scale(size.width, size.height);
-    for (var index = 0; index < _glows.length; index++) {
-      final orbit = angle + index * math.pi * 2 / _glows.length;
-      final center = Offset(
-        .18 + index * .32 + .13 * math.sin(orbit),
-        .50 + .16 * math.cos(orbit),
-      );
-      // Sine/cosine preserve position and velocity at the loop boundary.
-      // Constant opacity avoids a distracting pulse as the colors drift.
-      paint.shader = _glows[index].createShader(
-        bounds.shift(center - const Offset(.5, .5)),
-      );
-      canvas.drawRect(bounds, paint);
-    }
-    canvas.restore();
+    // A moving color field avoids the uneven speed a rotating sweep has on a
+    // very wide panel. Sine/cosine keep color and velocity continuous at repeat.
+    final gradient = LinearGradient(
+      begin: Alignment(-1.8 + .8 * math.sin(angle), -.6),
+      end: Alignment(1.8 + .8 * math.cos(angle), .6),
+      colors: _colors,
+    ).createShader(bounds);
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..shader = gradient;
+
+    // Blur only this thin painted edge, never the desktop or transcript. The
+    // center stays quiet and legible; no backdrop filter or saveLayer is used.
+    canvas.drawRRect(
+      outline,
+      paint
+        ..strokeWidth = 5
+        ..color = Colors.white.withValues(alpha: dark ? .24 : .16)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4),
+    );
+    canvas.drawRRect(
+      outline,
+      paint
+        ..strokeWidth = .8
+        ..color = Colors.white.withValues(alpha: dark ? .50 : .36)
+        ..maskFilter = null,
+    );
   }
 
   @override
   bool shouldRepaint(covariant _ThinkingFlowPainter oldDelegate) =>
-      oldDelegate.dark != dark || oldDelegate.phase != phase;
+      oldDelegate.colors != colors || oldDelegate.phase != phase;
 }

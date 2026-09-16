@@ -325,8 +325,8 @@ class _NewAgentMenu extends StatelessWidget {
       );
       final actionStyle = MenuItemButton.styleFrom(
         minimumSize: const Size(0, 30),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        visualDensity: VisualDensity.standard,
       );
       return MenuAnchor(
         consumeOutsideTap: true,

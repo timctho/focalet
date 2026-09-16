@@ -1153,13 +1153,12 @@ class ThinkingActivityGroup extends StatelessWidget {
                               ),
                             if (toolCount > 0) const SizedBox(width: 8),
                             if (!completed)
-                              const SizedBox.square(
-                                dimension: 13,
-                                child: RepaintBoundary(
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 1.5,
-                                  ),
-                                ),
+                              Icon(
+                                Icons.more_horiz_rounded,
+                                size: 15,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
                               )
                             else
                               const Icon(
