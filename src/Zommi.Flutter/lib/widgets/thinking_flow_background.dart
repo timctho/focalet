@@ -1,4 +1,4 @@
-import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
@@ -15,7 +15,7 @@ class _ThinkingFlowBackgroundState extends State<ThinkingFlowBackground>
     with SingleTickerProviderStateMixin {
   late final AnimationController _phase = AnimationController(
     vsync: this,
-    duration: const Duration(seconds: 10),
+    duration: const Duration(seconds: 6),
   );
 
   @override
@@ -59,55 +59,78 @@ class _ThinkingFlowPainter extends CustomPainter {
 
   final Animation<double> phase;
   final ColorScheme colors;
-  static const _colors = [
-    Color(0xff63b6f5),
-    Color(0xff9c8aef),
-    Color(0xffdb9acb),
-    Color(0xffe7b394),
-    Color(0xff9c8aef),
-    Color(0xff63b6f5),
-  ];
+  Size? _size;
+  late RRect _outline;
+  late ui.PathMetric _perimeter;
 
   @override
   void paint(Canvas canvas, Size size) {
     if (size.isEmpty) return;
     final dark = colors.brightness == Brightness.dark;
-    final angle = phase.value * math.pi * 2;
     final bounds = Offset.zero & size;
-    final outline = RRect.fromRectAndRadius(
-      bounds.deflate(1),
-      const Radius.circular(9),
-    );
+    if (_size != size) {
+      _size = size;
+      _outline = RRect.fromRectAndRadius(
+        bounds.deflate(1),
+        const Radius.circular(9),
+      );
+      _perimeter = (Path()..addRRect(_outline)).computeMetrics().single;
+    }
     canvas.drawRRect(
       RRect.fromRectAndRadius(bounds, const Radius.circular(10)),
       Paint()..color = colors.surfaceContainerLow,
     );
+    canvas.drawRRect(
+      _outline,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = .8
+        ..color = colors.primary.withValues(alpha: dark ? .12 : .10),
+    );
 
-    // A moving color field avoids the uneven speed a rotating sweep has on a
-    // very wide panel. Sine/cosine keep color and velocity continuous at repeat.
-    final gradient = LinearGradient(
-      begin: Alignment(-1.8 + .8 * math.sin(angle), -.6),
-      end: Alignment(1.8 + .8 * math.cos(angle), .6),
-      colors: _colors,
-    ).createShader(bounds);
+    // Two localized lights visibly travel instead of tinting the whole edge.
+    // Distance along the rounded rectangle keeps their speed steady even on a
+    // wide, collapsed panel; a closed path makes the repeat seamless.
+    final radius = (size.width * .23).clamp(90.0, 220.0);
+    for (var light = 0; light < 2; light++) {
+      final distance = ((phase.value + light * .5) % 1) * _perimeter.length;
+      final center = _perimeter.getTangentForOffset(distance)!.position;
+      final color = light == 0
+          ? (dark ? const Color(0xff8ccaff) : const Color(0xff4285cf))
+          : (dark ? const Color(0xffd3a5f2) : const Color(0xffaa64bb));
+      final shader = ui.Gradient.radial(
+        center,
+        radius,
+        [
+          Color.lerp(color, Colors.white, dark ? .35 : .08)!,
+          color,
+          color.withValues(alpha: .45),
+          color.withValues(alpha: 0),
+        ],
+        const [0, .25, .55, 1],
+      );
+      _paintLight(canvas, shader, dark);
+    }
+  }
+
+  void _paintLight(Canvas canvas, ui.Shader shader, bool dark) {
+    // Blur only the thin painted edge, never the desktop or transcript. The
+    // opaque center stays still and legible, without a backdrop filter/layer.
     final paint = Paint()
       ..style = PaintingStyle.stroke
-      ..shader = gradient;
-
-    // Blur only this thin painted edge, never the desktop or transcript. The
-    // center stays quiet and legible; no backdrop filter or saveLayer is used.
+      ..shader = shader;
     canvas.drawRRect(
-      outline,
+      _outline,
       paint
-        ..strokeWidth = 5
-        ..color = Colors.white.withValues(alpha: dark ? .24 : .16)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4),
+        ..strokeWidth = 6
+        ..color = Colors.white.withValues(alpha: dark ? .48 : .30)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
     );
     canvas.drawRRect(
-      outline,
+      _outline,
       paint
-        ..strokeWidth = .8
-        ..color = Colors.white.withValues(alpha: dark ? .50 : .36)
+        ..strokeWidth = 1.2
+        ..color = Colors.white.withValues(alpha: dark ? .90 : .72)
         ..maskFilter = null,
     );
   }

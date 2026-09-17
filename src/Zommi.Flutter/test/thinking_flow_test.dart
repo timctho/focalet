@@ -14,14 +14,42 @@ import 'package:zommi_flutter/zommi_app.dart';
 
 import 'test_support.dart';
 
-Future<Uint8List> pixels(WidgetTester tester, Finder finder) async {
+Future<Uint8List> pixels(
+  WidgetTester tester,
+  Finder finder, {
+  ui.ImageByteFormat format = ui.ImageByteFormat.png,
+}) async {
   final boundary = tester.renderObject<RenderRepaintBoundary>(finder);
   return (await tester.runAsync(() async {
     final image = await boundary.toImage();
-    final data = await image.toByteData(format: ui.ImageByteFormat.png);
+    final data = await image.toByteData(format: format);
     image.dispose();
     return data!.buffer.asUint8List();
   }))!;
+}
+
+// Locate the cool highlight around the edge, independent of its intensity.
+// A changing tint without spatial motion must not satisfy this regression.
+Offset coolHighlightPosition(Uint8List rgba, int width) {
+  var weight = 0;
+  var positionX = 0;
+  var positionY = 0;
+  for (var y = 0; y < rgba.length ~/ (width * 4); y++) {
+    for (var x = 0; x < width; x++) {
+      final offset = (y * width + x) * 4;
+      // Exclude the warm light and faint stationary outline from the signal.
+      final coolness =
+          (rgba[offset + 2] + rgba[offset + 1] - 2 * rgba[offset] - 12).clamp(
+            0,
+            255,
+          );
+      weight += coolness;
+      positionX += x * coolness;
+      positionY += y * coolness;
+    }
+  }
+  expect(weight, greaterThan(0));
+  return Offset(positionX / weight, positionY / weight);
 }
 
 void main() {
@@ -119,6 +147,17 @@ void main() {
       emit('assistant', 'answer', ' ready.', completed: true);
       await tester.pump();
       expect(find.byType(ThinkingFlowBackground), findsOneWidget);
+      final activeEdge = find.descendant(
+        of: find.byType(ThinkingFlowBackground),
+        matching: find.byType(RepaintBoundary),
+      );
+      final before = await pixels(tester, activeEdge);
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(
+        listEquals(before, await pixels(tester, activeEdge)),
+        isFalse,
+        reason: 'Keep moving with no running items until the response ends.',
+      );
       core.emit(
         CoreEvent(
           name: 'turn.completed',
@@ -227,6 +266,76 @@ void main() {
         expect(tester.binding.hasScheduledFrame, isFalse);
       },
     );
+  }
+
+  for (final brightness in Brightness.values) {
+    for (final height in [40, 240]) {
+      testWidgets(
+        'flow visibly travels with a still center in $brightness at height $height',
+        (tester) async {
+          const width = 500;
+          final scheme =
+              ColorScheme.fromSeed(
+                seedColor: const Color(0xff8d9ca8),
+                brightness: brightness,
+              ).copyWith(
+                surfaceContainerLow: brightness == Brightness.dark
+                    ? const Color(0xff282828)
+                    : const Color(0xfff9f9f9),
+              );
+          await tester.pumpWidget(
+            MaterialApp(
+              theme: ThemeData(colorScheme: scheme),
+              home: Center(
+                child: SizedBox(
+                  width: width.toDouble(),
+                  height: height.toDouble(),
+                  child: const ThinkingFlowBackground(),
+                ),
+              ),
+            ),
+          );
+          await tester.pump();
+          final boundary = find.descendant(
+            of: find.byType(ThinkingFlowBackground),
+            matching: find.byType(RepaintBoundary),
+          );
+          await tester.pump(const Duration(milliseconds: 200));
+          final before = await pixels(
+            tester,
+            boundary,
+            format: ui.ImageByteFormat.rawRgba,
+          );
+          await tester.pump(const Duration(milliseconds: 600));
+          final after = await pixels(
+            tester,
+            boundary,
+            format: ui.ImageByteFormat.rawRgba,
+          );
+          expect(
+            (coolHighlightPosition(after, width) -
+                    coolHighlightPosition(before, width))
+                .distance,
+            greaterThan(50),
+            reason: 'The light should visibly move, not only change color.',
+          );
+          var largestEdgeChange = 0;
+          for (var index = 0; index < width * 6 * 4; index++) {
+            final change = (after[index] - before[index]).abs();
+            if (change > largestEdgeChange) largestEdgeChange = change;
+          }
+          expect(largestEdgeChange, greaterThan(24));
+          // Keep the reading area opaque and stationary, including when open.
+          for (var y = 12; y < height - 12; y++) {
+            final start = (y * width + 12) * 4;
+            final end = (y * width + width - 12) * 4;
+            expect(after.sublist(start, end), before.sublist(start, end));
+          }
+          await tester.pumpWidget(const SizedBox());
+          await tester.pumpAndSettle();
+        },
+      );
+    }
   }
 
   testWidgets('render the active thinking signal', (tester) async {
@@ -340,6 +449,20 @@ void main() {
       await tester.runAsync(
         () =>
             File('$directory/frame-${frame.toString().padLeft(2, '0')}.png')
+                .writeAsBytes(data),
+      );
+    }
+    final group = tester.widget<ThinkingActivityGroup>(
+      find.byType(ThinkingActivityGroup),
+    );
+    await tester.tap(find.byKey(ValueKey('thinking-toggle-${group.id}')));
+    await tester.pump();
+    for (var frame = 0; frame < 36; frame++) {
+      await tester.pump(const Duration(milliseconds: 166));
+      final data = await pixels(tester, find.byKey(screen));
+      await tester.runAsync(
+        () =>
+            File('$directory/expanded-${frame.toString().padLeft(2, '0')}.png')
                 .writeAsBytes(data),
       );
     }
