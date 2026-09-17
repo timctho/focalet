@@ -446,6 +446,7 @@ final class ZommiController extends ChangeNotifier {
       unawaited(_handleDesktopInvocation(invocation));
     });
     final desktopInitialization = _initializeDesktopIntegration();
+    (String, String)? startupRecovery;
     try {
       await _restoreSessionCatalog();
       if (_closed) return;
@@ -469,7 +470,39 @@ final class ZommiController extends ChangeNotifier {
       try {
         await _connectRuntime(targetId, coreVersion: coreStatus.version);
       } on Object catch (error) {
-        if (!_applyConnectionError(targetId, error)) rethrow;
+        if (!_applyConnectionError(targetId, error)) {
+          final binding = discovery.binding;
+          final savedSession = activeRuntime?.id == targetId
+              ? activeSessionId
+              : binding['runtimeTargetId'] == targetId
+              ? binding['sessionId']?.toString()
+              : null;
+          if (!_canRetrySwitch(error) ||
+              savedSession == null ||
+              savedSession.isEmpty) {
+            rethrow;
+          }
+          // Freeze the remembered chat, including its profile/workspace, before
+          // retrying. A later catalog refresh must not select a different chat.
+          final metadata =
+              binding['sessionId'] == savedSession &&
+                  binding['runtimeTargetId'] == targetId
+              ? {...binding, ...mapValue(binding['sessionMetadata'])}
+              : const <String, Object?>{};
+          final key = _sessionKey(targetId, savedSession);
+          final settings = _settingsForSession(targetId, savedSession);
+          _sessionSettings.putIfAbsent(
+            key,
+            () => settings.copyWith(
+              workspace:
+                  _nonEmpty(metadata['cwd']?.toString()) ?? settings.workspace,
+              profile:
+                  _nonEmpty(metadata['profile']?.toString()) ??
+                  settings.profile,
+            ),
+          );
+          startupRecovery = (targetId, savedSession);
+        }
       }
     } on Object catch (error) {
       if (error is CoreProtocolException &&
@@ -488,6 +521,10 @@ final class ZommiController extends ChangeNotifier {
     } finally {
       await desktopInitialization;
       starting = false;
+      final recovery = startupRecovery;
+      if (!_closed && recovery != null) {
+        _scheduleSwitchRecovery(recovery.$1, recovery.$2, _switchEpoch);
+      }
       _notify();
       _scheduleStartupCatalogRefresh();
     }
@@ -751,7 +788,8 @@ final class ZommiController extends ChangeNotifier {
   Future<void> selectRuntime(String targetId) async {
     final selectingActiveRuntime = activeRuntime?.id == targetId;
     final activeRuntimeUnavailable =
-        selectingActiveRuntime && activeRuntime?.status == 'unavailable';
+        selectingActiveRuntime &&
+        (activeRuntime?.status == 'unavailable' || _switchFailures > 0);
     if (runtimeBusy ||
         sessionBusy ||
         sessionSettingsBusy ||
@@ -935,7 +973,7 @@ final class ZommiController extends ChangeNotifier {
     }
     _hydrateSessionSettingsFromSummaries(connection.runtimeTargetId);
     _restoreSessionSettings(connection);
-    await _readActiveHistory();
+    await _readActiveHistory(history: connection.history, retryOnFailure: true);
     _rememberActiveSessionSettings();
     final version = connection.runtimeVersion ?? coreVersion;
     _setStatus('$activeRuntimeName${version == null ? '' : ' $version'} ready');
@@ -1078,10 +1116,12 @@ final class ZommiController extends ChangeNotifier {
       return;
     }
     if (sessionBusy && _switchWorker == null) return;
+    final recovering = _switchFailures > 0;
     _switchRetryTimer?.cancel();
     _switchFailures = 0;
     _switchEpoch++;
     if (_switchWorker == null &&
+        !recovering &&
         _isActiveSession(targetId, sessionId) &&
         !sessionReadOnly) {
       _pendingSwitch = null;
@@ -1159,18 +1199,7 @@ final class ZommiController extends ChangeNotifier {
     } on Object catch (error) {
       if (_closed || epoch != _switchEpoch) return;
       if (_canRetrySwitch(error)) {
-        _switchFailures++;
-        _setStatus('Reconnecting to chat… Your draft is kept.');
-        final delay = Duration(
-          seconds: (1 << (_switchFailures - 1).clamp(0, 4)).clamp(1, 15),
-        );
-        _switchRetryTimer = Timer(delay, () {
-          if (_closed || epoch != _switchEpoch || _switchWorker != null) return;
-          _pendingSwitch = (targetId, sessionId);
-          final worker = _drainSessionSwitches();
-          _switchWorker = worker;
-          unawaited(worker.whenComplete(() => _switchWorker = null));
-        });
+        _scheduleSwitchRecovery(targetId, sessionId, epoch);
       } else {
         final detail = error is CoreProtocolException
             ? error.message
@@ -1194,7 +1223,24 @@ final class ZommiController extends ChangeNotifier {
             'unknown-outcome',
             'session-busy',
             'core-unavailable',
+            'core-timeout',
           }.contains(error.code));
+
+  void _scheduleSwitchRecovery(String targetId, String sessionId, int epoch) {
+    _switchRetryTimer?.cancel();
+    _switchFailures++;
+    _setStatus('Reconnecting to chat… Your draft is kept.');
+    final delay = Duration(
+      seconds: (1 << (_switchFailures - 1).clamp(0, 4)).clamp(1, 15),
+    );
+    _switchRetryTimer = Timer(delay, () {
+      if (_closed || epoch != _switchEpoch || _switchWorker != null) return;
+      _pendingSwitch = (targetId, sessionId);
+      final worker = _drainSessionSwitches();
+      _switchWorker = worker;
+      unawaited(worker.whenComplete(() => _switchWorker = null));
+    });
+  }
 
   void _cancelSwitchRecovery() {
     _switchRetryTimer?.cancel();

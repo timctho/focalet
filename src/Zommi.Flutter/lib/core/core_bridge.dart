@@ -244,11 +244,13 @@ final class RuntimeDiscovery {
     required this.targets,
     this.selectedTargetId,
     this.settings = const <String, Object?>{},
+    this.binding = const <String, Object?>{},
   });
 
   final List<RuntimeTarget> targets;
   final String? selectedTargetId;
   final Map<String, Object?> settings;
+  final Map<String, Object?> binding;
 }
 
 final class RuntimeConnection {
@@ -381,6 +383,7 @@ final class ProcessCoreBridge
   ProcessCoreBridge({
     this.executablePath,
     this.requestTimeout = const Duration(seconds: 30),
+    this.connectionTimeout = const Duration(seconds: 90),
     this.environment = const {},
   }) : _catalogWorker = false;
 
@@ -388,10 +391,12 @@ final class ProcessCoreBridge
     required this.executablePath,
     required this.environment,
   }) : requestTimeout = const Duration(seconds: 90),
+       connectionTimeout = const Duration(seconds: 90),
        _catalogWorker = true;
 
   final String? executablePath;
   final Duration requestTimeout;
+  final Duration connectionTimeout;
   final Map<String, String> environment;
   final bool _catalogWorker;
   final Map<String, Completer<Map<String, Object?>>> _pending = {};
@@ -441,6 +446,7 @@ final class ProcessCoreBridge
       targets: targets,
       selectedTargetId: result['selectedTargetId']?.toString(),
       settings: _map(result['settings']),
+      binding: _map(result['binding']),
     );
   }
 
@@ -471,6 +477,7 @@ final class ProcessCoreBridge
       targets: targets,
       selectedTargetId: result['selectedTargetId']?.toString(),
       settings: _map(result['settings']),
+      binding: _map(result['binding']),
     );
   }
 
@@ -829,14 +836,24 @@ final class ProcessCoreBridge
       _pending.remove(id);
       rethrow;
     }
+    // Cold discovery and connection include runtime startup, which can exceed
+    // the deadline for ordinary RPCs (Hermes alone allows 45 seconds to start).
+    final timeout =
+        const {
+          'runtime.discover',
+          'runtime.connect',
+          'session.open',
+        }.contains(operation)
+        ? connectionTimeout
+        : requestTimeout;
     try {
-      return await completer.future.timeout(requestTimeout);
+      return await completer.future.timeout(timeout);
     } on TimeoutException {
       _pending.remove(id);
       throw CoreProtocolException(
         'core-timeout',
         "The Rust core did not answer '$operation' within "
-            '${requestTimeout.inSeconds} seconds.',
+            '${timeout.inSeconds} seconds.',
       );
     }
   }

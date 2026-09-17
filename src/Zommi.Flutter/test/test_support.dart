@@ -80,7 +80,11 @@ class RichFakeCore
   int historyCount = 45;
   bool closed = false;
   int connectCount = 0;
+  Map<String, Object?> savedBinding = {};
+  final List<Map<String, Object?>> connectionRequests = [];
+  final List<Map<String, Object?>> openedSessionOptions = [];
   String? connectErrorCode;
+  String? readSessionErrorCode;
   String connectErrorMessage = 'Authentication required';
   bool? lastDiscoveryForce;
   Future<void>? discoveryGate;
@@ -239,6 +243,7 @@ class RichFakeCore
       targets: discoveredTargets,
       selectedTargetId: lastSelectedTargetId ?? activeTargetId,
       settings: _settings(),
+      binding: savedBinding,
     );
   }
 
@@ -308,6 +313,11 @@ class RichFakeCore
     String? cwd,
   }) async {
     connectCount++;
+    connectionRequests.add({
+      'runtimeTargetId': runtimeTargetId,
+      'preferredSessionId': preferredSessionId,
+      'cwd': cwd,
+    });
     if (connectGate case final gate?) await gate;
     if (connectErrorCode case final code?) {
       throw CoreProtocolException(code, connectErrorMessage);
@@ -416,6 +426,7 @@ class RichFakeCore
     String? cwd,
     String? profile,
   }) async {
+    openedSessionOptions.add({'cwd': cwd, 'profile': profile});
     openedSessions.add((runtimeTargetId, sessionId));
     if (openSessionGate case final gate?) await gate;
     if (openSessionFails) {
@@ -467,6 +478,9 @@ class RichFakeCore
     required String runtimeTargetId,
     required String sessionId,
   }) async {
+    if (readSessionErrorCode case final code?) {
+      throw CoreProtocolException(code, 'History is not ready');
+    }
     readSessionCount++;
     if (readSessionGate case final gate?) await gate;
     return historyBySession['$runtimeTargetId\u0000$sessionId'] ??

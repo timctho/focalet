@@ -639,6 +639,13 @@ def main() -> int:
     parser.add_argument("--mode", choices=["hermes", "openclaw"], required=True)
     parser.add_argument("--port", type=int, default=0)
     args, _unknown = parser.parse_known_args()
+    if args.mode == "hermes":
+        failure_marker = os.environ.get("ZOMMI_FAKE_STARTUP_FAILURE_MARKER")
+        if failure_marker and not os.path.exists(failure_marker):
+            with open(failure_marker, "w") as marker:
+                marker.write("failed once")
+            return 1
+        time.sleep(float(os.environ.get("ZOMMI_FAKE_STARTUP_DELAY", "0")))
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(("127.0.0.1", args.port))
