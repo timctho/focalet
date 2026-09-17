@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:zommi_flutter/desktop/artifact_loader.dart';
+import 'package:zommi_flutter/desktop/capture_permissions.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/diagnostics/scroll_performance.dart';
 import 'package:zommi_flutter/state/session_catalog_store.dart';
@@ -25,6 +26,7 @@ import 'package:zommi_flutter/widgets/runtime_logo.dart';
 import 'package:zommi_flutter/widgets/transcript_view.dart';
 import 'package:zommi_flutter/widgets/frosted_surface.dart';
 import 'package:zommi_flutter/widgets/first_run_setup.dart';
+import 'package:zommi_flutter/widgets/screen_recording_permission_dialog.dart';
 
 export 'package:zommi_flutter/theme/zommi_typography.dart';
 
@@ -271,6 +273,7 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
       catalogStartupDelay: widget.catalogStartupDelay,
       initialWindowSize: widget.preferences.windowSize,
       runtimeSetupPending: !widget.preferences.runtimeSetupCompleted,
+      prepareImageCapture: _prepareImageCapture,
     );
     _composer = InlineAttachmentTextController(
       emphasisRange: (text) =>
@@ -285,6 +288,23 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
     _composerFocus.addListener(_onComposerFocusChanged);
     _controller.addListener(_onControllerChanged);
     unawaited(_controller.initialize());
+  }
+
+  Future<bool> _prepareImageCapture() async {
+    if (widget.desktop case final CapturePermissionBridge bridge
+        when bridge.supportsCapturePermissions) {
+      if ((await bridge.capturePermissions()).screenRecording) return true;
+      // A global shortcut may arrive while Zommi is hidden. Explain the request
+      // before hiding for capture or invoking any macOS consent prompts.
+      await widget.desktop.showPanel();
+      if (!mounted) return false;
+      return showScreenRecordingPermissionDialog(
+        context,
+        bridge: bridge,
+        continueToSelection: true,
+      );
+    }
+    return true;
   }
 
   void _onComposerChanged() {
@@ -638,6 +658,43 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
     );
   }
 
+  Widget _buildStatusWarning() {
+    final scheme = Theme.of(context).colorScheme;
+    return Semantics(
+      liveRegion: true,
+      child: Container(
+        key: const ValueKey('operation-warning'),
+        margin: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: scheme.errorContainer,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.error_outline, size: 18, color: scheme.onErrorContainer),
+            const SizedBox(width: 8),
+            Expanded(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 120),
+                child: SingleChildScrollView(
+                  child: SelectableText(
+                    _controller.status,
+                    style: TextStyle(
+                      color: scheme.onErrorContainer,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildPanel(double width, double height) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(34),
@@ -792,6 +849,8 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                                   ),
                                 if (_controller.queuedMessages.isNotEmpty)
                                   _buildMessageQueue(),
+                                if (_controller.statusWarning)
+                                  _buildStatusWarning(),
                                 _buildComposer(),
                                 if (_controller.activeSessionId != null)
                                   Semantics(

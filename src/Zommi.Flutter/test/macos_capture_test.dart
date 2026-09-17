@@ -46,9 +46,9 @@ void main() {
         return ProcessResult(1, denied ? 1 : 0, 'TextEdit\nFixture\n', '');
       },
       screenAccessAllowed: () async => true,
-      selectRegion: () async {
+      selectRegions: () async {
         events.add('selector');
-        return image;
+        return [?image];
       },
     );
     var selected = await provider.selectContext();
@@ -67,8 +67,9 @@ void main() {
     final provider = PortableCaptureProvider(
       runCommand: (_, _, _) async => ProcessResult(1, 0, 'Zommi\nZommi\n', ''),
       screenAccessAllowed: () async => true,
-      selectRegion: () async =>
-          const ImageSelection(dataUrl: 'data:image/png;base64,iVBORw0KGgo='),
+      selectRegions: () async => const [
+        ImageSelection(dataUrl: 'data:image/png;base64,iVBORw0KGgo='),
+      ],
     );
     await expectLater(provider.capture(), throwsStateError);
     final selected = await provider.selectContext();
@@ -135,32 +136,44 @@ void main() {
     },
   );
 
-  test('Screen Recording denial is actionable and never treated as selection cancellation', () async {
-    var requests = 0;
-    var selections = 0;
-    final provider = PortableCaptureProvider(
-      screenAccessAllowed: () async => false,
-      requestScreenAccess: () async {
-        requests++;
-      },
-      selectRegion: () async {
-        selections++;
-        return null;
-      },
-    );
-    await expectLater(
-      provider.selectImage(),
-      throwsA(
-        isA<StateError>().having(
-          (e) => e.message,
-          'message',
-          contains('Screen Recording'),
-        ),
-      ),
-    );
-    expect(requests, 1);
-    expect(selections, 0);
-  });
+  test(
+    'repeated denied captures only check status and never request permission',
+    () async {
+      final calls = <String>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(MacCapturePermissions.channel, (
+            call,
+          ) async {
+            calls.add(call.method);
+            return {'accessibility': false, 'screenRecording': false};
+          });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(MacCapturePermissions.channel, null),
+      );
+      var selections = 0;
+      final provider = PortableCaptureProvider(
+        selectRegion: () async {
+          selections++;
+          return null;
+        },
+      );
+      for (var attempt = 0; attempt < 3; attempt++) {
+        await expectLater(
+          provider.selectImage(),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              contains('Screen Recording'),
+            ),
+          ),
+        );
+      }
+      expect(calls, ['status', 'status', 'status']);
+      expect(selections, 0);
+    },
+  );
 
   test('granting permission permits capture, preserves payload, and still supports cancel', () async {
     var allowed = false;
@@ -168,19 +181,15 @@ void main() {
       dataUrl: 'data:image/png;base64,iVBORw0KGgo=',
     );
     ImageSelection? next = selection;
-    var requests = 0;
     final provider = PortableCaptureProvider(
       screenAccessAllowed: () async => allowed,
-      requestScreenAccess: () async {
-        requests++;
-        allowed = true;
-      },
       selectRegion: () async => next,
     );
+    await expectLater(provider.selectImage(), throwsStateError);
+    allowed = true;
     expect(await provider.selectImage(), same(selection));
     next = null;
     expect(await provider.selectImage(), isNull);
-    expect(requests, 1);
   });
 
   test(
@@ -206,6 +215,71 @@ void main() {
       await bridge.requestCapturePermission(CapturePermission.screenRecording);
       expect(calls.last.method, 'request');
       expect(calls.last.arguments, {'permission': 'screenRecording'});
+    },
+  );
+
+  test('native Mac selector preserves a batch in order and cancellation returns nothing', () async {
+    var cancelled = false;
+    const png =
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+    final calls = <String>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(MacCapturePermissions.channel, (call) async {
+          calls.add(call.method);
+          if (cancelled) return <Object?>[];
+          return [
+            for (final x in [20, 200])
+              {
+                'dataUrl': png,
+                'bounds': {'x': x, 'y': 30, 'width': 1, 'height': 1},
+                'alignment': {
+                  'status': 'image-only',
+                  'screenBounds': {'x': x, 'y': 30, 'width': 1, 'height': 1},
+                  'mapping': {
+                    'imageBounds': {'x': 0, 'y': 0, 'width': 1, 'height': 1},
+                  },
+                },
+              },
+          ];
+        });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(MacCapturePermissions.channel, null),
+    );
+    final provider = PortableCaptureProvider(
+      runCommand: (_, _, _) async => ProcessResult(1, 1, '', 'Context denied'),
+      screenAccessAllowed: () async => true,
+      selectRegion: () async =>
+          throw StateError('Single-region selector must not be used'),
+    );
+    final selected = await provider.selectContext();
+    expect(calls, ['selectRegions']);
+    expect(selected.map((result) => result.image?.bounds?['x']), [20, 200]);
+    expect(selected.map((result) => result.image?.dataUrl), [png, png]);
+    expect(selected.first.image?.alignment?['status'], 'image-only');
+    cancelled = true;
+    expect(await provider.selectContext(), isEmpty);
+  });
+
+  test(
+    'denied screen access never starts multi-selection or foreground lookup',
+    () async {
+      final provider = PortableCaptureProvider(
+        screenAccessAllowed: () async => false,
+        runCommand: (_, _, _) async =>
+            throw StateError('Must not look up context'),
+        selectRegions: () async => throw StateError('Must not open selector'),
+      );
+      await expectLater(
+        provider.selectContext(),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            contains('Screen Recording'),
+          ),
+        ),
+      );
     },
   );
 }

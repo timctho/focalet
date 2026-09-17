@@ -7,6 +7,8 @@ class MainFlutterWindow: NSWindow {
   private var capturePermissionsChannel: FlutterMethodChannel?
   private var activationObserver: NSObjectProtocol?
   private var lastExternalApplication: NSRunningApplication?
+  private var regionSelector: MacRegionSelector?
+  private var requestedScreenRecording = false
 
   deinit {
     if let observer = activationObserver {
@@ -16,6 +18,9 @@ class MainFlutterWindow: NSWindow {
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
+    flutterViewController.backgroundColor = .clear
+    isOpaque = false
+    backgroundColor = .clear
     let windowFrame = self.frame
     self.contentViewController = flutterViewController
     self.setFrame(windowFrame, display: true)
@@ -39,6 +44,28 @@ class MainFlutterWindow: NSWindow {
       binaryMessenger: flutterViewController.engine.binaryMessenger
     )
     channel.setMethodCallHandler { [weak self] call, result in
+      if call.method == "selectRegions" {
+        guard let self = self, self.regionSelector == nil else {
+          result(FlutterError(code: "selection-in-progress", message: "A selection is already open", details: nil))
+          return
+        }
+        let selector = MacRegionSelector()
+        self.regionSelector = selector
+        selector.start { [weak self] selected in
+          self?.regionSelector = nil
+          switch selected {
+          case .success(let regions): result(regions)
+          case .failure(let error):
+            result(FlutterError(code: "capture-failed", message: error.localizedDescription, details: nil))
+          }
+        }
+        return
+      }
+      if call.method == "cancelSelection" {
+        self?.regionSelector?.cancel()
+        result(nil)
+        return
+      }
       if call.method == "hideForCapture" {
         // Ordering out one window leaves Zommi frontmost. Hiding the app also
         // returns activation to the external app whose context is requested.
@@ -61,7 +88,12 @@ class MainFlutterWindow: NSWindow {
           let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
           _ = AXIsProcessTrustedWithOptions(options as CFDictionary)
         case "screenRecording":
-          _ = CGRequestScreenCaptureAccess()
+          // Only the guide's explicit button requests access. Repeated checks
+          // and repeated Settings visits must not stack native consent prompts.
+          if !CGPreflightScreenCaptureAccess(), self?.requestedScreenRecording == false {
+            self?.requestedScreenRecording = true
+            _ = CGRequestScreenCaptureAccess()
+          }
           if !CGPreflightScreenCaptureAccess(),
              let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
             NSWorkspace.shared.open(url)

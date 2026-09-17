@@ -296,7 +296,9 @@ final class FlutterDesktopBridge
       windowButtonVisibility: false,
     );
     await windowManager.waitUntilReadyToShow(options);
-    await windowManager.setAsFrameless();
+    // The hidden macOS title bar already provides a full-size content view.
+    // setAsFrameless marks NSWindow opaque, turning our clear corners black.
+    if (!Platform.isMacOS) await windowManager.setAsFrameless();
     if (supportsNativeWindowShadow(Platform.operatingSystem)) {
       await windowManager.setHasShadow(false);
     }
@@ -1703,19 +1705,20 @@ final class PortableCaptureProvider implements CaptureProvider {
   PortableCaptureProvider({
     CaptureCommandRunner? runCommand,
     Future<bool> Function()? screenAccessAllowed,
-    Future<void> Function()? requestScreenAccess,
     Future<ImageSelection?> Function()? selectRegion,
+    Future<List<ImageSelection>> Function()? selectRegions,
   }) : _runCommand = runCommand ?? _runProcess,
-       _screenAccessAllowed =
-           screenAccessAllowed ?? screenCapturer.isAccessAllowed,
-       _requestScreenAccess =
-           requestScreenAccess ?? screenCapturer.requestAccess,
-       _selectRegion = selectRegion ?? _captureRegion;
+       _screenAccessAllowed = screenAccessAllowed ?? _macScreenAccessAllowed,
+       _selectRegion = selectRegion ?? _captureRegion,
+       _selectRegions = selectRegions ?? _captureRegions;
 
   final CaptureCommandRunner _runCommand;
   final Future<bool> Function() _screenAccessAllowed;
-  final Future<void> Function() _requestScreenAccess;
   final Future<ImageSelection?> Function() _selectRegion;
+  final Future<List<ImageSelection>> Function() _selectRegions;
+
+  static Future<bool> _macScreenAccessAllowed() async =>
+      (await MacCapturePermissions().capturePermissions()).screenRecording;
 
   @override
   Future<void> initialize() async {}
@@ -1730,6 +1733,7 @@ final class PortableCaptureProvider implements CaptureProvider {
 
   @override
   Future<List<CaptureResult>> selectContext() async {
+    await _ensureScreenAccess();
     CaptureResult? context;
     try {
       // Read the foreground app before the system selector takes activation.
@@ -1737,18 +1741,34 @@ final class PortableCaptureProvider implements CaptureProvider {
     } on Object {
       // Missing Accessibility/Automation must not discard permitted pixels.
     }
-    final image = await selectImage();
-    if (image == null) return const [];
+    final images = await _selectRegions();
     return [
-      CaptureResult(
-        image: ImageSelection(
-          dataUrl: image.dataUrl,
-          bounds: image.bounds,
-          alignment: image.alignment,
-          snapshot: image.snapshot ?? context?.snapshot,
-          previewText: image.previewText ?? context?.previewText,
+      for (final image in images)
+        CaptureResult(
+          image: ImageSelection(
+            dataUrl: image.dataUrl,
+            bounds: image.bounds,
+            alignment: image.alignment,
+            snapshot: image.snapshot ?? context?.snapshot,
+            previewText: image.previewText ?? context?.previewText,
+          ),
         ),
-      ),
+    ];
+  }
+
+  static Future<List<ImageSelection>> _captureRegions() async {
+    final selections = await MacCapturePermissions.channel
+        .invokeListMethod<Object?>('selectRegions');
+    return [
+      for (final selection in selections ?? const [])
+        if (_nullableMap(selection) case final item?)
+          ImageSelection(
+            dataUrl: item['dataUrl'] as String,
+            bounds: _nullableMap(item['bounds']),
+            alignment: _nullableMap(item['alignment']),
+            snapshot: _nullableMap(item['snapshot']),
+            previewText: item['previewText'] as String?,
+          ),
     ];
   }
 
@@ -1797,15 +1817,18 @@ final class PortableCaptureProvider implements CaptureProvider {
 
   @override
   Future<ImageSelection?> selectImage() async {
-    if (!await _screenAccessAllowed()) {
-      await _requestScreenAccess();
-      if (!await _screenAccessAllowed()) {
-        throw StateError(
-          'Allow Screen Recording for Zommi in System Settings > Privacy & Security, then restart Zommi and try again.',
-        );
-      }
-    }
+    await _ensureScreenAccess();
     return _selectRegion();
+  }
+
+  Future<void> _ensureScreenAccess() async {
+    if (!await _screenAccessAllowed()) {
+      // The permission guide owns explicit requests. Permission can change
+      // between that guide and capture; never reopen Settings from this layer.
+      throw StateError(
+        'Screen Recording is unavailable for this copy of Zommi. Open capture permissions in Settings to check access.',
+      );
+    }
   }
 
   static Future<ImageSelection?> _captureRegion() async {

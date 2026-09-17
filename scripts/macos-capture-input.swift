@@ -45,4 +45,7 @@ if CommandLine.arguments.dropFirst().first == "inspect" {
     mouse(.leftMouseDragged, 120 + Double(step) * 10, 140 + Double(step) * 80 / 12)
   }
   mouse(.leftMouseUp, 240, 220)
+  // The app-owned picker retains boxes until the batch is confirmed.
+  CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: true)!.post(tap: .cghidEventTap)
+  CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: false)!.post(tap: .cghidEventTap)
 }

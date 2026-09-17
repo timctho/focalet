@@ -2,12 +2,14 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:zommi_flutter/desktop/capture_permissions.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 import 'package:zommi_flutter/theme/zommi_typography.dart';
 import 'package:zommi_flutter/widgets/content_views.dart';
+import 'package:zommi_flutter/widgets/capture_permission_setup.dart';
 import 'package:zommi_flutter/widgets/frosted_surface.dart';
 import 'package:zommi_flutter/widgets/runtime_logo.dart';
 import 'package:zommi_flutter/widgets/session_context_menu.dart';
@@ -1148,6 +1150,9 @@ class AppSettingsPanel extends StatelessWidget {
               'App settings',
               style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
             ),
+            if (controller.desktop case final CapturePermissionBridge bridge
+                when bridge.supportsCapturePermissions)
+              CapturePermissionSetup(bridge: bridge),
             if (controller.desktop case final BrowserCaptureSettings settings
                 when settings.supportsBrowserPageDetails)
               SwitchListTile(

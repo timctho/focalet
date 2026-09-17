@@ -1471,6 +1471,8 @@ impl Inner {
                 .unwrap_or_default();
             let code = if detail.contains("already has an active writer") {
                 "session-busy"
+            } else if detail.starts_with("no rollout found for thread id ") {
+                "session-not-found"
             } else if error.get("code").and_then(Value::as_i64) == Some(-32001) {
                 "runtime-overloaded"
             } else {

@@ -521,6 +521,14 @@ jobs:
           ZOMMI_MACOS_SIGNING_IDENTITY: ${{ secrets.ZOMMI_MACOS_SIGNING_IDENTITY }}
         run: bash scripts/package-unix.sh macos
 
+      - name: Test native macOS selection geometry
+        run: |
+          xcrun swiftc -swift-version 5 \
+            src/Zommi.Flutter/macos/Runner/MacRegionSelector.swift \
+            scripts/test-macos-region-selection.swift \
+            -o /tmp/zommi-macos-region-tests
+          /tmp/zommi-macos-region-tests
+
       - name: Probe packaged macOS startup and capture permissions
         run: python3 scripts/accept-macos.py artifacts/zommi-macos-${{ inputs.macos_arch == 'x64' && 'x64' || 'arm64' }} --output artifacts/macos-acceptance --interactive
 

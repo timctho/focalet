@@ -10,6 +10,15 @@ fi
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 flutter_directory="$repository_root/src/Zommi.Flutter"
 
+if [[ "$target_platform" == macos ]]; then
+  # Keep this checkout's local builds on the same identity. Ad-hoc signatures
+  # use binary hashes, so replacing the app invalidates existing TCC grants.
+  macos_signing_identity=${ZOMMI_MACOS_SIGNING_IDENTITY:-$(git -C "$repository_root" config --local --get zommi.macosSigningIdentity || true)}
+  if [[ -z "$macos_signing_identity" || "$macos_signing_identity" == - ]]; then
+    echo 'macOS: using ad-hoc signing; rebuilt apps can lose Screen Recording and Accessibility grants. Set ZOMMI_MACOS_SIGNING_IDENTITY or git config --local zommi.macosSigningIdentity to retain a signing identity.' >&2
+  fi
+fi
+
 resolve_linux_runtime_library() {
   local soname=$1
   local search_path
@@ -100,8 +109,8 @@ if [[ "$target_platform" == macos ]]; then
   assembler_arguments+=(--document "$repository_root/scripts/accept-macos.py")
   assembler_arguments+=(--document "$repository_root/scripts/macos-capture-input.swift")
 fi
-if [[ "$target_platform" == macos && -n "${ZOMMI_MACOS_SIGNING_IDENTITY:-}" ]]; then
-  assembler_arguments+=(--macos-signing-identity "$ZOMMI_MACOS_SIGNING_IDENTITY")
+if [[ "$target_platform" == macos && -n "$macos_signing_identity" ]]; then
+  assembler_arguments+=(--macos-signing-identity "$macos_signing_identity")
 elif [[ "$target_platform" == linux ]]; then
   assembler_arguments+=(--signing-status checksum-only --signing-mechanism sha256)
   assembler_arguments+=(

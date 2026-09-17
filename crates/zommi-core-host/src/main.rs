@@ -658,17 +658,17 @@ impl HostState {
         } else {
             requested_cwd
         };
-        let preferred_session_id = payload
+        let explicit_session_id = payload
             .get("preferredSessionId")
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
-            .map(str::to_owned)
-            .or_else(|| {
-                binding
-                    .as_ref()
-                    .filter(|binding| binding.runtime_target_id == target.id)
-                    .map(|binding| binding.session_id.clone())
-            });
+            .map(str::to_owned);
+        let preferred_session_id = explicit_session_id.clone().or_else(|| {
+            binding
+                .as_ref()
+                .filter(|binding| binding.runtime_target_id == target.id)
+                .map(|binding| binding.session_id.clone())
+        });
         let preferred_session_file = payload
             .get("preferredSessionFile")
             .and_then(Value::as_str)
@@ -740,15 +740,36 @@ impl HostState {
             adapter.shutdown().await;
             return Ok(json!({"data": result?}));
         }
-        let adapter = RuntimeAdapter::connect(
-            target,
-            runtime_command,
+        let connection_attempt = RuntimeAdapter::connect(
+            target.clone(),
+            runtime_command.clone(),
             cwd.clone(),
-            preferred_session_id,
+            preferred_session_id.clone(),
             preferred_session_file,
             self.event_tx.clone(),
         )
-        .await?;
+        .await;
+        let adapter = match connection_attempt {
+            // A remembered empty/deleted Codex chat may have no persisted
+            // rollout. It must not prevent startup or creating a new agent.
+            // Explicit session selection and every other failure stay exact.
+            Err(error)
+                if error.code == "session-not-found"
+                    && explicit_session_id.is_none()
+                    && preferred_session_id.is_some() =>
+            {
+                RuntimeAdapter::connect(
+                    target,
+                    runtime_command,
+                    cwd.clone(),
+                    None,
+                    None,
+                    self.event_tx.clone(),
+                )
+                .await?
+            }
+            result => result?,
+        };
         let connection = adapter.connection_value().await?;
         let runtime_target_id = adapter.target_id().to_owned();
         let session_id = adapter.active_session_id().await?;

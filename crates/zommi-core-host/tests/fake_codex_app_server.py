@@ -140,6 +140,12 @@ for line in sys.stdin:
         if os.environ.get("ZOMMI_FAKE_FORK_CWD"):
             result["thread"]["cwd"] = os.environ["ZOMMI_FAKE_FORK_CWD"]
     elif method == "thread/resume":
+        if os.environ.get('ZOMMI_FAKE_RESUME_ERROR'):
+            send({'id': request_id, 'error': {'code': -32600, 'message': os.environ['ZOMMI_FAKE_RESUME_ERROR']}})
+            continue
+        if request['params']['threadId'] == os.environ.get('ZOMMI_FAKE_MISSING_THREAD'):
+            send({'id': request_id, 'error': {'code': -32600, 'message': 'no rollout found for thread id ' + request['params']['threadId']}})
+            continue
         if control and (control / "busy-session").exists() and (control / "busy-session").read_text() == request['params']['threadId']:
             send({'id': request_id, 'error': {'code': -32600, 'message': 'thread already has an active writer'}})
             continue

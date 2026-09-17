@@ -39,6 +39,7 @@ final class ZommiController extends ChangeNotifier {
     this.sessionCatalogStore = const NoopSessionCatalogStore(),
     this.catalogStartupDelay = Duration.zero,
     this.runtimeSetupPending = false,
+    this.prepareImageCapture,
     DateTime Function()? clock,
     WindowSizeSetting initialWindowSize = WindowSizeSetting.standard,
   }) : artifactLoader = artifactLoader ?? const LocalArtifactLoader(),
@@ -47,6 +48,7 @@ final class ZommiController extends ChangeNotifier {
 
   final CoreBridge core;
   final DesktopBridge desktop;
+  final Future<bool> Function()? prepareImageCapture;
   final ArtifactLoader artifactLoader;
   final SessionCatalogStore sessionCatalogStore;
   final Duration catalogStartupDelay;
@@ -1635,8 +1637,12 @@ final class ZommiController extends ChangeNotifier {
   }
 
   Future<void> addImageContext() async {
-    if (!imageInputSupported) return;
+    if (!imageInputSupported || selectingContent) return;
+    selectingContent = true;
+    _notify();
     try {
+      final prepare = prepareImageCapture;
+      if (prepare != null && !await prepare()) return;
       final attachment = await desktop.selectImageContext();
       if (attachment != null) {
         addAttachment(attachment);
@@ -1644,6 +1650,9 @@ final class ZommiController extends ChangeNotifier {
       }
     } on Object catch (error) {
       _setStatus('Image selection failed · $error', warning: true);
+    } finally {
+      selectingContent = false;
+      _notify();
     }
   }
 
@@ -1653,6 +1662,8 @@ final class ZommiController extends ChangeNotifier {
     previewAttachment = null;
     _notify();
     try {
+      final prepare = prepareImageCapture;
+      if (prepare != null && !await prepare()) return;
       final selected = await desktop.selectPointerContext();
       final prepared = <ContextAttachment>[];
       for (var attachment in selected) {

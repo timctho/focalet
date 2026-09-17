@@ -597,21 +597,30 @@ final class FakeDesktopBridge
   @override
   bool supportsCapturePermissions = false;
   final List<String> permissionRequests = [];
+  bool grantPermissionOnRequest = true;
+  CapturePermissionStatus permissionStatus = const CapturePermissionStatus(
+    accessibility: false,
+    screenRecording: false,
+  );
   @override
   Future<CapturePermissionStatus> capturePermissions() async =>
-      const CapturePermissionStatus(
-        accessibility: false,
-        screenRecording: false,
-      );
+      permissionStatus;
   @override
   Future<CapturePermissionStatus> requestCapturePermission(
     CapturePermission permission,
   ) async {
     permissionRequests.add(permission.name);
-    return CapturePermissionStatus(
-      accessibility: permission == CapturePermission.accessibility,
-      screenRecording: permission == CapturePermission.screenRecording,
-    );
+    if (grantPermissionOnRequest) {
+      permissionStatus = CapturePermissionStatus(
+        accessibility:
+            permissionStatus.accessibility ||
+            permission == CapturePermission.accessibility,
+        screenRecording:
+            permissionStatus.screenRecording ||
+            permission == CapturePermission.screenRecording,
+      );
+    }
+    return permissionStatus;
   }
 
   @override

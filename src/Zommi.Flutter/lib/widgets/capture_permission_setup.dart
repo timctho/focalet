@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:zommi_flutter/desktop/capture_permissions.dart';
+import 'package:zommi_flutter/widgets/screen_recording_permission_dialog.dart';
 
 class CapturePermissionSetup extends StatefulWidget {
   const CapturePermissionSetup({required this.bridge, super.key});
@@ -38,7 +39,14 @@ class _CapturePermissionSetupState extends State<CapturePermissionSetup>
     if (_busy) return;
     setState(() => _busy = true);
     try {
-      final status = permission == null
+      if (permission == CapturePermission.screenRecording) {
+        await showScreenRecordingPermissionDialog(
+          context,
+          bridge: widget.bridge,
+        );
+      }
+      final status =
+          permission == null || permission == CapturePermission.screenRecording
           ? await widget.bridge.capturePermissions()
           : await widget.bridge.requestCapturePermission(permission);
       if (mounted) {

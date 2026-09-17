@@ -1,0 +1,44 @@
+import Cocoa
+
+// Compile together with Runner/MacRegionSelector.swift. Exercises selection
+// and Retina crop geometry without screen access, UI input, or user data.
+@main
+struct MacRegionSelectionTests {
+  static func main() {
+    var state = MacRegionSelectionState()
+    let screen = CGSize(width: 400, height: 300)
+    state.append(displayIndex: 0, start: CGPoint(x: 120, y: 100), end: CGPoint(x: 20, y: 30), size: screen)
+    assert(state.regions[0].rect == CGRect(x: 20, y: 30, width: 100, height: 70))
+    state.append(displayIndex: 1, start: CGPoint(x: 50, y: 60), end: CGPoint(x: 90, y: 90), size: screen)
+    assert(state.regions.map(\.displayIndex) == [0, 1])
+    state.undo()
+    assert(state.regions.count == 1)
+    // Identical regions are ignored; tiny gestures do not attach pixels.
+    state.append(displayIndex: 0, start: CGPoint(x: 20, y: 30), end: CGPoint(x: 120, y: 100), size: screen)
+    state.append(displayIndex: 0, start: .zero, end: CGPoint(x: 2, y: 2), size: screen)
+    assert(state.regions.count == 1)
+    for index in 1...10 {
+      state.append(displayIndex: index, start: CGPoint(x: -10, y: -20), end: CGPoint(x: 450, y: 400), size: screen)
+    }
+    assert(state.regions.count == 8)
+    assert(state.regions.last!.rect == CGRect(origin: .zero, size: screen))
+    let pixels = MacRegionSelectionState.pixelRect(state.regions[0].rect, screenSize: screen,
+                                                  imageSize: CGSize(width: 800, height: 600))
+    assert(pixels == CGRect(x: 40, y: 60, width: 200, height: 140))
+    let fractional = MacRegionSelectionState.pixelRect(CGRect(x: 0.25, y: 0.25, width: 5, height: 5),
+      screenSize: screen, imageSize: CGSize(width: 800, height: 600))
+    assert(fractional == CGRect(x: 0, y: 0, width: 11, height: 11))
+    let context = CGContext(data: nil, width: 800, height: 600, bitsPerComponent: 8, bytesPerRow: 0,
+      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    context.setFillColor(NSColor.red.cgColor)
+    context.fill(CGRect(x: 0, y: 0, width: 800, height: 600))
+    let cropped = context.makeImage()!.cropping(to: pixels)!
+    let png = NSBitmapImageRep(cgImage: cropped).representation(using: .png, properties: [:])!
+    let decoded = NSBitmapImageRep(data: png)!
+    assert(decoded.pixelsWide == 200 && decoded.pixelsHigh == 140)
+    assert(decoded.colorAt(x: 10, y: 10)!.redComponent > 0.9)
+    for _ in 0..<10 { state.undo() }
+    assert(state.regions.isEmpty)
+    print("Passed: reverse drag, display/order retention, undo, duplicates, minimum size, eight-region limit, edge clamping, Retina/fractional crop, PNG round trip")
+  }
+}

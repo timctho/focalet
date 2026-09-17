@@ -14,22 +14,11 @@ import tempfile
 import time
 
 
-def interactive_selector(app_pid: int) -> int | None:
-    output = subprocess.check_output(['ps', '-axo', 'pid=,ppid=,command='], text=True)
-    rows = {}
-    for line in output.splitlines():
-        match = re.match(r"\s*(\d+)\s+(\d+)\s+(.+)", line)
-        if match:
-            rows[int(match[1])] = (int(match[2]), match[3])
-    descendants = {app_pid}
-    while True:
-        expanded = descendants | {pid for pid, (parent, _) in rows.items() if parent in descendants}
-        if expanded == descendants:
-            break
-        descendants = expanded
-    return next((pid for pid in descendants if pid in rows and
-                 rows[pid][1].startswith('/usr/sbin/screencapture ') and
-                 ' -i ' in rows[pid][1] and 'zommi-region-' in rows[pid][1]), None)
+def interactive_selector(startup: str) -> str | None:
+    # The picker now lives inside the app, with no screencapture child. The
+    # launched package logs readiness only after its overlay owns input.
+    events = re.findall(r'^macOS selector: (ready|closed) ([\w-]+)$', startup, re.MULTILINE)
+    return events[-1][1] if events and events[-1][0] == 'ready' else None
 
 
 def main() -> None:
@@ -80,16 +69,15 @@ def main() -> None:
                                     (mode == 'select' and 'macOS probe: cancel region' in startup)):
                                 continue
                             attempts, last_sent = sent_gestures.get(mode, (0, 0))
-                            selector = interactive_selector(process.pid)
+                            selector = interactive_selector(startup)
                             if selector is not None and attempts < 3 and time.monotonic() - last_sent >= 3:
-                                # A live process can precede the selector's input grab.
-                                # Retry only while this app's exact selector is alive.
+                                # Retry only while this app's exact overlay is open.
                                 time.sleep(0.7)
-                                if interactive_selector(process.pid) != selector:
+                                if interactive_selector((output / 'startup.log').read_text(errors='replace')) != selector:
                                     continue
                                 subprocess.run([str(input_driver), mode], check=True, timeout=10)
                                 sent_gestures[mode] = (attempts + 1, time.monotonic())
-                                print(f'{mode} gesture {attempts + 1} -> selector PID {selector}', flush=True)
+                                print(f'{mode} gesture {attempts + 1} -> selector {selector}', flush=True)
                     time.sleep(0.25)
                 report = json.loads(report_path.read_text())
                 if process.poll() is not None:

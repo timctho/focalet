@@ -62,8 +62,10 @@ def _write_checksums(root: Path) -> None:
 
 def _sign_macos(application: Path, identity: str | None) -> dict[str, str]:
     selected = identity or "-"
+    identity_signed = selected != "-"
     command = ["codesign", "--force", "--deep", "--sign", selected]
-    if identity:
+    if identity_signed:
+        command.append("--preserve-metadata=entitlements")
         command.extend(["--options", "runtime", "--timestamp"])
     command.append(str(application))
     subprocess.run(command, check=True)
@@ -71,10 +73,34 @@ def _sign_macos(application: Path, identity: str | None) -> dict[str, str]:
         ["codesign", "--verify", "--deep", "--strict", str(application)],
         check=True,
     )
-    return {
-        "status": "distribution-signed" if identity else "ad-hoc",
-        "mechanism": "codesign",
-    }
+    signing = {"status": "ad-hoc", "mechanism": "codesign"}
+    if identity_signed:
+        details = subprocess.run(
+            ["codesign", "--display", "--verbose=4", str(application)],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stderr
+        fields = dict(
+            line.split("=", 1) for line in details.splitlines() if "=" in line
+        )
+        authorities = [
+            line.removeprefix("Authority=")
+            for line in details.splitlines()
+            if line.startswith("Authority=")
+        ]
+        authority = authorities[0] if authorities else ""
+        if authority.startswith("Developer ID Application:"):
+            signing["status"] = "distribution-signed"
+        elif authority.startswith(("Apple Development:", "Mac Developer:")):
+            signing["status"] = "development-signed"
+        else:
+            signing["status"] = "identity-signed"
+        if team := fields.get("TeamIdentifier"):
+            signing["teamIdentifier"] = team
+        if authority:
+            signing["authority"] = authority
+    return signing
 
 
 def _write_manifest(

@@ -605,13 +605,15 @@ class ReleaseAssemblyTests(unittest.TestCase):
         application = self.root / "Zommi.app"
         identity = "Developer ID Application: Zommi Test"
         with mock.patch.object(assemble_release.subprocess, "run") as run:
+            run.return_value.stderr = f"Authority={identity}\nTeamIdentifier=TESTTEAM\n"
             result = assemble_release._sign_macos(application, identity)
 
         self.assertEqual(
             result,
-            {"status": "distribution-signed", "mechanism": "codesign"},
+            {"status": "distribution-signed", "mechanism": "codesign",
+             "teamIdentifier": "TESTTEAM", "authority": identity},
         )
-        self.assertEqual(run.call_count, 2)
+        self.assertEqual(run.call_count, 3)
         self.assertEqual(
             run.call_args_list[0].args[0],
             [
@@ -620,6 +622,7 @@ class ReleaseAssemblyTests(unittest.TestCase):
                 "--deep",
                 "--sign",
                 identity,
+                "--preserve-metadata=entitlements",
                 "--options",
                 "runtime",
                 "--timestamp",
@@ -630,6 +633,18 @@ class ReleaseAssemblyTests(unittest.TestCase):
             run.call_args_list[1].args[0],
             ["codesign", "--verify", "--deep", "--strict", str(application)],
         )
+
+    def test_macos_development_certificate_is_not_reported_as_distribution(self) -> None:
+        with mock.patch.object(assemble_release.subprocess, "run") as run:
+            run.return_value.stderr = (
+                "Authority=Apple Development: Test (TESTTEAM)\n"
+                "Authority=Apple Worldwide Developer Relations Certification Authority\n"
+                "TeamIdentifier=TESTTEAM\n"
+            )
+            result = assemble_release._sign_macos(self.root / "Zommi.app", "certificate-hash")
+        self.assertEqual(result["status"], "development-signed")
+        self.assertEqual(result["teamIdentifier"], "TESTTEAM")
+        self.assertEqual(result["authority"], "Apple Development: Test (TESTTEAM)")
 
     def test_macos_without_identity_is_ad_hoc_signed_and_verified(self) -> None:
         application = self.root / "Zommi.app"
