@@ -135,10 +135,11 @@ void main() {
     expect(messageTimestamp({'timestamp': 'invalid'}), isNull);
   });
 
-  test('resend preserves attachments and draft, queues once and keeps its send time', () async {
+  test('resend stops the active turn and preserves attachments, draft and send time', () async {
     final core = RichFakeCore()
       ..historyCount = 0
-      ..uniqueTurnIds = true;
+      ..uniqueTurnIds = true
+      ..completeInterruptedTurn = true;
     var now = DateTime(2026, 9, 14, 14, 32);
     final controller = ZommiController(
       core: core,
@@ -160,31 +161,23 @@ void main() {
     await controller.submit('Original prompt');
     final original = controller.turns.single;
     expect(original.createdAt, now);
+    await controller.submit('Discard queued follow-up');
     controller.updateComposerValue(
       const TextEditingValue(text: 'Unrelated draft'),
     );
     controller.addAttachment(ContextAttachment(id: 'draft-image', token: ''));
     now = now.add(const Duration(minutes: 1));
-    expect(await controller.resendMessage(original, 'Edited prompt'), isTrue);
+    expect(
+      await controller.resendMessage(original, 'Edited prompt'),
+      isTrue,
+      reason: controller.status,
+    );
     expect(controller.composerValue.text, 'Unrelated draft');
     expect(controller.attachments.single.id, 'draft-image');
-    expect(controller.turns.single.userText, 'Original prompt');
-    expect(controller.queuedMessages.single.text, 'Edited prompt');
-    expect(controller.queuedMessages.single.createdAt, now);
-    final first = core.startedTurns.single;
+    expect(controller.turns.single.userText, 'Edited prompt');
+    expect(controller.queuedMessages, isEmpty);
+    expect(core.interrupted?.$3, original.runtimeTurnId);
     now = now.add(const Duration(minutes: 3));
-    core.emit(
-      CoreEvent(
-        name: 'turn.completed',
-        sequence: 1,
-        runtimeTargetId: 'runtime-codex',
-        sessionId: 'session-1',
-        turnId: first['turnId'] as String,
-        clientOperationId: first['clientOperationId'] as String,
-        payload: const {'status': 'completed'},
-      ),
-    );
-    await Future<void>.delayed(Duration.zero);
     expect(core.startedTurns.map((turn) => turn['message']), [
       'Original prompt',
       'Edited prompt',
@@ -272,10 +265,7 @@ void main() {
         tester.widget<TextField>(composer).controller!.text,
         'Keep my draft',
       );
-      expect(
-        find.byKey(const ValueKey('user-message-original')),
-        findsOneWidget,
-      );
+      expect(find.byKey(const ValueKey('user-message-original')), findsNothing);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       await tester.pump();

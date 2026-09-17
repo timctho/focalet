@@ -75,6 +75,8 @@ final class ZommiController extends ChangeNotifier {
   Map<String, Object?> runtimeSettings = {};
   final Map<String, List<ConversationTurn>> _turnsBySession = {};
   final Map<String, int> _transcriptRevisions = {};
+  final Map<String, int> _historyEpochs = {};
+  final Map<String, Set<String>> _discardedTurnIds = {};
   final Map<String, String> _activeTurns = {};
   final Set<String> _unreadSessions = {};
   final Set<String> _cancelRequestedSessions = {};
@@ -950,6 +952,7 @@ final class ZommiController extends ChangeNotifier {
     final sessionKey = _sessionKey(runtimeTargetId, sessionId);
     final revisionBeforeRead =
         historyRevision ?? _transcriptRevisions[sessionKey] ?? 0;
+    final historyEpoch = _historyEpochs[sessionKey] ?? 0;
     if (!capabilities.contains('history.read.v1')) {
       _turnsBySession.putIfAbsent(sessionKey, () => []);
       return;
@@ -963,7 +966,15 @@ final class ZommiController extends ChangeNotifier {
               runtimeTargetId: runtimeTargetId,
               sessionId: sessionId,
             );
-      final canonical = mapThreadHistory(response);
+      if ((_historyEpochs[sessionKey] ?? 0) != historyEpoch) return;
+      final discarded = _discardedTurnIds[sessionKey] ?? const <String>{};
+      final canonical = mapThreadHistory(response)
+          .where(
+            (turn) =>
+                !discarded.contains(turn.id) &&
+                !discarded.contains(turn.runtimeTurnId),
+          )
+          .toList();
       final cached = _turnsBySession[sessionKey] ?? const <ConversationTurn>[];
       final changedDuringRead =
           (_transcriptRevisions[sessionKey] ?? 0) != revisionBeforeRead;
@@ -976,6 +987,7 @@ final class ZommiController extends ChangeNotifier {
       );
       _transcriptChanged(sessionKey);
     } on Object catch (error) {
+      if ((_historyEpochs[sessionKey] ?? 0) != historyEpoch) return;
       _turnsBySession.putIfAbsent(sessionKey, () => []);
       if (retryOnFailure) rethrow;
       _setStatus('History unavailable · $error', warning: true);
@@ -1363,8 +1375,11 @@ final class ZommiController extends ChangeNotifier {
     await _enqueueMessage(pendingMessage);
   }
 
-  /// Resubmits an explicitly edited message without consuming the composer
-  /// draft or changing the original conversation. It uses the normal queue.
+  bool get messageEditingSupported =>
+      core is SessionRewindBridge && capabilities.contains('session.rewind.v1');
+
+  /// Replace the edited turn and all following history before starting its
+  /// replacement. The unrelated composer draft and attachments stay untouched.
   Future<bool> resendMessage(ConversationTurn original, String message) async {
     final text = message.trim();
     final runtime = activeRuntime;
@@ -1376,6 +1391,8 @@ final class ZommiController extends ChangeNotifier {
         sessionBusy ||
         runtimeBusy ||
         selectingContent ||
+        !messageEditingSupported ||
+        original.runtimeTurnId == null ||
         !turns.contains(original)) {
       return false;
     }
@@ -1401,9 +1418,99 @@ final class ZommiController extends ChangeNotifier {
       }),
       createdAt: _clock(),
     );
-    _newSessions.remove(_sessionKey(runtime.id, sessionId));
-    await _enqueueMessage(pendingMessage);
-    return true;
+    final sessionKey = _sessionKey(runtime.id, sessionId);
+    final wasPaused = _pausedQueues.contains(sessionKey);
+    final wasRunning =
+        _activeTurns.containsKey(sessionKey) ||
+        _startingSessions.contains(sessionKey);
+    var rewound = false;
+    sessionBusy = true;
+    _pausedQueues.add(sessionKey);
+    _notify();
+    try {
+      if (wasRunning) {
+        await interrupt();
+        if (_activeTurns.containsKey(sessionKey) &&
+            !_interruptingSessions.contains(sessionKey)) {
+          throw StateError('The current response could not be stopped.');
+        }
+        await _waitForIdleSession(sessionKey);
+      }
+      if (_closed || !_isActiveSession(runtime.id, sessionId)) return false;
+      final current = _turnsBySession[sessionKey]!;
+      final index = current.indexWhere(
+        (turn) => turn.runtimeTurnId == original.runtimeTurnId,
+      );
+      final lastTurnId = current.reversed
+          .map((turn) => turn.runtimeTurnId)
+          .whereType<String>()
+          .firstOrNull;
+      if (index < 0 || lastTurnId == null) {
+        throw StateError('The chat changed. Reopen it before resending.');
+      }
+      _setStatus('Returning to the edited message…');
+      final history = await (core as SessionRewindBridge).rewindSession(
+        runtimeTargetId: runtime.id,
+        sessionId: sessionId,
+        turnId: original.runtimeTurnId!,
+        expectedLastTurnId: lastTurnId,
+      );
+      final thread = mapValue(history['thread']);
+      if (thread['id'] != sessionId || thread['turns'] is! List) {
+        throw StateError('The runtime returned history for a different chat.');
+      }
+      final prefix = current.take(index).toList();
+      rewound = true;
+      _historyEpochs[sessionKey] = (_historyEpochs[sessionKey] ?? 0) + 1;
+      final discarded = _discardedTurnIds.putIfAbsent(sessionKey, () => {});
+      for (final turn in current.skip(index)) {
+        discarded.add(turn.id);
+        if (turn.runtimeTurnId case final id?) discarded.add(id);
+      }
+      _turnsBySession[sessionKey] = mergeSessionHistory(
+        mapThreadHistory(history),
+        prefix,
+        preserveCached: false,
+      );
+      // Follow-ups written for the removed history must not run in the rewrite.
+      _messageQueues.remove(sessionKey);
+      _newSessions.remove(sessionKey);
+      _pausedQueues.remove(sessionKey);
+      approval = null;
+      question = null;
+      previewArtifact = null;
+      _transcriptChanged(sessionKey);
+      await _enqueueMessage(pendingMessage);
+      return true;
+    } on Object catch (error) {
+      _setStatus('Could not resend from this message · $error', warning: true);
+      return false;
+    } finally {
+      if (!rewound && !wasPaused && !wasRunning) {
+        _pausedQueues.remove(sessionKey);
+      }
+      sessionBusy = false;
+      _notify();
+    }
+  }
+
+  Future<void> _waitForIdleSession(String sessionKey) async {
+    final complete = Completer<void>();
+    void check() {
+      if (_closed ||
+          (!_activeTurns.containsKey(sessionKey) &&
+              !_startingSessions.contains(sessionKey))) {
+        if (!complete.isCompleted) complete.complete();
+      }
+    }
+
+    addListener(check);
+    check();
+    try {
+      await complete.future.timeout(const Duration(seconds: 30));
+    } finally {
+      removeListener(check);
+    }
   }
 
   Future<void> _enqueueMessage(QueuedMessage pendingMessage) async {
@@ -1490,6 +1597,7 @@ final class ZommiController extends ChangeNotifier {
       if (!receipt.accepted) {
         throw StateError('Agent did not accept the message');
       }
+      localTurn.runtimeTurnId = receipt.turnId;
       final completedIdentity = _turnIdentity(
         receipt.runtimeTargetId,
         receipt.turnId,
@@ -2268,6 +2376,14 @@ final class ZommiController extends ChangeNotifier {
     if (event.sequence > 0 && event.sequence <= previous) return;
     if (event.sequence > 0) _lastSequences[sequenceKey] = event.sequence;
     final sessionId = event.sessionId ?? activeSessionId;
+    final discarded = sessionId == null
+        ? null
+        : _discardedTurnIds[_sessionKey(event.runtimeTargetId, sessionId)];
+    if (discarded != null &&
+        (discarded.contains(event.turnId) ||
+            discarded.contains(event.clientOperationId))) {
+      return;
+    }
     switch (event.name) {
       case 'commands.updated':
         if (event.sessionId == null) return;
@@ -2398,6 +2514,7 @@ final class ZommiController extends ChangeNotifier {
               turns.add(
                 ConversationTurn(
                   id: turnId,
+                  runtimeTurnId: turnId,
                   number: turns.length + 1,
                   userText: 'Continue goal',
                   createdAt: messageTimestamp(event.payload) ?? _clock(),
@@ -2559,6 +2676,7 @@ final class ZommiController extends ChangeNotifier {
     if (turn == null) {
       turn = ConversationTurn(
         id: eventIdentity ?? 'runtime-turn-${sessionTurns.length + 1}',
+        runtimeTurnId: event.turnId,
         number: sessionTurns.length + 1,
         userText: 'Continue',
         createdAt: messageTimestamp(event.payload) ?? _clock(),
@@ -3056,8 +3174,15 @@ List<ConversationTurn> mergeSessionHistory(
   if (cached.isEmpty) return List<ConversationTurn>.of(canonical);
   final merged = List<ConversationTurn>.of(canonical);
   for (final cachedTurn in cached) {
-    var index = merged.indexWhere((turn) => turn.id == cachedTurn.id);
-    if (index < 0 && cachedTurn.id.startsWith('flutter:')) {
+    var index = merged.indexWhere(
+      (turn) =>
+          turn.id == cachedTurn.id ||
+          (cachedTurn.runtimeTurnId != null &&
+              turn.runtimeTurnId == cachedTurn.runtimeTurnId),
+    );
+    if (index < 0 &&
+        cachedTurn.runtimeTurnId == null &&
+        cachedTurn.id.startsWith('flutter:')) {
       index = merged.lastIndexWhere(
         (turn) => turn.userText == cachedTurn.userText,
       );
@@ -3135,6 +3260,7 @@ ConversationTurn mergeConversationTurn(
   ];
   return ConversationTurn(
     id: primary.id,
+    runtimeTurnId: primary.runtimeTurnId ?? secondary.runtimeTurnId,
     number: primary.number,
     userText: primary.userText,
     createdAt: primary.createdAt ?? secondary.createdAt,

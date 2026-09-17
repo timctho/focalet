@@ -705,7 +705,7 @@ void main() {
           'id': 'session-1',
           'turns': [
             {
-              'id': 'canonical-turn',
+              'id': core.startedTurns.single['turnId'],
               'items': [
                 {
                   'type': 'userMessage',

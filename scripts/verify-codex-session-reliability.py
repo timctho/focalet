@@ -45,11 +45,14 @@ async def verify(args):
             "ZOMMI_RUNTIME_OVERRIDES_PATH": str(root / "overrides.json"),
             "ZOMMI_RUNTIME_DISCOVERY_CACHE_PATH": str(root / "discovery.json"),
         })
-        process = await asyncio.create_subprocess_exec(
-            str(Path(args.core_host).resolve()), cwd=root, env=environment,
-            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL, limit=64 * 1024 * 1024,
-        )
+        async def launch_core():
+            return await asyncio.create_subprocess_exec(
+                str(Path(args.core_host).resolve()), cwd=root, env=environment,
+                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL, limit=64 * 1024 * 1024,
+            )
+
+        process = await launch_core()
         sequence = 0
         events = []
 
@@ -112,6 +115,55 @@ async def verify(args):
             result = {"emptyChats": len(ids), "switches": args.switches,
                       "firstTurnPreserved": True, "unexpectedRestarts": 0,
                       "runtimeVersion": connection.get("runtimeVersion")}
+            if args.verify_rewind:
+                async def send_turn(message):
+                    receipt = await request("turn.start", {
+                        **selected, "message": message, "clientOperationId": message,
+                    })
+                    while not any(e["name"] == "turn.completed" and e.get("turnId") == receipt["turnId"] for e in events):
+                        await receive()
+                    completed = next(e for e in events if e["name"] == "turn.completed" and e.get("turnId") == receipt["turnId"])
+                    assert completed["payload"]["status"] == "completed", completed
+
+                await send_turn("REWIND_DROP_ORIGINAL")
+                await send_turn("REWIND_DROP_LATER")
+                before = (await request("session.read", selected))["thread"]["turns"]
+                assert len(before) == 3
+                prefix = await request("session.rewind", {
+                    **selected, "turnId": before[1]["id"],
+                    "expectedLastTurnId": before[-1]["id"],
+                })
+                assert [t["id"] for t in prefix["thread"]["turns"]] == [before[0]["id"]]
+                await send_turn("REWIND_REPLACEMENT")
+                model_input = json.dumps(json.loads(server.request_log.read_text())["input"])
+                assert "Reply READY" in model_input and "REWIND_REPLACEMENT" in model_input
+                assert "REWIND_DROP_ORIGINAL" not in model_input and "REWIND_DROP_LATER" not in model_input
+                await request("session.open", {**payload, "sessionId": ids[1]})
+                reopened = await request("session.open", selected)
+                after = reopened["history"]["thread"]["turns"]
+                assert len(after) == 2 and "REWIND_DROP" not in json.dumps(after)
+                empty = await request("session.rewind", {
+                    **selected, "turnId": after[0]["id"], "expectedLastTurnId": after[-1]["id"],
+                })
+                assert empty["thread"]["turns"] == []
+                await send_turn("REWIND_FIRST_REPLACEMENT")
+                model_input = json.dumps(json.loads(server.request_log.read_text())["input"])
+                assert "REWIND_FIRST_REPLACEMENT" in model_input
+                assert "Reply READY" not in model_input and "REWIND_DROP" not in model_input
+                assert "REWIND_REPLACEMENT" not in model_input
+                await request("core.shutdown")
+                await asyncio.wait_for(process.wait(), 10)
+                process = await launch_core()
+                await request("core.initialize")
+                await request("runtime.discover")
+                await request("runtime.connect", payload)
+                restored = await request("session.open", selected)
+                durable = restored["history"]["thread"]["turns"]
+                assert len(durable) == 1 and "REWIND_FIRST_REPLACEMENT" in json.dumps(durable)
+                assert "Reply READY" not in json.dumps(durable) and "REWIND_DROP" not in json.dumps(durable)
+                result["rewind"] = {"middleTurnRemovedSuffix": True, "firstTurnRemovedAllHistory": True,
+                                    "providerInputExcludedRemovedMessages": True, "reopenedHistoryStayedRewound": True,
+                                    "runtimeRestartPreservedRewind": True}
             print(json.dumps(result, indent=2))
             await request("core.shutdown")
             await asyncio.wait_for(process.wait(), 10)
@@ -128,6 +180,7 @@ if __name__ == "__main__":
     parser.add_argument("--core-host", default="target/debug/zommi-core-host")
     parser.add_argument("--codex", default=shutil.which("codex"))
     parser.add_argument("--switches", type=int, default=40)
+    parser.add_argument("--verify-rewind", action="store_true")
     args = parser.parse_args()
     if not args.codex or args.switches < 1:
         parser.error("an installed Codex executable and positive switch count are required")

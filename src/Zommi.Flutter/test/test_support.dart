@@ -11,6 +11,7 @@ class RichFakeCore
         CoreBridge,
         RuntimeConfigurationBridge,
         SessionCatalogBridge,
+        SessionRewindBridge,
         GoalControlBridge {
   final Map<String, Map<String, Object?>> goals = {};
   final List<Map<String, Object?>> goalCommands = [];
@@ -93,6 +94,11 @@ class RichFakeCore
   Object? startTurnError;
   bool startTurnAccepted = true;
   final List<Map<String, Object?>> startedTurns = [];
+  final List<Map<String, String>> rewindRequests = [];
+  final Map<String, int> _rewindWatermarks = {};
+  Future<void>? rewindGate;
+  bool rewindFails = false;
+  bool completeInterruptedTurn = false;
   Future<void>? createSessionGate;
   Future<void>? openSessionGate;
   Future<void>? readSessionGate;
@@ -131,6 +137,7 @@ class RichFakeCore
     'session.create.v1',
     'session.resume.v1',
     'history.read.v1',
+    'session.rewind.v1',
     'turn.stream.v1',
     'turn.interrupt.v1',
     'input.image.v1',
@@ -546,6 +553,68 @@ class RichFakeCore
     required String turnId,
   }) async {
     interrupted = (runtimeTargetId, sessionId, turnId);
+    if (completeInterruptedTurn) {
+      emit(
+        CoreEvent(
+          name: 'turn.completed',
+          sequence: 0,
+          runtimeTargetId: runtimeTargetId,
+          sessionId: sessionId,
+          turnId: turnId,
+          payload: const {'status': 'interrupted'},
+        ),
+      );
+    }
+  }
+
+  @override
+  Future<Map<String, Object?>> rewindSession({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String turnId,
+    required String expectedLastTurnId,
+  }) async {
+    rewindRequests.add({
+      'runtimeTargetId': runtimeTargetId,
+      'sessionId': sessionId,
+      'turnId': turnId,
+      'expectedLastTurnId': expectedLastTurnId,
+    });
+    if (rewindGate case final gate?) await gate;
+    if (rewindFails) throw StateError('Rewind unavailable');
+    final key = '$runtimeTargetId\u0000$sessionId';
+    final history = await readSession(
+      runtimeTargetId: runtimeTargetId,
+      sessionId: sessionId,
+    );
+    final nativeTurns = List<Map<String, Object?>>.of(
+      mapList(mapValue(history['thread'])['turns']),
+    );
+    for (final sent in startedTurns.skip(_rewindWatermarks[key] ?? 0)) {
+      if (sent['runtimeTargetId'] != runtimeTargetId ||
+          sent['sessionId'] != sessionId) {
+        continue;
+      }
+      nativeTurns.add({
+        'id': sent['turnId'],
+        'items': [
+          {
+            'type': 'userMessage',
+            'content': [
+              {'type': 'text', 'text': sent['message']},
+            ],
+          },
+        ],
+      });
+    }
+    final index = nativeTurns.indexWhere((turn) => turn['id'] == turnId);
+    if (index < 0 || nativeTurns.last['id'] != expectedLastTurnId) {
+      throw StateError('History changed');
+    }
+    _rewindWatermarks[key] = startedTurns.length;
+    return historyBySession[key] = {
+      'thread': {'id': sessionId, 'turns': nativeTurns.take(index).toList()},
+    };
   }
 
   @override

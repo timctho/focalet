@@ -118,6 +118,15 @@ abstract interface class SessionForkBridge {
   });
 }
 
+abstract interface class SessionRewindBridge {
+  Future<Map<String, Object?>> rewindSession({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String turnId,
+    required String expectedLastTurnId,
+  });
+}
+
 abstract interface class SessionCatalogBridge {
   /// Lists stored chats without creating, resuming, or selecting a session.
   Future<List<Map<String, Object?>>> listSessionCatalog({
@@ -361,6 +370,7 @@ final class ProcessCoreBridge
         RuntimeConfigurationBridge,
         SessionCatalogBridge,
         SessionForkBridge,
+        SessionRewindBridge,
         GoalControlBridge,
         RuntimeCommandBridge {
   ProcessCoreBridge({
@@ -540,6 +550,19 @@ final class ProcessCoreBridge
       'sessionId': sessionId,
     }),
   );
+
+  @override
+  Future<Map<String, Object?>> rewindSession({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String turnId,
+    required String expectedLastTurnId,
+  }) => _request('session.rewind', {
+    'runtimeTargetId': runtimeTargetId,
+    'sessionId': sessionId,
+    'turnId': turnId,
+    'expectedLastTurnId': expectedLastTurnId,
+  });
 
   @override
   Future<RuntimeConnection> openSession({

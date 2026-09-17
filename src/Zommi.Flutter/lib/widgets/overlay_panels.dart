@@ -95,21 +95,33 @@ class _SessionSidebarState extends State<SessionSidebar> {
               padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
               child: Row(
                 children: [
-                  const Expanded(
-                    child: Text(
-                      'Agents',
-                      style: TextStyle(fontWeight: FontWeight.w700),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        const Text(
+                          'Agents',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        if (controller.sessionCatalogLoading) ...[
+                          const SizedBox(width: 10),
+                          const SizedBox.square(
+                            dimension: 16,
+                            child: RepaintBoundary(
+                              child: CircularProgressIndicator(
+                                key: ValueKey('session-catalog-loading'),
+                                semanticsLabel: 'Loading saved chats',
+                                strokeWidth: 2,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                   _NewAgentMenu(controller: controller),
                 ],
               ),
             ),
-            if (controller.sessionCatalogLoading)
-              const LinearProgressIndicator(
-                key: ValueKey('session-catalog-loading'),
-                minHeight: 2,
-              ),
             Expanded(
               child: NotificationListener<ScrollNotification>(
                 onNotification: (notification) {

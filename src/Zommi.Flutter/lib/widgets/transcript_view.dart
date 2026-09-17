@@ -692,6 +692,8 @@ class _EditableUserMessageState extends State<_EditableUserMessage> {
       builder: (context, _) {
         final enabled =
             !_sending &&
+            controller.messageEditingSupported &&
+            widget.turn.runtimeTurnId != null &&
             !controller.sessionReadOnly &&
             !controller.sessionBusy &&
             !controller.runtimeBusy &&
@@ -742,6 +744,11 @@ class _EditableUserMessageState extends State<_EditableUserMessage> {
                           onAttachmentEnter: widget.onAttachmentEnter,
                           onAttachmentExit: widget.onAttachmentExit,
                         ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Resending replaces this message and removes all later messages.',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
                       const SizedBox(height: 8),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.end,

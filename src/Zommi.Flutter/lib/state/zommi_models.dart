@@ -418,6 +418,7 @@ final class QueuedMessage {
 final class ConversationTurn {
   ConversationTurn({
     required this.id,
+    this.runtimeTurnId,
     required this.userText,
     String? inlineUserText,
     this.number = 0,
@@ -435,6 +436,7 @@ final class ConversationTurn {
 
   final String id;
   final int number;
+  String? runtimeTurnId;
   final DateTime? createdAt;
   final String userText;
   final String inlineUserText;

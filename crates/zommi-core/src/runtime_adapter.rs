@@ -290,6 +290,28 @@ impl RuntimeAdapter {
         }
     }
 
+    pub async fn rewind_session(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        expected_last_turn_id: &str,
+    ) -> Result<Value, CodexError> {
+        match self {
+            Self::Codex(adapter) => {
+                adapter
+                    .ready()
+                    .await?
+                    .rewind_session(session_id, turn_id, expected_last_turn_id)
+                    .await
+            }
+            _ => Err(CodexError {
+                code: "capability-unavailable".into(),
+                message: "This runtime does not support editing earlier messages.".into(),
+                retryable: false,
+            }),
+        }
+    }
+
     pub async fn open_session(
         &self,
         session_id: &str,

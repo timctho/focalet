@@ -27,9 +27,14 @@ write_lock = threading.Lock()
 empty_threads = set()
 created_threads = 0
 submitted_threads = set()
+rewind_history = os.environ.get("ZOMMI_FAKE_REWIND_HISTORY") == "1"
+saved_turns = {}
+turn_sequence = 0
 
 
 def history(session_id):
+    if session_id in saved_turns:
+        return {"thread": {"id": session_id, "turns": json.loads(json.dumps(saved_turns[session_id]))}}
     return {"thread": {"id": session_id, "turns": [
         {"id": f"{session_id}-turn-{index}", "items": [
             {"type": "userMessage", "content": [{"type": "text", "text": f"Question {index}"}]},
@@ -139,6 +144,18 @@ for line in sys.stdin:
         result["thread"]["id"] = fork_id
         if os.environ.get("ZOMMI_FAKE_FORK_CWD"):
             result["thread"]["cwd"] = os.environ["ZOMMI_FAKE_FORK_CWD"]
+    elif method == "thread/revert":
+        if os.environ.get("ZOMMI_FAKE_REWIND_FAIL") == "1":
+            send({"id": request_id, "error": {"code": -32601, "message": "Rewind unavailable"}})
+            continue
+        session_id = request["params"]["threadId"]
+        turns = history(session_id)["thread"]["turns"]
+        index = next((i for i, turn in enumerate(turns) if turn["id"] == request["params"]["beforeTurnId"]), None)
+        if index is None:
+            send({"id": request_id, "error": {"code": -32600, "message": "Invalid rewind turn"}})
+            continue
+        saved_turns[session_id] = turns[:index]
+        result = {"thread": {"id": session_id, "turns": []}}
     elif method == "thread/resume":
         if os.environ.get('ZOMMI_FAKE_RESUME_ERROR'):
             send({'id': request_id, 'error': {'code': -32600, 'message': os.environ['ZOMMI_FAKE_RESUME_ERROR']}})
@@ -195,6 +212,18 @@ for line in sys.stdin:
             send({"method": "item/completed", "params": {"threadId": goal_thread, "turnId": turn_id, "item": {"id": "goal-answer", "type": "agentMessage", "phase": "final", "text": "Working on the goal"}}})
         continue
     elif method == "turn/start":
+        if rewind_history:
+            turn_sequence += 1
+            turn_id = f"edited-turn-{turn_sequence}"
+            session_id = request["params"]["threadId"]
+            turns = history(session_id)["thread"]["turns"]
+            log({"modelContextTurnIds": [turn["id"] for turn in turns]})
+            message = "\n".join(item["text"] for item in request["params"]["input"] if item["type"] == "text")
+            turns.append({"id": turn_id, "status": "completed", "items": [
+                {"type": "userMessage", "content": [{"type": "text", "text": message}]},
+                {"id": "agent-fixture", "type": "agentMessage", "text": completed_text},
+            ]})
+            saved_turns[session_id] = turns
         empty_threads.discard(request["params"]["threadId"])
         submitted_threads.add(request["params"]["threadId"])
         result = {"turn": {"id": turn_id}}

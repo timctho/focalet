@@ -28,6 +28,7 @@ ConversationTurn _mapTurn(
       : _userItemAttachments(userItem, id);
   final result = ConversationTurn(
     id: id,
+    runtimeTurnId: turn['id']?.toString(),
     number: number,
     userText: userText.isEmpty ? 'Continue' : userText,
     createdAt: messageTimestamp(userItem ?? {}) ?? messageTimestamp(turn),

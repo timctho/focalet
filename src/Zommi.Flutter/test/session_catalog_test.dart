@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
+import 'package:zommi_flutter/widgets/overlay_panels.dart';
 import 'package:zommi_flutter/zommi_app.dart';
 
 import 'test_support.dart';
@@ -28,6 +29,54 @@ final savedHermesChats = [
 ];
 
 void main() {
+  testWidgets(
+    'catalog loading stays in the header without moving or covering sessions',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(640, 500));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final core = multiRuntimeCore();
+      await tester.pumpWidget(
+        ZommiApp(core: core, desktop: FakeDesktopBridge()),
+      );
+      await tester.pumpAndSettle();
+      final first = find
+          .descendant(
+            of: find.byKey(const ValueKey('session-list')),
+            matching: find.byType(ListTile),
+          )
+          .first;
+      final controller = tester
+          .widget<SessionSidebar>(find.byType(SessionSidebar))
+          .controller;
+      await controller.switchSession('session-2');
+      await tester.pumpAndSettle();
+      final before = tester.getRect(first);
+      final gate = Completer<void>();
+      core.catalogGates[hermes.id] = gate.future;
+      final refresh = controller.refreshSessionCatalog(force: true);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      final progress = find.byKey(const ValueKey('session-catalog-loading'));
+      final progressBounds = tester.getRect(progress);
+      expect(
+        progressBounds.center.dy,
+        closeTo(tester.getRect(find.text('Agents')).center.dy, .1),
+      );
+      expect(progressBounds.bottom, lessThan(before.top - 8));
+      expect(tester.getRect(first), before);
+      await tester.tap(first);
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(tester.takeException(), isNull);
+      expect(controller.activeSessionId, 'session-1');
+      expect(tester.getRect(first), before);
+      gate.complete();
+      await refresh;
+      await tester.pumpAndSettle();
+      expect(progress, findsNothing);
+      expect(tester.getRect(first), before);
+    },
+  );
+
   testWidgets(
     'sidebar opens with 20 summaries and adds 20 at each scroll to the bottom',
     (tester) async {

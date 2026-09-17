@@ -168,6 +168,7 @@ impl HostState {
                     "session.catalog.v1",
                     "session.create.v1",
                     "session.fork.v1",
+                    "session.rewind.v1",
                     "session.resume.v1",
                     "session.configure.v1",
                     "history.read.v1",
@@ -344,6 +345,16 @@ impl HostState {
                     payload,
                 )?;
                 Ok(connection)
+            }
+            "session.rewind" => {
+                let adapter = self.exact_adapter(payload)?;
+                Ok(adapter
+                    .rewind_session(
+                        required_string(payload, "sessionId")?,
+                        required_string(payload, "turnId")?,
+                        required_string(payload, "expectedLastTurnId")?,
+                    )
+                    .await?)
             }
             "session.read" => {
                 let adapter = self.exact_adapter(payload)?;

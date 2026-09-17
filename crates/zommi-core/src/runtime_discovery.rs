@@ -20,6 +20,7 @@ const CODEX_CAPABILITY_HINTS: &[&str] = &[
     "session.create.v1",
     "session.resume.v1",
     "session.fork.v1",
+    "session.rewind.v1",
     "history.read.v1",
     "turn.stream.v1",
     "turn.interrupt.v1",

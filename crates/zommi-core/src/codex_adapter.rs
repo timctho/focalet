@@ -121,6 +121,7 @@ impl CodexConfig {
 #[serde(rename_all = "camelCase")]
 pub struct CodexConnection {
     pub runtime_target_id: String,
+    pub capabilities: Vec<String>,
     pub session_id: String,
     pub protocol_version: u64,
     pub runtime_version: Option<String>,
@@ -523,6 +524,7 @@ impl CodexAdapter {
             "cwd": state.active_cwd.as_deref().unwrap_or_else(|| self.inner.cwd.to_str().unwrap_or_default())
         });
         Ok(CodexConnection {
+            capabilities: vec!["session.rewind.v1".into()],
             runtime_target_id: self.inner.target_id.clone(),
             session_id: state
                 .thread_id
@@ -989,6 +991,93 @@ impl CodexAdapter {
                 "Codex returned history for a different chat.",
             ));
         }
+        Ok(result)
+    }
+
+    /// Remove the edited turn and its suffix using Codex-owned history.
+    pub async fn rewind_session(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        expected_last_turn_id: &str,
+    ) -> Result<Value, CodexError> {
+        let _selection = self.inner.session_selection.lock().await;
+        self.require_writable(session_id).await?;
+        if self.active_session_id().await? != session_id {
+            return Err(CodexError::new(
+                "identity-mismatch",
+                "The requested chat is not active.",
+            ));
+        }
+        {
+            let state = self.inner.state.lock().await;
+            if state.active_turns.contains_key(session_id)
+                || state.turn_client_operations.contains_key(session_id)
+            {
+                return Err(CodexError::new(
+                    "session-busy",
+                    "Stop the current response before editing an earlier message.",
+                ));
+            }
+        }
+        let history = self.read_session(session_id).await?;
+        let turns = history
+            .pointer("/thread/turns")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                CodexError::new("invalid-response", "Codex did not return chat history.")
+            })?;
+        let index = turns.iter().position(|turn| turn.get("id").and_then(Value::as_str) == Some(turn_id))
+            .ok_or_else(|| CodexError::new("history-changed", "The edited message is no longer in this chat. Reopen the chat before editing it."))?;
+        if turns
+            .last()
+            .and_then(|turn| turn.get("id"))
+            .and_then(Value::as_str)
+            != Some(expected_last_turn_id)
+        {
+            return Err(CodexError::new(
+                "history-changed",
+                "The chat has changed. Reopen it before editing an earlier message.",
+            ));
+        }
+        // Never retry this mutation: a lost response can still mean it applied.
+        let reverted = self
+            .inner
+            .request(
+                "thread/revert",
+                json!({
+                    "threadId": session_id, "beforeTurnId": turn_id
+                }),
+            )
+            .await?;
+        if reverted.pointer("/thread/id").and_then(Value::as_str) != Some(session_id) {
+            return Err(CodexError::new(
+                "identity-mismatch",
+                "Codex reverted a different chat.",
+            ));
+        }
+        // Revert returns metadata with empty turns. Hydrate the authoritative
+        // prefix rather than treating that metadata as an empty conversation.
+        let result = self.read_session(session_id).await?;
+        let remaining = result.pointer("/thread/turns").and_then(Value::as_array);
+        if result.pointer("/thread/id").and_then(Value::as_str) != Some(session_id)
+            || !remaining.is_some_and(|remaining| {
+                remaining.len() == index
+                    && remaining
+                        .iter()
+                        .zip(&turns[..index])
+                        .all(|(a, b)| a.get("id") == b.get("id"))
+            })
+        {
+            return Err(CodexError::new(
+                "invalid-response",
+                "Could not verify the rewound history. Reopen this chat before resending.",
+            ));
+        }
+        let mut state = self.inner.state.lock().await;
+        state.empty_threads.remove(session_id);
+        state.pending_names.remove(session_id);
+        state.pending_previews.remove(session_id);
         Ok(result)
     }
 
