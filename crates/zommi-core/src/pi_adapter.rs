@@ -75,6 +75,7 @@ struct PendingRequest {
 #[derive(Default)]
 struct State {
     command_catalogs: HashMap<String, Vec<Value>>,
+    rewind_supported: bool,
     protocol_version: u64,
     runtime_version: Option<String>,
     runtime_state: Value,
@@ -198,6 +199,19 @@ impl PiAdapter {
             }
         }
         self.refresh_state(true).await?;
+        let rewind_supported = self
+            .inner
+            .request(json!({"type":"get_fork_messages"}))
+            .await
+            .ok()
+            .and_then(|value| {
+                value
+                    .pointer("/data/messages")
+                    .and_then(Value::as_array)
+                    .cloned()
+            })
+            .is_some();
+        self.inner.state.lock().await.rewind_supported = rewind_supported;
         let state = self.inner.state.lock().await;
         if state.runtime_state.get("model").is_none() || state.models.is_empty() {
             return Err(pi_error(
@@ -278,17 +292,27 @@ impl PiAdapter {
     pub async fn connection_value(&self) -> Result<Value, CodexError> {
         let state = self.inner.state.lock().await;
         let session_id = runtime_session_id(&state.runtime_state)?;
+        let mut capabilities = vec![
+            "session.create.v1",
+            "session.resume.v1",
+            "history.read.v1",
+            "turn.stream.v1",
+            "turn.interrupt.v1",
+            "turn.steer.v1",
+            "input.image.v1",
+            "model.select.v1",
+            "reasoning.select.v1",
+            "question.resolve.v1",
+        ];
+        if state.rewind_supported {
+            capabilities.extend(["session.rewind.v1", "session.rewind.prepare.v1"]);
+        }
         Ok(json!({
             "runtimeTargetId": self.inner.target.id,
             "sessionId": session_id,
             "protocolVersion": state.protocol_version,
             "runtimeVersion": state.runtime_version,
-            "capabilities": [
-                "session.create.v1", "session.resume.v1", "history.read.v1",
-                "turn.stream.v1", "turn.interrupt.v1", "turn.steer.v1",
-                "input.image.v1", "model.select.v1", "reasoning.select.v1",
-                "question.resolve.v1"
-            ],
+            "capabilities": capabilities,
             "models": state.models,
             "sessions": state.sessions.values().cloned().collect::<Vec<_>>(),
             "sessionMetadata": state.runtime_state.get("sessionFile").and_then(Value::as_str)
@@ -365,13 +389,125 @@ impl PiAdapter {
             ));
         }
         let response = self.inner.request(json!({"type": "get_messages"})).await?;
-        let messages = response
+        let mut messages = response
             .pointer("/data/messages")
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
+        if self.inner.state.lock().await.rewind_supported {
+            let fork = self
+                .inner
+                .request(json!({"type":"get_fork_messages"}))
+                .await?;
+            if let Some(entries) = fork.pointer("/data/messages").and_then(Value::as_array) {
+                // Ambiguous historical branches remain readable; preparation
+                // will refuse to mutate without exact entry identities.
+                let _ = identify_user_entries(&mut messages, entries);
+            }
+        }
         self.inner.state.lock().await.messages = messages.clone();
         Ok(json!({"thread": {"id": session_id, "turns": messages_to_turns(&messages)}}))
+    }
+
+    pub async fn prepare_rewind(&self, session_id: &str) -> Result<Value, CodexError> {
+        let live = self.inner.request(json!({"type":"get_state"})).await?;
+        if live.pointer("/data/sessionId").and_then(Value::as_str) != Some(session_id) {
+            return Err(pi_error(
+                "identity-mismatch",
+                "The requested Pi chat is not active.",
+            ));
+        }
+        if live["data"]["isStreaming"] == true
+            || live["data"]["isCompacting"] == true
+            || live["data"]["pendingMessageCount"].as_u64().unwrap_or(0) > 0
+            || self
+                .inner
+                .state
+                .lock()
+                .await
+                .active_turns
+                .contains_key(session_id)
+        {
+            return Err(pi_error(
+                "session-busy",
+                "Stop Pi before editing an earlier message.",
+            ));
+        }
+        let response = self.inner.request(json!({"type":"get_messages"})).await?;
+        let mut messages = response
+            .pointer("/data/messages")
+            .and_then(Value::as_array)
+            .cloned()
+            .ok_or_else(|| crate::session_rewind::error("Pi did not return history."))?;
+        let fork = self
+            .inner
+            .request(json!({"type":"get_fork_messages"}))
+            .await?;
+        let entries = fork
+            .pointer("/data/messages")
+            .and_then(Value::as_array)
+            .ok_or_else(|| crate::session_rewind::error("Pi does not expose message entry IDs."))?;
+        identify_user_entries(&mut messages, entries)?;
+        Ok(json!({"thread":{"id":session_id,"turns":messages_to_turns(&messages)}}))
+    }
+
+    pub async fn rewind_session(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        last_id: &str,
+    ) -> Result<Value, CodexError> {
+        let before = self.prepare_rewind(session_id).await?;
+        let index = crate::session_rewind::target(&before, turn_id, last_id)?;
+        let old_file = self
+            .binding_metadata()
+            .await
+            .and_then(|value| value["sessionFile"].as_str().map(str::to_owned))
+            .ok_or_else(|| {
+                crate::session_rewind::error("Pi did not expose its original session file.")
+            })?;
+        let fork = self
+            .inner
+            .request(json!({"type":"fork","entryId":turn_id}))
+            .await
+            .map_err(|mut error| {
+                error.retryable = false;
+                error
+            })?;
+        if fork.pointer("/data/cancelled").and_then(Value::as_bool) == Some(true) {
+            return Err(pi_error(
+                "runtime-rejected",
+                "Pi cancelled the edit branch.",
+            ));
+        }
+        let verify = async {
+            self.refresh_state(true).await?;
+            let new_id = self.active_session_id().await?;
+            if new_id == session_id {
+                return Err(crate::session_rewind::error(
+                    "Pi did not create a new edit branch.",
+                ));
+            }
+            let mut after = self.prepare_rewind(&new_id).await?;
+            crate::session_rewind::verify_prefix(&before, &after, index)?;
+            after["sourceSessionId"] = json!(session_id);
+            after["connection"] = self.connection_value().await?;
+            Ok(after)
+        }
+        .await;
+        if verify.is_err() {
+            // Fork never edits the source file. Restore the original selection
+            // if the new branch cannot be verified; do not retry the fork.
+            if self
+                .inner
+                .request(json!({"type":"switch_session","sessionPath":old_file}))
+                .await
+                .is_ok()
+            {
+                let _ = self.refresh_state(true).await;
+            }
+        }
+        verify
     }
 
     pub async fn start_turn(&self, request: PiTurnRequest<'_>) -> Result<TurnReceipt, CodexError> {
@@ -1175,6 +1311,63 @@ fn pi_thinking_levels(model: &Value) -> Vec<&'static str> {
         .collect()
 }
 
+fn identify_user_entries(messages: &mut [Value], entries: &[Value]) -> Result<(), CodexError> {
+    let users = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, message)| message["role"] == "user")
+        .map(|(index, message)| {
+            let text = if let Some(text) = message["content"].as_str() {
+                text.to_owned()
+            } else {
+                message["content"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|part| part["type"] == "text")
+                    .filter_map(|part| part["text"].as_str())
+                    .collect::<String>()
+            };
+            (index, text)
+        })
+        .collect::<Vec<_>>();
+    let mut forward = Vec::new();
+    let mut next = 0;
+    for (_, text) in &users {
+        let found = (next..entries.len())
+            .find(|&index| entries[index]["text"].as_str() == Some(text.as_str()))
+            .ok_or_else(|| {
+                crate::session_rewind::error(
+                    "Pi history could not be matched to native message entries.",
+                )
+            })?;
+        forward.push(found);
+        next = found + 1;
+    }
+    let mut previous = entries.len();
+    for ((_, text), &expected) in users.iter().zip(&forward).rev() {
+        let found = (0..previous)
+            .rev()
+            .find(|&index| entries[index]["text"].as_str() == Some(text.as_str()));
+        if found != Some(expected) {
+            return Err(crate::session_rewind::error(
+                "Pi history matches more than one branch; select an unambiguous branch before editing.",
+            ));
+        }
+        previous = expected;
+    }
+    for ((index, _), entry) in users.iter().zip(forward) {
+        let id = entries[entry]["entryId"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| {
+                crate::session_rewind::error("Pi returned an empty message entry ID.")
+            })?;
+        messages[*index]["id"] = json!(id);
+    }
+    Ok(())
+}
+
 fn messages_to_turns(messages: &[Value]) -> Vec<Value> {
     let mut turns = Vec::<Value>::new();
     for message in messages {
@@ -1332,7 +1525,36 @@ fn short_id(value: &str) -> &str {
 mod tests {
     use serde_json::json;
 
-    use super::{messages_to_turns, pi_image, pi_thinking_levels};
+    use super::{identify_user_entries, messages_to_turns, pi_image, pi_thinking_levels};
+
+    #[test]
+    fn fork_entries_distinguish_repeated_messages_and_refuse_ambiguous_branches() {
+        let mut messages = vec![
+            json!({"role":"user","content":"same"}),
+            json!({"role":"user","content":"same"}),
+        ];
+        identify_user_entries(
+            &mut messages,
+            &[
+                json!({"entryId":"a","text":"same"}),
+                json!({"entryId":"b","text":"same"}),
+            ],
+        )
+        .unwrap();
+        assert_eq!(messages[0]["id"], "a");
+        assert_eq!(messages[1]["id"], "b");
+        assert!(
+            identify_user_entries(
+                &mut messages,
+                &[
+                    json!({"entryId":"a","text":"same"}),
+                    json!({"entryId":"b","text":"same"}),
+                    json!({"entryId":"c","text":"same"})
+                ]
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn maps_pi_history_and_reasoning_levels() {

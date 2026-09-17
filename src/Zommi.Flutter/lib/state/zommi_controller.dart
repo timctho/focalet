@@ -984,6 +984,13 @@ final class ZommiController extends ChangeNotifier {
         preserveCached:
             _activeTurns.containsKey(sessionKey) || changedDuringRead,
         preferCachedUpdates: changedDuringRead,
+        reconcileLocalTurnIds:
+            !changedDuringRead &&
+            !_activeTurns.containsKey(sessionKey) &&
+            (_runtimeCapabilities[runtimeTargetId]?.contains(
+                  'session.rewind.prepare.v1',
+                ) ??
+                false),
       );
       _transcriptChanged(sessionKey);
     } on Object catch (error) {
@@ -1214,6 +1221,14 @@ final class ZommiController extends ChangeNotifier {
       ...?target?.capabilityHints,
       ...connection.capabilities,
     };
+    for (final capability in [
+      'session.rewind.v1',
+      'session.rewind.prepare.v1',
+    ]) {
+      if (!connection.capabilities.contains(capability)) {
+        _runtimeCapabilities[connection.runtimeTargetId]!.remove(capability);
+      }
+    }
     if (connection.models.isNotEmpty) {
       _modelCatalogs[connection.runtimeTargetId] = List.of(connection.models);
     }
@@ -1399,7 +1414,7 @@ final class ZommiController extends ChangeNotifier {
     final inlineText = original.attachments.isEmpty
         ? text
         : '$text\n${List.filled(original.attachments.length, '\u{fffc}').join(' ')}';
-    final pendingMessage = QueuedMessage(
+    var pendingMessage = QueuedMessage(
       id: 'flutter:${DateTime.now().microsecondsSinceEpoch}:${++_localTurnSequence}',
       runtimeTargetId: runtime.id,
       runtimeName: activeRuntimeName,
@@ -1437,41 +1452,116 @@ final class ZommiController extends ChangeNotifier {
         await _waitForIdleSession(sessionKey);
       }
       if (_closed || !_isActiveSession(runtime.id, sessionId)) return false;
-      final current = _turnsBySession[sessionKey]!;
+      final current = List<ConversationTurn>.of(_turnsBySession[sessionKey]!);
       final index = current.indexWhere(
         (turn) => turn.runtimeTurnId == original.runtimeTurnId,
       );
-      final lastTurnId = current.reversed
-          .map((turn) => turn.runtimeTurnId)
-          .whereType<String>()
-          .firstOrNull;
-      if (index < 0 || lastTurnId == null) {
+      if (index < 0) {
         throw StateError('The chat changed. Reopen it before resending.');
+      }
+      var prepared = current;
+      var offset = 0;
+      if (capabilities.contains('session.rewind.prepare.v1')) {
+        final snapshot = await (core as SessionRewindBridge)
+            .prepareSessionRewind(
+              runtimeTargetId: runtime.id,
+              sessionId: sessionId,
+            );
+        if (mapValue(snapshot['thread'])['id'] != sessionId) {
+          throw StateError('Rewind preparation returned a different chat.');
+        }
+        prepared = mapThreadHistory(snapshot);
+        offset = prepared.length - current.length;
+        if (offset < 0 ||
+            (offset > 0 &&
+                current.every((turn) => turn.id.startsWith('flutter:')))) {
+          throw StateError('The chat changed. Reopen it before resending.');
+        }
+        for (var i = 0; i < current.length; i++) {
+          final fresh = prepared[offset + i];
+          final shown = current[i];
+          // Live receipts can identify a run rather than a persisted user
+          // entry. Reconcile only local turns, once by position, after matching
+          // the complete visible message sequence (including repeated text).
+          if (fresh.userText != shown.userText ||
+              (fresh.runtimeTurnId != shown.runtimeTurnId &&
+                  !shown.id.startsWith('flutter:'))) {
+            throw StateError('The chat changed. Reopen it before resending.');
+          }
+        }
+      }
+      final targetIndex = index + offset;
+      final nativeId = prepared[targetIndex].runtimeTurnId;
+      final lastTurnId = prepared.last.runtimeTurnId;
+      if (nativeId == null || lastTurnId == null) {
+        throw StateError(
+          'The runtime did not expose exact message identities.',
+        );
       }
       _setStatus('Returning to the edited message…');
       final history = await (core as SessionRewindBridge).rewindSession(
         runtimeTargetId: runtime.id,
         sessionId: sessionId,
-        turnId: original.runtimeTurnId!,
+        turnId: nativeId,
         expectedLastTurnId: lastTurnId,
       );
       final thread = mapValue(history['thread']);
-      if (thread['id'] != sessionId || thread['turns'] is! List) {
-        throw StateError('The runtime returned history for a different chat.');
+      final nextSessionId = thread['id']?.toString();
+      final retained = mapThreadHistory(history);
+      if (nextSessionId == null ||
+          thread['turns'] is! List ||
+          retained.length != targetIndex) {
+        throw StateError('The runtime returned unexpected rewound history.');
       }
-      final prefix = current.take(index).toList();
+      for (var i = 0; i < retained.length; i++) {
+        if (retained[i].runtimeTurnId != prepared[i].runtimeTurnId) {
+          throw StateError(
+            'The runtime did not preserve the earlier conversation.',
+          );
+        }
+      }
+      final nextKey = _sessionKey(runtime.id, nextSessionId);
+      if (nextSessionId != sessionId) {
+        final connection = RuntimeConnection.fromJson(
+          mapValue(history['connection']),
+        );
+        if (history['sourceSessionId'] != sessionId ||
+            connection.runtimeTargetId != runtime.id ||
+            connection.sessionId != nextSessionId) {
+          throw StateError('The runtime returned a different edit branch.');
+        }
+        _saveSessionDraft();
+        _drafts[nextKey] = _drafts[sessionKey]!;
+        _sessionSettings[nextKey] = pendingMessage.settings;
+        _activateConnection(connection);
+        _restoreSessionSettings(connection);
+        unawaited(refreshCommands());
+        pendingMessage = pendingMessage.forSession(nextSessionId);
+      }
       rewound = true;
-      _historyEpochs[sessionKey] = (_historyEpochs[sessionKey] ?? 0) + 1;
-      final discarded = _discardedTurnIds.putIfAbsent(sessionKey, () => {});
-      for (final turn in current.skip(index)) {
+      if (nextKey != sessionKey) {
+        _historyEpochs[sessionKey] = (_historyEpochs[sessionKey] ?? 0) + 1;
+      }
+      _historyEpochs[nextKey] = (_historyEpochs[nextKey] ?? 0) + 1;
+      final discarded = _discardedTurnIds.putIfAbsent(nextKey, () => {});
+      for (final turn in [
+        ...current.skip(index),
+        ...prepared.skip(targetIndex),
+      ]) {
         discarded.add(turn.id);
         if (turn.runtimeTurnId case final id?) discarded.add(id);
       }
-      _turnsBySession[sessionKey] = mergeSessionHistory(
-        mapThreadHistory(history),
-        prefix,
-        preserveCached: false,
-      );
+      _turnsBySession[nextKey] = [
+        for (var i = 0; i < retained.length; i++)
+          if (i < offset)
+            retained[i]
+          else
+            mergeConversationTurn(
+              retained[i],
+              current[i - offset],
+              userPresentation: current[i - offset],
+            ),
+      ];
       // Follow-ups written for the removed history must not run in the rewrite.
       _messageQueues.remove(sessionKey);
       _newSessions.remove(sessionKey);
@@ -1479,7 +1569,7 @@ final class ZommiController extends ChangeNotifier {
       approval = null;
       question = null;
       previewArtifact = null;
-      _transcriptChanged(sessionKey);
+      _transcriptChanged(nextKey);
       await _enqueueMessage(pendingMessage);
       return true;
     } on Object catch (error) {
@@ -3169,17 +3259,34 @@ List<ConversationTurn> mergeSessionHistory(
   List<ConversationTurn> cached, {
   required bool preserveCached,
   bool preferCachedUpdates = false,
+  bool reconcileLocalTurnIds = false,
 }) {
   if (canonical.isEmpty) return List<ConversationTurn>.of(cached);
   if (cached.isEmpty) return List<ConversationTurn>.of(canonical);
   final merged = List<ConversationTurn>.of(canonical);
-  for (final cachedTurn in cached) {
+  final offset = canonical.length - cached.length;
+  final canReconcile =
+      reconcileLocalTurnIds &&
+      offset >= 0 &&
+      (offset == 0 || cached.any((turn) => !turn.id.startsWith('flutter:'))) &&
+      List.generate(cached.length, (index) => index).every((index) {
+        final fresh = canonical[offset + index];
+        final shown = cached[index];
+        return fresh.userText == shown.userText &&
+            (fresh.runtimeTurnId == shown.runtimeTurnId ||
+                shown.id.startsWith('flutter:'));
+      });
+  for (var cachedIndex = 0; cachedIndex < cached.length; cachedIndex++) {
+    final cachedTurn = cached[cachedIndex];
     var index = merged.indexWhere(
       (turn) =>
           turn.id == cachedTurn.id ||
           (cachedTurn.runtimeTurnId != null &&
               turn.runtimeTurnId == cachedTurn.runtimeTurnId),
     );
+    if (index < 0 && canReconcile && cachedTurn.id.startsWith('flutter:')) {
+      index = offset + cachedIndex;
+    }
     if (index < 0 &&
         cachedTurn.runtimeTurnId == null &&
         cachedTurn.id.startsWith('flutter:')) {

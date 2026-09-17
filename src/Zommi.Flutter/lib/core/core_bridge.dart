@@ -119,6 +119,11 @@ abstract interface class SessionForkBridge {
 }
 
 abstract interface class SessionRewindBridge {
+  Future<Map<String, Object?>> prepareSessionRewind({
+    required String runtimeTargetId,
+    required String sessionId,
+  });
+
   Future<Map<String, Object?>> rewindSession({
     required String runtimeTargetId,
     required String sessionId,
@@ -550,6 +555,15 @@ final class ProcessCoreBridge
       'sessionId': sessionId,
     }),
   );
+
+  @override
+  Future<Map<String, Object?>> prepareSessionRewind({
+    required String runtimeTargetId,
+    required String sessionId,
+  }) => _request('session.rewind.prepare', {
+    'runtimeTargetId': runtimeTargetId,
+    'sessionId': sessionId,
+  });
 
   @override
   Future<Map<String, Object?>> rewindSession({

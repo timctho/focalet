@@ -386,6 +386,21 @@ final class TranscriptBlock {
 
 /// A follow-up captured by Send, before its runtime turn starts.
 final class QueuedMessage {
+  QueuedMessage forSession(String sessionId) => QueuedMessage(
+    id: id,
+    runtimeTargetId: runtimeTargetId,
+    runtimeName: runtimeName,
+    sessionId: sessionId,
+    text: text,
+    inlineText: inlineText,
+    settings: settings,
+    draftValue: draftValue,
+    attachmentSequence: attachmentSequence,
+    isCommand: isCommand,
+    createdAt: createdAt,
+    attachments: attachments,
+  );
+
   QueuedMessage({
     required this.id,
     required this.runtimeTargetId,

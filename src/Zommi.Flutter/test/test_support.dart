@@ -568,6 +568,12 @@ class RichFakeCore
   }
 
   @override
+  Future<Map<String, Object?>> prepareSessionRewind({
+    required String runtimeTargetId,
+    required String sessionId,
+  }) => readSession(runtimeTargetId: runtimeTargetId, sessionId: sessionId);
+
+  @override
   Future<Map<String, Object?>> rewindSession({
     required String runtimeTargetId,
     required String sessionId,

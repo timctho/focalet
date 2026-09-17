@@ -13,6 +13,7 @@ pub mod pty_adapter;
 pub mod runtime_adapter;
 pub mod runtime_discovery;
 pub mod session_binding;
+mod session_rewind;
 pub mod supervised_codex;
 
 pub use broker_protocol::{

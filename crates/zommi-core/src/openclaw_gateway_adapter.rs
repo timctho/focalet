@@ -161,6 +161,8 @@ impl OpenClawGatewayAdapter {
         let requested_scopes = vec![
             "operator.read".to_owned(),
             "operator.write".to_owned(),
+            // Gateway classifies in-place history rewind as an admin mutation.
+            "operator.admin".to_owned(),
             "operator.approvals".to_owned(),
             "operator.questions".to_owned(),
         ];
@@ -341,13 +343,11 @@ impl OpenClawGatewayAdapter {
         if list_only {
             return Ok(());
         }
-        let sessions = self.load_sessions().await?;
+        self.load_sessions().await?;
         self.refresh_models().await;
-        if let Some(session_id) = preferred_session_id
-            && sessions
-                .iter()
-                .any(|session| session.get("id").and_then(Value::as_str) == Some(&session_id))
-        {
+        // A saved exact binding can be outside the current catalog page or
+        // filter. Reopen it directly instead of creating a replacement chat.
+        if let Some(session_id) = preferred_session_id {
             self.bind_session(&session_id).await?;
         } else {
             self.new_session(None, None).await?;
@@ -498,6 +498,113 @@ impl OpenClawGatewayAdapter {
         let state = self.inner.state.lock().await;
         let messages = state.histories.get(session_id).cloned().unwrap_or_default();
         Ok(json!({"thread": {"id": session_id, "turns": messages_to_turns(&messages)}}))
+    }
+
+    pub async fn prepare_rewind(&self, session_id: &str) -> Result<Value, CodexError> {
+        let state = self.inner.state.lock().await;
+        if state.active_session_id.as_deref() != Some(session_id) {
+            return Err(gateway_error(
+                "identity-mismatch",
+                "The requested OpenClaw chat is not active.",
+            ));
+        }
+        if !state
+            .capabilities
+            .iter()
+            .any(|capability| capability == "session.rewind.v1")
+        {
+            return Err(gateway_error(
+                "capability-unavailable",
+                "This Gateway connection does not advertise rewind.",
+            ));
+        }
+        if state.active_turns.contains_key(session_id)
+            || state.pending_starts.contains_key(session_id)
+        {
+            return Err(gateway_error(
+                "session-busy",
+                "Stop OpenClaw before editing an earlier message.",
+            ));
+        }
+        drop(state);
+        let mut messages = Vec::new();
+        let mut offset = 0;
+        for _ in 0..100 {
+            let mut params =
+                json!({"sessionKey":session_id,"limit":200,"maxChars":500_000,"offset":offset});
+            if let Some(agent) = &self.inner.agent_id {
+                params["agentId"] = json!(agent);
+            }
+            let page = self.inner.request("chat.history", params).await?;
+            if page
+                .pointer("/sessionInfo/hasActiveRun")
+                .and_then(Value::as_bool)
+                == Some(true)
+            {
+                return Err(gateway_error(
+                    "session-busy",
+                    "OpenClaw is still responding.",
+                ));
+            }
+            let mut older = page["messages"].as_array().cloned().ok_or_else(|| {
+                crate::session_rewind::error("OpenClaw did not return chat history.")
+            })?;
+            older.append(&mut messages);
+            messages = older;
+            if page["hasMore"] != true {
+                if messages
+                    .iter()
+                    .filter(|message| message["role"] == "user")
+                    .any(|message| native_entry_id(message).is_none())
+                {
+                    return Err(crate::session_rewind::error(
+                        "OpenClaw did not expose durable message entry IDs.",
+                    ));
+                }
+                return Ok(
+                    json!({"thread":{"id":session_id,"turns":messages_to_turns(&messages)}}),
+                );
+            }
+            let next = page["nextOffset"]
+                .as_u64()
+                .filter(|next| *next > offset)
+                .ok_or_else(|| {
+                    crate::session_rewind::error("OpenClaw returned incomplete history pagination.")
+                })?;
+            offset = next;
+        }
+        Err(crate::session_rewind::error(
+            "OpenClaw history exceeded the rewind inspection limit.",
+        ))
+    }
+
+    pub async fn rewind_session(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        last_id: &str,
+    ) -> Result<Value, CodexError> {
+        let before = self.prepare_rewind(session_id).await?;
+        let index = crate::session_rewind::target(&before, turn_id, last_id)?;
+        let entry_id = turn_id.strip_prefix("openclaw-turn-").ok_or_else(|| {
+            crate::session_rewind::error("The message has no OpenClaw entry identity.")
+        })?;
+        let mut params = json!({"sessionKey":session_id,"entryId":entry_id});
+        if let Some(agent) = &self.inner.agent_id {
+            params["agentId"] = json!(agent);
+        }
+        self.inner
+            .request("sessions.rewind", params)
+            .await
+            .map_err(|mut error| {
+                error.retryable = false;
+                error
+            })?;
+        let after = self.prepare_rewind(session_id).await?;
+        crate::session_rewind::verify_prefix(&before, &after, index)?;
+        // Invalidate the pre-rewind display projection as well as native history.
+        self.inner.state.lock().await.histories.remove(session_id);
+        Ok(after)
     }
 
     pub async fn start_turn(
@@ -1836,6 +1943,8 @@ fn negotiated_capabilities(methods: &HashSet<String>, scopes: &HashSet<String>) 
         ("session.list.v1", "sessions.list"),
         ("session.create.v1", "sessions.create"),
         ("session.resume.v1", "chat.history"),
+        ("session.rewind.v1", "sessions.rewind"),
+        ("session.rewind.prepare.v1", "sessions.rewind"),
         ("history.read.v1", "chat.history"),
         ("turn.stream.v1", "chat.send"),
         ("turn.interrupt.v1", "chat.abort"),
@@ -1850,6 +1959,9 @@ fn negotiated_capabilities(methods: &HashSet<String>, scopes: &HashSet<String>) 
         .filter(|(capability, method)| {
             (methods.is_empty() || methods.contains(*method))
                 && match *capability {
+                    "session.rewind.v1" | "session.rewind.prepare.v1" => {
+                        methods.contains("sessions.rewind") && scopes.contains("operator.admin")
+                    }
                     "approval.resolve.v1" => scopes.contains("operator.approvals"),
                     "question.resolve.v1" => scopes.contains("operator.questions"),
                     _ => true,
@@ -1893,6 +2005,14 @@ fn models_for_ui(models: &Value) -> Vec<Value> {
         .collect()
 }
 
+fn native_entry_id(message: &Value) -> Option<&str> {
+    message
+        .pointer("/__openclaw/id")
+        .or_else(|| message.get("entryId"))
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+}
+
 fn messages_to_turns(messages: &[Value]) -> Vec<Value> {
     let mut turns = Vec::new();
     for (index, message) in messages.iter().enumerate() {
@@ -1904,8 +2024,11 @@ fn messages_to_turns(messages: &[Value]) -> Vec<Value> {
             .to_ascii_lowercase();
         let text = message_text(message);
         if role == "user" {
+            let identity = native_entry_id(message)
+                .map(str::to_owned)
+                .unwrap_or_else(|| index.to_string());
             turns.push(json!({
-                "id": format!("openclaw-turn-{index}"),
+                "id": format!("openclaw-turn-{identity}"),
                 "items": [{"id": format!("openclaw-user-{index}"), "type": "userMessage", "content": [{"type": "text", "text": text}]}]
             }));
             continue;
@@ -2096,5 +2219,21 @@ fn gateway_error(code: impl Into<String>, message: impl Into<String>) -> CodexEr
         code: code.into(),
         message: sanitize_diagnostic(message.into()),
         retryable: false,
+    }
+}
+
+#[cfg(test)]
+mod rewind_tests {
+    use super::*;
+
+    #[test]
+    fn rewind_requires_the_advertised_method_and_granted_admin_scope() {
+        let mut methods = HashSet::from(["sessions.rewind".to_owned()]);
+        let mut scopes = HashSet::from(["operator.write".to_owned()]);
+        assert!(!negotiated_capabilities(&methods, &scopes).contains(&"session.rewind.v1".into()));
+        scopes.insert("operator.admin".into());
+        assert!(negotiated_capabilities(&methods, &scopes).contains(&"session.rewind.v1".into()));
+        methods.clear();
+        assert!(!negotiated_capabilities(&methods, &scopes).contains(&"session.rewind.v1".into()));
     }
 }

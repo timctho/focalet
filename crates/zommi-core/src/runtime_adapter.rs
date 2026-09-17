@@ -304,9 +304,37 @@ impl RuntimeAdapter {
                     .rewind_session(session_id, turn_id, expected_last_turn_id)
                     .await
             }
+            Self::Pi(adapter) => {
+                adapter
+                    .rewind_session(session_id, turn_id, expected_last_turn_id)
+                    .await
+            }
+            Self::HermesGateway(adapter) => {
+                adapter
+                    .rewind_session(session_id, turn_id, expected_last_turn_id)
+                    .await
+            }
+            Self::OpenClawGateway(adapter) => {
+                adapter
+                    .rewind_session(session_id, turn_id, expected_last_turn_id)
+                    .await
+            }
             _ => Err(CodexError {
                 code: "capability-unavailable".into(),
                 message: "This runtime does not support editing earlier messages.".into(),
+                retryable: false,
+            }),
+        }
+    }
+
+    pub async fn prepare_rewind(&self, session_id: &str) -> Result<Value, CodexError> {
+        match self {
+            Self::Pi(adapter) => adapter.prepare_rewind(session_id).await,
+            Self::HermesGateway(adapter) => adapter.prepare_rewind(session_id).await,
+            Self::OpenClawGateway(adapter) => adapter.prepare_rewind(session_id).await,
+            _ => Err(CodexError {
+                code: "capability-unavailable".into(),
+                message: "This connection does not expose rewind preparation.".into(),
                 retryable: false,
             }),
         }

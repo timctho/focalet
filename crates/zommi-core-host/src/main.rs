@@ -346,15 +346,29 @@ impl HostState {
                 )?;
                 Ok(connection)
             }
-            "session.rewind" => {
+            "session.rewind.prepare" => {
                 let adapter = self.exact_adapter(payload)?;
                 Ok(adapter
+                    .prepare_rewind(required_string(payload, "sessionId")?)
+                    .await?)
+            }
+            "session.rewind" => {
+                let adapter = self.exact_adapter(payload)?;
+                let result = adapter
                     .rewind_session(
                         required_string(payload, "sessionId")?,
                         required_string(payload, "turnId")?,
                         required_string(payload, "expectedLastTurnId")?,
                     )
-                    .await?)
+                    .await?;
+                let active = adapter.active_session_id().await?;
+                self.save_binding(
+                    adapter.target_id(),
+                    &active,
+                    adapter.binding_metadata().await,
+                    payload,
+                )?;
+                Ok(result)
             }
             "session.read" => {
                 let adapter = self.exact_adapter(payload)?;

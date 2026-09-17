@@ -488,6 +488,14 @@ impl HermesGatewayAdapter {
     }
 
     pub async fn connection_value(&self) -> Result<Value, CodexError> {
+        let session_id = self.active_session_id().await?;
+        let rewind_supported = self
+            .list_commands(&session_id, false)
+            .await
+            .ok()
+            .is_some_and(|commands| {
+                crate::command_catalog::require_command(&commands, "/undo").is_ok()
+            });
         let state = self.inner.state.lock().await;
         let session_id = state.active_session_id.clone().ok_or_else(|| {
             gateway_error("runtime-failed", "Hermes Gateway has no active session.")
@@ -501,12 +509,19 @@ impl HermesGatewayAdapter {
             state.session_info.get("provider").and_then(Value::as_str),
             state.session_info.get("model").and_then(Value::as_str),
         );
+        let mut capabilities = state.capabilities.clone();
+        if rewind_supported {
+            capabilities.extend([
+                "session.rewind.v1".into(),
+                "session.rewind.prepare.v1".into(),
+            ]);
+        }
         Ok(json!({
             "runtimeTargetId": self.inner.target.id,
             "sessionId": session_id,
             "protocolVersion": state.protocol_version,
             "runtimeVersion": state.runtime_version,
-            "capabilities": state.capabilities,
+            "capabilities": capabilities,
             "models": state.models,
             "sessions": state.sessions,
             "sessionMetadata": {
@@ -626,6 +641,107 @@ impl HermesGatewayAdapter {
         let state = self.inner.state.lock().await;
         let turns = state.histories.get(session_id).cloned().unwrap_or_default();
         Ok(json!({"thread": {"id": session_id, "turns": turns}}))
+    }
+
+    pub async fn prepare_rewind(&self, session_id: &str) -> Result<Value, CodexError> {
+        let state = self.inner.state.lock().await;
+        if state.active_session_id.as_deref() != Some(session_id) {
+            return Err(gateway_error(
+                "identity-mismatch",
+                "The requested Hermes chat is not active.",
+            ));
+        }
+        if state.active_turns.contains_key(session_id) {
+            return Err(gateway_error(
+                "session-busy",
+                "Stop Hermes before editing an earlier message.",
+            ));
+        }
+        let profile = state.session_info["profile_name"]
+            .as_str()
+            .unwrap_or(&state.active_profile)
+            .to_owned();
+        drop(state);
+        // session.history omits row IDs on current Hermes. Resuming the exact
+        // idle session returns its durable display projection including row_id.
+        let response = self.inner.request("session.resume", json!({"session_id":session_id,"source":"zommi","close_on_disconnect":false,"profile":profile})).await?;
+        if self.active_session_id().await? != session_id || response["running"] == true {
+            return Err(crate::session_rewind::error(
+                "The Hermes session changed during rewind preparation.",
+            ));
+        }
+        let messages = response["messages"].as_array().ok_or_else(|| {
+            crate::session_rewind::error("Hermes did not return authoritative history.")
+        })?;
+        if messages
+            .iter()
+            .filter(|message| message["role"] == "user")
+            .any(|message| {
+                message.get("row_id").is_none()
+                    || message
+                        .get("display_kind")
+                        .and_then(Value::as_str)
+                        .is_some_and(|kind| kind != "skill_invocation")
+            })
+        {
+            return Err(crate::session_rewind::error(
+                "Hermes did not expose durable user message IDs for this conversation.",
+            ));
+        }
+        Ok(json!({"thread":{"id":session_id,"turns":messages_to_turns(messages)}}))
+    }
+
+    pub async fn rewind_session(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        last_id: &str,
+    ) -> Result<Value, CodexError> {
+        let commands = self.list_commands(session_id, false).await?;
+        crate::command_catalog::require_command(&commands, "/undo")?;
+        let before = self.prepare_rewind(session_id).await?;
+        let index = crate::session_rewind::target(&before, turn_id, last_id)?;
+        let count = crate::session_rewind::turns(&before)?[index..]
+            .iter()
+            .filter(|turn| {
+                turn["items"]
+                    .as_array()
+                    .is_some_and(|items| items.iter().any(|item| item["type"] == "userMessage"))
+            })
+            .count();
+        let native = self
+            .inner
+            .state
+            .lock()
+            .await
+            .runtime_session_id
+            .clone()
+            .ok_or_else(|| crate::session_rewind::error("Hermes session binding is missing."))?;
+        // session.undo changes only memory. /undo N is the runtime's durable
+        // operation: it archives rows and invalidates the agent's cached context.
+        let response = self
+            .inner
+            .request(
+                "slash.exec",
+                json!({"session_id":native,"command":format!("/undo {count}")}),
+            )
+            .await
+            .map_err(|mut error| {
+                error.retryable = false;
+                error
+            })?;
+        if response["type"] != "prefill" {
+            return Err(crate::session_rewind::error(
+                "Hermes did not confirm a durable undo.",
+            ));
+        }
+        let after = self.prepare_rewind(session_id).await?;
+        crate::session_rewind::verify_prefix(&before, &after, index)?;
+        self.inner.state.lock().await.histories.insert(
+            session_id.into(),
+            crate::session_rewind::turns(&after)?.clone(),
+        );
+        Ok(after)
     }
 
     async fn submit_command(
