@@ -1415,6 +1415,7 @@ class _ToolActivitySubItem extends StatelessWidget {
                   Expanded(
                     child: Text(
                       activityBlockTitle(block),
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: chatTextStyleOf(context).copyWith(
                         color: Theme.of(context).colorScheme.onSurface,
@@ -1448,7 +1449,11 @@ class _ToolActivitySubItem extends StatelessWidget {
           ),
           _ExpandableActivityBody(
             expanded: block.expanded,
-            duration: const Duration(milliseconds: 130),
+            // Tool output can stream just like reasoning. Animating each delta
+            // makes the card and its surrounding thinking edge chase the text.
+            duration: forceCompleted || block.completed
+                ? const Duration(milliseconds: 130)
+                : Duration.zero,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(9, 0, 9, 5),
               child: Column(
