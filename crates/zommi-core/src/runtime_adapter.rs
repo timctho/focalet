@@ -39,6 +39,39 @@ pub enum RuntimeAdapter {
 }
 
 impl RuntimeAdapter {
+    pub fn supports_preparation(adapter_id: &str) -> bool {
+        matches!(
+            adapter_id,
+            "codex-app-server"
+                | "hermes-acp"
+                | "openclaw-acp"
+                | "hermes-gateway"
+                | "openclaw-gateway"
+        )
+    }
+
+    /// Select only after a caller chooses this runtime. Preparation itself has
+    /// no active chat, history read, prompt, or persisted session binding.
+    pub async fn activate(
+        &self,
+        session_id: Option<String>,
+        cwd: Option<&str>,
+    ) -> Result<Value, CodexError> {
+        match self {
+            Self::Codex(adapter) => adapter.activate(session_id, cwd).await?,
+            Self::Acp(adapter) => adapter.activate(session_id.as_deref(), cwd).await?,
+            Self::HermesGateway(adapter) => adapter.activate(session_id, cwd).await?,
+            Self::OpenClawGateway(adapter) => adapter.activate(session_id).await?,
+            _ => {
+                return Err(CodexError {
+                    code: "capability-unavailable".into(),
+                    message: "This runtime requires a session to initialize.".into(),
+                    retryable: false,
+                });
+            }
+        }
+        self.connection_value().await
+    }
     pub async fn connect(
         target: RuntimeTarget,
         command: RuntimeCommand,
@@ -185,7 +218,11 @@ impl RuntimeAdapter {
     pub async fn is_running(&self) -> bool {
         match self {
             Self::Codex(adapter) => adapter.is_running().await,
-            _ => true,
+            Self::Acp(adapter) => adapter.is_running().await,
+            Self::HermesGateway(adapter) => adapter.is_running().await,
+            Self::OpenClawGateway(adapter) => adapter.is_running().await,
+            Self::Pi(adapter) => adapter.is_running().await,
+            Self::Pty(_) => true,
         }
     }
 

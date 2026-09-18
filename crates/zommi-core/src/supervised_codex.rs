@@ -80,9 +80,32 @@ impl SupervisedCodex {
         &self.inner.target_id
     }
 
+    pub async fn activate(
+        &self,
+        session_id: Option<String>,
+        cwd: Option<&str>,
+    ) -> Result<(), CodexError> {
+        self.ready().await?.activate(session_id, cwd).await?;
+        let mut task = self.inner.task.lock().await;
+        if task.is_none() && !self.inner.stopped.load(Ordering::Acquire) {
+            *task = Some(tokio::spawn(monitor(
+                Arc::downgrade(&self.inner),
+                HealthPolicy::default(),
+            )));
+        }
+        Ok(())
+    }
+
     // The host must retain this supervisor while it replaces the child.
     pub async fn is_running(&self) -> bool {
-        !self.inner.stopped.load(Ordering::Acquire)
+        if self.inner.stopped.load(Ordering::Acquire) {
+            return false;
+        }
+        // A prepared transport has no supervisor until a chat is selected.
+        if self.inner.task.lock().await.is_none() {
+            return self.inner.adapter.read().await.is_running().await;
+        }
+        true
     }
 
     pub async fn ready(&self) -> Result<RwLockReadGuard<'_, CodexAdapter>, CodexError> {
@@ -355,6 +378,46 @@ mod tests {
             })
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn prepared_transport_activates_supervision_and_recovers_exact_chat() {
+        let fixture = Fixture::new();
+        let mut config = fixture.config();
+        config.list_only = true;
+        let (tx, mut events) = mpsc::unbounded_channel();
+        let runtime = SupervisedCodex::connect(config, tx).await.unwrap();
+        assert_eq!(fixture.count("thread/start"), 0);
+        assert!(runtime.inner.task.lock().await.is_none());
+        runtime
+            .activate(Some("saved-chat".into()), None)
+            .await
+            .unwrap();
+        assert_eq!(fixture.pids().len(), 1);
+        assert!(runtime.inner.task.lock().await.is_some());
+        fixture.mark("exit-pid", fixture.pids()[0]);
+        // The fixture exits on its next native request.
+        let _ = runtime
+            .ready()
+            .await
+            .unwrap()
+            .health_check(Duration::from_millis(100))
+            .await;
+        let recovered = event(&mut events, "runtime.recovered").await;
+        assert_eq!(recovered.payload["previousSessionId"], "saved-chat");
+        assert_eq!(
+            runtime
+                .ready()
+                .await
+                .unwrap()
+                .active_session_id()
+                .await
+                .unwrap(),
+            "saved-chat"
+        );
+        assert_eq!(fixture.pids().len(), 2);
+        assert_eq!(fixture.count("thread/start"), 0);
+        runtime.shutdown().await;
     }
 
     #[tokio::test]

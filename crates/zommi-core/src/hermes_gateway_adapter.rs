@@ -394,6 +394,14 @@ impl HermesGatewayAdapter {
         if list_only {
             return Ok(());
         }
+        self.activate(preferred_session_id, None).await
+    }
+
+    pub async fn activate(
+        &self,
+        preferred_session_id: Option<String>,
+        cwd: Option<&str>,
+    ) -> Result<(), CodexError> {
         let sessions = self.load_sessions().await?;
         if let Some(session_id) = preferred_session_id
             && let Some(session) = sessions
@@ -403,7 +411,7 @@ impl HermesGatewayAdapter {
             self.resume_session(&session_id, session.get("profile").and_then(Value::as_str))
                 .await?;
         } else {
-            self.new_session(None, None, None, None).await?;
+            self.new_session(None, None, cwd, None).await?;
         }
         self.refresh_models().await;
         let session_id = self.active_session_id().await?;
@@ -414,6 +422,11 @@ impl HermesGatewayAdapter {
             None,
         );
         Ok(())
+    }
+
+    pub async fn is_running(&self) -> bool {
+        let state = self.inner.state.lock().await;
+        !state.exited && !state.stopping
     }
 
     pub fn target_id(&self) -> &str {

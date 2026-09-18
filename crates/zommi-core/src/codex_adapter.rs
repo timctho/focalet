@@ -403,13 +403,20 @@ impl CodexAdapter {
         if list_only {
             return Ok(());
         }
+        self.activate(preferred_session_id, None).await
+    }
 
+    pub async fn activate(
+        &self,
+        preferred_session_id: Option<String>,
+        cwd: Option<&str>,
+    ) -> Result<(), CodexError> {
         self.load_models().await?;
         self.list_sessions().await?;
         if let Some(session_id) = preferred_session_id {
             self.open_session(&session_id).await?;
         } else {
-            self.start_thread(None, None).await?;
+            self.start_thread(None, cwd).await?;
         }
         let session_id = self.active_session_id().await?;
         self.inner.emit_status(
@@ -695,6 +702,11 @@ impl CodexAdapter {
         let (config, model, effort, cwd) = {
             let state = self.inner.state.lock().await;
             let mut config = self.inner.config.clone();
+            // A transport originally prepared without a session becomes a
+            // normal supervised connection after its first activation.
+            if state.thread_id.is_some() {
+                config.list_only = false;
+            }
             config.preferred_session_id = state.thread_id.clone();
             config.resume_required = state.thread_id.as_ref().is_some_and(|id| {
                 state.materialized_threads.contains(id) || state.submitted_threads.contains(id)

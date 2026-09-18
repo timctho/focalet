@@ -317,6 +317,11 @@ impl AcpAdapter {
         Ok(())
     }
 
+    pub async fn is_running(&self) -> bool {
+        let state = self.inner.state.lock().await;
+        !state.exited && !state.stopping
+    }
+
     pub fn target_id(&self) -> &str {
         &self.inner.target.id
     }
@@ -376,6 +381,14 @@ impl AcpAdapter {
     }
 
     pub async fn open_session(&self, session_id: &str) -> Result<Value, CodexError> {
+        self.open_session_with_cwd(session_id, None).await
+    }
+
+    pub async fn open_session_with_cwd(
+        &self,
+        session_id: &str,
+        cwd: Option<&str>,
+    ) -> Result<Value, CodexError> {
         self.inner
             .state
             .lock()
@@ -387,7 +400,7 @@ impl AcpAdapter {
             .request(
                 "session/load",
                 json!({
-                    "cwd": self.inner.cwd.to_string_lossy(),
+                    "cwd": cwd.map(str::to_owned).unwrap_or_else(|| self.inner.cwd.to_string_lossy().into_owned()),
                     "sessionId": session_id,
                     "mcpServers": []
                 }),
@@ -667,11 +680,19 @@ impl AcpAdapter {
     }
 
     async fn new_session(&self, model: Option<&str>) -> Result<(), CodexError> {
+        self.new_session_with_cwd(model, None).await
+    }
+
+    async fn new_session_with_cwd(
+        &self,
+        model: Option<&str>,
+        cwd: Option<&str>,
+    ) -> Result<(), CodexError> {
         let result = self
             .inner
             .request(
                 "session/new",
-                json!({"cwd": self.inner.cwd.to_string_lossy(), "mcpServers": []}),
+                json!({"cwd": cwd.map(str::to_owned).unwrap_or_else(|| self.inner.cwd.to_string_lossy().into_owned()), "mcpServers": []}),
                 REQUEST_TIMEOUT,
             )
             .await?;
@@ -684,6 +705,19 @@ impl AcpAdapter {
         self.select_session(session_id, &result).await?;
         if let Some(model) = model {
             self.set_model(model).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn activate(
+        &self,
+        session_id: Option<&str>,
+        cwd: Option<&str>,
+    ) -> Result<(), CodexError> {
+        if let Some(session_id) = session_id {
+            self.open_session_with_cwd(session_id, cwd).await?;
+        } else {
+            self.new_session_with_cwd(None, cwd).await?;
         }
         Ok(())
     }

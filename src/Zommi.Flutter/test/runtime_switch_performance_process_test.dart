@@ -76,6 +76,8 @@ void main() {
       final target = discovery.targets.firstWhere(
         (target) => target.adapterId == adapter,
       );
+      await bridge.prepareRuntime(runtimeTargetId: target.id);
+      expect(await File('${temporary.path}/binding.json').exists(), isFalse);
       final initial = await bridge.connectRuntime(
         runtimeTargetId: target.id,
         cwd: temporary.path,

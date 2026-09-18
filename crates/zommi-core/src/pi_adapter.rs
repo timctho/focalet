@@ -235,6 +235,11 @@ impl PiAdapter {
         Ok(())
     }
 
+    pub async fn is_running(&self) -> bool {
+        let state = self.inner.state.lock().await;
+        !state.exited && !state.stopping
+    }
+
     pub fn target_id(&self) -> &str {
         &self.inner.target.id
     }

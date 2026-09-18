@@ -2,6 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     env, io,
     path::PathBuf,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -9,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter},
-    sync::mpsc,
+    sync::{mpsc, watch},
 };
 use uuid::Uuid;
 use zommi_core::{
@@ -76,19 +77,22 @@ struct HostAction {
 struct HostState {
     targets: Vec<zommi_core::RuntimeTarget>,
     adapters: HashMap<String, RuntimeAdapter>,
+    prepared: HashSet<String>,
+    binding_generation: Arc<Mutex<u64>>,
+    request_generation: u64,
     binding_store: SessionBindingStore,
     override_store: RuntimeOverrideStore,
     discovery_cache: RuntimeDiscoveryCacheStore,
     wsl_probe_retry_at: Option<Instant>,
     overrides: Vec<ConfiguredRuntimeOverride>,
-    operations: HashMap<String, OperationRecord>,
+    operations: Arc<Mutex<HashMap<String, OperationRecord>>>,
     event_tx: EventSender,
 }
 
 #[derive(Clone)]
 struct OperationRecord {
     fingerprint: String,
-    outcome: Result<Value, HostError>,
+    outcome: Option<Result<Value, HostError>>,
 }
 
 impl HostState {
@@ -96,12 +100,15 @@ impl HostState {
         Self {
             targets: Vec::new(),
             adapters: HashMap::new(),
+            prepared: HashSet::new(),
+            binding_generation: Arc::new(Mutex::new(0)),
+            request_generation: 0,
             binding_store: SessionBindingStore::platform_default(),
             override_store: RuntimeOverrideStore::platform_default(),
             discovery_cache: RuntimeDiscoveryCacheStore::platform_default(),
             wsl_probe_retry_at: None,
             overrides: Vec::new(),
-            operations: HashMap::new(),
+            operations: Arc::new(Mutex::new(HashMap::new())),
             event_tx,
         }
     }
@@ -163,6 +170,7 @@ impl HostState {
                     "runtime.discovery.v1",
                     "runtime.overrides.v1",
                     "runtime.adapters.v1",
+                    "runtime.prepare.v1",
                     "session.binding.v1",
                     "session.list.v1",
                     "session.catalog.v1",
@@ -261,10 +269,11 @@ impl HostState {
                 self.refresh_runtime_targets(true).await?;
                 Ok(self.discovery_value(payload))
             }
-            "runtime.connect" => self.connect_runtime(payload, false).await,
+            "runtime.connect" => self.connect_runtime(payload, false, false).await,
+            "runtime.prepare" => self.connect_runtime(payload, false, true).await,
             "session.catalog" => {
                 required_string(payload, "runtimeTargetId")?;
-                self.connect_runtime(payload, true).await
+                self.connect_runtime(payload, true, false).await
             }
             "session.list" => {
                 let adapter = self.exact_adapter(payload)?;
@@ -452,14 +461,31 @@ impl HostState {
                     "cwd": payload.get("cwd"),
                     "profile": payload.get("profile")
                 }));
-                if let Some(previous) = self.operations.get(&client_operation_id) {
-                    if previous.fingerprint != fingerprint {
-                        return Err(HostError::new(
-                            "conflict",
-                            "clientOperationId was reused for a different turn.",
-                        ));
+                {
+                    let mut operations = self.operations.lock().unwrap();
+                    if let Some(previous) = operations.get(&client_operation_id) {
+                        if previous.fingerprint != fingerprint {
+                            return Err(HostError::new(
+                                "conflict",
+                                "clientOperationId was reused for a different turn.",
+                            ));
+                        }
+                        return previous.outcome.clone().unwrap_or_else(|| {
+                            Err(HostError::new(
+                                "runtime-overloaded",
+                                "This operation is already being submitted.",
+                            ))
+                        });
                     }
-                    return previous.outcome.clone();
+                    // Reserve before awaiting the runtime so another worker
+                    // cannot reuse this identity for a different target.
+                    operations.insert(
+                        client_operation_id.clone(),
+                        OperationRecord {
+                            fingerprint: fingerprint.clone(),
+                            outcome: None,
+                        },
+                    );
                 }
                 let outcome = adapter
                     .start_turn(AdapterTurnRequest {
@@ -477,17 +503,21 @@ impl HostState {
                     .await
                     .map_err(HostError::from)
                     .and_then(|receipt| serde_json::to_value(receipt).map_err(HostError::from));
-                self.operations.insert(
+                let mut operations = self.operations.lock().unwrap();
+                operations.insert(
                     client_operation_id,
                     OperationRecord {
                         fingerprint,
-                        outcome: outcome.clone(),
+                        outcome: Some(outcome.clone()),
                     },
                 );
-                if self.operations.len() > 512
-                    && let Some(oldest) = self.operations.keys().next().cloned()
+                if operations.len() > 512
+                    && let Some(oldest) = operations
+                        .iter()
+                        .find(|(_, record)| record.outcome.is_some())
+                        .map(|(id, _)| id.clone())
                 {
-                    self.operations.remove(&oldest);
+                    operations.remove(&oldest);
                 }
                 outcome
             }
@@ -628,6 +658,7 @@ impl HostState {
         &mut self,
         payload: &Value,
         catalog_only: bool,
+        prepare_only: bool,
     ) -> Result<Value, HostError> {
         if self.targets.is_empty() {
             self.refresh_runtime_targets(false).await?;
@@ -658,6 +689,10 @@ impl HostState {
                 ),
             )
         })?;
+
+        if prepare_only && !RuntimeAdapter::supports_preparation(&target.adapter_id) {
+            return Ok(json!({"prepared": false}));
+        }
 
         let explicit_cwd = payload
             .get("cwd")
@@ -713,19 +748,29 @@ impl HostState {
                 return Ok(json!({"data": adapter.list_sessions().await?}));
             }
             if adapter.is_running().await {
-                let connection = adapter.connection_value().await?;
+                if prepare_only {
+                    return Ok(json!({"prepared": true}));
+                }
+                let connection = if self.prepared.contains(&target.id) {
+                    let connection = adapter
+                        .activate(preferred_session_id.clone(), cwd.to_str())
+                        .await?;
+                    self.prepared.remove(&target.id);
+                    connection
+                } else {
+                    adapter.connection_value().await?
+                };
                 let session_id = adapter.active_session_id().await?;
-                self.binding_store
-                    .save(&SessionBinding {
-                        runtime_target_id: adapter.target_id().to_owned(),
-                        session_id,
-                        cwd: cwd.to_string_lossy().into_owned(),
-                        session_metadata: adapter.binding_metadata().await,
-                    })
-                    .map_err(|error| HostError::new("persistence-failed", error.to_string()))?;
+                self.persist_binding(SessionBinding {
+                    runtime_target_id: adapter.target_id().to_owned(),
+                    session_id,
+                    cwd: cwd.to_string_lossy().into_owned(),
+                    session_metadata: adapter.binding_metadata().await,
+                })?;
                 return Ok(connection);
             }
             if let Some(stale) = self.adapters.remove(&target.id) {
+                self.prepared.remove(&target.id);
                 stale.shutdown().await;
             }
         }
@@ -752,7 +797,7 @@ impl HostState {
             runtime_command = wsl_relay::wrap_wsl_command(&target, runtime_command)
                 .map_err(|error| HostError::new("runtime-unavailable", error.to_string()))?;
         }
-        if catalog_only {
+        if catalog_only || prepare_only {
             let adapter = RuntimeAdapter::connect_for_listing(
                 target,
                 runtime_command,
@@ -760,6 +805,12 @@ impl HostState {
                 self.event_tx.clone(),
             )
             .await?;
+            if prepare_only {
+                self.prepared.insert(adapter.target_id().to_owned());
+                self.adapters
+                    .insert(adapter.target_id().to_owned(), adapter);
+                return Ok(json!({"prepared": true}));
+            }
             // Listing has no selected session and must never persist a binding.
             let result = adapter.list_sessions().await;
             adapter.shutdown().await;
@@ -799,14 +850,12 @@ impl HostState {
         let runtime_target_id = adapter.target_id().to_owned();
         let session_id = adapter.active_session_id().await?;
         let session_metadata = adapter.binding_metadata().await;
-        self.binding_store
-            .save(&SessionBinding {
-                runtime_target_id: runtime_target_id.clone(),
-                session_id,
-                cwd: cwd.to_string_lossy().into_owned(),
-                session_metadata,
-            })
-            .map_err(|error| HostError::new("persistence-failed", error.to_string()))?;
+        self.persist_binding(SessionBinding {
+            runtime_target_id: runtime_target_id.clone(),
+            session_id,
+            cwd: cwd.to_string_lossy().into_owned(),
+            session_metadata,
+        })?;
         self.adapters.insert(runtime_target_id, adapter);
         Ok(connection)
     }
@@ -905,20 +954,42 @@ impl HostState {
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
             .map(str::to_owned)
-            .or_else(|| self.binding_store.load().map(|binding| binding.cwd))
+            .or_else(|| {
+                session_metadata
+                    .as_ref()?
+                    .get("cwd")?
+                    .as_str()
+                    .map(str::to_owned)
+            })
+            .or_else(|| {
+                self.binding_store
+                    .load()
+                    .filter(|binding| binding.runtime_target_id == runtime_target_id)
+                    .map(|binding| binding.cwd)
+            })
             .or_else(|| {
                 env::current_dir()
                     .ok()
                     .map(|path| path.to_string_lossy().into_owned())
             })
             .unwrap_or_default();
+        self.persist_binding(SessionBinding {
+            runtime_target_id: runtime_target_id.into(),
+            session_id: session_id.into(),
+            cwd,
+            session_metadata,
+        })
+    }
+
+    fn persist_binding(&self, binding: SessionBinding) -> Result<(), HostError> {
+        // A slow connection from an older selection may finish after the user
+        // has selected another runtime. Serialize the check and atomic save.
+        let generation = self.binding_generation.lock().unwrap();
+        if *generation != self.request_generation {
+            return Ok(());
+        }
         self.binding_store
-            .save(&SessionBinding {
-                runtime_target_id: runtime_target_id.into(),
-                session_id: session_id.into(),
-                cwd,
-                session_metadata,
-            })
+            .save(&binding)
             .map_err(|error| HostError::new("persistence-failed", error.to_string()))
     }
 }
@@ -954,6 +1025,92 @@ impl From<serde_json::Error> for HostError {
     fn from(error: serde_json::Error) -> Self {
         Self::new("protocol-error", error.to_string())
     }
+}
+
+struct RuntimeWork {
+    request: CoreRequest,
+    targets: Vec<zommi_core::RuntimeTarget>,
+    generation: u64,
+}
+
+struct RuntimeWorker {
+    sender: mpsc::UnboundedSender<RuntimeWork>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+fn runtime_request_target(request: &CoreRequest) -> Option<&str> {
+    if request.protocol_version != Some(CORE_PROTOCOL_VERSION)
+        || request.id.as_deref().is_none_or(str::is_empty)
+        || !request.payload.is_object()
+    {
+        return None;
+    }
+    let operation = request.operation.as_deref()?;
+    if !(matches!(
+        operation,
+        "runtime.connect" | "runtime.prepare" | "command.execute"
+    ) || operation.starts_with("session.")
+        || operation.starts_with("turn.")
+        || operation.starts_with("approval.")
+        || operation.starts_with("question."))
+    {
+        return None;
+    }
+    request
+        .payload
+        .get("runtimeTargetId")?
+        .as_str()
+        .filter(|id| !id.is_empty())
+}
+
+fn selects_session(operation: Option<&str>) -> bool {
+    matches!(
+        operation,
+        Some(
+            "runtime.connect"
+                | "session.open"
+                | "session.create"
+                | "session.fork"
+                | "session.configure"
+                | "session.rewind"
+        )
+    )
+}
+
+fn runtime_worker(
+    event_tx: EventSender,
+    binding_generation: Arc<Mutex<u64>>,
+    operations: Arc<Mutex<HashMap<String, OperationRecord>>>,
+    output: mpsc::UnboundedSender<Value>,
+    mut shutdown: watch::Receiver<bool>,
+) -> RuntimeWorker {
+    let (sender, mut requests) = mpsc::unbounded_channel::<RuntimeWork>();
+    let task = tokio::spawn(async move {
+        let mut state = HostState::new(event_tx);
+        state.binding_generation = binding_generation;
+        state.operations = operations;
+        loop {
+            let work = tokio::select! {
+                biased;
+                _ = shutdown.changed() => break,
+                work = requests.recv() => match work { Some(work) => work, None => break },
+            };
+            state.targets = work.targets;
+            state.request_generation = work.generation;
+            let action = tokio::select! {
+                biased;
+                _ = shutdown.changed() => break,
+                action = state.handle(work.request) => action,
+            };
+            if let Ok(value) = serde_json::to_value(action.response) {
+                let _ = output.send(value);
+            }
+        }
+        for (_, adapter) in std::mem::take(&mut state.adapters) {
+            adapter.shutdown().await;
+        }
+    });
+    RuntimeWorker { sender, task }
 }
 
 #[tokio::main]
@@ -1010,6 +1167,8 @@ async fn main() -> io::Result<()> {
         }
     });
     let mut state = HostState::new(event_tx);
+    let mut workers = HashMap::<String, RuntimeWorker>::new();
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     while let Some(line) = lines.next_line().await? {
         let action = if line.len() > MAX_REQUEST_BYTES {
@@ -1047,6 +1206,73 @@ async fn main() -> io::Result<()> {
                         }
                     }
                 }
+                Ok(mut request)
+                    if !catalog_worker
+                        && (runtime_request_target(&request).is_some()
+                            || (request.operation.as_deref() == Some("runtime.connect")
+                                && request.protocol_version == Some(CORE_PROTOCOL_VERSION)
+                                && request.id.as_deref().is_some_and(|id| !id.is_empty())
+                                && request.payload.is_object()
+                                && request.payload.get("runtimeTargetId").is_none())) =>
+                {
+                    if state.targets.is_empty() {
+                        // Legacy clients can connect before explicit discovery.
+                        if let Err(error) = state.refresh_runtime_targets(false).await {
+                            let action =
+                                failure(request.id, error.code, error.message, error.retryable);
+                            output_tx
+                                .send(
+                                    serde_json::to_value(action.response)
+                                        .map_err(io::Error::other)?,
+                                )
+                                .map_err(|_| {
+                                    io::Error::new(io::ErrorKind::BrokenPipe, "core output closed")
+                                })?;
+                            continue;
+                        }
+                    }
+                    if request.payload.get("runtimeTargetId").is_none() {
+                        if let Some(target_id) =
+                            state.discovery_value(&json!({}))["selectedTargetId"].as_str()
+                        {
+                            request.payload["runtimeTargetId"] = json!(target_id);
+                        } else {
+                            let action = state.handle(request).await;
+                            let _ = output_tx.send(
+                                serde_json::to_value(action.response).map_err(io::Error::other)?,
+                            );
+                            continue;
+                        }
+                    }
+                    let target_id = runtime_request_target(&request).unwrap().to_owned();
+                    let generation = {
+                        let mut current = state.binding_generation.lock().unwrap();
+                        if selects_session(request.operation.as_deref()) {
+                            *current += 1;
+                        }
+                        *current
+                    };
+                    let worker = workers.entry(target_id).or_insert_with(|| {
+                        runtime_worker(
+                            state.event_tx.clone(),
+                            state.binding_generation.clone(),
+                            state.operations.clone(),
+                            output_tx.clone(),
+                            shutdown_rx.clone(),
+                        )
+                    });
+                    worker
+                        .sender
+                        .send(RuntimeWork {
+                            request,
+                            targets: state.targets.clone(),
+                            generation,
+                        })
+                        .map_err(|_| {
+                            io::Error::new(io::ErrorKind::BrokenPipe, "runtime worker closed")
+                        })?;
+                    continue;
+                }
                 Ok(request) => state.handle(request).await,
                 Err(error) => failure(
                     None,
@@ -1063,6 +1289,10 @@ async fn main() -> io::Result<()> {
         if action.shutdown {
             break;
         }
+    }
+    let _ = shutdown_tx.send(true);
+    for (_, worker) in workers {
+        let _ = worker.task.await;
     }
     for (_, adapter) in std::mem::take(&mut state.adapters) {
         adapter.shutdown().await;

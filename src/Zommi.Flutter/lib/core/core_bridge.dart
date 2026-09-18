@@ -157,6 +157,11 @@ abstract interface class RuntimeCommandBridge {
   });
 }
 
+abstract interface class RuntimePreparationBridge {
+  /// Prepare a runtime transport without selecting or creating a chat.
+  Future<void> prepareRuntime({required String runtimeTargetId});
+}
+
 abstract interface class GoalControlBridge {
   Future<Map<String, Object?>> goalCommand({
     required String runtimeTargetId,
@@ -375,6 +380,7 @@ final class ProcessCoreBridge
     implements
         CoreBridge,
         RuntimeConfigurationBridge,
+        RuntimePreparationBridge,
         SessionCatalogBridge,
         SessionForkBridge,
         SessionRewindBridge,
@@ -503,6 +509,11 @@ final class ProcessCoreBridge
       'runtimeTargetId': runtimeTargetId,
     });
     return _mapList(result['data']);
+  }
+
+  @override
+  Future<void> prepareRuntime({required String runtimeTargetId}) async {
+    await _request('runtime.prepare', {'runtimeTargetId': runtimeTargetId});
   }
 
   @override
@@ -842,6 +853,7 @@ final class ProcessCoreBridge
         const {
           'runtime.discover',
           'runtime.connect',
+          'runtime.prepare',
           'session.open',
         }.contains(operation)
         ? connectionTimeout

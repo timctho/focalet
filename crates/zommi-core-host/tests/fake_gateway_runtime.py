@@ -646,7 +646,10 @@ def main() -> int:
             with open(failure_marker, "w") as marker:
                 marker.write("failed once")
             return 1
-        time.sleep(float(os.environ.get("ZOMMI_FAKE_STARTUP_DELAY", "0")))
+        startup_delay = float(os.environ.get("ZOMMI_FAKE_STARTUP_DELAY", "0"))
+        if startup_delay:
+            write_log({"method": "fixture.startup", "pid": os.getpid(), "delay": startup_delay})
+            time.sleep(startup_delay)
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(("127.0.0.1", args.port))

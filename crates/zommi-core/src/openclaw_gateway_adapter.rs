@@ -343,6 +343,10 @@ impl OpenClawGatewayAdapter {
         if list_only {
             return Ok(());
         }
+        self.activate(preferred_session_id).await
+    }
+
+    pub async fn activate(&self, preferred_session_id: Option<String>) -> Result<(), CodexError> {
         self.load_sessions().await?;
         self.refresh_models().await;
         // A saved exact binding can be outside the current catalog page or
@@ -361,6 +365,11 @@ impl OpenClawGatewayAdapter {
             None,
         );
         Ok(())
+    }
+
+    pub async fn is_running(&self) -> bool {
+        let state = self.inner.state.lock().await;
+        !state.exited && !state.stopping
     }
 
     pub fn target_id(&self) -> &str {

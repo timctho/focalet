@@ -128,6 +128,12 @@ final class ZommiController extends ChangeNotifier {
   bool get sessionReadOnly => _readOnlySessions.contains(_activeSessionKey);
   (String, String)? _pendingSwitch;
   Future<void>? _switchWorker;
+  String? _switchWorkerTargetId;
+  int _switchWorkerGeneration = 0;
+  final Set<String> _runtimePreparations = {};
+  final List<String> _runtimePreparationQueue = [];
+  int _runtimePreparationCount = 0;
+  String? _startupRuntimeId;
   Timer? _switchRetryTimer;
   int _switchEpoch = 0;
   int _switchFailures = 0;
@@ -448,6 +454,7 @@ final class ZommiController extends ChangeNotifier {
     });
     final desktopInitialization = _initializeDesktopIntegration();
     (String, String)? startupRecovery;
+    final startupEpoch = _switchEpoch;
     try {
       await _restoreSessionCatalog();
       if (_closed) return;
@@ -456,6 +463,16 @@ final class ZommiController extends ChangeNotifier {
       final discovery = await core.discoverRuntimeTargets();
       if (_closed) return;
       _replaceDiscovery(discovery);
+      // Only discovery gates the initial shell. Runtime processes can now start
+      // independently while settings, drafts and other sessions remain usable.
+      starting = false;
+      _notify();
+      final selectedTarget = _visibleSelectedTargetId(
+        discovery.selectedTargetId,
+      );
+      _startupRuntimeId = runtimeSetupPending ? null : selectedTarget;
+      _prepareRuntimes(except: _startupRuntimeId);
+      _scheduleStartupCatalogRefresh();
       if (runtimeSetupPending) {
         _setStatus('Choose an agent to get started');
         return;
@@ -468,9 +485,17 @@ final class ZommiController extends ChangeNotifier {
         );
         return;
       }
+      _setStatus(
+        'Connecting to ${_runtimeTarget(targetId)?.displayName ?? 'agent'}…',
+      );
       try {
-        await _connectRuntime(targetId, coreVersion: coreStatus.version);
+        await _connectRuntime(
+          targetId,
+          coreVersion: coreStatus.version,
+          selectionEpoch: startupEpoch,
+        );
       } on Object catch (error) {
+        if (_closed || startupEpoch != _switchEpoch) return;
         if (!_applyConnectionError(targetId, error)) {
           final binding = discovery.binding;
           final savedSession = activeRuntime?.id == targetId
@@ -521,13 +546,53 @@ final class ZommiController extends ChangeNotifier {
       }
     } finally {
       await desktopInitialization;
+      _startupRuntimeId = null;
       starting = false;
       final recovery = startupRecovery;
-      if (!_closed && recovery != null) {
+      if (!_closed && recovery != null && startupEpoch == _switchEpoch) {
         _scheduleSwitchRecovery(recovery.$1, recovery.$2, _switchEpoch);
       }
       _notify();
-      _scheduleStartupCatalogRefresh();
+    }
+  }
+
+  void _prepareRuntimes({String? except}) {
+    if (_closed || core is! RuntimePreparationBridge) return;
+    for (final target in visibleRuntimeTargets) {
+      if (target.id == except ||
+          !const {
+            'codex-app-server',
+            'hermes-acp',
+            'openclaw-acp',
+            'hermes-gateway',
+            'openclaw-gateway',
+          }.contains(target.adapterId) ||
+          !_runtimePreparations.add(target.id)) {
+        continue;
+      }
+      _runtimePreparationQueue.add(target.id);
+    }
+    _drainRuntimePreparations();
+  }
+
+  void _drainRuntimePreparations() {
+    while (!_closed &&
+        _runtimePreparationCount < 2 &&
+        _runtimePreparationQueue.isNotEmpty) {
+      final targetId = _runtimePreparationQueue.removeAt(0);
+      _runtimePreparationCount++;
+      unawaited(
+        (core as RuntimePreparationBridge)
+            .prepareRuntime(runtimeTargetId: targetId)
+            .catchError((Object _) {
+              // A selection retries preparation failures through normal connection.
+              _runtimePreparations.remove(targetId);
+            })
+            .whenComplete(() {
+              _runtimePreparationCount--;
+              _drainRuntimePreparations();
+            }),
+      );
     }
   }
 
@@ -568,6 +633,7 @@ final class ZommiController extends ChangeNotifier {
       );
       if (_closed) return;
       _replaceDiscovery(discovery);
+      _prepareRuntimes(except: activeRuntime?.id);
     } on Object {
       if (!_closed) {
         runtimeDiscoveryError = 'Could not refresh agents. Try again.';
@@ -674,6 +740,7 @@ final class ZommiController extends ChangeNotifier {
         visibleRuntimeTargets
             .where(
               (target) =>
+                  target.id != _startupRuntimeId &&
                   target.capabilityHints.contains('session.list.v1') &&
                   !_catalogLoading.contains(target.id) &&
                   (force || _catalogIsDue(target.id)),
@@ -956,26 +1023,24 @@ final class ZommiController extends ChangeNotifier {
     }
   }
 
-  Future<void> _connectRuntime(String targetId, {String? coreVersion}) async {
+  Future<void> _connectRuntime(
+    String targetId, {
+    String? coreVersion,
+    int? selectionEpoch,
+  }) async {
     _rememberActiveSessionSettings();
     final connection = await core.connectRuntime(runtimeTargetId: targetId);
-    _activateConnection(connection);
-    if (capabilities.contains('session.list.v1')) {
-      try {
-        final values = await core.listSessions(
-          runtimeTargetId: connection.runtimeTargetId,
-        );
-        _mergeSessions(connection.runtimeTargetId, values);
-        _markCatalogSynced(connection.runtimeTargetId);
-        _ensureSession(connection.sessionId);
-      } on Object {
-        // The exact connection remains usable when optional listing fails.
-      }
+    _connectedRuntimes.add(connection.runtimeTargetId);
+    if (_closed || (selectionEpoch != null && selectionEpoch != _switchEpoch)) {
+      return;
     }
-    _hydrateSessionSettingsFromSummaries(connection.runtimeTargetId);
-    _restoreSessionSettings(connection);
-    await _readActiveHistory(history: connection.history, retryOnFailure: true);
-    _rememberActiveSessionSettings();
+    await _applySessionConnection(connection, focusComposer: false);
+    if (selectionEpoch != null && connection.sessions.isNotEmpty) {
+      _markCatalogSynced(connection.runtimeTargetId);
+    }
+    if (_closed || (selectionEpoch != null && selectionEpoch != _switchEpoch)) {
+      return;
+    }
     final version = connection.runtimeVersion ?? coreVersion;
     _setStatus('$activeRuntimeName${version == null ? '' : ' $version'} ready');
   }
@@ -1130,20 +1195,28 @@ final class ZommiController extends ChangeNotifier {
       return;
     }
     _pendingSwitch = (targetId, sessionId);
-    if (_switchWorker case final worker?) return worker;
-    final worker = _drainSessionSwitches();
+    if (_switchWorker case final worker?) {
+      if (_switchWorkerTargetId == targetId) return worker;
+    }
+    final worker = _drainSessionSwitches(++_switchWorkerGeneration);
     _switchWorker = worker;
     try {
       await worker;
     } finally {
-      _switchWorker = null;
+      if (identical(_switchWorker, worker)) {
+        _switchWorker = null;
+        _switchWorkerTargetId = null;
+      }
     }
   }
 
-  Future<void> _drainSessionSwitches() async {
-    while (!_closed && _pendingSwitch != null) {
+  Future<void> _drainSessionSwitches(int generation) async {
+    while (!_closed &&
+        generation == _switchWorkerGeneration &&
+        _pendingSwitch != null) {
       final (targetId, sessionId) = _pendingSwitch!;
       _pendingSwitch = null;
+      _switchWorkerTargetId = targetId;
       await _switchSessionOnce(sessionId, targetId, _switchEpoch);
     }
   }
@@ -1154,7 +1227,6 @@ final class ZommiController extends ChangeNotifier {
     int epoch,
   ) async {
     if (starting ||
-        sessionBusy ||
         runtimeBusy ||
         sessionSettingsBusy ||
         submitting ||
@@ -1179,7 +1251,9 @@ final class ZommiController extends ChangeNotifier {
           preferredSessionId: sessionId,
           cwd: _nonEmpty(targetSettings.workspace),
         );
+        _connectedRuntimes.add(initialConnection.runtimeTargetId);
       }
+      if (_closed || epoch != _switchEpoch) return;
       // A cold connection already resumes the requested chat. A warm host can
       // instead return its previous selection; only reuse an exact match, and
       // keep explicit reopen semantics for recovery and profile changes.
@@ -1206,6 +1280,7 @@ final class ZommiController extends ChangeNotifier {
         connection,
         historyRevision: historyRevision,
       );
+      if (_closed || epoch != _switchEpoch) return;
       _switchFailures = 0;
       _setStatus(
         sessionReadOnly
@@ -1223,9 +1298,11 @@ final class ZommiController extends ChangeNotifier {
         _setStatus('Could not open chat · $detail', warning: true);
       }
     } finally {
-      sessionBusy = false;
-      switchingRuntimeId = null;
-      _notify();
+      if (epoch == _switchEpoch) {
+        sessionBusy = false;
+        switchingRuntimeId = null;
+        _notify();
+      }
     }
   }
 
@@ -1252,9 +1329,16 @@ final class ZommiController extends ChangeNotifier {
     _switchRetryTimer = Timer(delay, () {
       if (_closed || epoch != _switchEpoch || _switchWorker != null) return;
       _pendingSwitch = (targetId, sessionId);
-      final worker = _drainSessionSwitches();
+      final worker = _drainSessionSwitches(++_switchWorkerGeneration);
       _switchWorker = worker;
-      unawaited(worker.whenComplete(() => _switchWorker = null));
+      unawaited(
+        worker.whenComplete(() {
+          if (identical(_switchWorker, worker)) {
+            _switchWorker = null;
+            _switchWorkerTargetId = null;
+          }
+        }),
+      );
     });
   }
 
@@ -1353,6 +1437,7 @@ final class ZommiController extends ChangeNotifier {
     RuntimeConnection connection, {
     SessionSettings? inherited,
     int? historyRevision,
+    bool focusComposer = true,
   }) async {
     _activateConnection(connection);
     _hydrateSessionSettingsFromSummaries(connection.runtimeTargetId);
@@ -1367,11 +1452,14 @@ final class ZommiController extends ChangeNotifier {
       historyRevision: historyRevision,
       retryOnFailure: true,
     );
-    // The core processes requests in order. Optional command discovery must
+    if (!_isActiveSession(connection.runtimeTargetId, connection.sessionId)) {
+      return;
+    }
+    // Each runtime processes requests in order. Optional command discovery must
     // not get ahead of the selected transcript or hold the composer busy.
     unawaited(refreshCommands());
     unawaited(_refreshGoal());
-    focusComposerEpoch++;
+    if (focusComposer) focusComposerEpoch++;
   }
 
   Future<void> submit(
