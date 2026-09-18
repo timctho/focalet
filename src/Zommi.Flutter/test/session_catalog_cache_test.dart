@@ -211,7 +211,9 @@ void main() {
       );
       expect(second.createdSessions, isEmpty);
       await restarted.switchSession(saved.id, runtimeTargetId: hermes.id);
-      expect(second.openedSessions.last, (hermes.id, saved.id));
+      expect(restarted.activeRuntime?.id, hermes.id);
+      expect(restarted.activeSessionId, saved.id);
+      expect(second.openedSessions, isEmpty);
       expect(second.createdSessions, isEmpty);
     },
   );

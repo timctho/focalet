@@ -451,6 +451,7 @@ impl OpenClawGatewayAdapter {
             "capabilities": state.capabilities,
             "models": state.models,
             "sessions": state.sessions,
+            "history": {"thread": {"id": session_id, "turns": messages_to_turns(state.histories.get(&session_id).map(Vec::as_slice).unwrap_or_default())}},
             "sessionMetadata": {"sessionKey": session_id}
         }))
     }
@@ -470,7 +471,10 @@ impl OpenClawGatewayAdapter {
     }
 
     pub async fn open_session(&self, session_id: &str) -> Result<Value, CodexError> {
-        let sessions = self.load_sessions().await?;
+        let mut sessions = self.inner.state.lock().await.sessions.clone();
+        if !sessions.iter().any(|session| session["id"] == session_id) {
+            sessions = self.load_sessions().await?;
+        }
         if !sessions
             .iter()
             .any(|session| session.get("id").and_then(Value::as_str) == Some(session_id))

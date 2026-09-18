@@ -24,7 +24,117 @@ Map<String, Object?> history(String session, {String? answer}) => {
   },
 };
 
+class ColdSwitchCore extends RichFakeCore {
+  bool returnPreviousSession = false;
+
+  @override
+  Future<RuntimeConnection> connectRuntime({
+    required String runtimeTargetId,
+    String? preferredSessionId,
+    String? cwd,
+  }) async {
+    final value = await super.connectRuntime(
+      runtimeTargetId: runtimeTargetId,
+      preferredSessionId: returnPreviousSession ? null : preferredSessionId,
+      cwd: cwd,
+    );
+    return RuntimeConnection(
+      runtimeTargetId: value.runtimeTargetId,
+      sessionId: value.sessionId,
+      protocolVersion: value.protocolVersion,
+      capabilities: value.capabilities,
+      models: value.models,
+      sessions: value.sessions,
+      history: history(value.sessionId, answer: 'Connected history'),
+    );
+  }
+}
+
+class SlowGoalCore extends RichFakeCore {
+  Completer<void>? goalGate;
+
+  @override
+  Future<Map<String, Object?>> goalCommand({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String action,
+    String? objective,
+    String? model,
+    String? effort,
+    String? cwd,
+  }) async {
+    if (goalGate case final gate?) await gate.future;
+    return {'goal': null};
+  }
+}
+
 void main() {
+  for (final previous in [false, true]) {
+    test(
+      'cold cross-runtime connection reuses only exact history ($previous)',
+      () async {
+        final core = ColdSwitchCore()..returnPreviousSession = previous;
+        final controller = ZommiController(
+          core: core,
+          desktop: FakeDesktopBridge(),
+        );
+        addTearDown(controller.close);
+        await controller.initialize();
+        final reads = core.readSessionCount;
+        final connects = core.connectCount;
+        await controller.switchSession(
+          'pi-second',
+          runtimeTargetId: 'runtime-pi',
+        );
+        expect(controller.activeRuntime?.id, 'runtime-pi');
+        expect(controller.activeSessionId, 'pi-second');
+        expect(core.connectCount, connects + 1);
+        expect(
+          core.openedSessions,
+          previous ? [('runtime-pi', 'pi-second')] : isEmpty,
+        );
+        expect(core.readSessionCount, reads + (previous ? 1 : 0));
+        if (!previous) {
+          expect(
+            controller.turns.single.blocks.single.text,
+            'Connected history',
+          );
+        }
+        await controller.switchSession(
+          'session-2',
+          runtimeTargetId: 'runtime-codex',
+        );
+        await controller.switchSession(
+          'pi-second',
+          runtimeTargetId: 'runtime-pi',
+        );
+        expect(core.connectCount, connects + 1);
+        expect(core.openedSessions.last, ('runtime-pi', 'pi-second'));
+        expect(core.lastMessage, isNull);
+      },
+    );
+  }
+
+  test(
+    'optional goal read does not hold the selected transcript busy',
+    () async {
+      final core = SlowGoalCore()..historyCount = 0;
+      final controller = ZommiController(
+        core: core,
+        desktop: FakeDesktopBridge(),
+      );
+      addTearDown(controller.close);
+      await controller.initialize();
+      core.goalGate = Completer<void>();
+      await controller
+          .switchSession('session-2')
+          .timeout(const Duration(seconds: 1));
+      expect(controller.activeSessionId, 'session-2');
+      expect(controller.sessionBusy, isFalse);
+      core.goalGate!.complete();
+    },
+  );
+
   testWidgets('a slow cold switch still starts on a bounded history page', (
     tester,
   ) async {

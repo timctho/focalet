@@ -310,7 +310,9 @@ void main() {
       retained.sessions.map((s) => s.id),
       unorderedEquals(['running', 'older']),
     );
-    expect(core.openedSessions.last, (hermes.id, 'older'));
+    expect(controller.activeRuntime?.id, hermes.id);
+    expect(controller.activeSessionId, 'older');
+    expect(core.openedSessions, isEmpty);
     expect(core.createdSessions, isEmpty);
   });
 

@@ -199,7 +199,7 @@ impl PiAdapter {
             }
         }
         self.refresh_state(true).await?;
-        let rewind_supported = self
+        let fork_entries = self
             .inner
             .request(json!({"type":"get_fork_messages"}))
             .await
@@ -209,9 +209,14 @@ impl PiAdapter {
                     .pointer("/data/messages")
                     .and_then(Value::as_array)
                     .cloned()
-            })
-            .is_some();
-        self.inner.state.lock().await.rewind_supported = rewind_supported;
+            });
+        {
+            let mut state = self.inner.state.lock().await;
+            state.rewind_supported = fork_entries.is_some();
+            if let Some(entries) = fork_entries {
+                let _ = identify_user_entries(&mut state.messages, &entries);
+            }
+        }
         let state = self.inner.state.lock().await;
         if state.runtime_state.get("model").is_none() || state.models.is_empty() {
             return Err(pi_error(
@@ -315,6 +320,7 @@ impl PiAdapter {
             "capabilities": capabilities,
             "models": state.models,
             "sessions": state.sessions.values().cloned().collect::<Vec<_>>(),
+            "history": {"thread": {"id": session_id, "turns": messages_to_turns(&state.messages)}},
             "sessionMetadata": state.runtime_state.get("sessionFile").and_then(Value::as_str)
                 .map(|session_file| json!({"sessionFile": session_file}))
         }))
@@ -388,6 +394,12 @@ impl PiAdapter {
                 "Pi history is available only for the exact loaded session.",
             ));
         }
+        let messages = self.load_messages().await?;
+        self.inner.state.lock().await.messages = messages.clone();
+        Ok(json!({"thread": {"id": session_id, "turns": messages_to_turns(&messages)}}))
+    }
+
+    async fn load_messages(&self) -> Result<Vec<Value>, CodexError> {
         let response = self.inner.request(json!({"type": "get_messages"})).await?;
         let mut messages = response
             .pointer("/data/messages")
@@ -405,8 +417,7 @@ impl PiAdapter {
                 let _ = identify_user_entries(&mut messages, entries);
             }
         }
-        self.inner.state.lock().await.messages = messages.clone();
-        Ok(json!({"thread": {"id": session_id, "turns": messages_to_turns(&messages)}}))
+        Ok(messages)
     }
 
     pub async fn prepare_rewind(&self, session_id: &str) -> Result<Value, CodexError> {
@@ -770,7 +781,7 @@ impl PiAdapter {
             .request(json!({"type": "get_available_models"}))
             .await?;
         let messages_response = if include_messages {
-            Some(self.inner.request(json!({"type": "get_messages"})).await?)
+            Some(self.load_messages().await?)
         } else {
             None
         };
@@ -821,12 +832,8 @@ impl PiAdapter {
         state.runtime_state = runtime_state;
         state.models = models;
         state.thinking_levels = thinking_levels;
-        if let Some(response) = messages_response {
-            state.messages = response
-                .pointer("/data/messages")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
+        if let Some(messages) = messages_response {
+            state.messages = messages;
         }
         Ok(())
     }

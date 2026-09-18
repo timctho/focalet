@@ -360,7 +360,8 @@ impl AcpAdapter {
             "runtimeVersion": state.runtime_version,
             "capabilities": state.capabilities,
             "models": state.models,
-            "sessions": state.sessions
+            "sessions": state.sessions,
+            "history": {"thread": {"id": session_id, "turns": state.histories.get(&session_id).cloned().unwrap_or_default()}}
         }))
     }
 
@@ -394,7 +395,6 @@ impl AcpAdapter {
             )
             .await?;
         self.select_session(session_id, &result).await?;
-        self.load_sessions().await?;
         self.connection_value().await
     }
 

@@ -26,9 +26,10 @@ extension CodexCommands on ZommiController {
         sessionId: sessionId,
         action: 'get',
       );
-      if ((_goalRevisions[key] ?? 0) == revision) {
+      if (!_closed && (_goalRevisions[key] ?? 0) == revision) {
         final value = response['goal'];
         _goalsBySession[key] = value is Map ? mapValue(value) : null;
+        if (_activeSessionKey == key) _notify();
       }
     } on Object {
       // Older runtimes and configurations with goals disabled remain usable.

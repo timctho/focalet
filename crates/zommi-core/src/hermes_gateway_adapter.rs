@@ -17,7 +17,7 @@ use tokio::{
     process::{ChildStdout, Command},
     sync::{Mutex, Notify, oneshot},
     task::JoinHandle,
-    time::{Duration, timeout},
+    time::{Duration, Instant, timeout},
 };
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
 use uuid::Uuid;
@@ -129,6 +129,7 @@ struct State {
     active_profile: String,
     histories: HashMap<String, Vec<Value>>,
     models: Vec<Value>,
+    model_catalogs: HashMap<String, (Instant, Vec<Value>)>,
     session_info: Value,
     active_turns: HashMap<String, String>,
     turn_operations: HashMap<String, String>,
@@ -524,6 +525,7 @@ impl HermesGatewayAdapter {
             "capabilities": capabilities,
             "models": state.models,
             "sessions": state.sessions,
+            "history": {"thread": {"id": session_id, "turns": state.histories.get(&session_id).cloned().unwrap_or_default()}},
             "sessionMetadata": {
                 "sessionKey": session_id,
                 "activeModel": model,
@@ -556,7 +558,12 @@ impl HermesGatewayAdapter {
         session_id: &str,
         profile: Option<&str>,
     ) -> Result<Value, CodexError> {
-        let sessions = self.load_sessions().await?;
+        // The sidebar already knows this identity. Only refresh the complete
+        // inventory when this adapter has not seen it yet.
+        let mut sessions = self.inner.state.lock().await.sessions.clone();
+        if !sessions.iter().any(|session| session["id"] == session_id) {
+            sessions = self.load_sessions().await?;
+        }
         if !sessions
             .iter()
             .any(|session| session.get("id").and_then(Value::as_str) == Some(session_id))
@@ -1274,20 +1281,36 @@ impl HermesGatewayAdapter {
     }
 
     async fn refresh_models(&self) {
-        let runtime_session_id = self
-            .inner
-            .state
-            .lock()
-            .await
-            .runtime_session_id
-            .clone()
-            .unwrap_or_default();
+        let (runtime_session_id, profile) = {
+            let mut state = self.inner.state.lock().await;
+            let profile = state.session_info["profile_name"]
+                .as_str()
+                .unwrap_or(&state.active_profile)
+                .to_owned();
+            if let Some((updated, models)) = state.model_catalogs.get(&profile)
+                && updated.elapsed() < Duration::from_secs(300)
+            {
+                state.models = models.clone();
+                return;
+            }
+            (
+                state.runtime_session_id.clone().unwrap_or_default(),
+                profile,
+            )
+        };
         match self
             .inner
             .request("model.options", json!({"session_id": runtime_session_id}))
             .await
         {
-            Ok(value) => self.inner.state.lock().await.models = models_for_ui(&value),
+            Ok(value) => {
+                let models = models_for_ui(&value);
+                let mut state = self.inner.state.lock().await;
+                state
+                    .model_catalogs
+                    .insert(profile, (Instant::now(), models.clone()));
+                state.models = models;
+            }
             Err(error) => {
                 let mut state = self.inner.state.lock().await;
                 state.models.clear();

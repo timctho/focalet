@@ -23,6 +23,7 @@ LOG_PATH = os.environ.get("ZOMMI_FAKE_REQUEST_LOG")
 
 
 def write_log(frame: dict[str, Any]) -> None:
+    time.sleep(float(os.environ.get("ZOMMI_FAKE_REQUEST_DELAY_MS", "0")) / 1000)
     if not LOG_PATH:
         return
     safe = json.loads(json.dumps(frame))

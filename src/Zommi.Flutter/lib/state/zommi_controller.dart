@@ -124,6 +124,7 @@ final class ZommiController extends ChangeNotifier {
   bool runtimeOverrideBusy = false;
   bool sessionBusy = false;
   final Set<String> _readOnlySessions = {};
+  final Set<String> _connectedRuntimes = {};
   bool get sessionReadOnly => _readOnlySessions.contains(_activeSessionKey);
   (String, String)? _pendingSwitch;
   Future<void>? _switchWorker;
@@ -1066,6 +1067,7 @@ final class ZommiController extends ChangeNotifier {
         initialConnection = await core.connectRuntime(
           runtimeTargetId: target.id,
         );
+        _connectedRuntimes.add(initialConnection.runtimeTargetId);
         if (!{
           ...target.capabilityHints,
           ...initialConnection.capabilities,
@@ -1169,8 +1171,8 @@ final class ZommiController extends ChangeNotifier {
     _notify();
     try {
       RuntimeConnection? initialConnection;
-      if (changingRuntime ||
-          activeRuntime?.status == 'unavailable' ||
+      if (!_connectedRuntimes.contains(targetId) ||
+          _runtimeTarget(targetId)?.status == 'unavailable' ||
           _switchFailures > 0) {
         initialConnection = await core.connectRuntime(
           runtimeTargetId: targetId,
@@ -1178,12 +1180,26 @@ final class ZommiController extends ChangeNotifier {
           cwd: _nonEmpty(targetSettings.workspace),
         );
       }
-      final connection = await core.openSession(
-        runtimeTargetId: targetId,
-        sessionId: sessionId,
-        cwd: _nonEmpty(targetSettings.workspace),
-        profile: _nonEmpty(targetSettings.profile),
-      );
+      // A cold connection already resumes the requested chat. A warm host can
+      // instead return its previous selection; only reuse an exact match, and
+      // keep explicit reopen semantics for recovery and profile changes.
+      final reuseInitial =
+          initialConnection != null &&
+          initialConnection.runtimeTargetId == targetId &&
+          initialConnection.sessionId == sessionId &&
+          _switchFailures == 0 &&
+          initialConnection.sessionMetadata['readOnly'] != true &&
+          (targetSettings.profile.isEmpty ||
+              initialConnection.sessionMetadata['profile'] ==
+                  targetSettings.profile);
+      final connection = reuseInitial
+          ? initialConnection
+          : await core.openSession(
+              runtimeTargetId: targetId,
+              sessionId: sessionId,
+              cwd: _nonEmpty(targetSettings.workspace),
+              profile: _nonEmpty(targetSettings.profile),
+            );
       if (initialConnection != null) _cacheConnection(initialConnection);
       if (_closed || epoch != _switchEpoch) return;
       await _applySessionConnection(
@@ -1253,6 +1269,7 @@ final class ZommiController extends ChangeNotifier {
       value == null || value.isEmpty ? null : value;
 
   void _cacheConnection(RuntimeConnection connection) {
+    _connectedRuntimes.add(connection.runtimeTargetId);
     final key = _sessionKey(connection.runtimeTargetId, connection.sessionId);
     if (connection.sessionMetadata['readOnly'] == true) {
       _readOnlySessions.add(key);
@@ -1343,7 +1360,6 @@ final class ZommiController extends ChangeNotifier {
     if (inherited != null) _sessionSettings[key] = inherited;
     _restoreSessionSettings(connection);
     _rememberActiveSessionSettings();
-    unawaited(refreshCommands());
     // Paint cached history while an adapter finishes reading the selected chat.
     _notify();
     await _readActiveHistory(
@@ -1351,7 +1367,10 @@ final class ZommiController extends ChangeNotifier {
       historyRevision: historyRevision,
       retryOnFailure: true,
     );
-    await _refreshGoal();
+    // The core processes requests in order. Optional command discovery must
+    // not get ahead of the selected transcript or hold the composer busy.
+    unawaited(refreshCommands());
+    unawaited(_refreshGoal());
     focusComposerEpoch++;
   }
 

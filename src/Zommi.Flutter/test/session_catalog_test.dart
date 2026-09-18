@@ -157,7 +157,9 @@ void main() {
       find.byKey(const ValueKey('session-runtime-hermes-hermes-recent')),
     );
     await tester.pumpAndSettle();
-    expect(core.openedSessions.last, (hermes.id, 'hermes-recent'));
+    expect(core.activeTargetId, hermes.id);
+    expect(core.activeSessionId, 'hermes-recent');
+    expect(core.openedSessions, isEmpty);
     expect(core.createdSessions, isEmpty);
   });
 
