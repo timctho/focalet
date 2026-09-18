@@ -5,6 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/zommi_app.dart';
 
+import 'golden_support.dart';
+
 void main() {
   testWidgets('taskbar shell starts expanded and never renders an orb', (
     tester,
@@ -200,7 +202,7 @@ void main() {
     await tester.pumpAndSettle();
     await expectLater(
       find.byType(ZommiShell),
-      matchesGoldenFile('goldens/zommi_shell_expanded.png'),
+      matchesGoldenFile(platformGoldenPath('zommi_shell_expanded.png')),
     );
   });
 

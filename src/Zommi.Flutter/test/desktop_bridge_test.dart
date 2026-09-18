@@ -9,6 +9,24 @@ import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 
 void main() {
+  setUp(() {
+    // macOS hides through its native capture channel instead of window_manager.
+    // Mock both paths so these provider tests never wait on the host OS.
+    const capture = MethodChannel('zommi/capture_permissions');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(capture, (call) async {
+          expectSync(call.method, 'hideForCapture');
+          return null;
+        });
+  });
+  tearDown(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('zommi/capture_permissions'),
+          null,
+        );
+  });
+
   testWidgets(
     'startup centers and fits the saved window size before showing it',
     (tester) async {
@@ -725,6 +743,14 @@ void main() {
       _mockCursor(tester);
       const channel = MethodChannel('window_manager');
       final windowCalls = <String>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('zommi/capture_permissions'),
+        (call) async {
+          expectSync(call.method, 'hideForCapture');
+          windowCalls.add('hide');
+          return null;
+        },
+      );
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
         call,
       ) async {

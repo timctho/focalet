@@ -10,6 +10,7 @@ import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/widgets/runtime_command_menu.dart';
 import 'package:zommi_flutter/zommi_app.dart';
 
+import 'golden_support.dart';
 import 'test_support.dart';
 
 class CommandCore extends RichFakeCore implements RuntimeCommandBridge {
@@ -295,7 +296,7 @@ void main() {
     expect(find.text('Available in the runtime terminal'), findsOneWidget);
     await expectLater(
       find.byKey(const ValueKey('command-golden')),
-      matchesGoldenFile('goldens/runtime_command_menu.png'),
+      matchesGoldenFile(platformGoldenPath('runtime_command_menu.png')),
     );
     await tester.tap(find.byTooltip('Refresh commands'));
     expect(refreshed, isTrue);

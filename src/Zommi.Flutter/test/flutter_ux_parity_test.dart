@@ -14,6 +14,7 @@ import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
 import 'package:zommi_flutter/widgets/transcript_view.dart';
 import 'package:zommi_flutter/zommi_app.dart';
 
+import 'golden_support.dart';
 import 'test_support.dart';
 
 const _onePixelPng =
@@ -1113,7 +1114,7 @@ void main() {
       await tester.pumpAndSettle();
       await expectLater(
         find.byKey(const ValueKey('runtime-setup-panel')),
-        matchesGoldenFile('goldens/runtime_setup_panel.png'),
+        matchesGoldenFile(platformGoldenPath('runtime_setup_panel.png')),
       );
       expect(
         find.byKey(const ValueKey('runtime-override-locator')),
@@ -1423,7 +1424,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 200));
       await expectLater(
         thinkingCard,
-        matchesGoldenFile('goldens/thinking_tools_collapsed.png'),
+        matchesGoldenFile(platformGoldenPath('thinking_tools_collapsed.png')),
       );
 
       await tester.tap(
@@ -1479,7 +1480,7 @@ void main() {
       expect(timelineTops, orderedEquals([...timelineTops]..sort()));
       await expectLater(
         thinkingCard,
-        matchesGoldenFile('goldens/thinking_tools_expanded.png'),
+        matchesGoldenFile(platformGoldenPath('thinking_tools_expanded.png')),
       );
       expect(
         find.byKey(const ValueKey('assistant-answer-stream')),

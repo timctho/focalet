@@ -529,6 +529,15 @@ jobs:
             -o /tmp/zommi-macos-region-tests
           /tmp/zommi-macos-region-tests
 
+      - name: Test macOS capture bridge and UI goldens
+        working-directory: src/Zommi.Flutter
+        run: |
+          flutter test --no-pub --concurrency=4 \
+            test/desktop_bridge_test.dart \
+            test/flutter_ux_parity_test.dart \
+            test/runtime_commands_test.dart \
+            test/zommi_app_test.dart
+
       - name: Probe packaged macOS startup and capture permissions
         run: python3 scripts/accept-macos.py artifacts/zommi-macos-${{ inputs.macos_arch == 'x64' && 'x64' || 'arm64' }} --output artifacts/macos-acceptance --interactive
 
