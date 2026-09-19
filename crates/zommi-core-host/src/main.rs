@@ -322,7 +322,11 @@ impl HostState {
                 let adapter = self.exact_adapter(payload)?;
                 let session_id = required_string(payload, "sessionId")?;
                 let connection = adapter
-                    .open_session(session_id, payload.get("profile").and_then(Value::as_str))
+                    .open_session(
+                        session_id,
+                        payload.get("profile").and_then(Value::as_str),
+                        payload.get("cwd").and_then(Value::as_str),
+                    )
                     .await?;
                 let active_session_id = adapter.active_session_id().await?;
                 self.save_binding(
@@ -390,6 +394,20 @@ impl HostState {
                     .session_status(required_string(payload, "sessionId")?)
                     .await?)
             }
+            "session.history.page" => Ok(self
+                .exact_adapter(payload)?
+                .read_history_page(
+                    required_string(payload, "sessionId")?,
+                    payload.get("cursor").and_then(Value::as_str),
+                )
+                .await?),
+            "session.history.turn" => Ok(self
+                .exact_adapter(payload)?
+                .read_history_turn(
+                    required_string(payload, "sessionId")?,
+                    required_string(payload, "turnId")?,
+                )
+                .await?),
             "session.goal" => {
                 let adapter = self.exact_adapter(payload)?;
                 let session_id = required_string(payload, "sessionId")?;
@@ -744,6 +762,7 @@ impl HostState {
                 binding
                     .as_ref()
                     .filter(|binding| binding.runtime_target_id == target.id)
+                    .filter(|binding| preferred_session_id.as_deref() == Some(&binding.session_id))
                     .and_then(|binding| binding.session_metadata.as_ref())
                     .and_then(|metadata| metadata.get("sessionFile"))
                     .and_then(Value::as_str)

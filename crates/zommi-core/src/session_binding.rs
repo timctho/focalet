@@ -56,6 +56,10 @@ impl SessionBindingStore {
         self.path.with_file_name("codex-homes")
     }
 
+    pub(crate) fn session_locators_directory(&self) -> PathBuf {
+        self.path.with_file_name("session-locators")
+    }
+
     pub fn load(&self) -> Option<SessionBinding> {
         let bytes = fs::read(&self.path).ok()?;
         serde_json::from_slice(&bytes).ok()

@@ -1,7 +1,8 @@
 #include "tray_popup.h"
 
 #include <commctrl.h>
-#include <dwmapi.h>
+#include <cmath>
+#include <cstdint>
 #include <algorithm>
 #include <string>
 #include <variant>
@@ -42,7 +43,7 @@ void TrayPopup::Show(const flutter::EncodableMap& colors,
   POINT cursor{};
   GetCursorPos(&cursor);
   // Create on the pointer's monitor before reading its actual per-monitor DPI.
-  window_ = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, kClass,
+  window_ = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_LAYERED, kClass,
       L"Zommi menu", WS_POPUP, cursor.x, cursor.y, 1, 1,
       nullptr, nullptr, klass.hInstance, this);
   if (!window_) { Finish(""); return; }
@@ -55,10 +56,6 @@ void TrayPopup::Show(const flutter::EncodableMap& colors,
   const int top = std::clamp(cursor.y - height, monitor.rcWork.top,
                             monitor.rcWork.bottom - height);
   SetWindowPos(window_, HWND_TOPMOST, left, top, width, height, SWP_NOACTIVATE);
-  SetWindowRgn(window_, CreateRoundRectRgn(0, 0, width + 1, height + 1,
-      Scale(36), Scale(36)), FALSE);
-  const int round = 2;
-  DwmSetWindowAttribute(window_, 33, &round, sizeof(round));
   font_ = CreateFontW(-Scale(11), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
       DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
       CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
@@ -69,6 +66,7 @@ void TrayPopup::Show(const flutter::EncodableMap& colors,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(i + 1)), klass.hInstance, nullptr);
     SetWindowSubclass(buttons_[i], ButtonProc, 1, reinterpret_cast<DWORD_PTR>(this));
   }
+  PaintSurface();
   ShowWindow(window_, SW_SHOW);
   SetForegroundWindow(window_);
   SetFocus(buttons_[0]);
@@ -102,17 +100,15 @@ LRESULT CALLBACK TrayPopup::WindowProc(HWND window, UINT message,
         self->Finish(LOWORD(wparam) == 1 ? "open" : "exit");
       return 0;
     case WM_DRAWITEM:
-      self->PaintButton(*reinterpret_cast<DRAWITEMSTRUCT*>(lparam));
+      // The layered surface draws the controls; native children keep input
+      // and accessibility without painting opaque rectangles over the corners.
       return TRUE;
     case WM_ERASEBKGND: return TRUE;
     case WM_PAINT: {
       PAINTSTRUCT paint{};
-      const auto dc = BeginPaint(window, &paint);
-      RECT client{}; GetClientRect(window, &client);
-      const auto brush = CreateSolidBrush(self->background_);
-      FillRect(dc, &client, brush);
-      DeleteObject(brush);
+      BeginPaint(window, &paint);
       EndPaint(window, &paint);
+      self->PaintSurface();
       return 0;
     }
   }
@@ -126,14 +122,15 @@ LRESULT CALLBACK TrayPopup::ButtonProc(HWND button, UINT message,
   if (message == WM_MOUSEMOVE) {
     if (self->hovered_ != index) {
       self->hovered_ = index;
-      InvalidateRect(self->buttons_[0], nullptr, FALSE);
-      InvalidateRect(self->buttons_[1], nullptr, FALSE);
+      InvalidateRect(self->window_, nullptr, FALSE);
       TRACKMOUSEEVENT track{sizeof(TRACKMOUSEEVENT), TME_LEAVE, button, 0};
       TrackMouseEvent(&track);
     }
   } else if (message == WM_MOUSELEAVE) {
     if (self->hovered_ == index) self->hovered_ = -1;
-    InvalidateRect(button, nullptr, FALSE);
+    InvalidateRect(self->window_, nullptr, FALSE);
+  } else if (message == WM_SETFOCUS || message == WM_KILLFOCUS) {
+    InvalidateRect(self->window_, nullptr, FALSE);
   } else if (message == WM_KEYDOWN) {
     if (wparam == VK_ESCAPE) { self->Finish(""); return 0; }
     if (wparam == VK_DOWN || wparam == VK_UP || wparam == VK_TAB) {
@@ -148,39 +145,77 @@ LRESULT CALLBACK TrayPopup::ButtonProc(HWND button, UINT message,
   return DefSubclassProc(button, message, wparam, lparam);
 }
 
-void TrayPopup::PaintButton(const DRAWITEMSTRUCT& item) {
-  const bool highlighted = hovered_ >= 0
-      ? hovered_ == static_cast<int>(item.CtlID) - 1
-      : (item.itemState & (ODS_SELECTED | ODS_FOCUS)) != 0;
-  const auto brush = CreateSolidBrush(highlighted ? hover_ : background_);
-  FillRect(item.hDC, &item.rcItem, brush);
-  DeleteObject(brush);
-  const auto old_font = SelectObject(item.hDC, font_);
-  SetBkMode(item.hDC, TRANSPARENT);
-  SetTextColor(item.hDC, foreground_);
-  RECT text = item.rcItem;
-  text.left += Scale(34);
-  text.right -= Scale(12);
-  DrawTextW(item.hDC, item.CtlID == 1 ? L"Open Zommi" : L"Quit", -1,
-            &text, DT_SINGLELINE | DT_VCENTER | DT_LEFT);
-  SelectObject(item.hDC, old_font);
-  const auto pen = CreatePen(PS_SOLID, std::max(1, Scale(1)), foreground_);
-  const auto old_pen = SelectObject(item.hDC, pen);
-  const auto old_brush = SelectObject(item.hDC, GetStockObject(HOLLOW_BRUSH));
-  const int x = Scale(12), y = (item.rcItem.bottom - Scale(14)) / 2;
-  if (item.CtlID == 1) {
-    Rectangle(item.hDC, x, y + Scale(4), x + Scale(10), y + Scale(14));
-    MoveToEx(item.hDC, x + Scale(5), y + Scale(9), nullptr);
-    LineTo(item.hDC, x + Scale(14), y);
-    MoveToEx(item.hDC, x + Scale(8), y, nullptr);
-    LineTo(item.hDC, x + Scale(14), y);
-    LineTo(item.hDC, x + Scale(14), y + Scale(6));
-  } else {
-    Arc(item.hDC, x, y + Scale(2), x + Scale(14), y + Scale(14),
-        x + Scale(4), y, x + Scale(10), y);
-    MoveToEx(item.hDC, x + Scale(7), y, nullptr);
-    LineTo(item.hDC, x + Scale(7), y + Scale(8));
+void TrayPopup::PaintSurface() {
+  if (!window_ || !font_) return;
+  RECT bounds{};
+  GetWindowRect(window_, &bounds);
+  const int width = bounds.right - bounds.left;
+  const int height = bounds.bottom - bounds.top;
+  if (width <= 0 || height <= 0) return;
+  BITMAPINFO info{};
+  info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  info.bmiHeader.biWidth = width;
+  info.bmiHeader.biHeight = -height;
+  info.bmiHeader.biPlanes = 1;
+  info.bmiHeader.biBitCount = 32;
+  info.bmiHeader.biCompression = BI_RGB;
+  void* pixels = nullptr;
+  const HDC screen = GetDC(nullptr);
+  const HDC dc = CreateCompatibleDC(screen);
+  const HBITMAP bitmap = CreateDIBSection(screen, &info, DIB_RGB_COLORS,
+                                         &pixels, nullptr, 0);
+  if (!dc || !bitmap) {
+    if (bitmap) DeleteObject(bitmap);
+    if (dc) DeleteDC(dc);
+    ReleaseDC(nullptr, screen);
+    return;
   }
-  SelectObject(item.hDC, old_pen); DeleteObject(pen);
-  SelectObject(item.hDC, old_brush);
+  const auto old_bitmap = SelectObject(dc, bitmap);
+  const auto old_font = SelectObject(dc, font_);
+  const RECT client{0, 0, width, height};
+  const auto background = CreateSolidBrush(background_);
+  FillRect(dc, &client, background);
+  DeleteObject(background);
+  SetBkMode(dc, TRANSPARENT);
+  SetTextColor(dc, foreground_);
+  for (int i = 0; i < 2; ++i) {
+    RECT row{0, Scale(5 + i * 30), width, Scale(5 + (i + 1) * 30)};
+    const bool highlighted = hovered_ >= 0 ? hovered_ == i : GetFocus() == buttons_[i];
+    if (highlighted) {
+      const auto hover = CreateSolidBrush(hover_);
+      FillRect(dc, &row, hover);
+      DeleteObject(hover);
+    }
+    row.left += Scale(12);
+    row.right -= Scale(12);
+    DrawTextW(dc, i == 0 ? L"Open Zommi" : L"Quit", -1, &row,
+              DT_SINGLELINE | DT_VCENTER | DT_LEFT);
+  }
+  GdiFlush();
+  // A per-pixel alpha edge stays smooth at every DPI, including desktops where
+  // DWM rounding is unavailable. Apply it after GDI paints so hover rows share
+  // the exact same rounded contour. UpdateLayeredWindow needs premultiplied RGB.
+  const double radius = Scale(18);
+  auto* argb = static_cast<uint32_t*>(pixels);
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      const double dx = std::max({radius - (x + 0.5), x + 0.5 - (width - radius), 0.0});
+      const double dy = std::max({radius - (y + 0.5), y + 0.5 - (height - radius), 0.0});
+      const auto alpha = static_cast<uint32_t>(
+          std::clamp(radius + 0.5 - std::hypot(dx, dy), 0.0, 1.0) * 255.0 + 0.5);
+      auto& pixel = argb[static_cast<size_t>(y) * width + x];
+      pixel = (alpha << 24) | (((pixel >> 16 & 255) * alpha / 255) << 16)
+          | (((pixel >> 8 & 255) * alpha / 255) << 8) | ((pixel & 255) * alpha / 255);
+    }
+  }
+  POINT destination{bounds.left, bounds.top}, origin{};
+  SIZE size{width, height};
+  BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+  UpdateLayeredWindow(window_, screen, &destination, &size, dc, &origin,
+                      0, &blend, ULW_ALPHA);
+  SelectObject(dc, old_font);
+  SelectObject(dc, old_bitmap);
+  DeleteObject(bitmap);
+  DeleteDC(dc);
+  ReleaseDC(nullptr, screen);
 }

@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
-    path::PathBuf,
+    fs,
+    path::{Path, PathBuf},
     process::Stdio,
     sync::{
         Arc, Weak,
@@ -10,6 +11,7 @@ use std::{
 
 use base64::Engine as _;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::{ChildStdin, Command},
@@ -20,7 +22,7 @@ use tokio::{
 use uuid::Uuid;
 
 use crate::{
-    RuntimeCommand, RuntimeTarget,
+    RuntimeCommand, RuntimeTarget, SessionBindingStore,
     artifacts::artifacts_from_content,
     build_context_handoff,
     codex_adapter::{CodexError, CoreEvent, EventSender, TurnReceipt},
@@ -34,6 +36,7 @@ pub struct PiConfig {
     pub target: RuntimeTarget,
     pub command: RuntimeCommand,
     pub cwd: PathBuf,
+    pub preferred_session_id: Option<String>,
     pub preferred_session_file: Option<String>,
 }
 
@@ -55,6 +58,7 @@ pub struct PiAdapter {
 
 struct Inner {
     target: RuntimeTarget,
+    command: RuntimeCommand,
     cwd: PathBuf,
     stdin: Mutex<ChildStdin>,
     pending: Mutex<HashMap<String, PendingRequest>>,
@@ -99,10 +103,29 @@ struct PendingQuestion {
 }
 
 impl PiAdapter {
-    pub async fn connect(config: PiConfig, event_tx: EventSender) -> Result<Self, CodexError> {
+    pub async fn connect(mut config: PiConfig, event_tx: EventSender) -> Result<Self, CodexError> {
+        if config.preferred_session_file.is_none()
+            && let Some(id) = &config.preferred_session_id
+        {
+            config.preferred_session_file = stored_session_file(&config.target.id, id)?;
+        }
+        set_launch_cwd(&mut config.command, &config.target, &config.cwd)?;
         let mut command = Command::new(&config.command.command);
+        command.args(&config.command.args);
+        if let Some(file) = &config.preferred_session_file {
+            command.args(["--session", file]);
+        } else if let Some(id) = &config.preferred_session_id {
+            // Legacy catalogs retained only the ID. Let Pi resolve its own
+            // complete UUID; never invent a path or treat an ID as a file.
+            Uuid::parse_str(id).map_err(|_| {
+                pi_error(
+                    "invalid-request",
+                    "Pi needs an exact saved session ID or its native session file.",
+                )
+            })?;
+            command.args(["--session", id]);
+        }
         command
-            .args(&config.command.args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -131,6 +154,7 @@ impl PiAdapter {
         let adapter = Self {
             inner: Arc::new(Inner {
                 target: config.target,
+                command: config.command,
                 cwd: config.cwd,
                 stdin: Mutex::new(stdin),
                 pending: Mutex::new(HashMap::new()),
@@ -165,14 +189,21 @@ impl PiAdapter {
                 inner.handle_exit(status).await;
             }
         }));
-        if let Err(error) = adapter.initialize(config.preferred_session_file).await {
+        if let Err(error) = adapter
+            .initialize(config.preferred_session_file, config.preferred_session_id)
+            .await
+        {
             adapter.shutdown().await;
             return Err(error);
         }
         Ok(adapter)
     }
 
-    async fn initialize(&self, preferred_session_file: Option<String>) -> Result<(), CodexError> {
+    async fn initialize(
+        &self,
+        preferred_session_file: Option<String>,
+        preferred_session_id: Option<String>,
+    ) -> Result<(), CodexError> {
         self.refresh_state(false).await?;
         self.inner.state.lock().await.protocol_version = 1;
         let current_file = self
@@ -199,6 +230,14 @@ impl PiAdapter {
             }
         }
         self.refresh_state(true).await?;
+        if let Some(expected) = preferred_session_id
+            && self.active_session_id().await? != expected
+        {
+            return Err(pi_error(
+                "identity-mismatch",
+                "Pi resumed a different session than requested.",
+            ));
+        }
         let fork_entries = self
             .inner
             .request(json!({"type":"get_fork_messages"}))
@@ -361,8 +400,12 @@ impl PiAdapter {
         self.connection_value().await
     }
 
-    pub async fn open_session(&self, session_id: &str) -> Result<Value, CodexError> {
-        let session_file = self
+    pub async fn open_session(
+        &self,
+        session_id: &str,
+        cwd: Option<&str>,
+    ) -> Result<Value, CodexError> {
+        let known_file = self
             .inner
             .state
             .lock()
@@ -371,13 +414,46 @@ impl PiAdapter {
             .get(session_id)
             .and_then(|session| session.get("sessionFile"))
             .and_then(Value::as_str)
-            .map(str::to_owned)
-            .ok_or_else(|| {
-                pi_error(
-                    "invalid-request",
-                    "Pi can resume only an exact session file previously returned by Pi.",
-                )
-            })?;
+            .map(str::to_owned);
+        let session_file =
+            match known_file.or(stored_session_file(&self.inner.target.id, session_id)?) {
+                Some(file) => file,
+                None => {
+                    // Recover pre-index catalog entries through Pi's native CLI.
+                    // The temporary connection must return the exact ID before its
+                    // file is used; no prompt, fork or new_session is requested.
+                    let (events, _discarded) = tokio::sync::mpsc::unbounded_channel();
+                    let probe = Self::connect(
+                        PiConfig {
+                            target: self.inner.target.clone(),
+                            command: self.inner.command.clone(),
+                            cwd: cwd
+                                .map(PathBuf::from)
+                                .unwrap_or_else(|| self.inner.cwd.clone()),
+                            preferred_session_id: Some(session_id.into()),
+                            preferred_session_file: None,
+                        },
+                        events,
+                    )
+                    .await?;
+                    let file = probe
+                        .binding_metadata()
+                        .await
+                        .and_then(|value| value["sessionFile"].as_str().map(str::to_owned));
+                    probe.shutdown().await;
+                    file.ok_or_else(|| {
+                        pi_error(
+                            "session-not-found",
+                            "Pi did not return a file for this saved session.",
+                        )
+                    })?
+                }
+            };
+        let previous_file = self
+            .binding_metadata()
+            .await
+            .and_then(|metadata| metadata["sessionFile"].as_str().map(str::to_owned));
+        let previous_id = self.active_session_id().await?;
         let result = self
             .inner
             .request(json!({"type": "switch_session", "sessionPath": session_file}))
@@ -389,6 +465,26 @@ impl PiAdapter {
             ));
         }
         self.refresh_state(true).await?;
+        if self.active_session_id().await? != session_id {
+            // Never leave a failed selection pointing at another native chat.
+            let restored = if let Some(file) = previous_file {
+                self.inner
+                    .request(json!({"type":"switch_session","sessionPath":file}))
+                    .await
+                    .is_ok()
+                    && self.refresh_state(true).await.is_ok()
+                    && self.active_session_id().await.as_deref() == Ok(previous_id.as_str())
+            } else {
+                false
+            };
+            if !restored {
+                self.shutdown().await;
+            }
+            return Err(pi_error(
+                "identity-mismatch",
+                "Pi switched to a different session than requested.",
+            ));
+        }
         self.connection_value().await
     }
 
@@ -781,6 +877,12 @@ impl PiAdapter {
             .get("data")
             .cloned()
             .unwrap_or_else(|| json!({}));
+        if let (Ok(id), Some(file)) = (
+            runtime_session_id(&runtime_state),
+            runtime_state.get("sessionFile").and_then(Value::as_str),
+        ) {
+            remember_session_file(&self.inner.target.id, &id, file)?;
+        }
         let models_response = self
             .inner
             .request(json!({"type": "get_available_models"}))
@@ -1510,6 +1612,112 @@ fn runtime_session_id(state: &Value) -> Result<String, CodexError> {
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
         .ok_or_else(|| pi_error("invalid-response", "Pi did not expose a session id."))
+}
+
+fn set_launch_cwd(
+    command: &mut RuntimeCommand,
+    target: &RuntimeTarget,
+    cwd: &Path,
+) -> Result<(), CodexError> {
+    if target.execution_host.kind != "wsl" {
+        return Ok(());
+    }
+    let cwd = cwd
+        .to_str()
+        .filter(|value| value.starts_with('/') && !value.contains('\0'))
+        .ok_or_else(|| {
+            pi_error(
+                "invalid-request",
+                "Pi needs an absolute workspace path in WSL.",
+            )
+        })?;
+    let boundary = command
+        .args
+        .iter()
+        .position(|arg| arg == "--" || arg == "-e")
+        .ok_or_else(|| {
+            pi_error(
+                "invalid-configuration",
+                "Pi WSL command has no execution boundary.",
+            )
+        })?;
+    if let Some(index) = command.args[..boundary]
+        .iter()
+        .position(|arg| arg == "--cwd" || arg == "--cd")
+    {
+        if index + 1 >= boundary {
+            return Err(pi_error(
+                "invalid-configuration",
+                "Pi WSL command has no workspace.",
+            ));
+        }
+        command.args[index + 1] = cwd.into();
+    } else {
+        command
+            .args
+            .splice(boundary..boundary, ["--cd".into(), cwd.into()]);
+    }
+    Ok(())
+}
+
+fn session_locator_path(target_id: &str, session_id: &str) -> PathBuf {
+    SessionBindingStore::platform_default()
+        .session_locators_directory()
+        .join(format!(
+            "pi-{:x}.json",
+            Sha256::digest(format!("{target_id}\0{session_id}"))
+        ))
+}
+
+fn stored_session_file(target_id: &str, session_id: &str) -> Result<Option<String>, CodexError> {
+    let bytes = match fs::read(session_locator_path(target_id, session_id)) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(pi_error("persistence-failed", error.to_string())),
+    };
+    let value: Value = serde_json::from_slice(&bytes)
+        .map_err(|error| pi_error("persistence-failed", error.to_string()))?;
+    if value["runtimeTargetId"].as_str() != Some(target_id)
+        || value["sessionId"].as_str() != Some(session_id)
+    {
+        return Err(pi_error(
+            "identity-mismatch",
+            "Pi session locator belongs to another runtime or chat.",
+        ));
+    }
+    let file = value["sessionFile"]
+        .as_str()
+        .filter(|file| valid_session_file(file))
+        .ok_or_else(|| pi_error("invalid-response", "Saved Pi session file is invalid."))?;
+    Ok(Some(file.into()))
+}
+
+fn valid_session_file(file: &str) -> bool {
+    !file.contains('\0') && (file.starts_with('/') || Path::new(file).is_absolute())
+}
+
+fn remember_session_file(target_id: &str, session_id: &str, file: &str) -> Result<(), CodexError> {
+    if !valid_session_file(file) {
+        return Err(pi_error(
+            "invalid-response",
+            "Pi did not return an absolute session file.",
+        ));
+    }
+    let path = session_locator_path(target_id, session_id);
+    let value = json!({"runtimeTargetId":target_id,"sessionId":session_id,"sessionFile":file});
+    let bytes = serde_json::to_vec(&value).expect("session locator JSON");
+    if fs::read(&path).ok().as_deref() == Some(bytes.as_slice()) {
+        return Ok(());
+    }
+    let temporary = path.with_extension(format!("tmp-{}", Uuid::new_v4()));
+    let save = || -> std::io::Result<()> {
+        fs::create_dir_all(path.parent().expect("locator directory"))?;
+        fs::write(&temporary, bytes)?;
+        fs::rename(&temporary, &path)
+    };
+    let result = save().map_err(|error| pi_error("persistence-failed", error.to_string()));
+    let _ = fs::remove_file(temporary);
+    result
 }
 
 fn value_string(value: Option<&Value>) -> String {

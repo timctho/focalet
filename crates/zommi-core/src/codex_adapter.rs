@@ -210,6 +210,8 @@ impl Drop for ProcessGroup {
 
 #[derive(Default)]
 struct AdapterState {
+    initial_history: Option<Value>,
+    history_paging: Option<bool>,
     token_usage: HashMap<String, Value>,
     thread_settings: HashMap<String, Value>,
     command_catalogs: HashMap<String, Vec<Value>>,
@@ -413,10 +415,10 @@ impl CodexAdapter {
         preferred_session_id: Option<String>,
         cwd: Option<&str>,
     ) -> Result<(), CodexError> {
-        self.load_models().await?;
-        self.list_sessions().await?;
+        tokio::try_join!(self.load_models(), self.list_sessions())?;
         if let Some(session_id) = preferred_session_id {
-            self.open_session(&session_id).await?;
+            let connection = self.open_session(&session_id).await?;
+            self.inner.state.lock().await.initial_history = connection.history;
         } else {
             self.start_thread(None, cwd).await?;
         }
@@ -525,7 +527,7 @@ impl CodexAdapter {
     }
 
     pub async fn connection(&self) -> Result<CodexConnection, CodexError> {
-        let state = self.inner.state.lock().await;
+        let mut state = self.inner.state.lock().await;
         let session_metadata = json!({
             "readOnly": state.thread_id.as_ref().is_some_and(|id| state.read_only_threads.contains(id)),
             "activeModel": state.active_model,
@@ -544,7 +546,7 @@ impl CodexAdapter {
             models: state.models.clone(),
             sessions: sorted_sessions(&state.sessions),
             session_metadata,
-            history: None,
+            history: state.initial_history.take(),
         })
     }
 
@@ -972,28 +974,61 @@ impl CodexAdapter {
         let result = if let Some(empty) = self.empty_history(session_id).await {
             empty
         } else if has_active_turn {
-            self.inner
-                .request(
-                    "thread/read",
-                    json!({"threadId": session_id, "includeTurns": true}),
-                )
-                .await?
+            self.read_history_preview(session_id).await?
         } else {
+            let paged = self.inner.state.lock().await.history_paging != Some(false);
+            let mut params = json!({"threadId": session_id});
+            if paged {
+                params["excludeTurns"] = json!(true);
+                params["initialTurnsPage"] =
+                    json!({"limit":18,"sortDirection":"desc","itemsView":"summary"});
+            }
             match self
                 .inner
                 .request_with_timeout(
                     "thread/resume",
-                    json!({"threadId": session_id}),
+                    params,
                     self.inner.request_timeout.min(Duration::from_secs(8)),
                 )
                 .await
             {
-                Ok(result) => result,
+                Ok(mut result) => {
+                    if let Some(page) = result
+                        .get("initialTurnsPage")
+                        .filter(|page| page.is_object())
+                        .cloned()
+                    {
+                        apply_history_page(&mut result, &page)?;
+                        self.inner.state.lock().await.history_paging = Some(true);
+                    } else if paged
+                        && result
+                            .pointer("/thread/turns")
+                            .and_then(Value::as_array)
+                            .is_none_or(Vec::is_empty)
+                    {
+                        let preview = self.read_history_preview(session_id).await?;
+                        result["thread"]["turns"] = preview["thread"]["turns"].clone();
+                        if let Some(page) = preview.get("pagination") {
+                            result["pagination"] = page.clone();
+                        }
+                    } else if paged {
+                        // Older servers ignore the new resume parameters and
+                        // still return a complete transcript.
+                        self.inner.state.lock().await.history_paging = Some(false);
+                    }
+                    result
+                }
+                Err(error) if paged && pagination_unsupported(&error) => {
+                    self.inner.state.lock().await.history_paging = Some(false);
+                    self.inner
+                        .request("thread/resume", json!({"threadId":session_id}))
+                        .await?
+                }
                 Err(error) if error.code == "session-busy" => {
                     // Reading does not acquire another process's writer lease.
                     // Keep the real history visible and let the monitor retry.
                     read_only = true;
-                    self.read_session(session_id).await?
+                    self.read_history_preview(session_id).await?
                 }
                 Err(error) => return Err(error),
             }
@@ -1014,12 +1049,140 @@ impl CodexAdapter {
             }
         }
         let mut connection = self.connection().await?;
+        // The client already has this runtime's models and catalog. Do not
+        // retransmit hundreds of KB of unchanged metadata on every selection.
+        connection.models.clear();
+        connection
+            .sessions
+            .retain(|session| session["id"].as_str() == Some(session_id));
         // Resume/read already returns the selected transcript. Keep it out of
         // the catalog and deliver it once instead of requiring another read.
         if result.pointer("/thread/turns").is_some_and(Value::is_array) {
             connection.history = Some(result);
         }
         Ok(connection)
+    }
+
+    async fn read_history_preview(&self, session_id: &str) -> Result<Value, CodexError> {
+        if self.inner.state.lock().await.history_paging == Some(false) {
+            return self.read_session(session_id).await;
+        }
+        let (metadata, page) = tokio::join!(
+            self.inner.request(
+                "thread/read",
+                json!({"threadId":session_id,"includeTurns":false})
+            ),
+            self.read_history_page(session_id, None),
+        );
+        match page {
+            Ok(page) => {
+                let mut result = metadata?;
+                if result.pointer("/thread/id").and_then(Value::as_str) != Some(session_id) {
+                    return Err(CodexError::new(
+                        "identity-mismatch",
+                        "Codex returned a different chat's history.",
+                    ));
+                }
+                result["thread"]["turns"] = page["thread"]["turns"].clone();
+                result["pagination"] = page["pagination"].clone();
+                Ok(result)
+            }
+            Err(error) if pagination_unsupported(&error) => {
+                self.inner.state.lock().await.history_paging = Some(false);
+                self.read_session(session_id).await
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    pub async fn read_history_page(
+        &self,
+        session_id: &str,
+        cursor: Option<&str>,
+    ) -> Result<Value, CodexError> {
+        let page = self
+            .inner
+            .request(
+                "thread/turns/list",
+                json!({
+                    "threadId":session_id,"cursor":cursor,"limit":18,
+                    "sortDirection":"desc","itemsView":"summary"
+                }),
+            )
+            .await?;
+        let cwd = self
+            .inner
+            .state
+            .lock()
+            .await
+            .sessions
+            .get(session_id)
+            .map(|session| session["cwd"].clone());
+        let mut result = json!({"thread":{"id":session_id,"cwd":cwd}});
+        apply_history_page(&mut result, &page)?;
+        self.inner.state.lock().await.history_paging = Some(true);
+        Ok(result)
+    }
+
+    pub async fn read_history_turn(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+    ) -> Result<Value, CodexError> {
+        let mut items = Vec::new();
+        let mut cursor: Option<String> = None;
+        let mut seen = HashSet::new();
+        loop {
+            let page = self
+                .inner
+                .request(
+                    "thread/items/list",
+                    json!({
+                        "threadId":session_id,"turnId":turn_id,"cursor":cursor,
+                        "limit":100,"sortDirection":"asc"
+                    }),
+                )
+                .await?;
+            let entries = page["data"].as_array().ok_or_else(|| {
+                CodexError::new("invalid-response", "Codex did not return turn items.")
+            })?;
+            for entry in entries {
+                if entry["turnId"].as_str() != Some(turn_id) || !entry["item"].is_object() {
+                    return Err(CodexError::new(
+                        "identity-mismatch",
+                        "Codex returned items from a different turn.",
+                    ));
+                }
+                items.push(entry["item"].clone());
+            }
+            cursor = page["nextCursor"].as_str().map(str::to_owned);
+            let Some(next) = &cursor else {
+                break;
+            };
+            if !seen.insert(next.clone()) {
+                return Err(CodexError::new(
+                    "invalid-response",
+                    "Codex repeated a history cursor.",
+                ));
+            }
+        }
+        if items.is_empty() {
+            return Err(CodexError::new(
+                "history-unavailable",
+                "Codex returned no items for this turn. Retry loading its activity.",
+            ));
+        }
+        let cwd = self
+            .inner
+            .state
+            .lock()
+            .await
+            .sessions
+            .get(session_id)
+            .map(|session| session["cwd"].clone());
+        Ok(
+            json!({"thread":{"id":session_id,"cwd":cwd,"turns":[{"id":turn_id,"items":items,"itemsView":"full"}]}}),
+        )
     }
 
     pub async fn refresh_read_only_session(&self) -> Result<(), CodexError> {
@@ -2318,6 +2481,41 @@ fn codex_runtime_version(initialized: &Value) -> Option<String> {
         })
         .collect::<String>();
     (version.matches('.').count() >= 1).then_some(version)
+}
+
+fn pagination_unsupported(error: &CodexError) -> bool {
+    error.code == "history-page-unavailable"
+        || (error.code == "runtime-request-failed"
+            && (error.message.contains("-32601")
+                || error.message.contains("not supported")
+                || error.message.contains("initialTurnsPage")
+                || error.message.contains("excludeTurns")))
+}
+
+fn apply_history_page(result: &mut Value, page: &Value) -> Result<(), CodexError> {
+    let mut turns = page["data"].as_array().cloned().ok_or_else(|| {
+        CodexError::new(
+            "history-page-unavailable",
+            "Codex did not expose paginated history.",
+        )
+    })?;
+    if turns
+        .iter()
+        .any(|turn| !turn["id"].is_string() || !turn["items"].is_array())
+        || !(page["nextCursor"].is_null() || page["nextCursor"].is_string())
+    {
+        return Err(CodexError::new(
+            "invalid-response",
+            "Codex returned an invalid history page.",
+        ));
+    }
+    turns.reverse();
+    result["thread"]["turns"] = json!(turns);
+    result["pagination"] = json!({"nextCursor":page["nextCursor"]});
+    if let Some(object) = result.as_object_mut() {
+        object.remove("initialTurnsPage");
+    }
+    Ok(())
 }
 
 fn value_string(value: Option<&Value>) -> String {

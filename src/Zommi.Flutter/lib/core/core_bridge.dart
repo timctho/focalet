@@ -6,6 +6,20 @@ import 'package:zommi_flutter/core/runtime_environment.dart';
 
 const int coreProtocolVersion = 1;
 
+abstract interface class PagedHistoryBridge {
+  Future<Map<String, Object?>> readHistoryPage({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String cursor,
+  });
+
+  Future<Map<String, Object?>> readHistoryTurn({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String turnId,
+  });
+}
+
 abstract interface class CoreBridge {
   Stream<CoreEvent> get events;
 
@@ -393,6 +407,7 @@ final class ProcessCoreBridge
         SessionRewindBridge,
         GoalControlBridge,
         SessionStatusBridge,
+        PagedHistoryBridge,
         RuntimeCommandBridge {
   ProcessCoreBridge({
     this.executablePath,
@@ -442,6 +457,28 @@ final class ProcessCoreBridge
       capabilities: capabilities,
     );
   }
+
+  @override
+  Future<Map<String, Object?>> readHistoryPage({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String cursor,
+  }) => _request('session.history.page', {
+    'runtimeTargetId': runtimeTargetId,
+    'sessionId': sessionId,
+    'cursor': cursor,
+  });
+
+  @override
+  Future<Map<String, Object?>> readHistoryTurn({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String turnId,
+  }) => _request('session.history.turn', {
+    'runtimeTargetId': runtimeTargetId,
+    'sessionId': sessionId,
+    'turnId': turnId,
+  });
 
   @override
   Future<RuntimeDiscovery> discoverRuntimeTargets({

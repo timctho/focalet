@@ -171,6 +171,9 @@ extension SessionActions on ZommiController {
     _pausedQueues.remove(key);
     _sessionSettings.remove(key);
     _turnsBySession.remove(key);
+    _historyEpochs[key] = (_historyEpochs[key] ?? 0) + 1;
+    _historyNextCursor.remove(key);
+    _historyPageErrors.remove(key);
     _transcriptRevisions.remove(key);
     _unreadSessions.remove(key);
     if (_activeSessionKey == key) {

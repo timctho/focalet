@@ -21,6 +21,7 @@ rekey_completion = os.environ.get("ZOMMI_FAKE_REKEY_COMPLETION") == "1"
 fragments = ["Book", "keeper", " sees ", "1", "1", "1", ". 世界", "世界", "."] if rekey_completion else ["Rust-owned Codex reply"]
 completed_text = "".join(fragments)
 goals = {}
+paged_history = os.environ.get("ZOMMI_FAKE_PAGED_HISTORY") == "1"
 history_count = int(os.environ.get("ZOMMI_FAKE_HISTORY_COUNT", "0"))
 request_delay = float(os.environ.get("ZOMMI_FAKE_REQUEST_DELAY_MS", "0")) / 1000
 write_lock = threading.Lock()
@@ -38,10 +39,22 @@ def history(session_id):
     return {"thread": {"id": session_id, "turns": [
         {"id": f"{session_id}-turn-{index}", "items": [
             {"type": "userMessage", "content": [{"type": "text", "text": f"Question {index}"}]},
+            *([{ "id": f"thinking-{index}", "type": "reasoning", "summary": [{"type":"summary_text", "text":"Detailed reasoning"}] }] if paged_history else []),
             {"id": f"answer-{index}", "type": "agentMessage", "text": "History response. " * 200},
         ]}
         for index in range(history_count)
     ]}}
+
+
+def history_page(session_id, params):
+    turns = list(reversed(history(session_id)["thread"]["turns"]))
+    offset = int(params.get("cursor") or "0")
+    limit = params.get("limit", 18)
+    data = turns[offset:offset + limit]
+    for turn in data:
+        turn["items"] = [item for item in turn["items"] if item["type"] in ("userMessage", "agentMessage")]
+        turn["itemsView"] = "summary"
+    return {"data": data, "nextCursor": str(offset + limit) if offset + limit < len(turns) else None}
 
 
 def send(message):
@@ -114,7 +127,7 @@ for line in sys.stdin:
     elif method == "skills/list":
         result = {"data":[{"cwd":request["params"]["cwds"][0],"skills":[{"name":"inspect", "description":"Inspect project", "path":"/skills/inspect/SKILL.md", "enabled":True}]}]}
     elif method in ("model/list", "mcpServerStatus/list"):
-        result = {"data": []}
+        result = {"data": [{"id":"fixture-model", "model":"fixture-model"}] if paged_history and method == "model/list" else []}
     elif method == "account/read":
         result = {"account": {"type": "chatgpt", "planType": "pro", "email": "fixture@example.invalid"}}
     elif method == "account/rateLimits/read":
@@ -185,12 +198,27 @@ for line in sys.stdin:
             )
             continue
         result = history(request["params"]["threadId"])
+        if paged_history and request["params"].get("initialTurnsPage"):
+            result["thread"]["turns"] = []
+            result["initialTurnsPage"] = history_page(request["params"]["threadId"], request["params"]["initialTurnsPage"])
         if control and (control / "wrong-resume-id").exists():
             result['thread']['id'] = 'wrong-thread'
     elif method == "thread/read":
         result = history(request["params"]["threadId"])
         if control and request["params"]["threadId"] in submitted_threads:
             result["thread"]["turns"] = [{"id": turn_id, "status": "inProgress", "items": []}]
+        if paged_history and not request["params"].get("includeTurns", False):
+            result["thread"]["turns"] = []
+    elif method == "thread/turns/list" and paged_history:
+        result = history_page(request["params"]["threadId"], request["params"])
+    elif method == "thread/items/list" and paged_history:
+        params = request["params"]
+        turns = history(params["threadId"])["thread"]["turns"]
+        turn = next((turn for turn in turns if turn["id"] == params["turnId"]), {"items": []})
+        offset = int(params.get("cursor") or "0")
+        # Deliberately paginate even a short turn to exercise cursor following.
+        result = {"data": [{"turnId": params["turnId"], "item": item} for item in turn["items"][offset:offset+2]],
+                  "nextCursor": str(offset+2) if offset+2 < len(turn["items"]) else None}
     elif method == "thread/name/set":
         result = {}
     elif method == "thread/settings/update":

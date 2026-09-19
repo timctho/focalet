@@ -613,7 +613,11 @@ mod tests {
             first
         );
         assert_eq!(fixture.count("thread/resume"), 0);
-        assert_eq!(fixture.count("thread/read"), 2);
+        // One metadata probe accompanies the initial pagination capability
+        // check. This legacy server then falls back to complete history.
+        assert_eq!(fixture.count("thread/read"), 3);
+        adapter.open_session(&first).await.unwrap();
+        assert_eq!(fixture.count("thread/read"), 4);
         drop(adapter);
         runtime.shutdown().await;
     }

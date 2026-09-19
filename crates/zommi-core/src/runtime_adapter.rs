@@ -179,6 +179,7 @@ impl RuntimeAdapter {
                         target,
                         command,
                         cwd,
+                        preferred_session_id,
                         preferred_session_file,
                     },
                     event_tx,
@@ -381,6 +382,7 @@ impl RuntimeAdapter {
         &self,
         session_id: &str,
         profile: Option<&str>,
+        cwd: Option<&str>,
     ) -> Result<Value, CodexError> {
         match self {
             Self::Codex(adapter) => {
@@ -394,7 +396,7 @@ impl RuntimeAdapter {
             Self::Acp(adapter) => adapter.open_session(session_id).await,
             Self::HermesGateway(adapter) => adapter.open_session(session_id, profile).await,
             Self::OpenClawGateway(adapter) => adapter.open_session(session_id).await,
-            Self::Pi(adapter) => adapter.open_session(session_id).await,
+            Self::Pi(adapter) => adapter.open_session(session_id, cwd).await,
             Self::Pty(_) => Err(CodexError {
                 code: "capability-unavailable".into(),
                 message: "Terminal compatibility does not provide canonical session resume.".into(),
@@ -445,6 +447,48 @@ impl RuntimeAdapter {
             Self::OpenClawGateway(adapter) => adapter.read_session(session_id).await,
             Self::Pi(adapter) => adapter.read_session(session_id).await,
             Self::Pty(adapter) => adapter.read_session(session_id).await,
+        }
+    }
+
+    pub async fn read_history_page(
+        &self,
+        session_id: &str,
+        cursor: Option<&str>,
+    ) -> Result<Value, CodexError> {
+        match self {
+            Self::Codex(adapter) => {
+                adapter
+                    .ready()
+                    .await?
+                    .read_history_page(session_id, cursor)
+                    .await
+            }
+            _ => Err(CodexError {
+                code: "capability-unavailable".into(),
+                message: "This runtime does not expose paginated history.".into(),
+                retryable: false,
+            }),
+        }
+    }
+
+    pub async fn read_history_turn(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+    ) -> Result<Value, CodexError> {
+        match self {
+            Self::Codex(adapter) => {
+                adapter
+                    .ready()
+                    .await?
+                    .read_history_turn(session_id, turn_id)
+                    .await
+            }
+            _ => Err(CodexError {
+                code: "capability-unavailable".into(),
+                message: "This runtime does not expose turn details.".into(),
+                retryable: false,
+            }),
         }
     }
 

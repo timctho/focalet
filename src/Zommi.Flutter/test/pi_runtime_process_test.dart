@@ -160,7 +160,7 @@ void main() {
       runtimeTargetId: secondTarget.id,
       cwd: temporary.path,
     );
-    expect(resumed.sessionId, 'pi-session-bound');
+    expect(resumed.sessionId, 'pi-session-a');
     final secondEvents = <CoreEvent>[];
     final secondSubscription = secondBridge.events.listen(secondEvents.add);
     addTearDown(secondSubscription.cancel);
@@ -233,8 +233,9 @@ void main() {
     expect(
       requests.any(
         (request) =>
-            request['type'] == 'switch_session' &&
-            request['sessionPath'] == '/sessions/a.jsonl',
+            request['startupSession'] == 'pi-session-a' &&
+            jsonEncode(request['startupArgs']) ==
+                jsonEncode(['--session', '/sessions/a.jsonl']),
       ),
       isTrue,
     );

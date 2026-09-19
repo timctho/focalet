@@ -30,6 +30,7 @@ ConversationTurn _mapTurn(
     id: id,
     runtimeTurnId: turn['id']?.toString(),
     number: number,
+    historySummary: turn['itemsView'] == 'summary',
     userText: userText.isEmpty ? 'Continue' : userText,
     createdAt: messageTimestamp(userItem ?? {}) ?? messageTimestamp(turn),
     attachments: attachments,

@@ -16,6 +16,7 @@ import 'package:zommi_flutter/theme/app_preferences.dart';
 part 'codex_commands.dart';
 part 'runtime_commands.dart';
 part 'session_actions.dart';
+part 'paged_history.dart';
 
 const int historyPageSize = 18;
 const int sessionPageSize = 20;
@@ -138,6 +139,9 @@ final class ZommiController extends ChangeNotifier {
   Timer? _switchRetryTimer;
   int _switchEpoch = 0;
   int _switchFailures = 0;
+  final Map<String, String> _historyNextCursor = {};
+  final Set<String> _historyPagesLoading = {};
+  final Map<String, String> _historyPageErrors = {};
   bool sessionSettingsBusy = false;
   bool get submitting => _startingSessions.isNotEmpty;
   bool selectingContent = false;
@@ -1084,20 +1088,35 @@ final class ZommiController extends ChangeNotifier {
       final cached = _turnsBySession[sessionKey] ?? const <ConversationTurn>[];
       final changedDuringRead =
           (_transcriptRevisions[sessionKey] ?? 0) != revisionBeforeRead;
-      _turnsBySession[sessionKey] = mergeSessionHistory(
-        canonical,
-        cached,
-        preserveCached:
-            _activeTurns.containsKey(sessionKey) || changedDuringRead,
-        preferCachedUpdates: changedDuringRead,
-        reconcileLocalTurnIds:
-            !changedDuringRead &&
-            !_activeTurns.containsKey(sessionKey) &&
-            (_runtimeCapabilities[runtimeTargetId]?.contains(
-                  'session.rewind.prepare.v1',
-                ) ??
-                false),
-      );
+      final pagination = mapValue(response['pagination']);
+      final next = pagination['nextCursor'];
+      if (next is String && next.isNotEmpty) {
+        _historyNextCursor[sessionKey] = next;
+      } else {
+        _historyNextCursor.remove(sessionKey);
+      }
+      _historyPageErrors.remove(sessionKey);
+      _turnsBySession[sessionKey] = response.containsKey('pagination')
+          ? mergeRecentHistory(
+              canonical,
+              cached,
+              preserveUpdates:
+                  changedDuringRead || _activeTurns.containsKey(sessionKey),
+            )
+          : mergeSessionHistory(
+              canonical,
+              cached,
+              preserveCached:
+                  _activeTurns.containsKey(sessionKey) || changedDuringRead,
+              preferCachedUpdates: changedDuringRead,
+              reconcileLocalTurnIds:
+                  !changedDuringRead &&
+                  !_activeTurns.containsKey(sessionKey) &&
+                  (_runtimeCapabilities[runtimeTargetId]?.contains(
+                        'session.rewind.prepare.v1',
+                      ) ??
+                      false),
+            );
       _transcriptChanged(sessionKey);
     } on Object catch (error) {
       if ((_historyEpochs[sessionKey] ?? 0) != historyEpoch) return;
@@ -1617,12 +1636,19 @@ final class ZommiController extends ChangeNotifier {
       }
       var prepared = current;
       var offset = 0;
-      if (capabilities.contains('session.rewind.prepare.v1')) {
-        final snapshot = await (core as SessionRewindBridge)
-            .prepareSessionRewind(
-              runtimeTargetId: runtime.id,
-              sessionId: sessionId,
-            );
+      if (capabilities.contains('session.rewind.prepare.v1') ||
+          _historyNextCursor.containsKey(sessionKey)) {
+        // Editing a paged transcript still verifies the complete native prefix
+        // before the runtime truncates its history.
+        final snapshot = capabilities.contains('session.rewind.prepare.v1')
+            ? await (core as SessionRewindBridge).prepareSessionRewind(
+                runtimeTargetId: runtime.id,
+                sessionId: sessionId,
+              )
+            : await core.readSession(
+                runtimeTargetId: runtime.id,
+                sessionId: sessionId,
+              );
         if (mapValue(snapshot['thread'])['id'] != sessionId) {
           throw StateError('Rewind preparation returned a different chat.');
         }
@@ -1699,6 +1725,8 @@ final class ZommiController extends ChangeNotifier {
         _historyEpochs[sessionKey] = (_historyEpochs[sessionKey] ?? 0) + 1;
       }
       _historyEpochs[nextKey] = (_historyEpochs[nextKey] ?? 0) + 1;
+      _historyNextCursor.remove(nextKey);
+      _historyPageErrors.remove(nextKey);
       final discarded = _discardedTurnIds.putIfAbsent(nextKey, () => {});
       for (final turn in [
         ...current.skip(index),
@@ -2577,13 +2605,14 @@ final class ZommiController extends ChangeNotifier {
     bool expanded, {
     String? groupId,
   }) {
-    if (groupId == null) {
+    if (groupId == null || turn.historySummary) {
       turn.activityExpanded = expanded;
       turn.activityGroupExpansion.clear();
     } else {
       turn.activityGroupExpansion[groupId] = expanded;
     }
     _notify();
+    if (expanded && turn.historySummary) unawaited(loadTurnHistory(turn));
   }
 
   Future<void> _handleDesktopInvocation(DesktopInvocation invocation) async {
@@ -3522,24 +3551,27 @@ ConversationTurn mergeConversationTurn(
     ],
   ];
   return ConversationTurn(
-    id: primary.id,
-    runtimeTurnId: primary.runtimeTurnId ?? secondary.runtimeTurnId,
-    number: primary.number,
-    userText: primary.userText,
-    createdAt: primary.createdAt ?? secondary.createdAt,
-    inlineUserText: presentation.attachments.isEmpty
-        ? primary.inlineUserText
-        : presentation.inlineUserText,
-    activityExpanded: primary.activityExpanded,
-    activityGroupExpansion: primary.activityGroupExpansion,
-    contextTokens: presentation.attachments.isNotEmpty
-        ? presentation.contextTokens
-        : primary.contextTokens.isEmpty
-        ? secondary.contextTokens
-        : primary.contextTokens,
-    attachments: presentation.attachments,
-    blocks: normalizeTranscriptBlocks(orderedBlocks),
-  );
+      id: primary.id,
+      runtimeTurnId: primary.runtimeTurnId ?? secondary.runtimeTurnId,
+      number: primary.number,
+      userText: primary.userText,
+      createdAt: primary.createdAt ?? secondary.createdAt,
+      inlineUserText: presentation.attachments.isEmpty
+          ? primary.inlineUserText
+          : presentation.inlineUserText,
+      activityExpanded: primary.activityExpanded,
+      historySummary: primary.historySummary && secondary.historySummary,
+      activityGroupExpansion: primary.activityGroupExpansion,
+      contextTokens: presentation.attachments.isNotEmpty
+          ? presentation.contextTokens
+          : primary.contextTokens.isEmpty
+          ? secondary.contextTokens
+          : primary.contextTokens,
+      attachments: presentation.attachments,
+      blocks: normalizeTranscriptBlocks(orderedBlocks),
+    )
+    ..historyLoading = primary.historyLoading || secondary.historyLoading
+    ..historyError = primary.historyError ?? secondary.historyError;
 }
 
 int _matchingTranscriptBlock(

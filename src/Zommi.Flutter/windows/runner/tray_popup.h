@@ -19,7 +19,7 @@ class TrayPopup {
   static LRESULT CALLBACK ButtonProc(HWND, UINT, WPARAM, LPARAM,
                                     UINT_PTR, DWORD_PTR);
   void Finish(const char* action);
-  void PaintButton(const DRAWITEMSTRUCT& item);
+  void PaintSurface();
   int Scale(int value) const;
 
   HWND window_ = nullptr;

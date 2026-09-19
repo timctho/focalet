@@ -158,28 +158,39 @@ class _TranscriptPaneState extends State<TranscriptPane> {
     final position = _scroll.position;
     _autoFollow = position.maxScrollExtent - position.pixels <= 36;
     _awayFromLatest.value = !_autoFollow;
-    if (position.pixels <= 96 && _start > 0 && !_loadScheduled) {
-      _loadScheduled = true;
-      final epoch = _rangeEpoch;
-      final oldExtent = position.maxScrollExtent;
-      final oldPixels = position.pixels;
+    if (position.pixels <= 96 &&
+        (_start > 0 || widget.controller.hasOlderHistory) &&
+        !_loadScheduled) {
+      unawaited(_loadEarlier());
+    }
+  }
+
+  Future<void> _loadEarlier() async {
+    if (!_scroll.hasClients || _loadScheduled) return;
+    final position = _scroll.position;
+    _loadScheduled = true;
+    final epoch = _rangeEpoch;
+    final oldExtent = position.maxScrollExtent;
+    final oldPixels = position.pixels;
+    if (_start == 0) await widget.controller.loadOlderHistory();
+    if (!mounted || epoch != _rangeEpoch) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || epoch != _rangeEpoch) return;
+      setState(() => _start = math.max(0, _start - historyPageSize));
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || epoch != _rangeEpoch) return;
-        setState(() => _start = math.max(0, _start - historyPageSize));
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted || epoch != _rangeEpoch) return;
-          _loadScheduled = false;
-          if (!_scroll.hasClients) return;
-          final added = _scroll.position.maxScrollExtent - oldExtent;
-          _scroll.jumpTo(
-            (oldPixels + added).clamp(
-              _scroll.position.minScrollExtent,
-              _scroll.position.maxScrollExtent,
-            ),
-          );
-        });
+        _loadScheduled = false;
+        if (!_scroll.hasClients) return;
+        final added = _scroll.position.maxScrollExtent - oldExtent;
+        _scroll.jumpTo(
+          (oldPixels + added).clamp(
+            _scroll.position.minScrollExtent,
+            _scroll.position.maxScrollExtent,
+          ),
+        );
       });
-    }
+    });
+    WidgetsBinding.instance.scheduleFrame();
   }
 
   void _scrollToLatest() {
@@ -215,6 +226,10 @@ class _TranscriptPaneState extends State<TranscriptPane> {
       isResponding,
       transcriptContentRevision([turn], visibleOnly: true),
       turn.activityExpanded,
+      turn.number,
+      turn.historySummary,
+      turn.historyLoading,
+      turn.historyError,
       Object.hashAll(
         turn.activityGroupExpansion.entries.map(
           (entry) => Object.hash(entry.key, entry.value),
@@ -356,6 +371,19 @@ class _TranscriptPaneState extends State<TranscriptPane> {
               },
             ),
           ),
+          if (widget.controller.loadingOlderHistory)
+            const Positioned(
+              top: 2,
+              left: 24,
+              right: 24,
+              child: LinearProgressIndicator(minHeight: 2),
+            ),
+          if (widget.controller.olderHistoryError case final error?)
+            Positioned(
+              top: 4,
+              left: 24,
+              child: TextButton(onPressed: _loadEarlier, child: Text(error)),
+            ),
           Positioned(
             left: 0,
             right: 0,
@@ -451,6 +479,17 @@ class ConversationTurnView extends StatelessWidget {
       } else {
         segments.add([block]);
       }
+    }
+    if (turn.historySummary) {
+      segments.insert(0, [
+        TranscriptBlock(
+          id: '${turn.id}:history-details',
+          kind: TranscriptKind.thinking,
+          title: 'Thinking',
+          text: '',
+          lifecycle: TranscriptLifecycle.completed,
+        ),
+      ]);
     }
     final lastActivity = segments
         .where((segment) => segment.first.kind.isFoldedActivity)
@@ -1187,12 +1226,22 @@ class ThinkingActivityGroup extends StatelessWidget {
                           : Duration.zero,
                       child: Padding(
                         padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-                        child: _ActivityList(
-                          activities: activities,
-                          controller: controller,
-                          forceCompleted: forceCompleted,
-                          completedBefore: activePhaseStart,
-                        ),
+                        child: turn.historySummary
+                            ? turn.historyLoading
+                                  ? const Text('Loading activity…')
+                                  : TextButton(
+                                      onPressed: () =>
+                                          controller.loadTurnHistory(turn),
+                                      child: Text(
+                                        turn.historyError ?? 'Load activity',
+                                      ),
+                                    )
+                            : _ActivityList(
+                                activities: activities,
+                                controller: controller,
+                                forceCompleted: forceCompleted,
+                                completedBefore: activePhaseStart,
+                              ),
                       ),
                     ),
                   ],

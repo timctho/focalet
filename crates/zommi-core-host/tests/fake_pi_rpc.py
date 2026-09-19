@@ -10,6 +10,16 @@ session_id = os.environ.get("ZOMMI_FAKE_PI_SESSION", "pi-session-a")
 session_file = os.environ.get("ZOMMI_FAKE_PI_INITIAL_FILE", "/sessions/a.jsonl")
 request_log = os.environ.get("ZOMMI_FAKE_REQUEST_LOG")
 active = False
+session_files = {"pi-session-a": "/sessions/a.jsonl", "pi-session-new": "/sessions/new.jsonl", **json.loads(os.environ.get("ZOMMI_FAKE_PI_SESSIONS", "{}"))}
+if "--session" in sys.argv:
+    selected = sys.argv[sys.argv.index("--session") + 1]
+    if selected in session_files:
+        session_id, session_file = selected, session_files[selected]
+    elif selected in session_files.values():
+        session_file = selected
+        session_id = next(key for key, file in session_files.items() if file == selected)
+    else:
+        sys.exit(1)
 
 
 def send(message):
@@ -33,6 +43,8 @@ def response(request, data=None, success=True):
         }
     )
 
+
+log({"startupSession": session_id, "startupArgs": sys.argv[1:], "cwd": os.getcwd()})
 
 for line in sys.stdin:
     try:
@@ -110,7 +122,9 @@ for line in sys.stdin:
         )
     elif request_type == "switch_session":
         session_file = request["sessionPath"]
-        session_id = "pi-session-bound"
+        session_id = next((key for key, file in session_files.items() if file == session_file), "pi-session-bound")
+        if os.environ.get("ZOMMI_FAKE_PI_WRONG_FILE") == session_file:
+            session_id = "wrong-session"
         response(request, {"cancelled": False})
     elif request_type == "new_session":
         session_id = "pi-session-new"

@@ -439,6 +439,7 @@ final class ConversationTurn {
     this.number = 0,
     this.createdAt,
     this.activityExpanded = false,
+    this.historySummary = false,
     Map<String, bool> activityGroupExpansion = const {},
     List<String> contextTokens = const [],
     List<ContextAttachment> attachments = const [],
@@ -450,12 +451,15 @@ final class ConversationTurn {
        blocks = List<TranscriptBlock>.of(blocks);
 
   final String id;
-  final int number;
+  int number;
   String? runtimeTurnId;
   final DateTime? createdAt;
   final String userText;
   final String inlineUserText;
   bool activityExpanded;
+  bool historySummary;
+  bool historyLoading = false;
+  String? historyError;
   final Map<String, bool> activityGroupExpansion;
   bool get hasExpandedActivity =>
       activityExpanded || activityGroupExpansion.containsValue(true);
