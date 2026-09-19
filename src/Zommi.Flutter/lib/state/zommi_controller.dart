@@ -84,6 +84,16 @@ final class ZommiController extends ChangeNotifier {
   final Set<String> _cancelRequestedSessions = {};
   final Set<String> _interruptingSessions = {};
   final Map<String, String> _completedTurnIds = {};
+  final Set<(String, String, String)> _notifiedTurns = {};
+  DesktopInvocation? _pendingNotificationOpen;
+
+  bool get _canOpenNotification =>
+      !starting &&
+      !runtimeBusy &&
+      !sessionSettingsBusy &&
+      !submitting &&
+      !selectingContent &&
+      (!sessionBusy || _switchWorker != null);
   final Map<String, int> _lastSequences = {};
   final Map<String, SessionSettings> _sessionSettings = {};
   final Map<String, List<Map<String, Object?>>> _modelCatalogs = {};
@@ -2616,6 +2626,19 @@ final class ZommiController extends ChangeNotifier {
   }
 
   Future<void> _handleDesktopInvocation(DesktopInvocation invocation) async {
+    if (invocation.kind == DesktopInvocationKind.openSession) {
+      final runtime = invocation.runtimeTargetId;
+      final session = invocation.sessionId;
+      if (runtime == null || session == null || _closed) return;
+      await setExpanded(true, focus: true);
+      if (!_canOpenNotification) {
+        _pendingNotificationOpen = invocation;
+        return;
+      }
+      _pendingNotificationOpen = null;
+      await switchSession(session, runtimeTargetId: runtime);
+      return;
+    }
     if (invocation.kind == DesktopInvocationKind.windowState) {
       if (invocation.maximized case final maximized?) {
         _applyWindowMaximized(maximized);
@@ -2897,6 +2920,16 @@ final class ZommiController extends ChangeNotifier {
         }
         if (statusValue.toLowerCase() == 'completed') {
           _recordSessionActivity(event.runtimeTargetId, sessionId);
+          final completedId = event.turnId ?? event.clientOperationId;
+          if (event.sessionId != null && completedId != null) {
+            unawaited(
+              _notifyResponseReady(
+                event.runtimeTargetId,
+                sessionId,
+                completedId,
+              ),
+            );
+          }
         }
         for (final turn in _turnsBySession[sessionKey] ?? const []) {
           turn.activityExpanded = false;
@@ -3411,6 +3444,38 @@ final class ZommiController extends ChangeNotifier {
         : _modelId(preferred);
   }
 
+  Future<void> _notifyResponseReady(
+    String runtime,
+    String session,
+    String turn,
+  ) async {
+    if (!_notifiedTurns.add((runtime, session, turn))) return;
+    if (_notifiedTurns.length > 512) {
+      _notifiedTurns.remove(_notifiedTurns.first);
+    }
+    final summary = sessions
+        .where(
+          (value) => value.runtimeTargetId == runtime && value.id == session,
+        )
+        .firstOrNull;
+    try {
+      await desktop.notifyResponseReady(
+        runtimeTargetId: runtime,
+        sessionId: session,
+        turnId: turn,
+        runtimeName: _runtimeTarget(runtime)?.displayName ?? 'Agent',
+        sessionTitle: summary?.title ?? '',
+      );
+    } on Object {
+      // A disabled desktop notification must not affect a completed response.
+    }
+  }
+
+  void dismissStatusWarning() {
+    statusWarning = false;
+    _notify();
+  }
+
   void _setStatus(String value, {bool warning = false}) {
     status = value;
     statusWarning = warning;
@@ -3418,7 +3483,16 @@ final class ZommiController extends ChangeNotifier {
   }
 
   void _notify() {
-    if (!_closed) notifyListeners();
+    if (_closed) return;
+    notifyListeners();
+    final pending = _pendingNotificationOpen;
+    if (pending != null && _canOpenNotification) {
+      _pendingNotificationOpen = null;
+      // Resume after the operation that blocked navigation has settled.
+      scheduleMicrotask(() {
+        if (!_closed) unawaited(_handleDesktopInvocation(pending));
+      });
+    }
   }
 
   Future<void> close() async {

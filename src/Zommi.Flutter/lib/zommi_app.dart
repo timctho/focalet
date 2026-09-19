@@ -676,36 +676,61 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
 
   Widget _buildStatusWarning() {
     final scheme = Theme.of(context).colorScheme;
-    return Semantics(
-      liveRegion: true,
-      child: Container(
-        key: const ValueKey('operation-warning'),
-        margin: const EdgeInsets.fromLTRB(20, 8, 20, 0),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: scheme.errorContainer,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(Icons.error_outline, size: 18, color: scheme.onErrorContainer),
-            const SizedBox(width: 8),
-            Expanded(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 120),
-                child: SingleChildScrollView(
-                  child: SelectableText(
-                    _controller.status,
-                    style: TextStyle(
-                      color: scheme.onErrorContainer,
-                      fontSize: 13,
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: _alignCommandPanel(
+        Semantics(
+          liveRegion: true,
+          child: Container(
+            key: const ValueKey('operation-warning'),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: scheme.errorContainer,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.error_outline,
+                  size: 18,
+                  color: scheme.onErrorContainer,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 120),
+                    child: SingleChildScrollView(
+                      child: SelectableText(
+                        _controller.status,
+                        style: TextStyle(
+                          color: scheme.onErrorContainer,
+                          fontSize: 13,
+                        ),
+                      ),
                     ),
                   ),
                 ),
-              ),
+                const SizedBox(width: 8),
+                IconButton(
+                  key: const ValueKey('dismiss-operation-warning'),
+                  tooltip: 'Dismiss error',
+                  onPressed: _controller.dismissStatusWarning,
+                  icon: Icon(
+                    Icons.close_rounded,
+                    size: 18,
+                    color: scheme.onErrorContainer,
+                  ),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 28,
+                    height: 28,
+                  ),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

@@ -2,12 +2,57 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/zommi_app.dart';
 
 import 'test_support.dart';
 
 void main() {
+  for (final width in [760.0, 1440.0]) {
+    testWidgets('dismissible error matches composer at width $width', (
+      tester,
+    ) async {
+      final desktop = FakeDesktopBridge();
+      await tester.binding.setSurfaceSize(Size(width, 820));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(ZommiApp(core: RichFakeCore(), desktop: desktop));
+      await tester.pumpAndSettle();
+      final composer = find.byKey(const ValueKey('zommi-composer'));
+      await tester.enterText(composer, 'keep this draft');
+      for (final sidebarOpen in [true, false]) {
+        if (!sidebarOpen) {
+          await tester.tap(find.byKey(const ValueKey('toggle-sessions')));
+          await tester.pumpAndSettle();
+        }
+        desktop.emit(
+          const DesktopInvocation(
+            kind: DesktopInvocationKind.status,
+            message: 'Something failed. You can retry.',
+            warning: true,
+          ),
+        );
+        await tester.pumpAndSettle();
+        final banner = find.byKey(const ValueKey('operation-warning'));
+        final warningRect = tester.getRect(banner);
+        final inputRect = tester.getRect(
+          find.byKey(const ValueKey('message-composer-shell')),
+        );
+        expect(warningRect.left, closeTo(inputRect.left, 0.1));
+        expect(warningRect.right, closeTo(inputRect.right, 0.1));
+        await tester.tap(
+          find.byKey(const ValueKey('dismiss-operation-warning')),
+        );
+        await tester.pumpAndSettle();
+        expect(banner, findsNothing);
+        expect(
+          tester.widget<TextField>(composer).controller!.text,
+          'keep this draft',
+        );
+      }
+    });
+  }
+
   Future<void> showApp(
     WidgetTester tester,
     RichFakeCore core,

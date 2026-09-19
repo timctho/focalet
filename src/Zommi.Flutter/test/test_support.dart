@@ -720,6 +720,29 @@ class FakeDesktopBridge
   final StreamController<DesktopInvocation> _invocations =
       StreamController<DesktopInvocation>.broadcast(sync: true);
   final List<String> calls = [];
+  final List<Map<String, String>> responseNotifications = [];
+  Future<void>? notificationGate;
+  bool notificationFails = false;
+
+  @override
+  Future<void> notifyResponseReady({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String turnId,
+    required String runtimeName,
+    required String sessionTitle,
+  }) async {
+    responseNotifications.add({
+      'runtimeTargetId': runtimeTargetId,
+      'sessionId': sessionId,
+      'turnId': turnId,
+      'runtimeName': runtimeName,
+      'sessionTitle': sessionTitle,
+    });
+    if (notificationGate case final gate?) await gate;
+    if (notificationFails) throw StateError('Notifications unavailable');
+  }
+
   final List<bool> surfaceAnimations = [];
   ContextAttachment? nextContext;
   List<ContextAttachment>? nextSelections;

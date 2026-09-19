@@ -17,6 +17,7 @@ import 'package:window_manager/window_manager.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/desktop/capture_permissions.dart';
 import 'package:zommi_flutter/desktop/capture_shortcut.dart';
+import 'package:zommi_flutter/desktop/response_notifications.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 
@@ -46,6 +47,7 @@ Rect pixelAlignedSurfaceBounds(Rect bounds, double scale) => Rect.fromLTRB(
 
 enum DesktopInvocationKind {
   open,
+  openSession,
   selectContent,
   captureStarted,
   context,
@@ -61,6 +63,8 @@ final class DesktopInvocation {
     this.message,
     this.warning = false,
     this.maximized,
+    this.runtimeTargetId,
+    this.sessionId,
   });
 
   final DesktopInvocationKind kind;
@@ -68,6 +72,8 @@ final class DesktopInvocation {
   final String? message;
   final bool warning;
   final bool? maximized;
+  final String? runtimeTargetId;
+  final String? sessionId;
 }
 
 DesktopInvocation imageSelectionInvocation(ContextAttachment? attachment) {
@@ -137,6 +143,14 @@ abstract interface class DesktopBridge {
 
   Future<DesktopReadiness> initialize();
 
+  Future<void> notifyResponseReady({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String turnId,
+    required String runtimeName,
+    required String sessionTitle,
+  });
+
   Future<ContextAttachment?> captureContext({bool hidePanel = false});
 
   Future<List<ContextAttachment>> selectPointerContext();
@@ -187,6 +201,15 @@ final class NoopDesktopBridge implements DesktopBridge {
 
   @override
   Future<DesktopReadiness> initialize() async => const DesktopReadiness();
+
+  @override
+  Future<void> notifyResponseReady({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String turnId,
+    required String runtimeName,
+    required String sessionTitle,
+  }) async {}
 
   @override
   Future<ContextAttachment?> captureContext({bool hidePanel = false}) async =>
@@ -278,6 +301,45 @@ final class FlutterDesktopBridge
            FileDesktopAcceptanceRecorder.fromEnvironment();
 
   final bool _useNativeSurface;
+  late final ResponseNotifications _notifications = ResponseNotifications(
+    onOpen: (runtime, session) {
+      if (!_invocations.isClosed) {
+        _invocations.add(
+          DesktopInvocation(
+            kind: DesktopInvocationKind.openSession,
+            runtimeTargetId: runtime,
+            sessionId: session,
+          ),
+        );
+      }
+    },
+    record: _recordAcceptance,
+  );
+
+  @override
+  Future<void> notifyResponseReady({
+    required String runtimeTargetId,
+    required String sessionId,
+    required String turnId,
+    required String runtimeName,
+    required String sessionTitle,
+  }) async {
+    try {
+      await _notifications.show(
+        runtimeTargetId: runtimeTargetId,
+        sessionId: sessionId,
+        turnId: turnId,
+        runtimeName: runtimeName,
+        sessionTitle: sessionTitle,
+      );
+    } on Object {
+      await _recordAcceptance('notification.failed', {
+        'runtimeTargetId': runtimeTargetId,
+        'sessionId': sessionId,
+      });
+    }
+  }
+
   final MacCapturePermissions _capturePermissions = MacCapturePermissions();
 
   @override
@@ -457,6 +519,7 @@ final class FlutterDesktopBridge
       return _readiness;
     }
     _initialized = true;
+    unawaited(_notifications.initialize());
     if (Platform.isWindows) {
       _windowAnimationChannel.setMethodCallHandler((call) async {
         if (call.method == 'selectContent') await invokeContentSelection();
@@ -1082,6 +1145,7 @@ final class FlutterDesktopBridge
   @override
   Future<void> close() async {
     WidgetsBinding.instance.removeObserver(this);
+    _notifications.close();
     _windowAnimationChannel.setMethodCallHandler(null);
     windowManager.removeListener(this);
     trayManager.removeListener(this);
