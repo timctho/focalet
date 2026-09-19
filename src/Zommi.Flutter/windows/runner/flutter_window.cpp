@@ -1,5 +1,6 @@
 #include "flutter_window.h"
 #include "desktop_snapshot.h"
+#include "tray_popup.h"
 
 #include <dwmapi.h>
 #include <dxgi.h>
@@ -74,6 +75,7 @@ bool FlutterWindow::OnCreate() {
       });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
   desktop_snapshot_ = std::make_unique<DesktopSnapshot>();
+  tray_popup_ = std::make_unique<TrayPopup>();
   desktop_snapshot_->Prepare(MonitorFromWindow(GetHandle(), MONITOR_DEFAULTTONEAREST));
 
   wchar_t trace_path[32768]{};
@@ -106,12 +108,17 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  if (selection_hotkey_id_) {
+    UnregisterHotKey(GetHandle(), selection_hotkey_id_);
+    selection_hotkey_id_ = 0;
+  }
   if (surface_handoff_result_) {
     surface_handoff_result_->Error("window_closed", "The window was closed.");
     surface_handoff_result_.reset();
   }
   DestroySurfaceHandoff();
   desktop_snapshot_.reset();
+  tray_popup_.reset();
   window_animation_channel_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
@@ -124,6 +131,11 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  if (message == WM_HOTKEY && selection_hotkey_id_ &&
+      wparam == static_cast<WPARAM>(selection_hotkey_id_)) {
+    window_animation_channel_->InvokeMethod("selectContent", nullptr);
+    return 0;
+  }
   if (message == WM_TIMER && surface_handoff_timer_ != 0 &&
       wparam == surface_handoff_timer_) {
     CompleteSurfaceHandoff(true);
@@ -196,6 +208,48 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
 void FlutterWindow::HandleWindowAnimationMethodCall(
     const flutter::MethodCall<flutter::EncodableValue> &call,
     std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+  if (call.method_name() == "setSelectionShortcut") {
+    const auto* arguments = call.arguments() == nullptr
+        ? nullptr : std::get_if<flutter::EncodableMap>(call.arguments());
+    if (arguments == nullptr) {
+      if (selection_hotkey_id_) UnregisterHotKey(GetHandle(), selection_hotkey_id_);
+      selection_hotkey_id_ = 0;
+      result->Success();
+      return;
+    }
+    const auto key = NumberArgument(*arguments, "key");
+    const auto modifiers = NumberArgument(*arguments, "modifiers");
+    if (!key || !modifiers || *key < 1 || *key > 255 ||
+        *modifiers < 1 || *modifiers > 15) {
+      result->Error("invalid_shortcut", "Choose a modified letter, number or function key.");
+      return;
+    }
+    const auto next_key = static_cast<UINT>(*key);
+    const auto next_modifiers = static_cast<UINT>(*modifiers);
+    if (selection_hotkey_id_ && selection_hotkey_key_ == next_key &&
+        selection_hotkey_modifiers_ == next_modifiers) {
+      result->Success();
+      return;
+    }
+    // Reserve the replacement first, so conflicts never discard a working key.
+    const int next_id = selection_hotkey_id_ == 0x5a50 ? 0x5a51 : 0x5a50;
+    if (!RegisterHotKey(GetHandle(), next_id, next_modifiers | MOD_NOREPEAT, next_key)) {
+      result->Error("shortcut_unavailable", "That shortcut is already in use or reserved by Windows.");
+      return;
+    }
+    if (selection_hotkey_id_) UnregisterHotKey(GetHandle(), selection_hotkey_id_);
+    selection_hotkey_id_ = next_id;
+    selection_hotkey_key_ = next_key;
+    selection_hotkey_modifiers_ = next_modifiers;
+    result->Success();
+    return;
+  }
+  if (call.method_name() == "showTrayMenu") {
+    const auto* arguments = call.arguments() == nullptr
+        ? nullptr : std::get_if<flutter::EncodableMap>(call.arguments());
+    tray_popup_->Show(arguments ? *arguments : flutter::EncodableMap{}, std::move(result));
+    return;
+  }
   if (call.method_name() == "surfaceMetricsChanged") {
     const auto* arguments = call.arguments() == nullptr
         ? nullptr : std::get_if<flutter::EncodableMap>(call.arguments());

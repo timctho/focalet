@@ -39,6 +39,7 @@ const codexComposerCommands = [
   ComposerCommand('/clear', 'Start a fresh chat and keep the previous history'),
   ComposerCommand('/goal', 'Set an objective, or view the current goal'),
   ComposerCommand('/new', 'Start a fresh chat'),
+  ComposerCommand('/status', 'Show session, context usage and account limits'),
   ComposerCommand('/help', 'Show supported commands'),
   ComposerCommand('/goal pause', 'Pause work toward the goal'),
   ComposerCommand('/goal resume', 'Continue work toward the goal'),

@@ -48,7 +48,7 @@ void main() {
     final bridge = File('${root.path}/lib/desktop/desktop_bridge.dart')
         .readAsStringSync();
     for (final contract in [
-      'HotKeyModifier.alt',
+      'CaptureShortcut.standard',
       'CaptureMode.region',
       'skipTaskbar: false',
       'windowManager.minimize()',

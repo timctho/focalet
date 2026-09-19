@@ -681,7 +681,7 @@ class RichFakeCore
   }
 }
 
-final class FakeDesktopBridge
+class FakeDesktopBridge
     implements DesktopBridge, BrowserCaptureSettings, CapturePermissionBridge {
   @override
   bool supportsCapturePermissions = false;

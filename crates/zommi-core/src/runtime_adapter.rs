@@ -599,6 +599,17 @@ impl RuntimeAdapter {
         }
     }
 
+    pub async fn session_status(&self, session_id: &str) -> Result<Value, CodexError> {
+        match self {
+            Self::Codex(adapter) => adapter.ready().await?.session_status(session_id).await,
+            _ => Err(CodexError {
+                code: "capability-unavailable".into(),
+                message: "Status is not advertised by this runtime.".into(),
+                retryable: false,
+            }),
+        }
+    }
+
     pub async fn goal_command(
         &self,
         session_id: &str,

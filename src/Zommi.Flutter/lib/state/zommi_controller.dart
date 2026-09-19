@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
+import 'package:zommi_flutter/state/codex_status.dart';
 import 'package:zommi_flutter/desktop/artifact_loader.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/history_mapper.dart';
@@ -170,6 +171,7 @@ final class ZommiController extends ChangeNotifier {
   ArtifactPreview? previewArtifact;
   bool resolvingPrompt = false;
   String? commandOutput;
+  int _statusRequest = 0;
   int commandComposerEpoch = 0;
   bool goalPanelOpen = false;
   final Map<String, Map<String, Object?>?> _goalsBySession = {};
@@ -1311,6 +1313,7 @@ final class ZommiController extends ChangeNotifier {
       (error is CoreProtocolException &&
           const {
             'runtime-recovering',
+            'runtime-exited',
             'runtime-unavailable',
             'runtime-overloaded',
             'unknown-outcome',
@@ -1468,7 +1471,7 @@ final class ZommiController extends ChangeNotifier {
     List<String>? attachmentOrder,
   }) async {
     final text = message.trim();
-    if (sessionReadOnly) {
+    if (sessionReadOnly && !isReadOnlyCodexCommand(text)) {
       _setStatus(
         'Chat is open elsewhere · your draft is kept until it reconnects',
       );

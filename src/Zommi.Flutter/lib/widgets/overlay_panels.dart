@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:zommi_flutter/desktop/capture_permissions.dart';
+import 'package:zommi_flutter/desktop/capture_shortcut.dart';
+import 'package:zommi_flutter/widgets/capture_shortcut_setting.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
@@ -1165,6 +1167,14 @@ class AppSettingsPanel extends StatelessWidget {
             if (controller.desktop case final CapturePermissionBridge bridge
                 when bridge.supportsCapturePermissions)
               CapturePermissionSetup(bridge: bridge),
+            if (controller.desktop case final CaptureShortcutSettings settings)
+              CaptureShortcutSetting(
+                settings: settings,
+                value: preferences.selectionShortcut,
+                onChanged: (shortcut) => onChanged(
+                  preferences.copyWith(selectionShortcut: shortcut),
+                ),
+              ),
             if (controller.desktop case final BrowserCaptureSettings settings
                 when settings.supportsBrowserPageDetails)
               SwitchListTile(

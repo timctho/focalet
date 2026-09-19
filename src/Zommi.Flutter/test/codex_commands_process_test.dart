@@ -9,6 +9,7 @@ import 'package:zommi_flutter/state/zommi_controller.dart';
 void main() {
   Future<(ZommiController, ProcessCoreBridge, File)> setup({
     bool unsupported = false,
+    bool limitsUnsupported = false,
   }) async {
     final temporary = await Directory.systemTemp.createTemp(
       'zommi-command-contract-',
@@ -36,6 +37,8 @@ void main() {
         'ZOMMI_FAKE_FRESH_THREAD_ID': 'new-command-thread',
         'ZOMMI_FAKE_GOAL_TURNS': '1',
         'ZOMMI_FAKE_UNIQUE_THREADS': '1',
+        'ZOMMI_FAKE_STATUS': '1',
+        if (limitsUnsupported) 'ZOMMI_FAKE_STATUS_LIMITS_UNSUPPORTED': '1',
         if (unsupported) 'ZOMMI_FAKE_GOAL_UNSUPPORTED': '1',
       },
     );
@@ -66,6 +69,51 @@ void main() {
       .readAsLinesSync()
       .map((line) => jsonDecode(line) as Map<String, dynamic>)
       .toList();
+
+  test('status reads exact native usage and limits without creating or prompting a chat', () async {
+    final (controller, bridge, log) = await setup();
+    final before = requests(log).length;
+    await controller.submit('/status');
+    expect(controller.commandResult, contains('status-test-model'));
+    expect(
+      controller.commandResult,
+      contains('2000 / 10000 tokens · 80% left'),
+    );
+    expect(controller.commandResult, contains('5h: 75% left'));
+    expect(controller.commandResult, contains('Weekly: 90% left'));
+    expect(controller.commandResult, isNot(contains('999999')));
+    final native = requests(log).skip(before).toList();
+    expect(native.where((r) => r['method'] == 'thread/read').single['params'], {
+      'threadId': controller.activeSessionId,
+      'includeTurns': false,
+    });
+    expect(
+      native.where(
+        (r) => const [
+          'turn/start',
+          'thread/start',
+          'thread/resume',
+        ].contains(r['method']),
+      ),
+      isEmpty,
+    );
+    await expectLater(
+      bridge.sessionStatus(
+        runtimeTargetId: controller.activeRuntime!.id,
+        sessionId: 'another-chat',
+      ),
+      throwsA(isA<CoreProtocolException>()),
+    );
+  });
+
+  test('status retains available details when native account limits are unsupported', () async {
+    final (controller, _, log) = await setup(limitsUnsupported: true);
+    await controller.submit('/status');
+    expect(controller.commandResult, contains('status-test-model'));
+    expect(controller.commandResult, contains('Usage limits are unavailable'));
+    expect(controller.commandResult, isNot(contains('100% left')));
+    expect(requests(log).where((r) => r['method'] == 'turn/start'), isEmpty);
+  });
 
   test('composer commands cross the Rust broker and control the exact native goal without duplicate turns', () async {
     final (controller, bridge, log) = await setup();

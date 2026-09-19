@@ -16,6 +16,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/desktop/capture_permissions.dart';
+import 'package:zommi_flutter/desktop/capture_shortcut.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 
@@ -121,6 +122,14 @@ final class FileDesktopAcceptanceRecorder implements DesktopAcceptanceRecorder {
 abstract interface class BrowserCaptureSettings {
   bool get supportsBrowserPageDetails;
   void setBrowserPageDetails(bool enabled);
+}
+
+abstract interface class TrayMenuAppearance {
+  void setTrayMenuColors({
+    required Color background,
+    required Color foreground,
+    required Color hover,
+  });
 }
 
 abstract interface class DesktopBridge {
@@ -242,14 +251,21 @@ final class NoopDesktopBridge implements DesktopBridge {
 
 final class FlutterDesktopBridge
     with WindowListener, TrayListener, WidgetsBindingObserver
-    implements DesktopBridge, BrowserCaptureSettings, CapturePermissionBridge {
+    implements
+        DesktopBridge,
+        BrowserCaptureSettings,
+        CapturePermissionBridge,
+        CaptureShortcutSettings,
+        TrayMenuAppearance {
   FlutterDesktopBridge({
     CaptureProvider? captureProvider,
     DesktopAcceptanceRecorder? acceptanceRecorder,
     WaylandPortalShortcutClient? waylandPortalShortcutClient,
     bool? useWaylandPortals,
     bool? useNativeSurface,
-  }) : _captureProvider = captureProvider ?? platformCaptureProvider(),
+    CaptureShortcut? selectionShortcut,
+  }) : _selectionShortcut = selectionShortcut ?? CaptureShortcut.standard,
+       _captureProvider = captureProvider ?? platformCaptureProvider(),
        _useNativeSurface = useNativeSurface ?? Platform.isWindows,
        _waylandPortalShortcutClient =
            waylandPortalShortcutClient ??
@@ -278,6 +294,7 @@ final class FlutterDesktopBridge
   ) => _capturePermissions.requestCapturePermission(permission);
 
   static Future<FlutterDesktopBridge> bootstrap({
+    CaptureShortcut selectionShortcut = CaptureShortcut.standard,
     WindowSizeSetting windowSize = WindowSizeSetting.standard,
   }) async {
     await windowManager.ensureInitialized();
@@ -306,7 +323,7 @@ final class FlutterDesktopBridge
     await configureNativeSurfaceWindow();
     await windowManager.setAlwaysOnTop(false);
     await windowManager.setSkipTaskbar(false);
-    final desktop = FlutterDesktopBridge();
+    final desktop = FlutterDesktopBridge(selectionShortcut: selectionShortcut);
     // Size and position the first visible frame within the monitor work area.
     await desktop.setSurface(
       expanded: true,
@@ -335,11 +352,78 @@ final class FlutterDesktopBridge
   final DesktopAcceptanceRecorder? _acceptanceRecorder;
   final StreamController<DesktopInvocation> _invocations =
       StreamController<DesktopInvocation>.broadcast(sync: true);
-  final HotKey _contextHotKey = HotKey(
-    key: PhysicalKeyboardKey.keyA,
-    modifiers: const [HotKeyModifier.alt],
-    scope: HotKeyScope.system,
-  );
+  CaptureShortcut _selectionShortcut;
+  HotKey? _contextHotKey;
+  bool _shortcutSuspended = false;
+  Future<void> _shortcutQueue = Future<void>.value();
+
+  @override
+  bool get canCustomizeSelectionShortcut => !_useWaylandPortals;
+
+  Future<void> _queueShortcut(Future<void> Function() action) {
+    final next = _shortcutQueue.then((_) => action());
+    _shortcutQueue = next.catchError((Object _) {});
+    return next;
+  }
+
+  Future<void> _registerSelectionShortcut(CaptureShortcut shortcut) async {
+    if (Platform.isWindows) {
+      await _windowAnimationChannel.invokeMethod<void>('setSelectionShortcut', {
+        'key': shortcut.virtualKey,
+        'modifiers': shortcut.modifiers,
+      });
+    } else {
+      final previous = _contextHotKey;
+      if (_nativeContextRegistered && shortcut == _selectionShortcut) return;
+      final next = shortcut.toHotKey();
+      await hotKeyManager.register(
+        next,
+        keyDownHandler: (_) => unawaited(invokeContentSelection()),
+      );
+      if (previous != null && _nativeContextRegistered) {
+        try {
+          await hotKeyManager.unregister(previous);
+        } on Object {
+          await hotKeyManager.unregister(next);
+          rethrow;
+        }
+      }
+      _contextHotKey = next;
+    }
+    _nativeContextRegistered = true;
+    _shortcutSuspended = false;
+    _selectionShortcut = shortcut;
+  }
+
+  @override
+  Future<void> configureSelectionShortcut(CaptureShortcut shortcut) =>
+      _queueShortcut(() async {
+        if (!shortcut.valid) throw ArgumentError('Invalid selection shortcut');
+        if (!_initialized) {
+          _selectionShortcut = shortcut;
+        } else if (canCustomizeSelectionShortcut) {
+          await _registerSelectionShortcut(shortcut);
+        }
+      });
+
+  @override
+  Future<void> suspendSelectionShortcut() => _queueShortcut(() async {
+    _shortcutSuspended = true;
+    if (!_nativeContextRegistered) return;
+    if (Platform.isWindows) {
+      await _windowAnimationChannel.invokeMethod<void>('setSelectionShortcut');
+    } else {
+      await hotKeyManager.unregister(_contextHotKey!);
+    }
+    _nativeContextRegistered = false;
+  });
+
+  @override
+  Future<void> resumeSelectionShortcut() => _queueShortcut(() async {
+    if (_shortcutSuspended) {
+      await _registerSelectionShortcut(_selectionShortcut);
+    }
+  });
   bool _initialized = false;
   bool _surfacePositionInitialized = false;
   int _surfaceTransitionEpoch = 0;
@@ -349,6 +433,20 @@ final class FlutterDesktopBridge
   DesktopReadiness _readiness = const DesktopReadiness();
   StreamSubscription<String>? _portalShortcutSubscription;
   String? _trayIconPath;
+  Map<String, Object?> _trayColors = const {};
+
+  @override
+  void setTrayMenuColors({
+    required Color background,
+    required Color foreground,
+    required Color hover,
+  }) {
+    _trayColors = {
+      'background': background.toARGB32(),
+      'foreground': foreground.toARGB32(),
+      'hover': hover.toARGB32(),
+    };
+  }
 
   @override
   Stream<DesktopInvocation> get invocations => _invocations.stream;
@@ -359,6 +457,11 @@ final class FlutterDesktopBridge
       return _readiness;
     }
     _initialized = true;
+    if (Platform.isWindows) {
+      _windowAnimationChannel.setMethodCallHandler((call) async {
+        if (call.method == 'selectContent') await invokeContentSelection();
+      });
+    }
     if (_useNativeSurface) WidgetsBinding.instance.addObserver(this);
     windowManager.addListener(this);
     await windowManager.setPreventClose(false);
@@ -387,14 +490,16 @@ final class FlutterDesktopBridge
       }
     } else {
       try {
-        await hotKeyManager.register(
-          _contextHotKey,
-          keyDownHandler: (_) => unawaited(invokeContentSelection()),
-        );
-        contextRegistered = true;
-        _nativeContextRegistered = true;
+        await _queueShortcut(() async {
+          if (!_shortcutSuspended) {
+            await _registerSelectionShortcut(_selectionShortcut);
+          }
+        });
+        contextRegistered = _nativeContextRegistered;
       } on Object catch (error) {
-        _emitWarning('Alt+A could not be registered: $error');
+        _emitWarning(
+          '${_selectionShortcut.label} could not be registered: $error',
+        );
       }
     }
     await _configureTray();
@@ -883,9 +988,7 @@ final class FlutterDesktopBridge
         Menu(
           items: [
             MenuItem(key: 'open', label: 'Open Zommi'),
-            MenuItem(key: 'capture', label: 'Select (Alt+A)'),
-            MenuItem.separator(),
-            MenuItem(key: 'exit', label: 'Exit Zommi'),
+            MenuItem(key: 'exit', label: 'Quit'),
           ],
         ),
       );
@@ -902,6 +1005,10 @@ final class FlutterDesktopBridge
 
   @override
   void onTrayIconRightMouseDown() {
+    if (Platform.isWindows) {
+      unawaited(_showWindowsTrayMenu());
+      return;
+    }
     unawaited(
       showExplicitTrayContextMenu(
         operatingSystem: Platform.operatingSystem,
@@ -910,13 +1017,24 @@ final class FlutterDesktopBridge
     );
   }
 
+  Future<void> _showWindowsTrayMenu() async {
+    try {
+      final action = await _windowAnimationChannel.invokeMethod<String>(
+        'showTrayMenu',
+        _trayColors,
+      );
+      if (!_invocations.isClosed && action == 'open') onTrayIconMouseDown();
+      if (action == 'exit') await windowManager.destroy();
+    } on Object catch (error) {
+      _emitWarning('Could not open tray menu: $error');
+    }
+  }
+
   @override
   void onTrayMenuItemClick(MenuItem menuItem) {
     switch (menuItem.key) {
       case 'open':
         onTrayIconMouseDown();
-      case 'capture':
-        unawaited(invokeContentSelection());
       case 'exit':
         unawaited(windowManager.destroy());
     }
@@ -969,9 +1087,7 @@ final class FlutterDesktopBridge
     trayManager.removeListener(this);
     await _portalShortcutSubscription?.cancel();
     await _waylandPortalShortcutClient.close();
-    if (_nativeContextRegistered) {
-      await hotKeyManager.unregister(_contextHotKey);
-    }
+    await suspendSelectionShortcut();
     await trayManager.destroy();
     await _captureProvider.close();
     if (_trayIconPath case final path?) {

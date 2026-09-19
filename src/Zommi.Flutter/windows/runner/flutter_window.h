@@ -12,6 +12,7 @@
 #include "win32_window.h"
 
 class DesktopSnapshot;
+class TrayPopup;
 
 // A window that does nothing but host a Flutter view.
 class FlutterWindow : public Win32Window {
@@ -40,6 +41,7 @@ private:
   HWND surface_handoff_window_ = nullptr;
   HBITMAP surface_handoff_bitmap_ = nullptr;
   std::unique_ptr<DesktopSnapshot> desktop_snapshot_;
+  std::unique_ptr<TrayPopup> tray_popup_;
   std::uint64_t surface_handoff_epoch_ = 0;
   UINT_PTR surface_handoff_timer_ = 0;
   SIZE surface_handoff_size_{};
@@ -47,6 +49,9 @@ private:
   bool surface_handoff_armed_ = false;
   bool surface_handoff_frame_ready_ = false;
   WPARAM pending_surface_command_ = 0;
+  int selection_hotkey_id_ = 0;
+  UINT selection_hotkey_key_ = 0;
+  UINT selection_hotkey_modifiers_ = 0;
   std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
       surface_handoff_result_;
 

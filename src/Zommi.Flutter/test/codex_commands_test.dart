@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -9,7 +11,66 @@ import 'package:zommi_flutter/zommi_app.dart';
 
 import 'test_support.dart';
 
+class DeferredStatusCore extends RichFakeCore implements SessionStatusBridge {
+  Completer<Map<String, Object?>> pending = Completer();
+  @override
+  Future<Map<String, Object?>> sessionStatus({
+    required String runtimeTargetId,
+    required String sessionId,
+  }) => pending.future;
+}
+
 void main() {
+  test(
+    'status does not replace newer drafts or follow the user to another chat',
+    () async {
+      final core = DeferredStatusCore()..historyCount = 0;
+      final controller = ZommiController(
+        core: core,
+        desktop: FakeDesktopBridge(),
+      );
+      addTearDown(controller.close);
+      await controller.initialize();
+      controller.updateComposerValue(const TextEditingValue(text: '/status'));
+      final read = controller.submit('/status');
+      controller.updateComposerValue(const TextEditingValue(text: 'new draft'));
+      core.pending.complete({
+        'runtimeTargetId': 'runtime-codex',
+        'sessionId': 'session-1',
+      });
+      await read;
+      expect(controller.commandResult, contains('Session: session-1'));
+      expect(controller.composerValue.text, 'new draft');
+      core.pending = Completer();
+      final stale = controller.submit('/status');
+      await controller.switchSession('session-2');
+      core.pending.complete({
+        'runtimeTargetId': 'runtime-codex',
+        'sessionId': 'session-1',
+      });
+      await stale;
+      expect(controller.commandResult, isNull);
+      expect(core.lastMessage, isNull);
+    },
+  );
+
+  test('dismissing pending status keeps the result closed', () async {
+    final core = DeferredStatusCore()..historyCount = 0;
+    final controller = ZommiController(
+      core: core,
+      desktop: FakeDesktopBridge(),
+    );
+    addTearDown(controller.close);
+    await controller.initialize();
+    final read = controller.submit('/status');
+    controller.dismissCommandResult();
+    core.pending.complete({
+      'runtimeTargetId': 'runtime-codex',
+      'sessionId': 'session-1',
+    });
+    await read;
+    expect(controller.commandResult, isNull);
+  });
   Future<(ZommiController, RichFakeCore)> setup() async {
     final core = RichFakeCore()..historyCount = 0;
     final controller = ZommiController(

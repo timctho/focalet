@@ -115,6 +115,13 @@ for line in sys.stdin:
         result = {"data":[{"cwd":request["params"]["cwds"][0],"skills":[{"name":"inspect", "description":"Inspect project", "path":"/skills/inspect/SKILL.md", "enabled":True}]}]}
     elif method in ("model/list", "mcpServerStatus/list"):
         result = {"data": []}
+    elif method == "account/read":
+        result = {"account": {"type": "chatgpt", "planType": "pro", "email": "fixture@example.invalid"}}
+    elif method == "account/rateLimits/read":
+        if os.environ.get("ZOMMI_FAKE_STATUS_LIMITS_UNSUPPORTED") == "1":
+            send({"id": request_id, "error": {"code": -32601, "message": "Rate limits unavailable"}})
+            continue
+        result = {"rateLimits": {"primary": {"usedPercent": 25, "windowDurationMins": 300}, "secondary": {"usedPercent": 10, "windowDurationMins": 10080}}}
     elif method == "thread/list":
         result = {
             "data": [
@@ -315,4 +322,11 @@ for line in sys.stdin:
         )
         continue
 
+    if os.environ.get("ZOMMI_FAKE_STATUS") == "1" and method in ("thread/start", "thread/resume", "thread/read"):
+        result.update(model="status-test-model", reasoningEffort="high", cwd="/status-workspace")
+        result["thread"].update(status={"type": "idle"}, cwd="/status-workspace")
+        selected = result["thread"]["id"]
+        for identity, tokens in [(selected, 2000), ("unrelated-status-chat", 999999)]:
+            send({"method": "thread/tokenUsage/updated", "params": {"threadId": identity, "tokenUsage": {
+                "last": {"totalTokens": tokens}, "total": {"totalTokens": tokens * 3, "inputTokens": tokens * 2, "outputTokens": tokens}, "modelContextWindow": 10000}}})
     send({"id": request_id, "result": result})

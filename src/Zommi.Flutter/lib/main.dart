@@ -15,6 +15,7 @@ Future<void> main() async {
   final preferencesStore = FileAppPreferencesStore.platform();
   final preferences = await preferencesStore.load();
   final desktop = await FlutterDesktopBridge.bootstrap(
+    selectionShortcut: preferences.selectionShortcut,
     windowSize: preferences.windowSize,
   );
   runApp(

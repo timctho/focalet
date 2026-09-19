@@ -9,6 +9,7 @@ project(runner LANGUAGES CXX)
 add_executable(${BINARY_NAME} WIN32
   "desktop_snapshot.cpp"
   "flutter_window.cpp"
+  "tray_popup.cpp"
   "main.cpp"
   "utils.cpp"
   "win32_window.cpp"
@@ -35,6 +36,7 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
 # dependencies here.
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib" "d3d11.lib" "dxgi.lib" "dcomp.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "comctl32.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.

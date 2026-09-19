@@ -210,6 +210,8 @@ impl Drop for ProcessGroup {
 
 #[derive(Default)]
 struct AdapterState {
+    token_usage: HashMap<String, Value>,
+    thread_settings: HashMap<String, Value>,
     command_catalogs: HashMap<String, Vec<Value>>,
     read_only_threads: HashSet<String>,
     protocol_version: u64,
@@ -531,7 +533,7 @@ impl CodexAdapter {
             "cwd": state.active_cwd.as_deref().unwrap_or_else(|| self.inner.cwd.to_str().unwrap_or_default())
         });
         Ok(CodexConnection {
-            capabilities: vec!["session.rewind.v1".into()],
+            capabilities: vec!["session.rewind.v1".into(), "session.status.v1".into()],
             runtime_target_id: self.inner.target_id.clone(),
             session_id: state
                 .thread_id
@@ -544,6 +546,83 @@ impl CodexAdapter {
             session_metadata,
             history: None,
         })
+    }
+
+    pub async fn session_status(&self, session_id: &str) -> Result<Value, CodexError> {
+        if self.active_session_id().await? != session_id {
+            return Err(CodexError::new(
+                "identity-mismatch",
+                "Select this exact Codex chat before reading its status.",
+            ));
+        }
+        let deadline = self.inner.request_timeout.min(Duration::from_secs(5));
+        // Read-only native APIs; missing account features never send a prompt.
+        let (thread, account, limits) = tokio::join!(
+            self.inner.request_with_timeout(
+                "thread/read",
+                json!({"threadId": session_id, "includeTurns": false}),
+                deadline
+            ),
+            self.inner.request_with_timeout(
+                "account/read",
+                json!({"refreshToken": false}),
+                deadline
+            ),
+            self.inner
+                .request_with_timeout("account/rateLimits/read", json!({}), deadline),
+        );
+        let mut warnings = Vec::new();
+        let thread = match thread {
+            Ok(value)
+                if value.pointer("/thread/id").and_then(Value::as_str) == Some(session_id) =>
+            {
+                value["thread"].clone()
+            }
+            Ok(_) => {
+                return Err(CodexError::new(
+                    "identity-mismatch",
+                    "Codex returned status for a different chat.",
+                ));
+            }
+            Err(_) => {
+                warnings.push("Live chat status is unavailable.");
+                Value::Null
+            }
+        };
+        let account = match account {
+            Ok(value) => value["account"].clone(),
+            Err(_) => {
+                warnings.push("Account details are unavailable.");
+                Value::Null
+            }
+        };
+        let limits = match limits {
+            Ok(value) => value,
+            Err(_) => {
+                warnings.push("Usage limits are unavailable for this connection.");
+                Value::Null
+            }
+        };
+        let state = self.inner.state.lock().await;
+        if state.thread_id.as_deref() != Some(session_id) {
+            return Err(CodexError::new(
+                "identity-mismatch",
+                "The selected Codex chat changed.",
+            ));
+        }
+        Ok(json!({
+            "runtimeTargetId": self.inner.target_id,
+            "sessionId": session_id,
+            "runtimeVersion": state.runtime_version,
+            "settings": state.thread_settings.get(session_id),
+            "thread": {"id": session_id, "status": thread["status"], "cwd": thread["cwd"], "modelProvider": thread["modelProvider"]},
+            "tokenUsage": state.token_usage.get(session_id),
+            "account": account,
+            "rateLimits": limits["rateLimits"],
+            "rateLimitsByLimitId": limits["rateLimitsByLimitId"],
+            "readOnly": state.read_only_threads.contains(session_id),
+            "warnings": warnings,
+        }))
     }
 
     pub async fn active_session_id(&self) -> Result<String, CodexError> {
@@ -625,6 +704,10 @@ impl CodexAdapter {
                     .filter(|s| !s.is_empty())
                 {
                     state.active_model = Some(model.into());
+                    state
+                        .thread_settings
+                        .entry(session_id.into())
+                        .or_insert_with(|| json!({}))["model"] = json!(model);
                 }
                 if let Some(effort) = payload
                     .get("effort")
@@ -632,6 +715,10 @@ impl CodexAdapter {
                     .filter(|s| !s.is_empty())
                 {
                     state.active_effort = Some(effort.into());
+                    state
+                        .thread_settings
+                        .entry(session_id.into())
+                        .or_insert_with(|| json!({}))["reasoningEffort"] = json!(effort);
                 }
                 if let Some(cwd) = payload
                     .get("cwd")
@@ -639,6 +726,10 @@ impl CodexAdapter {
                     .filter(|s| !s.is_empty())
                 {
                     state.active_cwd = Some(cwd.into());
+                    state
+                        .thread_settings
+                        .entry(session_id.into())
+                        .or_insert_with(|| json!({}))["cwd"] = json!(cwd);
                 }
             }
         }
@@ -1242,12 +1333,24 @@ impl CodexAdapter {
             }
             if let Some(model) = model {
                 state.active_model = Some(model.into());
+                state
+                    .thread_settings
+                    .entry(session_id.into())
+                    .or_insert_with(|| json!({}))["model"] = json!(model);
             }
             if let Some(effort) = effort {
                 state.active_effort = Some(effort.into());
+                state
+                    .thread_settings
+                    .entry(session_id.into())
+                    .or_insert_with(|| json!({}))["reasoningEffort"] = json!(effort);
             }
             if let Some(cwd) = cwd.filter(|value| !value.trim().is_empty()) {
                 state.active_cwd = Some(cwd.into());
+                state
+                    .thread_settings
+                    .entry(session_id.into())
+                    .or_insert_with(|| json!({}))["cwd"] = json!(cwd);
             }
         }
         if let Some(error) = exited_after_accept {
@@ -1374,6 +1477,27 @@ impl CodexAdapter {
             .to_owned();
         let mut state = self.inner.state.lock().await;
         state.thread_id = Some(thread_id.clone());
+        let mut settings = serde_json::Map::new();
+        for key in [
+            "model",
+            "modelProvider",
+            "reasoningEffort",
+            "cwd",
+            "approvalPolicy",
+            "sandbox",
+            "serviceTier",
+        ] {
+            if let Some(value) = result.get(key).or_else(|| thread.get(key)) {
+                settings.insert(key.into(), value.clone());
+            }
+        }
+        state
+            .thread_settings
+            .entry(thread_id.clone())
+            .or_insert_with(|| json!({}))
+            .as_object_mut()
+            .unwrap()
+            .extend(settings);
         state.active_model = result
             .get("model")
             .or_else(|| thread.get("model"))
@@ -1589,6 +1713,19 @@ impl Inner {
     }
 
     async fn handle_notification(self: &Arc<Self>, method: &str, params: Value) {
+        if method == "thread/tokenUsage/updated" {
+            if let (Some(id), Some(usage)) = (
+                params.get("threadId").and_then(Value::as_str),
+                params.get("tokenUsage").filter(|v| v.is_object()),
+            ) {
+                self.state
+                    .lock()
+                    .await
+                    .token_usage
+                    .insert(id.into(), usage.clone());
+            }
+            return;
+        }
         if method == "skills/changed" {
             self.state.lock().await.command_catalogs.clear();
             self.emit("commands.invalidated", None, None, None, json!({}));

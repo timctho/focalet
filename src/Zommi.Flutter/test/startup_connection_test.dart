@@ -21,7 +21,11 @@ ZommiController controllerFor(RichFakeCore core) => ZommiController(
 );
 
 void main() {
-  for (final code in ['core-timeout', 'runtime-unavailable']) {
+  for (final code in [
+    'core-timeout',
+    'runtime-unavailable',
+    'runtime-exited',
+  ]) {
     testWidgets('startup recovers $code without clicking a saved chat', (
       tester,
     ) async {

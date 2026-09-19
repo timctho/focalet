@@ -7,9 +7,13 @@ const codexCommandHelp =
 /goal edit — load the objective into the composer.
 /goal pause or /goal resume — control goal work.
 /goal clear — remove the goal.
+/status — view session details, context usage and account limits.
 /help — show these commands.''';
 
 extension CodexCommands on ZommiController {
+  bool isReadOnlyCodexCommand(String text) =>
+      activeRuntime?.adapterId == 'codex-app-server' &&
+      const ['/status', '/help', '/'].contains(text.trim());
   Future<void> _refreshGoal() async {
     if (activeRuntime?.adapterId != 'codex-app-server' ||
         core is! GoalControlBridge ||
@@ -57,6 +61,7 @@ extension CodexCommands on ZommiController {
   }
 
   void dismissCommandResult() {
+    _statusRequest++;
     commandOutput = null;
     goalPanelOpen = false;
     _notify();
@@ -139,6 +144,56 @@ extension CodexCommands on ZommiController {
       composerValue = TextEditingValue.empty;
       commandComposerEpoch++;
       _notify();
+      return true;
+    }
+    if (command == 'status') {
+      if (argument.isNotEmpty) {
+        _commandError('Use /status without arguments.');
+        return true;
+      }
+      if (core is! SessionStatusBridge) {
+        _commandError('This connection does not support status queries.');
+        return true;
+      }
+      final target = activeRuntime!.id;
+      final session = activeSessionId!;
+      final epoch = _switchEpoch;
+      final request = ++_statusRequest;
+      final draft = composerValue;
+      commandOutput = 'Reading Codex status…';
+      _notify();
+      try {
+        final result = await (core as SessionStatusBridge).sessionStatus(
+          runtimeTargetId: target,
+          sessionId: session,
+        );
+        if (_closed ||
+            request != _statusRequest ||
+            epoch != _switchEpoch ||
+            !_isActiveSession(target, session)) {
+          return true;
+        }
+        if (result['runtimeTargetId'] != target ||
+            result['sessionId'] != session) {
+          throw const CoreProtocolException(
+            'identity-mismatch',
+            'Status belongs to another chat.',
+          );
+        }
+        commandOutput = formatCodexStatus(result);
+        if (composerValue == draft && draft.text.trim() == '/status') {
+          composerValue = TextEditingValue.empty;
+          commandComposerEpoch++;
+        }
+      } on Object catch (error) {
+        if (!_closed &&
+            request == _statusRequest &&
+            epoch == _switchEpoch &&
+            _isActiveSession(target, session)) {
+          _commandError('Could not read /status · $error');
+        }
+      }
+      if (!_closed) _notify();
       return true;
     }
     if (command == 'clear' || command == 'new') {

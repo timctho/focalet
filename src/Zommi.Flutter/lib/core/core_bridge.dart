@@ -162,6 +162,13 @@ abstract interface class RuntimePreparationBridge {
   Future<void> prepareRuntime({required String runtimeTargetId});
 }
 
+abstract interface class SessionStatusBridge {
+  Future<Map<String, Object?>> sessionStatus({
+    required String runtimeTargetId,
+    required String sessionId,
+  });
+}
+
 abstract interface class GoalControlBridge {
   Future<Map<String, Object?>> goalCommand({
     required String runtimeTargetId,
@@ -385,6 +392,7 @@ final class ProcessCoreBridge
         SessionForkBridge,
         SessionRewindBridge,
         GoalControlBridge,
+        SessionStatusBridge,
         RuntimeCommandBridge {
   ProcessCoreBridge({
     this.executablePath,
@@ -637,6 +645,15 @@ final class ProcessCoreBridge
     required String runtimeTargetId,
     required String sessionId,
   }) => _request('session.read', <String, Object?>{
+    'runtimeTargetId': runtimeTargetId,
+    'sessionId': sessionId,
+  });
+
+  @override
+  Future<Map<String, Object?>> sessionStatus({
+    required String runtimeTargetId,
+    required String sessionId,
+  }) => _request('session.status', {
     'runtimeTargetId': runtimeTargetId,
     'sessionId': sessionId,
   });

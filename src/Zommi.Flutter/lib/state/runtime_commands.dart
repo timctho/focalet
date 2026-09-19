@@ -32,7 +32,9 @@ extension RuntimeCommands on ZommiController {
     return commands
         .map((command) {
           if (!command.enabled) return command;
-          if (sessionReadOnly) {
+          if (sessionReadOnly &&
+              !(command.native &&
+                  const ['/status', '/help'].contains(command.text))) {
             return command.disabled('This chat is open elsewhere.');
           }
           if (!command.native && (turnActive || submitting)) {

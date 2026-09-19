@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:zommi_flutter/desktop/capture_shortcut.dart';
 
 enum WindowSizeSetting { standard, wide, maximized }
 
@@ -33,6 +34,7 @@ final class AppPreferences {
     this.customThemeColor = const Color(0xff8178c9),
     this.windowSize = WindowSizeSetting.standard,
     this.runtimeSetupCompleted = true,
+    this.selectionShortcut = CaptureShortcut.standard,
   });
 
   final bool browserPageDetails;
@@ -45,6 +47,7 @@ final class AppPreferences {
       themeColor == ZommiThemeColor.custom ? customThemeColor : themeColor.seed;
   final WindowSizeSetting windowSize;
   final bool runtimeSetupCompleted;
+  final CaptureShortcut selectionShortcut;
 
   AppPreferences copyWith({
     bool? browserPageDetails,
@@ -54,6 +57,7 @@ final class AppPreferences {
     Color? customThemeColor,
     WindowSizeSetting? windowSize,
     bool? runtimeSetupCompleted,
+    CaptureShortcut? selectionShortcut,
   }) => AppPreferences(
     browserPageDetails: browserPageDetails ?? this.browserPageDetails,
     chatFontSize: chatFontSize ?? this.chatFontSize,
@@ -62,6 +66,7 @@ final class AppPreferences {
     customThemeColor: customThemeColor ?? this.customThemeColor,
     windowSize: windowSize ?? this.windowSize,
     runtimeSetupCompleted: runtimeSetupCompleted ?? this.runtimeSetupCompleted,
+    selectionShortcut: selectionShortcut ?? this.selectionShortcut,
   );
 
   Map<String, Object?> toJson() => {
@@ -72,12 +77,14 @@ final class AppPreferences {
     'customThemeColor': customThemeColor.toARGB32(),
     'windowSize': windowSize.name,
     'runtimeSetupCompleted': runtimeSetupCompleted,
+    'selectionShortcut': selectionShortcut.toJson(),
   };
 
   static AppPreferences fromJson(Map<String, Object?> value) {
     final rawFontSize = value['chatFontSize'];
     final fontSize = rawFontSize is num ? rawFontSize.toDouble() : 14.0;
     return AppPreferences(
+      selectionShortcut: CaptureShortcut.fromJson(value['selectionShortcut']),
       // Settings written before the welcome flow belong to an existing install.
       runtimeSetupCompleted:
           !value.containsKey('runtimeSetupCompleted') ||
@@ -120,7 +127,8 @@ final class AppPreferences {
       other.themeMode == themeMode &&
       other.customThemeColor == customThemeColor &&
       other.windowSize == windowSize &&
-      other.runtimeSetupCompleted == runtimeSetupCompleted;
+      other.runtimeSetupCompleted == runtimeSetupCompleted &&
+      other.selectionShortcut == selectionShortcut;
 
   @override
   int get hashCode => Object.hash(
@@ -131,6 +139,7 @@ final class AppPreferences {
     customThemeColor,
     windowSize,
     runtimeSetupCompleted,
+    selectionShortcut,
   );
 }
 

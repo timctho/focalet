@@ -124,10 +124,11 @@ void main() {
 
   for (final code in [
     'runtime-recovering',
+    'runtime-exited',
     'unknown-outcome',
     'runtime-overloaded',
   ]) {
-    test('$code automatically retries only the requested switch', () async {
+    testWidgets('$code automatically retries only the requested switch', (tester) async {
       final core = RecoveryCore()..historyCount = 0;
       final controller = ZommiController(
         core: core,
@@ -143,14 +144,15 @@ void main() {
       expect(controller.activeSessionId, 'session-1');
       expect(controller.composerValue.text, 'keep my draft');
       expect(controller.status, contains('Reconnecting'));
-      await Future<void>.delayed(const Duration(milliseconds: 1100));
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
       expect(controller.activeSessionId, 'session-2');
       expect(
         core.openedSessions.where((s) => s.$2 == 'session-2'),
         hasLength(2),
       );
       expect(core.lastMessage, isNull);
-      await controller.close();
+      await tester.runAsync(controller.close);
     });
   }
 

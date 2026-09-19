@@ -384,6 +384,12 @@ impl HostState {
                 let session_id = required_string(payload, "sessionId")?;
                 Ok(adapter.read_session(session_id).await?)
             }
+            "session.status" => {
+                let adapter = self.exact_adapter(payload)?;
+                Ok(adapter
+                    .session_status(required_string(payload, "sessionId")?)
+                    .await?)
+            }
             "session.goal" => {
                 let adapter = self.exact_adapter(payload)?;
                 let session_id = required_string(payload, "sessionId")?;

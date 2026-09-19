@@ -122,17 +122,17 @@ void main() {
           calls.add(call);
           return null;
         });
-        messenger.setMockMethodCallHandler(
-          native,
-          (call) async => call.method == 'getSurfaceGeometry'
+        messenger.setMockMethodCallHandler(native, (call) async {
+          if (call.method == 'setSelectionShortcut') calls.add(call);
+          return call.method == 'getSurfaceGeometry'
               ? {
                   'bounds': [0, 0, 720, 620],
                   'workArea': [0, 0, 1920, 1080],
                   'scale': 1.0,
                   'maximized': false,
                 }
-              : true,
-        );
+              : true;
+        });
         addTearDown(() {
           for (final channel in [hotkey, hotkeyEvents, window, native, tray]) {
             messenger.setMockMethodCallHandler(channel, null);
@@ -152,6 +152,13 @@ void main() {
         );
         expect(ready.contextShortcut, isTrue);
         expect(ready.imageShortcut, isFalse);
+        if (Platform.isWindows) {
+          expect(calls.single.arguments, {'key': 65, 'modifiers': 1});
+          await bridge.close();
+          expect(calls.last.method, 'setSelectionShortcut');
+          expect(calls.last.arguments, isNull);
+          return;
+        }
         final registration = calls
             .where((call) => call.method == 'register')
             .single;

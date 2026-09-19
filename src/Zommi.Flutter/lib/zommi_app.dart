@@ -162,6 +162,20 @@ class _ZommiAppState extends State<ZommiApp> {
     }
 
     return MaterialApp(
+      builder: (context, child) {
+        if (widget.desktop case final TrayMenuAppearance tray) {
+          final colors = Theme.of(context).colorScheme;
+          tray.setTrayMenuColors(
+            background: colors.surfaceContainerLow,
+            foreground: colors.onSurface,
+            hover: Color.alphaBlend(
+              colors.onSurface.withValues(alpha: .08),
+              colors.surfaceContainerLow,
+            ),
+          );
+        }
+        return child!;
+      },
       debugShowCheckedModeBanner: false,
       title: 'Zommi',
       themeMode: _preferences.themeMode,
@@ -237,6 +251,7 @@ class ZommiShell extends StatefulWidget {
 }
 
 class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
+  final _selectionTooltip = GlobalKey<TooltipState>();
   late final InlineAttachmentTextController _composer;
   String? _composerSessionKey;
   int _lastCommandComposerEpoch = 0;
@@ -464,7 +479,8 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
       return;
     }
     if (text.isEmpty ||
-        _controller.sessionReadOnly ||
+        (_controller.sessionReadOnly &&
+            !_controller.isReadOnlyCodexCommand(_composer.messageText)) ||
         (_controller.submitting && isCommand) ||
         _controller.sessionBusy ||
         _controller.runtimeBusy ||
@@ -1172,19 +1188,31 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  FilledButton.tonalIcon(
-                    key: const ValueKey('select-content'),
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      minimumSize: const Size(0, 36),
-                      shape: const StadiumBorder(),
-                    ),
-                    onPressed: _controller.selectingContent
-                        ? null
-                        : () => unawaited(_controller.addPointerContext()),
-                    icon: const Icon(Icons.ads_click_rounded, size: 18),
-                    label: Text(
-                      _controller.selectingContent ? 'Selecting…' : 'Select',
+                  Tooltip(
+                    key: _selectionTooltip,
+                    message:
+                        'Select content (${widget.preferences.selectionShortcut.label})',
+                    waitDuration: const Duration(milliseconds: 450),
+                    child: GestureDetector(
+                      onSecondaryTap: () => _selectionTooltip.currentState
+                          ?.ensureTooltipVisible(),
+                      child: FilledButton.tonalIcon(
+                        key: const ValueKey('select-content'),
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          minimumSize: const Size(0, 36),
+                          shape: const StadiumBorder(),
+                        ),
+                        onPressed: _controller.selectingContent
+                            ? null
+                            : () => unawaited(_controller.addPointerContext()),
+                        icon: const Icon(Icons.ads_click_rounded, size: 18),
+                        label: Text(
+                          _controller.selectingContent
+                              ? 'Selecting…'
+                              : 'Select',
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -1258,7 +1286,10 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                                 _controller.activeSessionId == null ||
                                 _controller.selectingContent ||
                                 _controller.sessionBusy ||
-                                _controller.sessionReadOnly ||
+                                (_controller.sessionReadOnly &&
+                                    !_controller.isReadOnlyCodexCommand(
+                                      _composer.messageText,
+                                    )) ||
                                 _controller.runtimeBusy
                             ? null
                             : _submit,
