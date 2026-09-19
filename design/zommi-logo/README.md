@@ -1,8 +1,8 @@
 # Zommi logo study
 
-**Recommended: Relay.** Two rounded forms compose a Z around an open diagonal gap. The two sides represent the context on the user's screen and the agent conversation; Zommi carries information between them. This follows the product's existing [context companion intent](../../docs/product-intent.md).
+**Selected: Relay (01), adopted 2026-09-19.** Two rounded forms compose a Z around an open diagonal gap. The two sides represent the context on the user's screen and the agent conversation; Zommi carries information between them. This follows the product's existing [context companion intent](../../docs/product-intent.md).
 
-Open [preview.html](preview.html) for an offline comparison with light, dark and mint backgrounds, actual-size samples and SVG downloads. [directions.png](directions.png) compares the three directions; [relay-brand-board.png](relay-brand-board.png) presents the recommended identity. These are design proposals. The installed application's icons are not changed by this directory.
+Open [preview.html](preview.html) for the original exploration with light, dark and mint backgrounds, actual-size samples and SVG downloads. [directions.png](directions.png) compares the three directions; [relay-brand-board.png](relay-brand-board.png) presents the selected identity. Orbit and Focus remain archived alternatives.
 
 | Direction | Character | Tradeoff |
 | --- | --- | --- |
@@ -38,7 +38,7 @@ Use Ink on light surfaces and white/Paper on dark surfaces. Mint is an optional 
 - `exports/{relay,orbit,focus}/`: transparent ink/white marks and lockups, dark/light/mint app icons at 16, 24, 32, 48, 64, 128, 256, 512 and 1024 px, and Windows ICO files.
 - `zommi-logo-kit.zip`: all three export sets, master vectors, review boards, interactive preview and font license.
 
-The PNG and ICO files are design exports; installing them in the Flutter/Windows/macOS builds is a separate integration step. No runtime logos, tray menu or application behavior are modified.
+The application uses Relay on Mint for its desktop icon and the transparent mark for setup and the macOS menu bar. Windows embeds a multi-resolution ICO; macOS uses its standard optical inset. Flutter, Linux and Windows notification assets are bundled under `assets/branding`. Regenerate production assets with `python scripts/generate_brand_assets.py` (CairoSVG and Pillow). The exploration ZIP remains the original review kit.
 
 ## Rebuilding exports
 

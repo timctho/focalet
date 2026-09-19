@@ -83,10 +83,12 @@ class _FirstRunSetupState extends State<FirstRunSetup> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Icon(
-                      Icons.waving_hand_outlined,
-                      size: 30,
+                    Image.asset(
+                      'assets/branding/mark.png',
+                      width: 36,
+                      height: 36,
                       color: colors.primary,
+                      excludeFromSemantics: true,
                     ),
                     const SizedBox(height: 14),
                     const Text(

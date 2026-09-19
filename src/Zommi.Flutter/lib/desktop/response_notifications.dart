@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
@@ -15,6 +16,11 @@ final class ResponseNotifications {
   int _nextId = DateTime.now().millisecondsSinceEpoch % 0x7fffffff;
   bool _closed = false;
 
+  Uri? get _windowsIconUri => Platform.isWindows
+      ? File(Platform.resolvedExecutable).parent.uri
+            .resolve('data/flutter_assets/assets/branding/app-icon.png')
+      : null;
+
   Future<bool> initialize() => _initialization ??= _initialize();
 
   Future<bool> _initialize() async {
@@ -22,10 +28,11 @@ final class ResponseNotifications {
       final initialized =
           await _plugin.initialize(
             settings: InitializationSettings(
-              windows: const WindowsInitializationSettings(
+              windows: WindowsInitializationSettings(
                 appName: 'Zommi',
                 appUserModelId: 'Zommi.Desktop',
                 guid: 'f67d24b5-b13b-4b5e-aa39-88a40caec356',
+                iconPath: _windowsIconUri?.toFilePath(windows: true),
               ),
               macOS: const DarwinInitializationSettings(
                 requestBadgePermission: false,
@@ -33,6 +40,7 @@ final class ResponseNotifications {
               ),
               linux: LinuxInitializationSettings(
                 defaultActionName: 'Open chat',
+                defaultIcon: AssetsLinuxIcon('assets/branding/app-icon.png'),
                 defaultSound: ThemeLinuxSound('message-new-instant'),
               ),
             ),
@@ -94,6 +102,14 @@ final class ResponseNotifications {
       }),
       notificationDetails: NotificationDetails(
         windows: WindowsNotificationDetails(
+          images: [
+            if (_windowsIconUri case final icon?)
+              WindowsImage(
+                icon,
+                altText: 'Zommi',
+                placement: WindowsImagePlacement.appLogoOverride,
+              ),
+          ],
           audio: WindowsNotificationAudio.preset(
             sound: WindowsNotificationSound.defaultSound,
           ),

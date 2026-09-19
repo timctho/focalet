@@ -1036,7 +1036,9 @@ final class FlutterDesktopBridge
     try {
       final asset = Platform.isWindows
           ? 'windows/runner/resources/app_icon.ico'
-          : 'macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_32.png';
+          : Platform.isMacOS
+          ? 'assets/branding/tray-template.png'
+          : 'assets/branding/app-icon.png';
       final bytes = await rootBundle.load(asset);
       final extension = Platform.isWindows ? 'ico' : 'png';
       final file = File(

@@ -45,6 +45,6 @@ hooks:
 flutter:
   uses-material-design: true
   assets:
+    - assets/branding/
     - assets/runtime_icons/
-    - macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_32.png
     - windows/runner/resources/app_icon.ico

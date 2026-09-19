@@ -1,4 +1,7 @@
-# Zommi
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="design/zommi-logo/exports/relay/lockup-white.svg">
+  <img src="design/zommi-logo/exports/relay/lockup-ink.svg" alt="Zommi" width="240">
+</picture>
 
 [![CI](https://github.com/timctho/zommi/actions/workflows/ci.yml/badge.svg)](https://github.com/timctho/zommi/actions/workflows/ci.yml)
 
