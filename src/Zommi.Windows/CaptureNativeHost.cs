@@ -250,9 +250,11 @@ internal static class CaptureNativeHost
 
     private static object SelectImage(uint returnProcessId)
     {
-        using var selector = new RegionSelectionForm(returnProcessId);
+        // Read the desktop before constructing any topmost/layered selector HWND.
+        using var desktop = ScreenCapture.CaptureBitmap(SystemInformation.VirtualScreen);
+        using var selector = new RegionSelectionForm(returnProcessId, desktop);
         var dialogResult = selector.ShowDialog();
-        if (dialogResult != DialogResult.OK || selector.Result is not { } selected)
+        if (dialogResult != DialogResult.OK || selector.Selections.Count == 0)
         {
             return new
             {
@@ -264,7 +266,7 @@ internal static class CaptureNativeHost
         // overlay leave the compositor before reading pixels and UIA context.
         Application.DoEvents();
         Thread.Sleep(80);
-        return ImageResult(RegionContextCapture.Capture(selected));
+        return CaptureSelections(selector.Selections);
     }
 
     private static object ImageResult(RegionSelectionResult selected) => new
@@ -287,13 +289,19 @@ internal static class CaptureNativeHost
 
     private static object SelectContent(uint returnProcessId)
     {
-        using var selector = new ContentSelectionForm(returnProcessId);
+        using var desktop = ScreenCapture.CaptureBitmap(SystemInformation.VirtualScreen);
+        using var selector = new ContentSelectionForm(returnProcessId, desktop);
         if (selector.ShowDialog() != DialogResult.OK || selector.Selections.Count == 0)
             return new { Cancelled = true, selector.ErrorMessage };
         Application.DoEvents();
         Thread.Sleep(80);
+        return CaptureSelections(selector.Selections);
+    }
+
+    private static object CaptureSelections(IReadOnlyList<ContentSelection> selections)
+    {
         var results = new List<object>();
-        foreach (var selected in selector.Selections)
+        foreach (var selected in selections)
         {
             bool Matches() => NativeCaptureWindow.Bounds(selected.Window) == selected.WindowBounds &&
                 NativeCaptureWindow.Title(selected.Window) == selected.WindowTitle &&
@@ -309,7 +317,7 @@ internal static class CaptureNativeHost
                     return new { Cancelled = true, ErrorMessage = "The selected window changed or is covered. Select the content again." };
                 }
             }
-            results.Add(ImageResult(RegionContextCapture.Capture(selected.Region)));
+            results.Add(ImageResult(AnnotatedCapture.Complete(selected, RegionContextCapture.Capture(selected.Region))));
         }
         return results.Count == 1 ? results[0] : new { Cancelled = false, Selections = results };
     }

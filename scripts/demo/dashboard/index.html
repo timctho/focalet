@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Checkout health · Zommi sample</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#101717;color:#e7eee9;font:17px/1.5 "Segoe UI",Arial,sans-serif}button{font:inherit;cursor:pointer}header{height:80px;display:flex;align-items:center;gap:16px;padding:0 36px;border-bottom:1px solid #293636;background:#131d1c}.brand{width:29px;height:29px;border:2px solid #a0d8c0;border-radius:9px;transform:rotate(-15deg);display:grid;place-items:center;color:#a0d8c0;font-weight:700}header strong{letter-spacing:-.5px;font-size:23px}header span{font-size:13px;color:#8ca59b;border-left:1px solid #3b4b45;padding-left:18px}main{width:1120px;padding:30px 36px}.heading{display:flex;align-items:flex-start;justify-content:space-between}.eyebrow{font-size:12px;letter-spacing:2px;font-weight:700;color:#93c8af}h1{font-size:36px;letter-spacing:-1.2px;line-height:1.2;margin:8px 0 10px}.subtitle{font-size:15px;color:#8ba397;margin:0 0 28px}.refresh{margin-top:21px;background:#243a31;color:#bce6d0;border:1px solid #436251;border-radius:9px;padding:10px 18px}.charts{display:grid;grid-template-columns:1fr 1fr;gap:18px}.panel{background:#172221;border:1px solid #31413b;border-radius:14px;padding:22px 22px 13px;position:relative}.panel-title{font-size:17px;font-weight:600;color:#d6e5dc}.metric{display:flex;align-items:baseline;gap:12px;margin:12px 0 2px}.metric b{font-size:39px;font-weight:600;letter-spacing:-1px}.metric span{font-size:13px;color:#a0b0a5}.red{color:#ff9b80}.green{color:#a3e6c2}.chart{width:100%;height:200px;display:block;margin-top:8px}.panel-foot{border-top:1px solid #2b3a34;padding-top:12px;display:flex;justify-content:space-between;color:#809b8c;font-size:12px}.tag{font:12px ui-monospace,Consolas,monospace;color:#a5bbae}.inspector{margin-top:20px;background:#15201e;border:1px solid #354b3e;border-radius:14px;overflow:hidden}.inspector-head{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #304239;padding:15px 22px}.inspector-head strong{font-size:16px}.inspector-head span{font:12px ui-monospace,Consolas,monospace;color:#83b497}.queries{display:grid;grid-template-columns:1.25fr 1fr;gap:0}.query{padding:19px 22px}.query+.query{border-left:1px solid #2b4036}.query label{font:12px ui-monospace,Consolas,monospace;color:#7dc5a0;display:block;margin-bottom:12px}textarea{display:block;width:100%;height:225px;resize:none;border:0;outline:none;background:transparent;white-space:pre;overflow:auto;font:15px/1.7 ui-monospace,Consolas,monospace;color:#d5e9d9;margin:0;scrollbar-color:#536e5c #15201e}.editor-note{font-size:11px;color:#779a84;margin-top:8px}.source{border-top:1px solid #2b4036;padding:12px 22px;font-size:12px;color:#9bad9f;display:flex;justify-content:space-between}.source b{font-weight:500;color:#d0decf}.note{margin-top:19px;font-size:12px;color:#718e7b}.status{font-size:12px;color:#a6cbb7;margin-top:10px;text-align:right}.error{color:#ff9b80}#query-error{margin:12px 0;white-space:pre-wrap}
+</style>
+<header><div class="brand">z</div><strong>Checkout health</strong><span>Sample analytics workspace</span></header>
+<main>
+<div class="heading"><div><div class="eyebrow">PAYMENTS / OVERVIEW</div><h1>An incident, or a bad metric?</h1><p class="subtitle">Today · 14:00–14:55 UTC · 5 minute buckets · production sample</p></div><button class="refresh" id="refresh">↻ Refresh data</button></div>
+<div class="charts">
+<article class="panel" id="error-panel" aria-label="Checkout error rate chart">
+  <div class="panel-title">Checkout error rate</div><div class="metric"><b class="red" id="rate-value">—</b><span>latest bucket</span></div>
+  <svg class="chart" id="rate-chart" role="img" aria-label="Checkout error rate by five minute bucket"></svg>
+  <div class="panel-foot"><span>Source: checkouts + events</span><span class="tag">error-rate.sql</span></div>
+</article>
+<article class="panel" id="failed-panel" aria-label="Failed checkouts chart">
+  <div class="panel-title">Failed checkouts</div><div class="metric"><b class="green" id="failed-value">—</b><span>out of <span id="total-value">—</span> checkouts</span></div>
+  <svg class="chart" id="failed-chart" role="img" aria-label="Unique failed checkouts by five minute bucket"></svg>
+  <div class="panel-foot"><span>Source: one row per checkout</span><span class="tag">failed-checkouts.sql</span></div>
+</article>
+</div>
+<section class="inspector" id="query-panel" aria-label="Query inspector with raw SQLite queries">
+  <div class="inspector-head"><strong>Query inspector</strong><span>SQLite · live query results</span></div>
+  <div class="queries"><div class="query"><label for="error-query">error-rate.sql</label><textarea id="error-query" readonly aria-label="Complete SQL for error rate"></textarea><div class="editor-note" id="query-lines">Read-only SQL editor</div></div><div class="query"><label for="failed-query">failed-checkouts.sql</label><textarea id="failed-query" readonly aria-label="Complete SQL for failed checkouts"></textarea><div class="editor-note">Read-only SQL editor</div></div></div>
+  <div class="source"><span>Database: <b>demo.sqlite</b></span><span>Grain: <b>one checkout</b> · Intended rate: <b>failed / total</b></span></div>
+</section>
+<div id="query-error" class="error"></div>
+<div class="note">SYNTHETIC DATA · 12,000 sample checkouts · no real accounts or customer data</div>
+<div class="status" id="status">Connecting to local sample data…</div>
+</main>
+<script>
+function chart(id, rows, key, maximum, color, suffix='') {
+  const w=456,h=198,left=38,right=12,top=16,bottom=30;
+  const x=i=>left+i*(w-left-right)/(rows.length-1),y=v=>h-bottom-v/maximum*(h-top-bottom);
+  const points=rows.map((r,i)=>`${x(i)},${y(r[key])}`).join(' ');
+  let content='';
+  for(let i=0;i<=3;i++){const value=maximum*i/3,yy=y(value);content+=`<line x1="${left}" x2="${w-right}" y1="${yy}" y2="${yy}" stroke="#2b3b34"/><text x="28" y="${yy+4}" fill="#8aa392" font-size="10" text-anchor="end">${Math.round(value)}${suffix}</text>`}
+  content+=`<line x1="${x(6)}" x2="${x(6)}" y1="${top}" y2="${h-bottom}" stroke="#6f6550" stroke-dasharray="3 4"/><text x="${x(6)+7}" y="${top+10}" fill="#ae9873" font-size="10">14:30</text>`;
+  content+=`<polygon points="${left},${h-bottom} ${points} ${w-right},${h-bottom}" fill="${color}" opacity=".07"/><polyline points="${points}" fill="none" stroke="${color}" stroke-width="3" stroke-linejoin="round"/>`;
+  rows.forEach((r,i)=>{content+=`<circle cx="${x(i)}" cy="${y(r[key])}" r="3" fill="${color}"><title>${r.minute}: ${r[key]}${suffix}</title></circle>`;if(i%3===0||i===rows.length-1)content+=`<text x="${x(i)}" y="${h-8}" fill="#8aa392" font-size="10" text-anchor="middle">${r.minute}</text>`});
+  const svg=document.getElementById(id);svg.setAttribute('viewBox',`0 0 ${w} ${h}`);svg.innerHTML=content;
+}
+async function refresh(){
+  const response=await fetch('/api/dashboard'),data=await response.json();
+  if(!response.ok){document.getElementById('query-error').textContent=data.error;return}
+  document.getElementById('query-error').textContent='';
+  const [rate,failed]=data.panels;
+  document.getElementById('rate-value').textContent=rate.rows.at(-1).error_rate.toFixed(2)+'%';
+  document.getElementById('failed-value').textContent=failed.rows.at(-1).failed;
+  document.getElementById('total-value').textContent=failed.rows.at(-1).total.toLocaleString();
+  document.getElementById('error-query').value=rate.query;
+  document.getElementById('query-lines').textContent=rate.query.trim().split('\n').length+' lines · scroll to inspect';
+  document.getElementById('failed-query').value=failed.query;
+  chart('rate-chart',rate.rows,'error_rate',15,'#fba082','%');
+  chart('failed-chart',failed.rows,'failed',30,'#8ad9b3');
+  document.getElementById('status').textContent='Queries executed · 12 buckets loaded';
+  window.dashboardData=data;
+}
+document.getElementById('refresh').onclick=refresh;refresh();
+</script>
+</html>

@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Zommi context dataflow illustration</title>
+<style>
+*{box-sizing:border-box}body{margin:0;width:1920px;height:1080px;overflow:hidden;background:#f1f3ec;color:#193e30;font-family:Arial,"Segoe UI",sans-serif}.grid{position:absolute;inset:0;opacity:.18;background-image:radial-gradient(#5b8b6a 1px,transparent 1px);background-size:24px 24px}.top{position:absolute;left:100px;top:76px;right:100px;display:flex;justify-content:space-between;font-size:20px;letter-spacing:2px;font-weight:700}.top span:last-child{font-size:15px;font-weight:400;letter-spacing:.6px;color:#5a7967}h1{position:absolute;left:100px;top:135px;font-size:62px;line-height:1.12;letter-spacing:-2.4px;margin:0;max-width:1500px}h1 span{color:#6e8a74}.sub{position:absolute;left:100px;top:290px;font-size:24px;color:#607968}.node{position:absolute;border-radius:20px;border:1px solid #cbd6c7;background:#fffef8;box-shadow:0 12px 40px #214a3020;padding:26px}.sources{left:100px;top:402px;width:395px;height:475px;background:#e7eddf}.context{left:659px;top:402px;width:452px;height:475px}.agent{left:1280px;top:402px;width:536px;height:475px;background:#1b4434;color:#e6f2e7}.kicker{font-size:14px;font-weight:700;letter-spacing:1.7px;color:#64816a;margin-bottom:18px}.node h2{font-size:32px;margin:0 0 19px;letter-spacing:-1px}.capture{background:#f9fbf3;border:1px solid #c4d4c0;border-radius:12px;padding:16px;margin-top:14px;display:flex;align-items:center;gap:18px;font-size:20px}.label{border-radius:8px;background:#d8e6cb;color:#3c6041;width:35px;height:35px;display:grid;place-items:center;font-size:19px;font-weight:700}.capture small{display:block;font-size:14px;color:#71866f;margin-top:5px}.query{font:14px/1.7 Consolas,monospace;color:#577c58}.row{border-bottom:1px solid #dee5d6;padding:17px 0;font-size:22px;display:flex;gap:13px;align-items:center}.row span{color:#437549;font-weight:700}.stamp{font-size:15px;line-height:1.6;color:#7a8f77;margin-top:20px}.agent .kicker{color:#9bc5a1}.agent h2{color:#f2f8eb}.tool{display:flex;gap:15px;align-items:center;padding:15px 0;border-bottom:1px solid #416150;font-size:22px}.number{font-size:15px;color:#a8d6b2;border:1px solid #58856a;border-radius:50%;width:29px;height:29px;display:grid;place-items:center}.tool small{display:block;font-size:14px;color:#99bda4;margin-top:7px}.permission{font-size:15px;color:#a5c2ae;margin-top:22px}.footer{position:absolute;left:100px;right:104px;top:943px;display:flex;justify-content:space-between;color:#617d66;font-size:17px}.pill{background:#dce8d4;border:1px solid #c1d2b7;border-radius:20px;padding:7px 14px;font-size:15px;color:#53724f}.connector{position:absolute;inset:0}.phase{position:absolute;top:357px;font-size:17px;letter-spacing:1px;color:#547751}.phase.one{left:100px}.phase.two{left:659px}.phase.three{left:1280px}#preview{position:absolute;bottom:15px;left:0;right:0;text-align:center;font-size:18px;color:#995123;letter-spacing:2px}.packet{fill:#487b50}.path{fill:none;stroke:#87a178;stroke-width:2.5;stroke-dasharray:9 8}
+</style>
+<div class="grid"></div><div class="top"><span>zommi / inside the handoff</span><span>DATAFLOW ILLUSTRATION · agent wait trimmed</span></div>
+<h1>The context travels<br><span>with the crop.</span></h1>
+<div class="sub">Your selections keep their meaning, all the way to the fix.</div>
+<svg class="connector" width="1920" height="1080"><path class="path" d="M495 641H659"/><path class="path" d="M1111 641H1280"/><path d="M648 631l11 10-11 10M1269 631l11 10-11 10" fill="none" stroke="#688b5d" stroke-width="3"/><circle class="packet" id="packet1" r="7" cy="641"/><circle class="packet" id="packet2" r="7" cy="641"/></svg>
+<div class="phase one">01 / YOU SELECT</div><div class="phase two">02 / ZOMMI CAPTURES</div><div class="phase three">03 / YOUR AGENT ACTS</div>
+<section class="node sources" id="sources"><div class="kicker">THREE LINKED REFERENCES</div><h2>Point to the evidence.</h2>
+<div class="capture"><span class="label">A</span><div>The spike<small>Chart + metric labels</small></div><svg width="70" height="40" viewBox="0 0 70 40"><path d="M0 32H25L40 8H70" fill="none" stroke="#b17552" stroke-width="3"/></svg></div>
+<div class="capture"><span class="label">B</span><div>The comparison<small>Failed / total checkouts</small></div></div>
+<div class="capture"><span class="label">C</span><div>Full editor contents<small class="query">LEFT JOIN checkout_events …</small></div></div></section>
+<section class="node context" id="context"><div class="kicker">IMAGES + STRUCTURED CONTEXT</div><h2>A shared context bundle.</h2>
+<div class="row"><span>↗</span> Source page & selected regions</div><div class="row"><span>≡</span> Full SQL editor values</div><div class="row"><span>⌘</span> Labels, values & relationships</div><div class="row"><span>◷</span> Capture time & pixel mapping</div>
+<div class="stamp" id="proof">Native capture evidence required before export.</div></section>
+<section class="node agent" id="agent"><div class="kicker">EXISTING AGENT + ITS TOOLS</div><h2>Trace it. Fix it. Verify it.</h2>
+<div class="tool"><span class="number">1</span><div>Query the source data<small>Investigate demo.sqlite</small></div></div>
+<div class="tool"><span class="number">2</span><div>Correct the query & graph<small>Edit the actual workspace files</small></div></div>
+<div class="tool"><span class="number">3</span><div>Run again & check the result<small>The dashboard renders live query results</small></div></div>
+<div class="permission">Uses the agent's own tools and permissions.</div></section>
+<div class="footer"><span>Query Inspector exposes the SQL; Zommi captures it. The agent performs the database analysis and edits.</span><span class="pill">illustration, not app UI</span></div>
+<div id="preview">STORYBOARD PREVIEW · NOT A COMPLETED RECORDING</div>
+<script>
+let scene='dashboard';
+window.setScene=function(name){
+ if(!['dashboard','amazon','sheets'].includes(name))throw new Error('Unknown demo scene');
+ scene=name;
+ if(name==='dashboard')return;
+ const content=name==='amazon'?{
+  references:[['A','The first dock','Exact product + selected variant'],['B','The second dock','Exact product + selected variant'],['C','This laptop','Official display specifications']],
+  heading:'Keep the exact products.',
+  rows:['Images of your selections','Product links & source pages','Available titles, values & labels','Capture time & pixel mapping'],
+  tools:[['Open the exact listings','Follow the captured product links'],['Check the setup constraints','Read compatibility and accessory details'],['Compare with source links','Explain requirements and uncertainty']],
+  footer:'Zommi captures the references. Your agent follows the links and investigates the actual products.'
+ }:{
+  references:[['A','These incorrect totals','Rows, headers & status'],['B','This correct example','A reference for the intended formula'],['→','Then edit here','A new selection in the same sheet']],
+  heading:'Keep the same sheet.',
+  rows:['Images of selected cells','Source document & active tab','Available row and header context','A fresh follow-up selection'],
+  tools:[['Read the live cells','Inspect formulas in the source sheet'],['Apply both requested edits','Fix totals, then fill remaining balances'],['Reread and recalculate','Check formulas, exceptions & highlights']],
+  footer:'Zommi shares the selected context. Your agent uses its browser or Sheets tools to read and edit live cells.'
+ };
+ document.querySelector('.sources h2').textContent=content.heading;
+ document.querySelector('.sources .kicker').textContent=name==='sheets'?'TWO TURNS, ONE DOCUMENT':'THREE LINKED REFERENCES';
+ document.querySelectorAll('.capture').forEach((node,i)=>{const [label,title,detail]=content.references[i];node.innerHTML=`<span class="label">${label}</span><div>${title}<small>${detail}</small></div>`});
+ document.querySelector('.context .kicker').textContent='IMAGES + AVAILABLE CONTEXT';
+ document.querySelectorAll('.row').forEach((node,i)=>{node.innerHTML=`<span>↗</span>${content.rows[i]}`});
+ document.querySelectorAll('.tool').forEach((node,i)=>{const [title,detail]=content.tools[i];node.innerHTML=`<span class="number">${i+1}</span><div>${title}<small>${detail}</small></div>`});
+ document.querySelector('.footer span').textContent=content.footer;
+};
+window.setEvidence=function(proof){
+ if(['two-region-layout','contrasting-layouts'].includes(proof?.scenario)){
+  const contrast=proof.scenario==='contrasting-layouts';
+  if(contrast&&proof.referenceStylesVerified!==true)throw new Error('Each reference must receive its own requested layout');
+  if(scene!=='sheets'||proof.captureCount!==2||proof.agentCompleted!==true||proof.documentVerified!==true||proof.layoutVerified!==true||proof.blocksFormatted!==2||proof.unchangedDataVerified!==true)throw new Error('Two native selections and verified live layout edits are required');
+  if(!Array.isArray(proof.referenceLabels)||proof.referenceLabels.length!==2||new Set(proof.referenceLabels).size!==2||proof.referenceLabels.some(label=>!/^[A-Z]+$/.test(label)))throw new Error('Actual native reference labels are required');
+  document.querySelector('h1').innerHTML=contrast?'Two selections.<br><span>Two different instructions.</span>':'These two areas.<br><span>One clear request.</span>';
+  document.querySelector('.sub').textContent=contrast?'Each reference keeps its identity, from your request to the live edit.':'Point to both blocks. Let your agent find and format the live cells.';
+  document.querySelector('.sources .kicker').textContent='TWO REGIONS, ONE REQUEST';
+  document.querySelector('.sources h2').textContent='Roughly here, and here.';
+  document.querySelectorAll('.capture').forEach((node,i)=>{if(i===2){node.style.display='none';return}node.innerHTML='<span class="label">'+proof.referenceLabels[i]+'</span><div>'+['The budget block','The schedule block'][i]+'<small>'+(contrast?['Compact · navy headers','Spacious · orange · larger text'][i]:'Loose outline, extra space included')+'</small></div>'});
+  document.querySelector('.context h2').textContent=contrast?'Keep '+proof.referenceLabels.join(' and ')+' distinct.':'The same source sheet.';
+  const rows=contrast?[proof.referenceLabels[0]+' → the selected budget block',proof.referenceLabels[1]+' → the selected schedule block','Source document identity','Images & pixel mapping']:['Two selected images','Source document identity','Available sheet context','Capture time & pixel mapping'];
+  document.querySelectorAll('.row').forEach((node,i)=>node.innerHTML='<span>↗</span>'+rows[i]);
+  document.querySelector('.agent h2').textContent=contrast?'The right edit, in each place.':'Make the layout clear.';
+  const steps=contrast?[[proof.referenceLabels[0]+': a compact table','Navy headers, compact rows'],[proof.referenceLabels[1]+': a spacious agenda','Orange headers, taller rows, larger text'],['Verify both references','Correct styles; values and formulas preserved']]:[['Find both blocks','Read the actual cells with browser tools'],['Style the live sheet','Clear headings, widths and striped rows'],['Verify the result','Both blocks changed; values preserved']];
+  document.querySelectorAll('.tool').forEach((node,i)=>node.innerHTML='<span class="number">'+(i+1)+'</span><div>'+steps[i][0]+'<small>'+steps[i][1]+'</small></div>');
+  document.getElementById('proof').textContent=contrast?proof.referenceLabels.join(' and ')+' verified separately · 1 request':'2 native selections · 1 completed layout request';
+  document.querySelector('.footer span').textContent='Zommi identifies the selected context. The existing agent reads and formats the actual Google Sheet.';
+  document.getElementById('preview').style.display='none';return;
+ }
+ if(proof?.scenario==='latency-spike'||proof?.scenario==='listing-grid'||(scene==='sheets'&&proof?.firstTurnCaptureCount===1)){
+  if(proof.agentCompleted!==true)throw new Error('Completed native handoff and actual agent work required');
+  const dashboard=proof.scenario==='latency-spike',amazon=proof.scenario==='listing-grid';
+  if(dashboard&&(scene!=='dashboard'||proof.captureCount!==1||!proof.fullQueryVerified||!proof.spikeIntervalVerified||proof.queryEditorSelected!==false||!proof.dataVerified))throw new Error('A spike-only crop, full captured query and database analysis are required');
+  if(amazon&&(scene!=='amazon'||proof.captureCount!==1||proof.candidateCount<3||proof.productDetailsRead!==proof.candidateCount||proof.productLinksVerified!==proof.candidateCount))throw new Error('All selected candidates must be captured and investigated');
+  if(!dashboard&&!amazon&&(!proof.documentVerified||!proof.formulasVerified||!proof.unchangedRowsVerified||!proof.recalculationVerified||!proof.conditionalFormatVerified||proof.followupCaptureCount!==1))throw new Error('Both sheet edits and recalculation must be verified');
+  const content=dashboard?{
+   title:'Just the spike.',detail:'14:30–14:40 UTC',heading:'The chart keeps its meaning.',
+   rows:['The selected time interval','Metric, units & point values','The complete executed SQL','Source page & pixel mapping'],
+   tools:[['Run the captured query','Verify the 256 → 1,450 ms spike'],['Compare the source data','Region, timing and component latency'],['Explain the evidence','Pool change, affected traffic, recovery']],
+   proof:'1 crop · full query · exactly 3 selected data points',
+   footer:'This sample chart exposes its executed SQL as standard accessibility metadata. Query Inspector was not selected.'
+  }:amazon?{
+   title:'The whole candidate row.',detail:proof.candidateCount+' products · one loose rectangle',heading:'Keep every exact product.',
+   rows:['One image of the listing grid','Links for all selected candidates','Available product labels','Source page & pixel mapping'],
+   tools:[['Open the exact products','Follow the captured links'],['Check compatibility','Independent displays on the M1 Air'],['Compare with sources','Explain which listings meet the need']],
+   proof:proof.candidateCount+' captured products · all detail pages checked',
+   footer:'One native grid capture supplies the product identities. The agent reads full details with its browser tools.'
+  }:{
+   title:'Roughly this area.',detail:'No need to trace cell borders',heading:'Keep the same live sheet.',
+   rows:['The loosely selected area','Source document identity','Available row and header context','A fresh follow-up selection'],
+   tools:[['Read the real formulas','Find the intended rows in the sheet'],['Make the requested edits','Totals, then remaining balances'],['Recalculate and verify','540 → 440 → 540; highlight updates']],
+   proof:'2 loose selections · 2 verified edits in the same sheet',
+   footer:'The agent uses the captured document identity and browser tools to read and edit the actual cells.'
+  };
+  document.querySelector('.sources .kicker').textContent=dashboard?'ONE SPIKE SELECTION':amazon?'ONE GRID SELECTION':'TWO TURNS, ONE DOCUMENT';
+  document.querySelector('.sources h2').textContent=content.title;
+  document.querySelectorAll('.capture').forEach((node,i)=>{if(i){node.style.display='none';return}node.style.height='165px';node.innerHTML='<span class="label">'+(proof.referenceLabels?.[0]||'A')+'</span><div>'+content.detail+'</div>'});
+  document.querySelector('.context h2').textContent=content.heading;
+  document.querySelectorAll('.row').forEach((node,i)=>node.innerHTML='<span>↗</span>'+content.rows[i]);
+  document.querySelector('.agent h2').textContent=dashboard?'Find the cause.':amazon?'Check the actual details.':'Edit. Keep going.';
+  document.querySelectorAll('.tool').forEach((node,i)=>node.innerHTML='<span class="number">'+(i+1)+'</span><div>'+content.tools[i][0]+'<small>'+content.tools[i][1]+'</small></div>');
+  document.querySelector('.footer span').textContent=content.footer;
+  document.getElementById('proof').textContent=content.proof;
+  document.getElementById('preview').style.display='none';return;
+ }
+ if(scene==='amazon'){
+  if(proof?.scene!=='amazon'||proof?.captureCount!==3||proof?.productLinksVerified!==2||proof?.laptopSourceVerified!==true||proof?.productDetailsRead!==2||proof?.agentCompleted!==true)throw new Error('Verified native product references and actual agent investigation required');
+  if(!Array.isArray(proof.referenceLabels)||proof.referenceLabels.length!==3||new Set(proof.referenceLabels).size!==3||proof.referenceLabels.some(label=>!/^\[?[A-Z]+\]?$/.test(label)))throw new Error('Actual capture reference labels required');
+  document.querySelectorAll('.capture .label').forEach((node,i)=>node.textContent=proof.referenceLabels[i]);
+  document.getElementById('proof').textContent='2 exact products + laptop context · real follow-up browsing';
+ }else if(scene==='sheets'){
+  if(proof?.scene!=='sheets'||proof?.firstTurnCaptureCount!==2||proof?.followupCaptureCount!==1||proof?.agentCompleted!==true||proof?.documentVerified!==true||proof?.formulasVerified!==true||proof?.unchangedRowsVerified!==true||proof?.recalculationVerified!==true||proof?.conditionalFormatVerified!==true)throw new Error('Both native handoffs and verified live sheet edits required');
+  document.getElementById('proof').textContent='Same source sheet · both edits and live recalculation verified';
+ }else{
+ if(proof?.captureCount!==3||proof?.domContextCount!==3||proof?.rawQueriesVerified!==2||proof?.fullEditorValues!==2||proof?.agentCompleted!==true||proof?.queryChanged!==true||proof?.dataVerified!==true)throw new Error('Completed native capture and agent evidence required');
+ document.getElementById('proof').textContent='3 linked captures · complete SQL values, including lines outside the view';
+ }
+ document.getElementById('preview').style.display='none';
+};
+window.render=function(time){
+ const ease=x=>{x=Math.max(0,Math.min(1,x));return 1-Math.pow(1-x,3)};
+ for(const [id,start] of [['sources',0],['context',1.4],['agent',3.2]]){const p=ease((time-start)/.7),n=document.getElementById(id);n.style.opacity=p;n.style.transform=`translateY(${(1-p)*24}px)`}
+ for(const [id,start,x,width] of [['packet1',1.0,495,164],['packet2',2.8,1111,169]]){const p=(time-start)%1.25/1.25,n=document.getElementById(id);n.setAttribute('cx',x+Math.max(0,p)*width);n.style.opacity=time<start||time>6.8?0:Math.sin(p*Math.PI)}
+};render(0);
+</script></html>

@@ -10,6 +10,14 @@ import 'package:zommi_flutter/theme/app_preferences.dart';
 
 void main() {
   setUp(() {
+    // These unit tests have no Windows runner. A missing native response can
+    // otherwise wait on the widget test's fake event loop; individual native
+    // surface tests replace this fallback with their explicit channel contract.
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('zommi/window_animation'),
+          (_) async => null,
+        );
     // macOS hides through its native capture channel instead of window_manager.
     // Mock both paths so these provider tests never wait on the host OS.
     const capture = MethodChannel('zommi/capture_permissions');
@@ -20,6 +28,11 @@ void main() {
         });
   });
   tearDown(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('zommi/window_animation'),
+          null,
+        );
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
           const MethodChannel('zommi/capture_permissions'),
@@ -608,6 +621,8 @@ void main() {
         }
       }
     },
+    // Windows uses the separately tested native surface transition.
+    skip: Platform.isWindows,
   );
 
   for (final pixelRatio in [1.0, 1.25, 1.5, 2.0]) {
@@ -1245,24 +1260,25 @@ void main() {
         'zommi-wayland-shortcut-test-',
       );
       addTearDown(() => directory.delete(recursive: true));
-      final script = File('${directory.path}/portal-fixture.sh');
+      final script = File('${directory.path}/portal_fixture.py');
       await script.writeAsString('''
-printf '%s\n' '{"event":"ready","contextShortcut":true,"imageShortcut":false}'
-printf '%s\n' '{"event":"activated","shortcutId":"context"}'
-printf '%s\n' '{"event":"activated","shortcutId":"image"}'
-while read -r line; do :; done
+import sys
+print('{"event":"ready","contextShortcut":true,"imageShortcut":false}', flush=True)
+print('{"event":"activated","shortcutId":"context"}', flush=True)
+print('{"event":"activated","shortcutId":"image"}', flush=True)
+sys.stdin.read()
 ''');
       final client = ProcessWaylandPortalShortcutClient(
-        '/bin/sh',
+        Platform.isWindows ? 'python' : 'python3',
         argumentsBeforeCommand: [script.path],
       );
+      addTearDown(client.close);
       final activations = client.activations.take(1).toList();
 
       final readiness = await client.initialize();
       expect(readiness.contextShortcut, isTrue);
       expect(readiness.imageShortcut, isFalse);
       expect(await activations, ['context']);
-      await client.close();
     },
   );
 

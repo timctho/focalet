@@ -12,7 +12,8 @@ The publisher never uploads the source checkout or desktop acceptance evidence.
 
 ## Build and accept one revision
 
-Keep the shared runners disabled. Build Windows locally with
+Run `python3 scripts/check.py` and require the PR checks for the revision first.
+Keep persistent runners reserved for operator-invoked native acceptance. Build Windows locally with
 `scripts/package-windows.ps1 -Runtime win-x64`, then run the packaged Windows
 acceptance scripts. The package bundles MSVC and .NET runtime libraries.
 
@@ -37,7 +38,7 @@ This requires an interactive Windows desktop and PowerShell 7, and refuses to
 overwrite an already registered Zommi installation. Existing portable Zommi
 processes are suspended and restored by the capture acceptance helper.
 
-For each Mac architecture, dispatch the existing native CI workflow on the same
+For each Mac architecture, dispatch the manual Native acceptance workflow on the same
 main revision:
 
 ```sh

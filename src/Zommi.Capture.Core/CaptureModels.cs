@@ -138,4 +138,6 @@ public sealed record ContextSnapshot
     public RegionSpatialContext? SpatialContext { get; init; }
 
     public CapturedRegionContext? RegionContext { get; init; }
+
+    public ImageAnnotationInfo? ImageAnnotations { get; init; }
 }

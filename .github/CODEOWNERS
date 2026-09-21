@@ -1,0 +1,6 @@
+# Workflow or public-media changes need a maintainer's review when code-owner
+# review is enabled in the repository's branch rules.
+/.github/ @timctho
+/scripts/check.py @timctho
+/tests/test_contributor_checks.py @timctho
+/docs/demos/ @timctho

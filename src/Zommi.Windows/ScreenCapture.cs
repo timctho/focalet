@@ -16,11 +16,7 @@ internal static class ScreenCapture
             throw new ArgumentException("The screen capture area must have a positive size.", nameof(screenArea));
         }
 
-        using var source = new Bitmap(screenArea.Width, screenArea.Height, PixelFormat.Format32bppArgb);
-        using (var graphics = Graphics.FromImage(source))
-        {
-            CopyFromDesktop(graphics, screenArea);
-        }
+        using var source = CaptureBitmap(screenArea);
 
         var scale = Math.Min(1d, maximumDimension / (double)Math.Max(source.Width, source.Height));
         if (scale >= 1d)
@@ -44,7 +40,19 @@ internal static class ScreenCapture
         return EncodePng(resized);
     }
 
-    private static byte[] EncodePng(Image image)
+    public static Bitmap CaptureBitmap(Rectangle screenArea)
+    {
+        var image = new Bitmap(screenArea.Width, screenArea.Height, PixelFormat.Format32bppArgb);
+        try
+        {
+            using var graphics = Graphics.FromImage(image);
+            CopyFromDesktop(graphics, screenArea);
+            return image;
+        }
+        catch { image.Dispose(); throw; }
+    }
+
+    internal static byte[] EncodePng(Image image)
     {
         using var stream = new MemoryStream();
         image.Save(stream, ImageFormat.Png);

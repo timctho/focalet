@@ -55,6 +55,12 @@ public static class ZommiWindowsAcceptanceNative
         return true;
     }
 
+    public static void ConfirmSelection(IntPtr window)
+    {
+        PostMessage(window, 0x100, new IntPtr(13), IntPtr.Zero);
+        PostMessage(window, 0x101, new IntPtr(13), IntPtr.Zero);
+    }
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
 
@@ -699,9 +705,10 @@ public static class ZommiWindowsAcceptanceNative
             var edge = GetPixel(memory, 0, 0);
             var outside = GetPixel(memory, 5, 0);
             if (queued) return edge != 0xffffffff &&
-                ((edge >> 16) & 255) > (edge & 255) + 35 && ((edge >> 8) & 255) > (edge & 255) + 20;
+                ((edge >> 8) & 255) > (edge & 255) + 18 && ((edge >> 16) & 255) > (edge & 255) + 8;
             return edge != 0xffffffff && outside != 0xffffffff &&
-                (edge & 255) > (outside & 255) + 80;
+                ((edge >> 8) & 255) > ((outside >> 8) & 255) + 60 &&
+                ((edge >> 8) & 255) > (edge & 255) + 18;
         }
         finally
         {
@@ -1453,6 +1460,7 @@ function Invoke-PackagedApplicationAcceptance {
             # The content picker instructs the user to draw a rectangle; a
             # single click intentionally leaves it open without an attachment.
             [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector, 180, 200, 530, 240)
+            [ZommiWindowsAcceptanceNative]::ConfirmSelection($selector)
             $contextResult = Wait-ForAcceptanceEvent `
                 -Path $acceptanceLog `
                 -Name 'selection.content' `
@@ -1549,6 +1557,7 @@ function Invoke-PackagedApplicationAcceptance {
                 throw 'Packaged image selector lost its topmost foreground state.'
             }
             [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector, 180, 200, 220, 230)
+            [ZommiWindowsAcceptanceNative]::ConfirmSelection($selector)
             $imageResult = Wait-ForAcceptanceEvent `
                 -Path $acceptanceLog `
                 -Name 'selection.content' `
@@ -1842,6 +1851,7 @@ try {
         param($process)
         $window = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi image selection'
         [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($window, 200, 200, 240, 230)
+        [ZommiWindowsAcceptanceNative]::ConfirmSelection($window)
     }
 } finally {
     $imageFixture.Dispose()

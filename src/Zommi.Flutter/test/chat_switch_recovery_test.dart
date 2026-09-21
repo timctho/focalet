@@ -128,7 +128,9 @@ void main() {
     'unknown-outcome',
     'runtime-overloaded',
   ]) {
-    testWidgets('$code automatically retries only the requested switch', (tester) async {
+    testWidgets('$code automatically retries only the requested switch', (
+      tester,
+    ) async {
       final core = RecoveryCore()..historyCount = 0;
       final controller = ZommiController(
         core: core,

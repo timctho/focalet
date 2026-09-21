@@ -62,6 +62,7 @@ foreach ($case in $cases) {
                 $top = if ($case -eq 'partial') { 210 } else { 195 }
                 [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector, 175, $top, 535, 315)
             }
+            [ZommiWindowsAcceptanceNative]::ConfirmSelection($selector)
         }
         if ($result.cancelled -or $result.dataUrl -notlike 'data:image/png;base64,*') { throw "$case did not attach the selected image." }
         if ($result.snapshot.source.nativeWindowId -ne $fixture.Window.ToString() -or

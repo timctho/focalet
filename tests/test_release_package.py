@@ -410,9 +410,14 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertNotIn("graphics.CopyFromScreen", source)
 
     def test_windows_selector_forces_initial_foreground_and_stays_topmost(self) -> None:
-        source = (SCRIPTS.parent / "src/Zommi.Windows/RegionSelectionForm.cs").read_text(
-            encoding="utf-8"
-        )
+        native = SCRIPTS.parent / "src/Zommi.Windows"
+        region = (native / "RegionSelectionForm.cs").read_text(encoding="utf-8")
+        content = (native / "ContentSelectionForm.cs").read_text(encoding="utf-8")
+        self.assertIn(": ContentSelectionForm(returnProcessId, capturedDesktop, 1)", region)
+        self.assertIn("base.OnShown(e);", region)
+        self.assertIn("ContentSelectionForm : PointSelectionForm", content)
+        # Both selectors inherit foreground ownership from the shared form.
+        source = (native / "PointSelectionForm.cs").read_text(encoding="utf-8")
         for contract in (
             "flags |= NoActivate",
             "ForceForeground();",

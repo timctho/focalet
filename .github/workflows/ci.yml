@@ -1,10 +1,6 @@
-name: CI
+name: Native acceptance
 
 on:
-  pull_request:
-  push:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       run_shared_runners:
@@ -84,51 +80,11 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      - name: Check Rust core
-        run: |
-          cargo fmt --all -- --check
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo test --workspace --all-targets
-          cargo build --workspace --bins
+      - name: Install test policy dependencies
+        run: python3 -m pip install -r tests/requirements.txt
 
-      - name: Restore Flutter dependencies
-        working-directory: src/Zommi.Flutter
-        run: flutter pub get
-
-      - name: Analyze and test Flutter UI
-        working-directory: src/Zommi.Flutter
-        run: |
-          dart format --output=none --set-exit-if-changed lib test
-          flutter analyze --no-pub
-          # The self-hosted image has the SQLite runtime, but no -dev linker
-          # symlink. Native release packaging provides this same alias.
-          sqlite_library=$(ldconfig -p | awk '$1 == "libsqlite3.so.0" {print $NF; exit}')
-          test -f "$sqlite_library"
-          mkdir -p "$RUNNER_TEMP/zommi-sqlite"
-          ln -sf "$sqlite_library" "$RUNNER_TEMP/zommi-sqlite/libsqlite3.so"
-          export LD_LIBRARY_PATH="$RUNNER_TEMP/zommi-sqlite${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-          flutter test --no-pub --concurrency=4
-
-      - name: Test release package contracts
-        run: |
-          node --check scripts/zommi-wsl-relay.js
-          node --test tests/wsl_relay.test.mjs
-          python3 -m py_compile scripts/assemble_release.py scripts/verify_release.py tests/test_release_package.py
-          python3 tests/test_release_package.py -v
-          python3 tests/test_public_release.py -v
-          python3 tests/test_linux_startup_smoke.py -v
-          python3 tests/test_codex_history_repair.py -v
-          python3 tests/test_codex_home_persistence.py -v
-          python3 tests/test_runtime_commands.py -v
-          bash -n scripts/package-unix.sh scripts/package-linux-self-hosted.sh scripts/smoke-linux-release.sh
-
-      - name: Build Windows capture helper
-        run: |
-          dotnet run --project tests/Zommi.Capture.Tests/Zommi.Capture.Tests.csproj --configuration Release
-          dotnet build src/Zommi.Windows/Zommi.Windows.csproj --configuration Release
-
-      - name: Exercise browser DOM capture and element selection
-        run: bash scripts/test-browser-capture.sh
+      - name: Run contributor checks
+        run: python3 scripts/check.py
 
   release_linux:
     name: Native release (linux)

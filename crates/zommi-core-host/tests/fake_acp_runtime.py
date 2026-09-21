@@ -5,6 +5,10 @@ import json
 import os
 import sys
 
+# The runtime wire protocol is UTF-8, including on Windows redirected pipes.
+sys.stdin.reconfigure(encoding="utf-8")
+sys.stdout.reconfigure(encoding="utf-8")
+
 
 session_id = os.environ.get("ZOMMI_FAKE_ACP_SESSION", "acp-session-new")
 pending_prompt = None

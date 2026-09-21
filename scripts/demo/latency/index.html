@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Checkout latency · Sample analytics</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#101a1a;color:#e8f2ed;font:15px/1.5 system-ui,sans-serif}header{height:72px;border-bottom:1px solid #30453e;display:flex;align-items:center;gap:20px;padding:0 32px}header b{color:#b5e6c8;font-size:28px}header span{margin-left:auto;color:#8aa79b;font-size:12px}main{padding:28px 34px;max-width:1180px;margin:0}.eyebrow{color:#8fae9e;letter-spacing:2px;font-size:11px}h1{font-size:30px;letter-spacing:-1px;margin:5px 0 4px}p{margin:0;color:#8ca799}.panel{margin-top:24px;background:#172624;border:1px solid #355047;border-radius:14px;padding:20px 24px}.panel-head{display:flex;align-items:center;justify-content:space-between}.metric{font-size:29px;color:#ffb18d}.metric small{font-size:12px;color:#a0b9ae}.title{font-size:17px;font-weight:600}.subtitle{color:#91ad9f;font-size:12px}.chart{display:block;width:100%;height:245px;margin:12px 0}.foot{border-top:1px solid #2d473e;padding-top:12px;display:flex;justify-content:space-between;color:#8caa9b;font-size:12px}.secondary{display:flex;gap:16px;margin-top:16px}.stat{flex:1;padding:15px 20px;background:#172624;border:1px solid #304b40;border-radius:12px;color:#98b8a5}.stat b{display:block;color:#d1efdc;font-size:22px}.inspector{margin-top:22px;border:1px solid #30483e;border-radius:12px;overflow:hidden}.inspector header{height:49px;padding:0 20px;background:#182923;font-size:13px}textarea{display:block;width:100%;height:150px;border:0;background:#111e19;color:#a7cbb2;font:12px/1.65 Consolas,monospace;resize:none;padding:16px 20px;white-space:pre;outline:none}.note{margin-top:15px;font-size:11px;color:#6d9380}
+</style>
+<header><b>z</b><strong>Checkout health</strong><span>SAMPLE ANALYTICS</span></header>
+<main><div class="eyebrow">PAYMENTS / PERFORMANCE</div><h1>What happened here?</h1><p>Production · /checkout · all regions · 14:00–15:00 UTC</p>
+<section class="panel" aria-label="Checkout latency panel">
+<div class="panel-head"><div><div class="title">Checkout latency · p95</div><div class="subtitle">5 minute buckets · request duration in milliseconds</div></div><div class="metric" id="peak">— <small>peak</small></div></div>
+<svg class="chart" id="latency-chart" role="img" aria-label="Checkout p95 latency"></svg>
+<div class="foot"><span>Production /checkout · all regions</span><span>latency.sql · SQLite</span></div>
+</section>
+<div class="secondary"><div class="stat">Requests / bucket<b id="volume">—</b></div><div class="stat">Error rate<b>0.00%</b></div><div class="stat">Data source<b>demo.sqlite</b></div></div>
+<section class="inspector"><header>Query inspector<span>Complete query · read-only</span></header><textarea id="query" readonly aria-label="Complete latency query"></textarea></section>
+<div class="note">SYNTHETIC DATA · 12,000 requests · query and point values exposed as accessible chart metadata</div>
+</main>
+<script>
+async function refresh(){
+ const data=await (await fetch('/api/dashboard')).json(),rows=data.rows;
+ const svg=document.getElementById('latency-chart'),w=960,h=245,l=55,r=18,t=15,b=32;
+ const x=i=>l+i*(w-l-r)/11,y=v=>h-b-v/1600*(h-t-b);
+ let html='';
+ for(const v of [0,400,800,1200,1600])html+=`<line x1="${l}" x2="${w-r}" y1="${y(v)}" y2="${y(v)}" stroke="#2c433b"/><text x="43" y="${y(v)+4}" fill="#82a191" font-size="11" text-anchor="end">${v}</text>`;
+ const points=rows.map((v,i)=>`${x(i)},${y(v.p95_ms)}`).join(' ');
+ html+=`<polygon points="${l},${h-b} ${points} ${w-r},${h-b}" fill="#ffaf8c" opacity=".08"/><polyline points="${points}" fill="none" stroke="#ffaf8c" stroke-width="3" stroke-linejoin="round"/>`;
+ rows.forEach((v,i)=>{html+=`<circle id="bucket-${i}" role="img" aria-label="${v.minute} UTC; checkout p95 ${v.p95_ms} ms; ${v.requests} requests; 5 minute bucket" cx="${x(i)}" cy="${y(v.p95_ms)}" r="5" fill="#ffaf8c"/><text x="${x(i)}" y="${h-8}" font-size="11" text-anchor="middle" fill="#91af9f">${v.minute}</text>`});
+ svg.setAttribute('viewBox',`0 0 ${w} ${h}`);svg.innerHTML=html;
+ // Standard accessibility metadata belongs to the chart even when the user
+ // selects only part of it. No incident diagnosis or answer is embedded here.
+ svg.setAttribute('aria-description',`Metric: p95 request duration, milliseconds. Production /checkout, all regions. UTC range 14:00 inclusive to 15:00 exclusive. Each point is a 5 minute bucket. Database: demo.sqlite. Query file: latency.sql. Complete executed SQL:\n${data.query}`);
+ document.getElementById('query').value=data.query;
+ document.getElementById('peak').innerHTML=Math.max(...rows.map(v=>v.p95_ms)).toLocaleString()+' <small>ms peak</small>';
+ document.getElementById('volume').textContent=rows[0].requests+' · steady';
+ window.dashboardData=data;
+}refresh();
+</script></html>

@@ -1,0 +1,4 @@
+# Parses workflow structure for the external-contributor safety contract.
+PyYAML==6.0.3
+# Decodes images in the demo proof and regression tests.
+Pillow==12.3.0

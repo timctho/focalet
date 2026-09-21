@@ -27,7 +27,7 @@ function Wait-MultiOutline([int]$X, [int]$Y) {
         if ([ZommiWindowsAcceptanceNative]::HasSelectionEdge($X,$Y,$true)) { return }
         Start-Sleep -Milliseconds 25
     } while ([DateTime]::UtcNow -lt $deadline)
-    throw "Queued blue outline missing at ${X},${Y}."
+    throw "Queued mint outline missing at ${X},${Y}."
 }
 Assert-DesktopCaptureSurface
 # A single helper must show its modal selector while its MTA is blocked in UIA.
@@ -45,6 +45,11 @@ if ($IndependentWorkerOnly) {
         $start.RedirectStandardError = $true
         $shared = [System.Diagnostics.Process]::Start($start)
         $errors = $shared.StandardError.ReadToEndAsync()
+        # Measure contention in an initialized host, not cold .NET/UNC startup.
+        $shared.StandardInput.WriteLine('{"id":"ready","method":"ping"}')
+        $shared.StandardInput.Flush()
+        $ready = $shared.StandardOutput.ReadLineAsync().WaitAsync([TimeSpan]::FromSeconds(10)).GetAwaiter().GetResult() | ConvertFrom-Json
+        if ($ready.id -ne 'ready' -or $ready.ok -ne $true) { throw 'The shared host did not initialize.' }
         $fixture.PauseProvider(1800)
         $shared.StandardInput.WriteLine('{"id":"slow","method":"capture","params":{"browserPageDetails":false,"point":{"x":220,"y":220}}}')
         $shared.StandardInput.Flush()
@@ -53,7 +58,7 @@ if ($IndependentWorkerOnly) {
         $shared.StandardInput.WriteLine('{"id":"select","method":"selectContent","params":{"browserPageDetails":false}}')
         $shared.StandardInput.Flush()
         $selector = Wait-ForWindow -ProcessId $shared.Id -Title 'Zommi content selection'
-        if ($watch.ElapsedMilliseconds -gt 1200) { throw 'The shared-host selector waited for the slow UIA worker.' }
+        if ($watch.ElapsedMilliseconds -gt 1200) { throw "The shared-host selector took $($watch.ElapsedMilliseconds) ms while the UIA worker was busy (limit 1200 ms)." }
         [ZommiWindowsAcceptanceNative]::CancelSelection($selector) | Out-Null
         $responses = @{}
         while (-not $responses.ContainsKey('select')) {
@@ -114,7 +119,7 @@ foreach ($case in $cases) {
                     [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,180,270,530,310)
                 } else {
                     [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,180,200,530,240)
-                    # Moving over a queued rectangle must not erase its blue outline.
+                    # Moving over a queued rectangle must not erase its mint outline.
                     Start-Sleep -Milliseconds 800
                     Wait-MultiOutline 530 225
                     [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,180,270,530,310)
@@ -168,6 +173,7 @@ try {
             param($process)
             $selector = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi content selection'
             [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,($bounds[0]+15),($bounds[1]+8),($bounds[0]+110),($bounds[1]+25))
+            [ZommiWindowsAcceptanceNative]::ConfirmSelection($selector)
         }
         $cells = @($result.snapshot.spatialContext.cells)
         if ($result.cancelled -or $cells.Count -ne 1 -or $cells[0].dataRowNumber -ne ($row+1) -or

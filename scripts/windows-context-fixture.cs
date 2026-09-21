@@ -91,6 +91,21 @@ public sealed class ZommiContextFixture : IDisposable
         form.Invoke(new Action(() => form.Text += " changed"));
     }
 
+    public void ExpandForAnnotations()
+    {
+        form.Invoke(new Action(() => form.Size = new Size(900, 600)));
+    }
+
+    public void ChangeVisibleText()
+    {
+        form.Invoke(new Action(() => {
+            foreach (Control parent in form.Controls)
+                foreach (Control child in parent.Controls)
+                    if (child is Label) child.Text = "Source changed after capture";
+            form.Refresh();
+        }));
+    }
+
     public void Raise()
     {
         form.Invoke(new Action(() => {

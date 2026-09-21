@@ -4,6 +4,10 @@
 import json
 import os
 import sys
+
+# The runtime wire protocol is UTF-8, including on Windows redirected pipes.
+sys.stdin.reconfigure(encoding="utf-8")
+sys.stdout.reconfigure(encoding="utf-8")
 import time
 import pathlib
 import threading

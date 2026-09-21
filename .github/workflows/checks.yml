@@ -1,0 +1,137 @@
+name: PR checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Forks run only on disposable GitHub-hosted machines, without deployment keys.
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    name: Linux contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: '4'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@283fb51ee3c8a49cd7c8ff30102f3fcf3cfbe0e1 # 1.93.0
+        with:
+          components: clippy,rustfmt
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          flutter-version: 3.47.2
+          cache: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: 8.0.x
+      - name: Install native test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev libgtk-3-dev libayatana-appindicator3-dev libx11-dev clang cmake ninja-build pkg-config libasound2t64 ffmpeg
+          python -m pip install -r tests/requirements.txt
+      - name: Check all contracts, widgets, processes and browser capture
+        env:
+          ZOMMI_TEST_CHROMIUM: /usr/bin/google-chrome
+        run: python scripts/check.py
+      - name: Compile and verify the Linux desktop package
+        run: bash scripts/package-unix.sh linux
+      - name: Ensure checks did not rewrite committed files
+        run: git diff --exit-code
+
+  windows:
+    name: Windows contracts
+    runs-on: windows-2025
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: '4'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@283fb51ee3c8a49cd7c8ff30102f3fcf3cfbe0e1 # 1.93.0
+        with:
+          components: clippy,rustfmt
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          flutter-version: 3.47.2
+          cache: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: 8.0.x
+      - name: Check Windows process, path, SQLite and capture contracts
+        run: python scripts/check.py --suite windows
+      - name: Compile and verify the Windows desktop package
+        run: ./scripts/package-windows.ps1 -Runtime win-x64
+      - name: Ensure checks did not rewrite committed files
+        run: git diff --exit-code
+
+  macos:
+    name: macOS contracts
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: '4'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@283fb51ee3c8a49cd7c8ff30102f3fcf3cfbe0e1 # 1.93.0
+        with:
+          components: clippy,rustfmt
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          flutter-version: 3.47.2
+          cache: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Check core, Flutter and macOS golden contracts
+        run: python3 scripts/check.py --suite rust --suite flutter
+      - name: Test native macOS selection geometry
+        run: |
+          xcrun swiftc -swift-version 5 \
+            src/Zommi.Flutter/macos/Runner/MacRegionSelector.swift \
+            scripts/test-macos-region-selection.swift \
+            -o /tmp/zommi-macos-region-tests
+          /tmp/zommi-macos-region-tests
+      - name: Compile and verify the macOS desktop package
+        run: bash scripts/package-unix.sh macos
+      - name: Ensure checks did not rewrite committed files
+        run: git diff --exit-code
+
+  required:
+    name: PR checks passed
+    if: always()
+    needs: [contracts, windows, macos]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require every platform to pass
+        env:
+          LINUX_RESULT: ${{ needs.contracts.result }}
+          WINDOWS_RESULT: ${{ needs.windows.result }}
+          MACOS_RESULT: ${{ needs.macos.result }}
+        run: test "$LINUX_RESULT" = success && test "$WINDOWS_RESULT" = success && test "$MACOS_RESULT" = success

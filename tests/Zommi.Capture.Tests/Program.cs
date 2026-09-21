@@ -14,6 +14,8 @@ var tests = new (string Name, Action Body)[]
     ("Partial cell previews show the verified data row and column", CellLocationPreview),
     ("Region pixels map across negative screen origins and scaling", RegionPixelGeometry),
     ("Region previews retain state and partial metadata without ambient selection", RegionPreview),
+    ("Annotation undo and redo stay scoped to a region and retain immutable strokes", AnnotationHistory),
+    ("Annotation budgets and invalid drawing data are rejected", AnnotationLimits),
 };
 
 var failures = new List<string>();
@@ -33,6 +35,38 @@ foreach (var test in tests)
 
 Console.WriteLine($"{tests.Length - failures.Count}/{tests.Length} capture contracts passed");
 return failures.Count == 0 ? 0 : 1;
+
+static void AnnotationHistory()
+{
+    var a = new AnnotationDocument(); var b = new AnnotationDocument();
+    var points = new List<AnnotationPoint> { new(2, 3), new(20, 30) };
+    var stroke = new ImageAnnotation(AnnotationTool.Pen, "#FF686B", 4, points);
+    True(a.Add(stroke) && b.Add(stroke), "Valid stroke was rejected.");
+    points.Clear();
+    True(a.Strokes[0].Points.Count == 2, "Stored strokes share mutable input.");
+    True(a.Undo() && a.Strokes.Count == 0 && b.Strokes.Count == 1, "Undo affected another region.");
+    True(a.Redo() && !a.CanRedo && a.Strokes.Count == 1, "Redo did not restore the stroke.");
+    a.Undo();
+    True(a.Add(new(AnnotationTool.Arrow, "#70B8FF", 2, [new(0, 0), new(30, 20)])) && !a.CanRedo, "New drawing retained an obsolete redo branch.");
+    Contains(ContextPreviewFormatter.Format(Snapshot() with
+    {
+        ImageAnnotations = new ImageAnnotationInfo { StrokeCount = 1, Tools = ["arrow"] },
+    }), "1 user-added marks (arrow)");
+}
+
+static void AnnotationLimits()
+{
+    var document = new AnnotationDocument();
+    var stroke = new ImageAnnotation(AnnotationTool.Pen, "#FF686B", 4, [new(2, 3)]);
+    True(!document.Add(stroke with { Width = float.NaN }), "Nonfinite width accepted.");
+    True(!document.Add(stroke with { Color = "not a color" }), "Invalid color accepted.");
+    True(!document.Add(stroke with { Points = [new(float.PositiveInfinity, 0)] }), "Nonfinite point accepted.");
+    True(!document.Add(stroke with { Tool = AnnotationTool.Arrow }), "Incomplete arrow accepted.");
+    True(!document.Add(stroke with { Points = Enumerable.Repeat(new AnnotationPoint(0, 0), AnnotationDocument.MaximumPointsPerStroke + 1).ToArray() }), "Point budget exceeded.");
+    for (var i = 0; i < AnnotationDocument.MaximumStrokes; i++) True(document.Add(stroke), "Valid bounded stroke rejected.");
+    True(!document.Add(stroke), "Stroke budget exceeded.");
+    True(document.Undo() && document.Add(stroke), "Undo did not free space for editing.");
+}
 
 static void CellLocationPreview()
 {

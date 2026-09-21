@@ -1,16 +1,36 @@
 # Rectangle context capture
 
 Press `Alt+A` or use **Select** beside the composer, then drag a rectangle.
-Releasing the mouse attaches that image with context available for its region.
+On Windows, releasing the mouse opens the drawing toolbar beside the selection.
+Use a pen, arrow, rectangle, ellipse or highlighter; choose a color and stroke
+width, and undo or redo marks. Press **Enter** or **Attach** when ready to add the
+image and available context to your message. Other platforms retain their
+platform selection flow.
 A click alone does not select an application element. The same image-style
 selection works when an app exposes no accessibility elements.
 
 On Windows, hold **Ctrl** during the first drag to collect several rectangles.
-Numbered outlines remain after Ctrl is released. Continue dragging, then use
+Lettered outlines remain after Ctrl is released. Continue dragging, then use
 **Attach** or **Enter** to attach them in order, up to eight. **Escape** or
 **Cancel** discards the batch. Repeating an identical rectangle does not add an
 attachment. Selection painting does not wait for accessibility providers.
 Linux and macOS use their platform rectangle screenshot selectors.
+
+The Windows toolbar's **Add region** button or **S** starts another selection.
+Choose a drawing tool, then draw inside A or B; each region has its own undo/redo
+history. Click a region's letter to switch to it. **P**, **A**, **R**, **O** and
+**H** choose pen, arrow, rectangle, ellipse and highlighter. **Ctrl+Z** undoes;
+**Ctrl+Y** or **Ctrl+Shift+Z** redoes; **Delete** removes the active region.
+**Escape** cancels the entire capture, including its marks.
+
+The selector freezes the desktop before opening its overlay. Marks are clipped
+and baked into each exported PNG without changing its dimensions or coordinate
+mapping. The handoff identifies them as user annotations; source text and
+element metadata describe the original application. On confirmation, source
+identity and pixels are checked before retaining structured context. If the
+pixels changed, the frozen annotated image is retained with **Image only**, its
+original observation time and an explanation. Newer application metadata is
+omitted. Drawing is bounded to 256 strokes per region and 4,096 points per stroke.
 
 The rectangle is the primary user reference. On Windows, Zommi enriches it with
 DOM or UI Automation observations when the source and image can be aligned.
@@ -196,3 +216,8 @@ It verifies partial intersections, image-only empty areas, covered controls,
 provider IDs/states, invalid gestures and responsive dragging during a busy
 provider. `accept-windows-multi-content.ps1` verifies ordered multi-rectangle
 batches, duplicates, cancellation, source changes and partial table cells.
+
+`accept-windows-annotations.ps1 -CaptureHost <path-to-Zommi.Capture.exe>
+-OutputDirectory <private-evidence-directory>` exercises the native drawing
+toolbar, exported pixels, per-region undo/redo, changed-source fallback and
+cancellation against a synthetic Windows fixture.

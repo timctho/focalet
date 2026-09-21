@@ -1,0 +1,7 @@
+Item,Status,Quantity,Unit price,Discount,Total,Deposit,Remaining
+Lighting,Confirmed,2,150,10%,=C2*D2*(1-E2),100,
+Displays,Confirmed,3,200,10%,=C3*D3-E3,0,
+Seating,Confirmed,20,40,15%,=C4*D4-E4,100,
+Old venue,Cancelled,1,900,0%,=0,0,
+Printing,Confirmed,100,0.9,10%,=C6*D6-E6,50,
+Extra stage,Draft,1,700,10%,=C7*D7*(1-E7),0,

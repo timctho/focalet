@@ -592,6 +592,12 @@ fn discover_runtime_targets_with_status(
     platform: &str,
     probe_wsl: bool,
 ) -> (Vec<RuntimeTarget>, bool) {
+    // Contract tests and isolated automation must not discover a developer's
+    // installed agents or read their WSL catalogs. Explicit runtime commands
+    // and credential-free configured overrides still use the real adapters.
+    let configured_only = environment
+        .get("ZOMMI_RUNTIME_DISCOVERY_MODE")
+        .is_some_and(|mode| mode == "configured-only");
     let mut targets = Vec::new();
     let native_host = ExecutionHost {
         id: format!("native:{platform}"),
@@ -622,8 +628,9 @@ fn discover_runtime_targets_with_status(
                 environment.get("HOME").map(String::as_str),
                 Some("configured"),
             ));
-        } else if let Some(executable) =
-            resolve_native_command(entry.executable, environment, platform)
+        } else if !configured_only
+            && let Some(executable) =
+                resolve_native_command(entry.executable, environment, platform)
         {
             targets.push(target_for(
                 &native_host,
@@ -647,8 +654,9 @@ fn discover_runtime_targets_with_status(
         targets.push(openclaw_gateway_target(endpoint, platform, profile_id));
     }
 
-    let mut wsl_probe_succeeded = platform != "windows";
-    if platform == "windows" && probe_wsl {
+    // An intentionally empty WSL result must not restore cached personal targets.
+    let mut wsl_probe_succeeded = platform != "windows" || configured_only;
+    if platform == "windows" && probe_wsl && !configured_only {
         let outcome = discover_wsl_targets(environment);
         targets.extend(outcome.targets);
         wsl_probe_succeeded = outcome.succeeded;
@@ -1169,6 +1177,28 @@ mod tests {
     };
 
     #[test]
+    fn configured_only_discovery_ignores_installed_native_agents() {
+        let root = std::env::temp_dir().join(format!("zommi-isolated-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).expect("create fixture directory");
+        fs::write(root.join("pi"), "personal installation").expect("create installed CLI");
+        let environment = HashMap::from([
+            ("PATH".into(), root.to_string_lossy().into_owned()),
+            ("HOME".into(), root.to_string_lossy().into_owned()),
+            ("ZOMMI_CODEX_COMMAND".into(), "/fixtures/python".into()),
+            (
+                "ZOMMI_RUNTIME_DISCOVERY_MODE".into(),
+                "configured-only".into(),
+            ),
+        ]);
+        let targets = discover_runtime_targets_with(&environment, "linux");
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].adapter_id, "codex-app-server");
+        assert_eq!(targets[0].executable_path, "/fixtures/python");
+        assert_eq!(targets[0].source.as_deref(), Some("configured"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn discovery_produces_a_stable_native_codex_target() {
         let root = std::env::temp_dir().join(format!("zommi-discovery-{}", std::process::id()));
         fs::create_dir_all(&root).expect("create fixture directory");
@@ -1283,7 +1313,15 @@ mod tests {
             profile_id: None,
         };
         let command = command_for_target(&target);
-        assert_eq!(command.command, "wsl.exe");
+        assert_eq!(
+            std::path::Path::new(&command.command)
+                .file_name()
+                .and_then(|name| name.to_str()),
+            Some("wsl.exe")
+        );
+        if cfg!(windows) {
+            assert!(std::path::Path::new(&command.command).is_absolute());
+        }
         let expected = ["-d", "Ubuntu", "--cd", "/home/u", "-e", "/usr/bin/env"]
             .into_iter()
             .map(str::to_owned)
@@ -1360,18 +1398,19 @@ mod tests {
             id: "override-codex".into(),
             adapter_id: "codex-app-server".into(),
             execution_host: ExecutionHost {
-                id: "native:linux".into(),
+                id: format!("native:{}", std::env::consts::OS),
                 kind: "native".into(),
-                platform: "linux".into(),
-                display_name: "Linux".into(),
+                platform: std::env::consts::OS.into(),
+                display_name: "This computer".into(),
                 is_default: true,
                 name: None,
             },
-            executable_path: Some("/opt/codex/bin/codex".into()),
+            executable_path: Some(root.join("codex").to_string_lossy().into_owned()),
             endpoint: None,
             profile_id: None,
         };
-        let target = target_from_override(&configured, "linux").expect("valid override");
+        let target =
+            target_from_override(&configured, std::env::consts::OS).expect("valid override");
         assert_eq!(target.source.as_deref(), Some("configured-ui"));
         store
             .save(std::slice::from_ref(&configured))
@@ -1478,6 +1517,27 @@ mod tests {
             outcome.targets[0].source.as_deref(),
             Some("last-known-good")
         );
+        // An isolated contract run must neither probe WSL nor reuse a real
+        // runtime from an earlier discovery. This also runs on Windows hosts.
+        let isolated = discover_runtime_targets_resilient_with(
+            &HashMap::from([
+                ("PATH".into(), String::new()),
+                (
+                    "ZOMMI_RUNTIME_DISCOVERY_MODE".into(),
+                    "configured-only".into(),
+                ),
+                ("ZOMMI_CODEX_COMMAND".into(), "fixture-python.exe".into()),
+            ]),
+            "windows",
+            &[],
+            &store,
+            true,
+        );
+        assert!(isolated.wsl_probe_succeeded);
+        assert_eq!(isolated.targets.len(), 1);
+        assert_eq!(isolated.targets[0].executable_path, "fixture-python.exe");
+        assert_eq!(isolated.targets[0].execution_host.kind, "native");
+        assert!(store.load().expect("empty isolated cache").is_empty());
         let _ = fs::remove_dir_all(root);
     }
 

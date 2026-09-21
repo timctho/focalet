@@ -34,6 +34,35 @@ void main() {
       ],
     },
   };
+  test('frozen annotated images retain provenance and time without stale source context', () {
+    final geometry = {...alignment, 'status': 'image-only'};
+    final annotations = {
+      'source': 'user',
+      'bakedIntoImage': true,
+      'strokeCount': 2,
+      'tools': ['pen', 'arrow'],
+    };
+    final attachment = imageAttachmentFromSelection(
+      ImageSelection(
+        dataUrl: 'data:image/png;base64,YQ==',
+        bounds: bounds,
+        alignment: geometry,
+        snapshot: {
+          'region': geometry,
+          'observedAtUtc': '2026-09-20T12:00:00Z',
+          'imageAnnotations': annotations,
+          'regionContext': {'text': 'must not survive'},
+        },
+      ),
+      'annotated',
+    );
+    final handoff = contextHandoffSnapshots([attachment]).single;
+    expect(handoff['imageAnnotations'], annotations);
+    expect(handoff['observedAtUtc'], '2026-09-20T12:00:00Z');
+    expect(handoff['regionContext'], isNull);
+    expect(handoff['source'], isNull);
+    expect(handoff['imageIndex'], 1);
+  });
   test('a partial cell crop keeps verified row context without claiming whole-cell selected text', () {
     final spatial = {
       'cells': [

@@ -45,8 +45,18 @@ void main() {
     }
     final main = File('${root.path}/lib/main.dart').readAsStringSync();
     expect(main, contains('FlutterDesktopBridge.bootstrap('));
-    final bridge = File('${root.path}/lib/desktop/desktop_bridge.dart')
-        .readAsStringSync();
+    final bridge =
+        [
+              'desktop_bridge.dart',
+              'capture_provider.dart',
+              'surface_window.dart',
+              'wayland_shortcuts.dart',
+            ]
+            .map(
+              (name) =>
+                  File('${root.path}/lib/desktop/$name').readAsStringSync(),
+            )
+            .join('\n');
     for (final contract in [
       'CaptureShortcut.standard',
       'CaptureMode.region',
@@ -335,8 +345,7 @@ void main() {
       'Accept Windows shortcuts and capture UX',
       "if: github.event_name == 'workflow_dispatch' && inputs.windows_interactive",
       'scripts/accept-windows-capture.ps1',
-      'tests/test_release_package.py',
-      'tests/test_linux_startup_smoke.py',
+      'python3 scripts/check.py',
       'Accept Linux X11 shortcuts and capture UX',
       'scripts/accept-linux-x11.py',
     ]) {

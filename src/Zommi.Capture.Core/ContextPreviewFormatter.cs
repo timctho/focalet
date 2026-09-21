@@ -19,6 +19,8 @@ public static class ContextPreviewFormatter
     public static string Format(ContextSnapshot snapshot)
     {
         var builder = new StringBuilder();
+        if (snapshot.ImageAnnotations is { StrokeCount: > 0 } annotations)
+            builder.AppendLine($"Annotated image · {annotations.StrokeCount} user-added marks ({string.Join(", ", annotations.Tools)})");
         builder.AppendLine($"Surface: {Clean(snapshot.SurfaceKind, 40)} in {Clean(snapshot.Application, 80)}");
         AppendSnapshotDetails(builder, snapshot);
         return builder.ToString().TrimEnd();

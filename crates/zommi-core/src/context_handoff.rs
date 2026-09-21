@@ -74,6 +74,15 @@ fn format_snapshot(snapshot: &Value, index: usize, total: usize) -> String {
             "Attached image {index} corresponds to this context."
         ));
     }
+    if let Some(annotations) = snapshot
+        .get("imageAnnotations")
+        .filter(|value| value.is_object())
+    {
+        lines.push(format!(
+            "User-added image annotations (baked into the attached image; source context describes the original app, not these marks): {}",
+            pretty_json(annotations)
+        ));
+    }
     for (field, label) in [
         ("imageSize", "Attached image dimensions in pixels"),
         ("source", "Observation source"),
@@ -569,6 +578,25 @@ mod tests {
     }
 
     use super::{build_context_handoff, compact_accessibility_tree};
+
+    #[test]
+    fn user_annotations_keep_image_reference_and_original_source_context_distinct() {
+        let handoff = build_context_handoff(
+            "Check my arrow in B",
+            &[json!({
+                "contextLabel": "B", "imageIndex": 1,
+                "imageAnnotations": {"source": "user", "bakedIntoImage": true, "strokeCount": 2, "tools": ["arrow", "pen"]},
+                "regionContext": {"elements": [{"text": "Original app label"}]}
+            })],
+            1,
+        );
+        assert!(handoff.contains("User reference [B]"));
+        assert!(handoff.contains("Attached image 1"));
+        assert!(handoff.contains("User-added image annotations"));
+        assert!(handoff.contains("source context describes the original app, not these marks"));
+        assert!(handoff.contains("Original app label"));
+        assert!(handoff.contains("bakedIntoImage"));
+    }
 
     #[test]
     fn user_reference_labels_keep_their_image_mapping_after_replacement() {

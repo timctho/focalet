@@ -1125,7 +1125,7 @@ fn runtime_worker(
             let action = tokio::select! {
                 biased;
                 _ = shutdown.changed() => break,
-                action = state.handle(work.request) => action,
+                action = Box::pin(state.handle(work.request)) => action,
             };
             if let Ok(value) = serde_json::to_value(action.response) {
                 let _ = output.send(value);
@@ -1213,7 +1213,10 @@ async fn main() -> io::Result<()> {
                     // while a provider is starting so closing the UI cancels
                     // the read and drops its child processes promptly.
                     tokio::select! {
-                        action = state.handle(request) => action,
+                        // Adapter futures are large in debug builds. Keep the
+                        // cancellable catalog request off Windows' small main
+                        // stack while still polling shutdown concurrently.
+                        action = Box::pin(state.handle(request)) => action,
                         next = lines.next_line() => {
                             let shutdown = next?.filter(|line| line.len() <= MAX_REQUEST_BYTES)
                                 .and_then(|line| serde_json::from_str::<CoreRequest>(&line).ok())
@@ -1262,7 +1265,7 @@ async fn main() -> io::Result<()> {
                         {
                             request.payload["runtimeTargetId"] = json!(target_id);
                         } else {
-                            let action = state.handle(request).await;
+                            let action = Box::pin(state.handle(request)).await;
                             let _ = output_tx.send(
                                 serde_json::to_value(action.response).map_err(io::Error::other)?,
                             );
@@ -1298,7 +1301,7 @@ async fn main() -> io::Result<()> {
                         })?;
                     continue;
                 }
-                Ok(request) => state.handle(request).await,
+                Ok(request) => Box::pin(state.handle(request)).await,
                 Err(error) => failure(
                     None,
                     "invalid-request",

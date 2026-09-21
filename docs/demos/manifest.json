@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-20",
+  "recordings": [
+    {
+      "name": "amazon",
+      "buildCommit": "e21bf1c2be2eb70830d8e893f63a712a6255c9b9",
+      "platform": "windows",
+      "display": "windows-desktop",
+      "runtime": "Codex",
+      "response": "live",
+      "syntheticSource": false,
+      "sourceKind": "public-product-pages",
+      "audio": false,
+      "review": {
+        "ocrStatus": "no-matches",
+        "exportedFramesScanned": 929,
+        "visualReview": true
+      },
+      "assets": [
+        {
+          "file": "amazon.mp4",
+          "bytes": 1135467,
+          "sha256": "340df0a0bbef7236765085e631efe73e1b818a4eb4cf56527feb28c23cc8e860"
+        },
+        {
+          "file": "amazon.gif",
+          "bytes": 1282224,
+          "sha256": "7b5a70aa4cb8a940389252967dc6500a34ec93d4feb369c81e2e1fe55fabc444"
+        },
+        {
+          "file": "amazon-poster.webp",
+          "bytes": 53170,
+          "sha256": "7c0b7b8c53e7a62f23ffd9b85e67b6b1cb3a55c5a08b177c16d89ffa7d99e827"
+        }
+      ]
+    },
+    {
+      "name": "dashboard",
+      "buildCommit": "e21bf1c2be2eb70830d8e893f63a712a6255c9b9",
+      "platform": "windows",
+      "display": "windows-desktop",
+      "runtime": "Codex",
+      "response": "live",
+      "syntheticSource": true,
+      "sourceKind": "synthetic",
+      "audio": false,
+      "review": {
+        "ocrStatus": "no-matches",
+        "exportedFramesScanned": 825,
+        "visualReview": true
+      },
+      "assets": [
+        {
+          "file": "dashboard.mp4",
+          "bytes": 807922,
+          "sha256": "d12d6adc6f1c81fe5be84177096551675e1ce94bd438fa08ee9e72358ee14801"
+        },
+        {
+          "file": "dashboard.gif",
+          "bytes": 1129415,
+          "sha256": "71bfdeb3870b0f0d5fa475e25bea927f3de458966ee8e9a27381b68dcd4381b8"
+        },
+        {
+          "file": "dashboard-poster.webp",
+          "bytes": 57442,
+          "sha256": "5727f928b5481c1e8d651dc453a50813c4214845196614e307672048e087ad30"
+        }
+      ]
+    },
+    {
+      "name": "sheets",
+      "buildCommit": "e21bf1c2be2eb70830d8e893f63a712a6255c9b9",
+      "platform": "windows",
+      "display": "windows-desktop",
+      "runtime": "Codex",
+      "response": "live",
+      "syntheticSource": true,
+      "sourceKind": "synthetic",
+      "audio": false,
+      "review": {
+        "ocrStatus": "no-matches",
+        "exportedFramesScanned": 733,
+        "visualReview": true
+      },
+      "assets": [
+        {
+          "file": "sheets.mp4",
+          "bytes": 789743,
+          "sha256": "c7f6c9db72132a6157812daf5f5970ed153f5f96213ed0e155de09f9b5159188"
+        },
+        {
+          "file": "sheets.gif",
+          "bytes": 1027986,
+          "sha256": "9b7ec0f010ddae36e90017c0ff9b218c4428517baf777584e3aca9a8d200c063"
+        },
+        {
+          "file": "sheets-poster.webp",
+          "bytes": 57278,
+          "sha256": "6f0a652dc736d6afab50f47237ae4eb44dd61756c245cfd727a660f3e47fbaff"
+        }
+      ]
+    }
+  ]
+}
