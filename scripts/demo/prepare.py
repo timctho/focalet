@@ -137,7 +137,7 @@ def main():
                 {
                     "runtimeSetupCompleted": True,
                     "themeMode": "light",
-                    "themeColor": "cream",
+                    "themeColor": "ocean",
                     "chatFontSize": 14,
                     "windowSize": "standard",
                     "browserPageDetails": args.browser_details,

@@ -78,24 +78,29 @@ restoration. Verify the marked source references, correct taxes, exclusion and
 that only the connected quote changes. Other tabs, source data and formatting
 outside the quote amounts must remain unchanged; confirm **Saved to Drive**.
 
-Show the native strokes and both resulting quotes. After the agent finishes,
-record the source-price change and restoration. Label trimmed agent waits;
-zoomed crops may improve readability without changing the recorded UI.
+Show the native strokes and end the public clip on the agent’s completed reply.
+Keep the subsequent source-price change and restoration in private verification
+evidence only. Label trimmed agent waits; zoomed crops may improve readability without changing the recorded UI.
 
 ## First-run setup
 
 `scripts/demo/record-setup-windows.ps1` starts the actual packaged app with a
-fresh private settings profile. Select a real installed
+fresh private settings profile in **Ocean**. Show all installed agents; select an
 agent in **Welcome to Zommi**, then choose **Connect and continue**. The recorder
 requires persisted setup completion and a real runtime/session binding.
 It does not seed a chat or generate an agent response. Open the model picker,
-select an advertised model and record the **entire ready app window**, including
-the sidebar, header and composer. Use a clean actual runtime profile so personal
+show both Codex and OpenCode model choices, then record the **entire ready app
+window**, including the sidebar, header and composer. Use a clean actual runtime profile so personal
 chat titles and workspace paths never need to be cropped from the ending. Keep
 raw profiles private. The README lists supported agents and model families next
 to the accelerated selection video. Do not copy credentials into demo profiles.
 
 ## Editing and review
+
+Use Ocean for Zommi and explanatory graphics. The current Amazon and dashboard
+edits retain the original native selections and reopen the same completed
+sessions in Ocean for the conversation views. Disclose this in the recording
+notes; do not simulate a new turn or alter the saved reply.
 
 Keep the successful selection, attachment, short prompt and actual result.
 Remove abandoned setup, permission dialogs and idle waits. Accelerate selection

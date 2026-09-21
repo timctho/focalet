@@ -27,7 +27,7 @@ if($LASTEXITCODE -ne 0){throw 'Could not restrict recording evidence.'}
 $demoProfile=Join-Path $OutputDirectory 'profile'
 $null=New-Item -ItemType Directory (Join-Path $demoProfile 'Zommi')
 # Presentation preferences only: no completed setup, runtime binding or fake agent.
-@{runtimeSetupCompleted=$false;themeMode='light';themeColor='cream';chatFontSize=14}|ConvertTo-Json|Set-Content (Join-Path $demoProfile 'Zommi/settings.json')
+@{runtimeSetupCompleted=$false;themeMode='light';themeColor='ocean';chatFontSize=14}|ConvertTo-Json|Set-Content (Join-Path $demoProfile 'Zommi/settings.json')
 $previous=@();$app=$null;$recorder=$null
 try {
  $previous=@(Suspend-ConflictingZommiApplications -EntryPoint (Join-Path $OutputDirectory 'not-running.exe'))

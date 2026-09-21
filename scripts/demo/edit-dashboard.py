@@ -60,7 +60,7 @@ def segment(frames, times, start, end, directory, name, crop=None, speed=1):
     sequence = directory / (name + ".txt")
     sequence.write_text("\n".join(lines) + "\n")
     output = directory / (name + ".mp4")
-    scale = "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=0x101717,setsar=1"
+    scale = "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=0xeef5fa,setsar=1"
     if crop:
         scale = crop + "," + scale
     subprocess.run(

@@ -1,6 +1,6 @@
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="design/zommi-logo/exports/relay/lockup-white.svg">
-  <img src="design/zommi-logo/exports/relay/lockup-ink.svg" alt="Zommi" width="240">
+  <source media="(prefers-color-scheme: dark)" srcset="design/zommi-logo/exports/ocean/lockup-dark.svg">
+  <img src="design/zommi-logo/exports/ocean/lockup-light.svg" alt="Zommi" width="240">
 </picture>
 
 # Show your agent what you mean.
@@ -19,7 +19,8 @@ Uses your existing agent account. No separate model API key to enter in Zommi.
 
 ## Connect your agent and choose a model
 
-Choose your installed agent, connect, then pick a model from the chat header. If
+Choose from your installed agents, connect, then pick a model from the chat header.
+The demo shows Codex and OpenCode model selection in the Ocean theme. If
 sign-in is needed, Zommi opens your agent’s own sign-in flow. The demo speeds up
 selection and ends on the full, ready-to-use Zommi window.
 
@@ -80,7 +81,7 @@ Select **just the interval that looks wrong** on the latency chart.
 query reach the agent together. It investigates the source data and traces the
 p95 jump from 256 to 1,450 ms to an inventory-pool change.
 
-[Watch dashboard demo · 26 seconds](docs/demos/dashboard.mp4)
+[Watch dashboard demo · 25 seconds](docs/demos/dashboard.mp4)
 
 ### Sketch two quotes across a sheet
 
@@ -95,18 +96,19 @@ quote boxes, and cross out one option inside a loop.
 
 **The sketch defines the groups and the exception.** The agent combines items
 from different tables into two formula-driven quotes, including each item's tax
-rate. The prompt contains no item names or cell addresses. Change a source price
-and only the connected quote recalculates; the other quote stays unchanged.
+rate. The prompt contains no item names or cell addresses. The clip ends with
+the agent’s completed response.
 
-[Watch the Sheets sketch demo](docs/demos/sheets.mp4)
+[Watch the Sheets sketch demo · 29 seconds](docs/demos/sheets.mp4)
 
 <details>
 <summary>About these recordings</summary>
 
 Real selections, agent replies and sheet edits, recorded with the Windows
-development build. Setup uses OpenCode; the three task demos use Codex.
+development build. Setup shows Codex and OpenCode; the three task demos use Codex.
 The downloadable preview may differ. Clips speed
-up gestures and typing, trim waits and include labelled context illustrations.
+up gestures, trim waits and include labelled context illustrations. Amazon and
+dashboard conversations are reopened from the same completed sessions in Ocean.
 The dashboard and sheet use synthetic data.
 
 Context depends on what the source exposes. This sample chart exposes its SQL

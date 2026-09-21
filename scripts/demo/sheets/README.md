@@ -30,7 +30,9 @@ Maintainer expectations, derived from the reviewed annotated attachment:
 After the agent completes, export the whole workbook. Change C5 from 180 to 230
 in the live UI: Plan B must become 850 / 72.80 / 922.80 while Plan A stays fixed.
 Export again, restore C5 to 180, and export once more. Record both the change and
-restoration, and verify **Saved to Drive**. `sheets_quote_proof.verify` consumes
+restoration as private verification evidence, and verify **Saved to Drive**.
+End the public demo on the agent’s completed response, before these checks.
+`sheets_quote_proof.verify` consumes
 the actual completed session, all four ordered exports and the visually reviewed
 row groups. It checks native Pen provenance, actual browser edits, linked
 formulas, exclusion, recalculation and source/layout/other-tab preservation.

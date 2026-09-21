@@ -7,19 +7,22 @@ click them to open the clearer MP4.
 
 ## First launch: connect an agent and select a model
 
-Choose **OpenCode** in **Welcome to Zommi**, then **Connect and continue**. Open
-the model picker and choose a model. Selection is accelerated; the ending shows
+**Welcome to Zommi** shows the installed Codex, OpenCode, Pi, Hermes, OpenClaw
+and Claude CLI agents. Connect Codex and choose a model, then use **New agent**
+to open OpenCode and select one of its models. Selection is accelerated; the
+ending shows
 the full Zommi window with its sidebar, selected model and ready composer.
 
-This take uses the real installed OpenCode ACP runtime with an isolated demo
-history and its public model catalog. No credentials are copied into the demo
-profile. The app persists setup completion and binds a real empty session.
+This take uses the real installed Codex and OpenCode runtimes with isolated
+demo histories and their default model catalogs. No credentials are copied
+into the demo profiles. The app persists setup completion and binds real empty
+sessions.
 Model availability in your installation depends on your agent, providers and
 account. No agent reply is simulated.
 
-[![Connect OpenCode, choose a model and see the complete ready app](setup-preview.webp)](setup.mp4)
+[![Choose among six agents, select Codex and OpenCode models, and see the complete app](setup-preview.webp)](setup.mp4)
 
-[Watch setup](setup.mp4) · [Agents and model families](../../README.md#connect-your-agent-and-choose-a-model) · [Installation guide](../install.md)
+[Watch setup · 15 seconds](setup.mp4) · [Agents and model families](../../README.md#connect-your-agent-and-choose-a-model) · [Installation guide](../install.md)
 
 ## 1. Amazon: one box around all the candidates
 
@@ -50,7 +53,7 @@ traffic stay steady. The source database and query remain unchanged.
 
 [![Select only a latency spike, then read an investigation grounded in its full query and source data](dashboard-preview.webp)](dashboard.mp4)
 
-[Watch · 26 seconds](dashboard.mp4) · [View the analysis](dashboard-poster.webp)
+[Watch · 25 seconds](dashboard.mp4) · [View the analysis](dashboard-poster.webp)
 
 ## 3. Sheets: a sketch becomes two linked quotes
 
@@ -68,11 +71,12 @@ addresses or document URL are supplied in the prompt.
 
 [![Native freehand loops, connections and a crossed-out option become two linked quotes](sheets-preview.webp)](sheets.mp4)
 
-[Watch the sketch demo](sheets.mp4) · [View the result](sheets-poster.webp)
+[Watch the sketch demo · 29 seconds](sheets.mp4) · [View the result](sheets-poster.webp)
 
 The single actual attachment contains **17 Pen strokes**. The agent writes six
 formulas and displays the quote amounts with two decimal places. Plan A totals
-**564.80**; Plan B totals **814.80**. In the recorded verification, changing the
+**564.80**; Plan B totals **814.80**. In a separate, off-clip verification, changing
+the
 Display unit price **180 → 230** changes only Plan B, to **922.80**. Restoring 180
 restores its original total.
 
@@ -84,20 +88,24 @@ a maintainer verification after the agent's completed turn.
 
 ## What was recorded
 
-Recorded September 20–21, 2026 with the native Windows app. Setup uses OpenCode;
-the three task demos use Codex.
+Recorded September 20–21, 2026 with the native Windows app. Setup uses Codex
+and OpenCode; the three task demos use Codex.
 Amazon uses signed-out public product pages; listings and availability can
 change. The dashboard and private Google Sheet contain synthetic data.
 
 Selections, prompts, agent replies and sheet edits are real. The edited clips
-shorten waits and accelerate gestures and typing. Amazon and dashboard include
+shorten waits and accelerate gestures. All four demos use Ocean for Zommi and
+their explanatory graphics. Amazon and dashboard pair the original native
+selections with a new recording of the same completed conversations reopened
+in Ocean; no new request or agent reply is generated for these views. They include
 five-second labelled context illustrations; the drawing uses native footage
 with explanatory captions and zoomed crops. Setup retains the full app window
 after the model is selected. Results retain reading time. There is no audio
 or scripted agent response. Discarded capture attempts are omitted.
 
 Sheets uses one annotated selection and one request. The selection, freehand strokes and
-completed live result belong to the same native take and agent session.
+completed reply belong to the same native take and agent session. The clip ends
+on that reply; the later price-change and restoration checks are omitted.
 
 The sample dashboard explicitly exposes its executed SQL through the chart's
 standard accessibility description. Zommi captures that description and the
@@ -114,8 +122,10 @@ Zommi supplies context, while the existing agent supplies the tools and access.
 All final MP4/GIF/WebP frames are decoded and scanned with OCR. The lossless
 WebP previews preserve the reviewed GIF pixels and timeline at 960px and 8fps. Edited
 sequences and media metadata are reviewed, and the [manifest](manifest.json)
-records exact published hashes and the actual Windows recording build. Raw
-captures, profiles, session transcripts, workbook receipts and OCR text remain
+records exact published hashes and the primary Windows recording build. Amazon
+and dashboard selections were captured on `e21bf1c`; their Ocean conversation
+views and the setup demo were recorded on `9701793`. Sheets was recorded on
+`9819001`. Raw captures, profiles, session transcripts, workbook receipts and OCR text remain
 private. The source sheet URL is not published.
 
 ## Reproduce and verify
