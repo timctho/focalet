@@ -9,9 +9,9 @@ click them to open the clearer MP4.
 
 **Welcome to Zommi** shows the installed Codex, OpenCode, Pi, Hermes, OpenClaw
 and Claude CLI agents. Connect Codex and choose a model, then use **New agent**
-to open OpenCode and select one of its models. Selection is accelerated; the
-ending shows
-the full Zommi window with its sidebar, selected model and ready composer.
+to open OpenCode and select one of its models. Selection is accelerated and
+connection/loading waits are cut. The ending shows the full Zommi window with
+its sidebar, selected model and ready composer.
 
 This take uses the real installed Codex and OpenCode runtimes with isolated
 demo histories and their default model catalogs. No credentials are copied
@@ -22,22 +22,23 @@ account. No agent reply is simulated.
 
 [![Choose among six agents, select Codex and OpenCode models, and see the complete app](setup-preview.webp)](setup.mp4)
 
-[Watch setup · 15 seconds](setup.mp4) · [Agents and model families](../../README.md#connect-your-agent-and-choose-a-model) · [Installation guide](../install.md)
+[Watch setup · 11 seconds](setup.mp4) · [Agents and model families](../../README.md#connect-your-agent-and-choose-a-model) · [Installation guide](../install.md)
 
-## 1. Amazon: one box around all the candidates
+## 1. Amazon: three products, three selections
 
-On the real listing grid, select the whole row once. Ask:
-**“Which of these would let my M1 MacBook Air run two independent monitors?
+On the real listing grid, hold **Ctrl** while drawing three separate boxes,
+one per chosen product. Attach all three images together. Ask:
+**“Which of these three would let my M1 MacBook Air run two independent monitors?
 Check the exact listings. Keep the comparison short and link the sources.”**
 
-The single native attachment retains all five product links. The agent reads
-every exact listing and checks Apple's display limit. Its sourced comparison
-finds that **none of the five supports two independent external displays on the
-M1 Air**, despite their dual-HDMI descriptions. No purchase is made. The final
+Each native attachment retains exactly its own product link. The agent retrieves
+all three exact listings and checks Apple's display limit. Its sourced comparison
+finds that **none of the three supports two independent external displays on the
+M1 Air**, despite their dual-output descriptions. No purchase is made. The final
 comparison stays on screen for **3 seconds**; open the still result below to read
 it at your own pace.
 
-[![Select five Amazon candidates in one rectangle and receive a sourced compatibility comparison](amazon-preview.webp)](amazon.mp4)
+[![Select three Amazon products separately and receive a sourced compatibility comparison](amazon-preview.webp)](amazon.mp4)
 
 [Watch · 16 seconds](amazon.mp4) · [View the comparison](amazon-poster.webp)
 
@@ -97,13 +98,13 @@ change. The dashboard and private Google Sheet contain synthetic data.
 
 Selections, prompts, agent replies and sheet edits are real. The edited clips
 shorten waits and accelerate gestures. All four demos use Ocean for Zommi and
-their explanatory graphics. Amazon and dashboard pair the original native
-selections with a new recording of the same completed conversations reopened
-in Ocean; no new request or agent reply is generated for these views. They include
-five-second labelled context illustrations; the drawing uses native footage
-with explanatory captions and zoomed crops. Setup retains the full app window
-after the model is selected. Results retain reading time. There is no audio
-or scripted agent response. Discarded capture attempts are omitted.
+their explanatory graphics. Amazon records three separate selections, their
+attachments and a new completed comparison in the same live session. Dashboard
+pairs its original native selection with that completed conversation reopened
+in Ocean. Amazon includes a three-second labelled context illustration; dashboard
+uses five seconds. The drawing uses native footage with explanatory captions
+and zoomed crops. Setup retains the full app window after model selection.
+Results retain reading time. There is no audio or scripted agent response. Discarded capture attempts are omitted.
 
 Sheets uses one annotated selection and one request. The selection, freehand strokes and
 completed reply belong to the same native take and agent session. The clip ends
@@ -115,20 +116,21 @@ spatially selected points; Query Inspector is not selected. This demonstrates
 an application that exposes query context, not recovery of arbitrary hidden
 queries. The agent already has access to the sample database workspace.
 
-The Amazon grid's DOM traversal is truncated, but all five candidate links are
-retained; the agent reads full product details with browser tools. Sheets uses
-native Windows accessibility, retaining document identity with a truncated
-traversal; the agent reads and edits the actual cells through its browser tools.
+Amazon's three native DOM contexts each retain exactly one product link, without
+truncation. The agent retrieved the exact listings through a web text reader
+after its browser connection timed out, and fetched Apple's specification
+separately. Sheets uses native Windows accessibility, retaining document identity
+with a truncated traversal; the agent reads and edits the actual cells through its browser tools.
 Zommi supplies context, while the existing agent supplies the tools and access.
 
 All final MP4/GIF/WebP frames are decoded and scanned with OCR. The lossless
 WebP previews preserve the reviewed GIF pixels and timeline at 960px and 8fps. Edited
 sequences and media metadata are reviewed, and the [manifest](manifest.json)
 records exact published hashes and the primary Windows recording build. Amazon
-and dashboard selections were captured on `e21bf1c`; their Ocean conversation
-views and the setup demo were recorded on `9701793`. Sheets was recorded on
-`9819001`. Raw captures, profiles, session transcripts, workbook receipts and OCR text remain
-private. The source sheet URL is not published.
+was recorded on `16c594a`. Dashboard's selection was captured on `e21bf1c`; its
+Ocean conversation view and the setup demo were recorded on `9701793`. Sheets
+was recorded on `9819001`. Raw captures, profiles, session transcripts, workbook
+receipts and OCR text remain private. The source sheet URL is not published.
 
 ## Reproduce and verify
 

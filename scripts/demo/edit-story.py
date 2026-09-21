@@ -12,7 +12,7 @@ import tempfile
 
 from sheets_proof import verify as verify_sheets
 from sheets_layout_proof import verify as verify_sheets_layout
-from amazon_proof import MANUFACTURER, verify as verify_amazon
+from amazon_proof import MANUFACTURER, verify as verify_amazon, verify_product_selections
 from latency_proof import verify as verify_latency
 
 spec = importlib.util.spec_from_file_location(
@@ -72,7 +72,11 @@ def main():
             highlight_box=tuple(cut.get("highlightBox", [1005, 386, 1130, 410])),
         )
     elif cut["scene"] == "amazon":
-        proof = verify_amazon(session)
+        proof = (
+            verify_product_selections(session, cut["productIds"])
+            if cut.get("scenario") == "three-product-selections"
+            else verify_amazon(session)
+        )
     elif cut["scene"] == "dashboard":
         proof = verify_latency(
             session, Path(cut["workspace"]), read(args.recording / "baseline.json")
@@ -156,6 +160,8 @@ def main():
                 str(Path(__file__).with_name("render-flow.py")),
                 "--scene",
                 cut["scene"],
+                "--seconds",
+                str(cut.get("flowSeconds", 5)),
                 "--browser",
                 args.browser,
                 "--evidence",

@@ -50,6 +50,24 @@ window.setScene=function(name){
  document.querySelector('.footer span').textContent=content.footer;
 };
 window.setEvidence=function(proof){
+ if(proof?.scenario==='three-product-selections'){
+  if(scene!=='amazon'||proof.captureCount!==3||proof.candidateCount!==3||proof.productLinksVerified!==3||proof.productDetailsRead!==3||proof.agentCompleted!==true)throw new Error('Three separate product captures and completed detail-page reads are required');
+  if(!Array.isArray(proof.referenceLabels)||proof.referenceLabels.length!==3||new Set(proof.referenceLabels).size!==3||proof.referenceLabels.some(label=>!/^[A-Z]+$/.test(label)))throw new Error('Three actual capture reference labels are required');
+  document.querySelector('h1').innerHTML='Three selections.<br><span>One comparison.</span>';
+  document.querySelector('.sub').textContent='Pick only the products you want your agent to compare.';
+  document.querySelector('.sources .kicker').textContent='THREE SEPARATE SELECTIONS';
+  document.querySelector('.sources h2').textContent='These three products.';
+  document.querySelectorAll('.capture').forEach((node,i)=>{node.innerHTML='<span class="label">'+proof.referenceLabels[i]+'</span><div>Selected product '+(i+1)+'<small>Its own image and exact product link</small></div>'});
+  document.querySelector('.context h2').textContent='Keep each exact link.';
+  const rows=['Three separate native images','One product link per selection','Available titles and labels','Source page and pixel mapping'];
+  document.querySelectorAll('.row').forEach((node,i)=>node.innerHTML='<span>↗</span>'+rows[i]);
+  document.querySelector('.agent h2').textContent='Check the actual details.';
+  const steps=[['Read all three listings','Follow each captured product link'],['Check compatibility','Independent displays on the M1 Air'],['Compare with sources','Link the three selected products']];
+  document.querySelectorAll('.tool').forEach((node,i)=>node.innerHTML='<span class="number">'+(i+1)+'</span><div>'+steps[i][0]+'<small>'+steps[i][1]+'</small></div>');
+  document.getElementById('proof').textContent='3 selections · 3 products · all detail pages checked';
+  document.querySelector('.footer span').textContent='Each native crop retains its own product identity. Your agent reads the actual product pages.';
+  document.getElementById('preview').style.display='none';return;
+ }
  if(['two-region-layout','contrasting-layouts'].includes(proof?.scenario)){
   const contrast=proof.scenario==='contrasting-layouts';
   if(contrast&&proof.referenceStylesVerified!==true)throw new Error('Each reference must receive its own requested layout');

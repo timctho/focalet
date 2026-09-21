@@ -8,30 +8,30 @@ contains the reviewed recordings; this brief alone is not acceptance evidence.
 
 | Case | Context that is expensive to describe | User action | Payoff |
 | --- | --- | --- | --- |
-| Amazon | Five similar products, exact variants, and misleading dual-monitor labels | One loose rectangle around a row of real listing cards | Agent checks every exact listing against an M1 Air's display limit |
+| Amazon | Three chosen products among similar listings, exact variants, and misleading dual-monitor labels | Three separate native rectangles, one per product | Agent checks each selected listing against an M1 Air's display limit |
 | Dashboard | Which latency spike, time buckets, metric definition and query | Select only the spike interval | Agent receives the full executed query and selected points, then investigates the database |
 | Sheets | Two groups spanning three tables, their destinations, and a crossed-out exception | Use Pen loops, connections and a cross-out in one native selection | Agent builds two linked quotes and only the connected quote recalculates |
 
-## 1. Amazon: one grid, all candidates
+## 1. Amazon: three products, three selections
 
-Use the real, signed-out Amazon listing grid. Frame the entire candidate row
-once. Do not switch to individual detail pages to attach each product. The
-[recorded sources](amazon/README.md) identify the five candidates in this take.
+Use the real, signed-out Amazon listing grid. Hold Ctrl while drawing three
+separate boxes, one per selected product; leave other products out. Attach all
+three images together. The [recorded sources](amazon/README.md) identify the
+three candidates in this take.
 
-Ask: **“Which of these would let my M1 MacBook Air run two independent monitors?
+Ask: **“Which of these three would let my M1 MacBook Air run two independent monitors?
 Check the exact listings. Keep the comparison short and link the sources.”**
 
 The laptop model belongs in the question; candidate URLs and specifications must
 arrive through the native capture. Let the actual agent follow every selected
 product link, read additional compatibility details and provide a sourced
-comparison. Do not predeclare a winner: this take finds that none of the five
-meets the independent-display requirement.
+comparison. Do not predeclare a winner.
 
-`amazon_proof.py` requires one aligned image, at least three distinct native DOM
-product links, a completed agent investigation of every candidate and a final
-comparison linking each one. The capture may be truncated; full-page product
-details are obtained using the agent's browser tools. Record availability and
-prices as observations from that take. Keep account information, delivery
+`amazon_proof.py`'s `verify_product_selections` requires three aligned images,
+each with exactly its own native DOM product link, a completed agent investigation
+of every candidate and a final comparison linking all three. The capture may be
+truncated; full-page product details are obtained using the agent's web tools, with the actual retrieval method
+retained in the proof and recording notes. Record availability and prices as observations from that take. Keep account information, delivery
 addresses, personal recommendations and checkout out of the published crop.
 
 ## 2. Dashboard: only the latency spike
@@ -93,21 +93,23 @@ show both Codex and OpenCode model choices, then record the **entire ready app
 window**, including the sidebar, header and composer. Use a clean actual runtime profile so personal
 chat titles and workspace paths never need to be cropped from the ending. Keep
 raw profiles private. The README lists supported agents and model families next
-to the accelerated selection video. Do not copy credentials into demo profiles.
+to the accelerated selection video. Cut connection/loading waits while retaining
+both model selections and the full ready window. Do not copy credentials into
+demo profiles.
 
 ## Editing and review
 
-Use Ocean for Zommi and explanatory graphics. The current Amazon and dashboard
-edits retain the original native selections and reopen the same completed
-sessions in Ocean for the conversation views. Disclose this in the recording
-notes; do not simulate a new turn or alter the saved reply.
+Use Ocean for Zommi and explanatory graphics. Amazon's three separate selections,
+attachments and completed comparison belong to the same live session. The
+dashboard edit retains its original native selection and reopens that completed
+session in Ocean. Disclose replays in the recording notes; do not simulate a new
+turn or alter a saved reply.
 
 Keep the successful selection, attachment, short prompt and actual result.
 Remove abandoned setup, permission dialogs and idle waits. Accelerate selection
 and typing segments by about 1.5–3× using the reviewed cut list's `speed` field.
-The Amazon and dashboard clips use a five-second context illustration labelled
-**agent wait trimmed**. It must
-be generated from verified session evidence, use the actual attachment labels
+Amazon uses a three-second context illustration, and dashboard uses five seconds,
+labelled **agent wait trimmed**. Each must be generated from verified session evidence, use the actual attachment labels
 and explain what was captured versus what the agent read with its own tools.
 
 Never substitute an agent response, source mutation or successful capture.

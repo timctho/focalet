@@ -22,7 +22,8 @@ Uses your existing agent account. No separate model API key to enter in Zommi.
 Choose from your installed agents, connect, then pick a model from the chat header.
 The demo shows Codex and OpenCode model selection in the Ocean theme. If
 sign-in is needed, Zommi opens your agent’s own sign-in flow. The demo speeds up
-selection and ends on the full, ready-to-use Zommi window.
+selection, cuts connection/loading waits and ends on the full, ready-to-use
+Zommi window.
 
 [![First launch: choose an agent and model, then see the full Zommi window](docs/demos/setup-preview.webp)](docs/demos/setup.mp4)
 
@@ -56,16 +57,17 @@ automatically; click one for the clearer video.
 
 ### Compare the products you're actually considering
 
-Draw **one box around all five candidates** on the Amazon listing grid.
+Make **three separate selections**, one around each product you want to compare.
+Hold **Ctrl** while drawing the boxes, then attach them together.
 
-> Which of these would let my M1 MacBook Air run two independent monitors?
+> Which of these three would let my M1 MacBook Air run two independent monitors?
 > Check the exact listings.
 
-[![Select five products and receive a sourced comparison](docs/demos/amazon-preview.webp)](docs/demos/amazon.mp4)
+[![Select three products separately and receive a sourced comparison](docs/demos/amazon-preview.webp)](docs/demos/amazon.mp4)
 
-**Five exact links, one selection.** The agent checks each product and Apple's
-display limits, then returns a sourced comparison. In this case, none of the
-five hubs meets the requirement—even though the listings advertise dual HDMI.
+**Three selections, three exact links.** Each attachment keeps its own product
+identity. The agent follows those links, checks display compatibility and returns
+a sourced comparison of the selected items.
 
 [Watch Amazon demo · 16 seconds](docs/demos/amazon.mp4)
 
@@ -107,8 +109,9 @@ the agent’s completed response.
 Real selections, agent replies and sheet edits, recorded with the Windows
 development build. Setup shows Codex and OpenCode; the three task demos use Codex.
 The downloadable preview may differ. Clips speed
-up gestures, trim waits and include labelled context illustrations. Amazon and
-dashboard conversations are reopened from the same completed sessions in Ocean.
+up gestures, trim waits and include labelled context illustrations. Amazon's
+three selections and comparison belong to one actual Ocean session. The dashboard
+conversation is reopened from its completed session in Ocean.
 The dashboard and sheet use synthetic data.
 
 Context depends on what the source exposes. This sample chart exposes its SQL
