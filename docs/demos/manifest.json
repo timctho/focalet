@@ -52,29 +52,29 @@
       "audio": false,
       "review": {
         "ocrStatus": "no-matches",
-        "exportedFramesScanned": 1117,
+        "exportedFramesScanned": 615,
         "visualReview": true
       },
       "assets": [
         {
           "file": "amazon.mp4",
-          "bytes": 1291507,
-          "sha256": "a8a9de13141c2525e2bf7cf0ca06f40637affec83df20484c26053a093a71c46"
+          "bytes": 1130751,
+          "sha256": "87ba31d602af902fdf471901c58c41f7eb0ac5f3082084bc082f76cf1674b134"
         },
         {
           "file": "amazon.gif",
-          "bytes": 1103771,
-          "sha256": "c931789c6a01564ffef960048f2a1b21fccaf557b722985870461391f1dad70b"
+          "bytes": 987348,
+          "sha256": "092f480a6fac39b4478e5a03e7f5d18c656ef79c5c8398788ba2e23a2365f4db"
         },
         {
           "file": "amazon-poster.webp",
-          "bytes": 69692,
-          "sha256": "dbb65a4df9b3f3899a48f2b4a4dfc2b795c3cad41a24ecdaec2f19a6b1965a6d"
+          "bytes": 69906,
+          "sha256": "e13a0de094db79b696c03adc6d226afcd0fed8ef32cf5a78dc2387ea76fb177f"
         },
         {
           "file": "amazon-preview.webp",
-          "bytes": 1149982,
-          "sha256": "fed606d078cb28a3485965a2a1786a47d91b501b15dd4fe0aabc104d313dfa1b"
+          "bytes": 815746,
+          "sha256": "0a1cc94d279c1343f1c5df41a04822f74ca56d573263310a0841eac874612803"
         }
       ]
     },

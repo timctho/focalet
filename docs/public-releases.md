@@ -1,18 +1,22 @@
-# Public Windows and Mac downloads
+# Releases in the Zommi repository
 
-Use a public downloads repository, `timctho/zommi-releases`, for GitHub Releases.
-The source repository can remain private: releases in a private repository
-cannot be downloaded anonymously. Actions artifacts also require authentication
-and expire; they are not the public distribution channel.
+Publish installers in [timctho/zommi Releases](https://github.com/timctho/zommi/releases),
+alongside the source. Release tags point to the exact accepted source revision.
+Releases inherit repository visibility; publishing does not change it. Downloads
+from a private repository require GitHub access. Actions artifacts expire and
+are not the release distribution channel.
 
-The download repository contains an installation README and release assets.
-Each release provides a per-user Windows installer, Mac disk images with an
-Applications shortcut, checksums, and a manifest recording the exact source SHA.
-The publisher never uploads the source checkout or desktop acceptance evidence.
+Each release lists only the platforms actually accepted for that revision,
+with checksums and a manifest recording the source SHA. Windows previews can
+contain only the per-user Windows installer. Mac disk images are included when
+built and accepted on that same revision. Raw desktop acceptance evidence stays
+private and is not uploaded by the publisher.
 
 ## Build and accept one revision
 
-Run `python3 scripts/check.py` and require the PR checks for the revision first.
+Run the checks required by [CONTRIBUTING.md](../CONTRIBUTING.md) for the revision
+and inspect hosted PR checks. Record unavailable CI separately from local results;
+never describe jobs that did not start as passed.
 Keep persistent runners reserved for operator-invoked native acceptance. Build Windows locally with
 `scripts/package-windows.ps1 -Runtime win-x64`, then run the packaged Windows
 acceptance scripts. The package bundles MSVC and .NET runtime libraries.
@@ -56,32 +60,42 @@ draft releases `macos-test-<sha12>-<architecture>` retain the DMGs and their
 
 ## Prepare and publish
 
-Collect each installer and its `.release.json` sidecar into a local directory.
-Create the public downloads repository with only the installation README; do
-not copy the source checkout into it. Using an authenticated local `gh` session:
+Collect the accepted installer and its `.release.json` sidecar. With an
+authenticated local `gh` session, prepare a Windows preview:
 
 ```sh
-python scripts/publish_release.py --repository timctho/zommi-releases \
-  --tag v0.1.0-preview.1 --expected-commit <main-sha> \
+python scripts/publish_release.py --repository timctho/zommi \
+  --tag v0.1.0-preview.5 --expected-commit <main-sha> \
+  --windows-only \
   --metadata installers/Zommi-Setup-x64.exe.release.json \
-  --metadata installers/Zommi-macOS-arm64.dmg.release.json \
-  --metadata installers/Zommi-macOS-x64.dmg.release.json \
-  --output artifacts/public-release
+  --output artifacts/release
 ```
 
-This only prepares the manifest, checksum list, and release notes for review.
-Add `--publish` to upload to a draft, verify GitHub's asset digests, and publish
-the preview. Re-running against an already published tag is rejected. Use a new
-tag for each version. Verify the final download URLs without GitHub credentials.
+This prepares the manifest, checksum list and release notes without changing
+GitHub. Add `--publish` to verify that the source commit exists in the destination,
+upload to a draft, check GitHub's asset digests and publish the preview. The tag
+must match the installer version and source revision. Published tags cannot be
+overwritten; choose a new version for each release. Existing draft assets must
+belong to the same release asset set.
 
-Preview releases are not selected by GitHub's `/releases/latest` URL. Link users
-to the version's release page or `/releases/download/<tag>/<asset>` URLs from the
-public README. A future stable release can use `/releases/latest/download/<asset>`.
+For a release with Windows and Mac, omit `--windows-only` and add the accepted
+Mac Apple Silicon `.release.json` metadata; Mac Intel is optional. A partial
+platform set is rejected unless the Windows-only preview is explicitly selected.
+
+After publication, download the actual installer and checksum files from
+`timctho/zommi` and compare them with the accepted local bytes. Use authenticated
+downloads for a private repository; also verify anonymous downloads if it is
+public. Keep the repository's visibility unchanged.
+
+GitHub does not select prereleases for `/releases/latest`. Point the README's
+Windows buttons and installation guide at
+`/releases/download/<tag>/Zommi-Setup-x64.exe` for the current accepted preview.
+General release links point to this repository's `/releases` page.
 
 ## Signing
 
 The current installer builder produces an unsigned Windows setup executable and
-a non-notarized Mac DMG. Public downloads work, but operating systems may require
+a non-notarized Mac DMG. Operating systems may require
 explicit opening confirmation; document that in preview release notes.
 
 For a normal distribution release, sign the Windows application and installer
@@ -91,7 +105,6 @@ package builders accept `ZOMMI_WINDOWS_SIGNING_THUMBPRINT` and
 `ZOMMI_MACOS_SIGNING_IDENTITY`; signing only the app does not sign the installer
 or notarize the Mac distribution.
 
-Local publication needs no additional Actions secret. If publication later runs
-inside the private source workflow, its default `GITHUB_TOKEN` cannot write to a
-different repository; use a narrowly scoped GitHub App or token with Contents
-write permission on the downloads repository.
+Local publication needs no additional Actions secret. A workflow publishing in
+this source repository can use its `GITHUB_TOKEN` with `contents: write`; no
+separate downloads repository or cross-repository token is needed.

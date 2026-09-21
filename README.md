@@ -12,7 +12,7 @@ exactly what you're looking at can take longer than asking the question.
 attaching the selected image and available context—links, labels and structure—so
 you can get straight to the request.
 
-### [Download the Windows preview →](https://github.com/timctho/zommi-releases/releases)
+### [Download the Windows preview →](https://github.com/timctho/zommi/releases/download/v0.1.0-preview.5/Zommi-Setup-x64.exe)
 
 Uses your existing agent account. No separate model API key to enter in Zommi.
 [Setup guide](docs/install.md) · [See it in action ↓](#see-it-in-action)
@@ -67,7 +67,7 @@ Draw **one box around all five candidates** on the Amazon listing grid.
 display limits, then returns a sourced comparison. In this case, none of the
 five hubs meets the requirement—even though the listings advertise dual HDMI.
 
-[Watch Amazon demo · 29 seconds](docs/demos/amazon.mp4)
+[Watch Amazon demo · 16 seconds](docs/demos/amazon.mp4)
 
 ### Ask about this spike
 
@@ -151,13 +151,13 @@ data, and the handoff asks the agent to obtain fresh state before acting.
 | **Linux · X11** | Source build | Native region images; no DOM/UIA enrichment |
 | **Linux · Wayland** | Source build; requires desktop portals | Portal-based screenshots and shortcuts; reduced window context |
 
-Choose a package actually listed in [Releases](https://github.com/timctho/zommi-releases/releases).
+Choose a package actually listed in [Releases](https://github.com/timctho/zommi/releases).
 [Installation and permissions](docs/install.md) · [Build from source](CONTRIBUTING.md).
 
 ## Try it on the thing you're looking at
 
 1. **Install Zommi.** Get `Zommi-Setup-x64.exe` from
-   [Releases](https://github.com/timctho/zommi-releases/releases).
+   [Releases](https://github.com/timctho/zommi/releases).
 2. **Connect your agent.** Choose an installed, signed-in runtime. Windows
    discovers agents in both Windows and WSL.
 3. **Press Alt+A, select and ask.** On Windows, add arrows or sketches if useful,
@@ -167,7 +167,7 @@ Choose a package actually listed in [Releases](https://github.com/timctho/zommi-
 For several regions on Windows, hold **Ctrl** during the first drag, add the
 next region, then press **Enter**. Refer to them as **A**, **B**, and so on.
 
-### [Download Zommi and try your first selection →](https://github.com/timctho/zommi-releases/releases)
+### [Download Zommi and try your first selection →](https://github.com/timctho/zommi/releases/download/v0.1.0-preview.5/Zommi-Setup-x64.exe)
 
 ## You choose what to share
 

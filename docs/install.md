@@ -6,13 +6,13 @@ installation and account. You do not need a separate model API key in Zommi.
 
 ## 1. Install the app
 
-Download from [Zommi Releases](https://github.com/timctho/zommi-releases/releases).
+Download from [Zommi Releases](https://github.com/timctho/zommi/releases).
 Choose a platform actually listed in that release; preview releases may only
 include Windows. Do not use GitHub's “Source code” archive as an installer.
 
 | Computer | Download | Install |
 | --- | --- | --- |
-| Windows 10/11, x64 | `Zommi-Setup-x64.exe` | Run the installer, then launch Zommi from Start |
+| Windows 10/11, x64 | [Zommi-Setup-x64.exe](https://github.com/timctho/zommi/releases/download/v0.1.0-preview.5/Zommi-Setup-x64.exe) | Run the installer, then launch Zommi from Start |
 | Mac with Apple Silicon | `Zommi-macOS-arm64.dmg`, when available | Open the DMG; drag Zommi into Applications |
 | Mac with Intel | `Zommi-macOS-x64.dmg`, when available | Open the DMG; drag Zommi into Applications |
 

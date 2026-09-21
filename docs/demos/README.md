@@ -33,11 +33,13 @@ Check the exact listings. Keep the comparison short and link the sources.”**
 The single native attachment retains all five product links. The agent reads
 every exact listing and checks Apple's display limit. Its sourced comparison
 finds that **none of the five supports two independent external displays on the
-M1 Air**, despite their dual-HDMI descriptions. No purchase is made.
+M1 Air**, despite their dual-HDMI descriptions. No purchase is made. The final
+comparison stays on screen for **3 seconds**; open the still result below to read
+it at your own pace.
 
 [![Select five Amazon candidates in one rectangle and receive a sourced compatibility comparison](amazon-preview.webp)](amazon.mp4)
 
-[Watch · 29 seconds](amazon.mp4) · [View the comparison](amazon-poster.webp)
+[Watch · 16 seconds](amazon.mp4) · [View the comparison](amazon-poster.webp)
 
 ## 2. Dashboard: just this latency spike
 
