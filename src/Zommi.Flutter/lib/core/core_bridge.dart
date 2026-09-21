@@ -171,6 +171,13 @@ abstract interface class RuntimeCommandBridge {
   });
 }
 
+abstract interface class RuntimeModelRefreshBridge {
+  /// Null means this runtime has no open model catalog yet.
+  Future<List<Map<String, Object?>>?> refreshRuntimeModels({
+    required String runtimeTargetId,
+  });
+}
+
 abstract interface class RuntimePreparationBridge {
   /// Prepare a runtime transport without selecting or creating a chat.
   Future<void> prepareRuntime({required String runtimeTargetId});
@@ -402,6 +409,7 @@ final class ProcessCoreBridge
         CoreBridge,
         RuntimeConfigurationBridge,
         RuntimePreparationBridge,
+        RuntimeModelRefreshBridge,
         SessionCatalogBridge,
         SessionForkBridge,
         SessionRewindBridge,
@@ -554,6 +562,16 @@ final class ProcessCoreBridge
       'runtimeTargetId': runtimeTargetId,
     });
     return _mapList(result['data']);
+  }
+
+  @override
+  Future<List<Map<String, Object?>>?> refreshRuntimeModels({
+    required String runtimeTargetId,
+  }) async {
+    final result = await _request('runtime.refreshModels', {
+      'runtimeTargetId': runtimeTargetId,
+    });
+    return result['models'] == null ? null : _mapList(result['models']);
   }
 
   @override
@@ -908,6 +926,7 @@ final class ProcessCoreBridge
           'runtime.discover',
           'runtime.connect',
           'runtime.prepare',
+          'runtime.refreshModels',
           'session.open',
         }.contains(operation)
         ? connectionTimeout

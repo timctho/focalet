@@ -259,6 +259,24 @@ impl RuntimeAdapter {
         }
     }
 
+    /// Refresh only inventory; never select a chat or persist a new binding.
+    pub async fn refresh_models(&mut self) -> Result<Option<Vec<Value>>, CodexError> {
+        let models = match self {
+            Self::Codex(adapter) => adapter.ready().await?.load_models().await?,
+            Self::Acp(adapter) => {
+                let replacement = adapter.refreshed().await?;
+                let models = replacement.model_inventory().await;
+                *adapter = replacement;
+                return Ok(models);
+            }
+            Self::Pi(adapter) => adapter.refresh_models().await?,
+            Self::HermesGateway(adapter) => adapter.reload_models().await?,
+            Self::OpenClawGateway(adapter) => adapter.reload_models().await?,
+            Self::Pty(_) => return Ok(None),
+        };
+        Ok(Some(models))
+    }
+
     pub async fn list_sessions(&self) -> Result<Vec<Value>, CodexError> {
         match self {
             Self::Codex(adapter) => adapter.ready().await?.list_sessions().await,

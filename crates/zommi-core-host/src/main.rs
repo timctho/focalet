@@ -171,6 +171,7 @@ impl HostState {
                     "runtime.overrides.v1",
                     "runtime.adapters.v1",
                     "runtime.prepare.v1",
+                    "runtime.models.refresh.v1",
                     "session.binding.v1",
                     "session.list.v1",
                     "session.catalog.v1",
@@ -271,6 +272,19 @@ impl HostState {
             }
             "runtime.connect" => self.connect_runtime(payload, false, false).await,
             "runtime.prepare" => self.connect_runtime(payload, false, true).await,
+            "runtime.refreshModels" => {
+                let target_id = required_string(payload, "runtimeTargetId")?;
+                let models = match self.adapters.get_mut(target_id) {
+                    Some(adapter)
+                        if !self.prepared.contains(target_id)
+                            || matches!(adapter, RuntimeAdapter::Acp(_)) =>
+                    {
+                        adapter.refresh_models().await?
+                    }
+                    _ => None,
+                };
+                Ok(json!({"models": models}))
+            }
             "session.catalog" => {
                 required_string(payload, "runtimeTargetId")?;
                 self.connect_runtime(payload, true, false).await
@@ -1073,7 +1087,7 @@ fn runtime_request_target(request: &CoreRequest) -> Option<&str> {
     let operation = request.operation.as_deref()?;
     if !(matches!(
         operation,
-        "runtime.connect" | "runtime.prepare" | "command.execute"
+        "runtime.connect" | "runtime.prepare" | "runtime.refreshModels" | "command.execute"
     ) || operation.starts_with("session.")
         || operation.starts_with("turn.")
         || operation.starts_with("approval.")

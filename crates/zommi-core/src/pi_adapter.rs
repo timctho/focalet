@@ -871,6 +871,11 @@ impl PiAdapter {
         }
     }
 
+    pub async fn refresh_models(&self) -> Result<Vec<Value>, CodexError> {
+        self.refresh_state(false).await?;
+        Ok(self.inner.state.lock().await.models.clone())
+    }
+
     async fn refresh_state(&self, include_messages: bool) -> Result<(), CodexError> {
         let state_response = self.inner.request(json!({"type": "get_state"})).await?;
         let runtime_state = state_response

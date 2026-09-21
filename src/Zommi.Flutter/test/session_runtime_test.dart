@@ -509,6 +509,41 @@ void main() {
   );
 
   testWidgets(
+    'Refresh agents updates the model picker without switching chats',
+    (tester) async {
+      final core = RichFakeCore()..historyCount = 0;
+      await tester.pumpWidget(
+        ZommiApp(core: core, desktop: FakeDesktopBridge()),
+      );
+      await tester.pumpAndSettle();
+      final session = core.activeSessionId;
+      core.modelCatalogByRuntime[core.activeTargetId] = [
+        ...RichFakeCore.models,
+        {'id': 'copilot/after-login', 'displayName': 'Copilot after login'},
+      ];
+      await tester.tap(find.byKey(const ValueKey('new-session')));
+      await tester.pumpAndSettle();
+      final gate = Completer<void>();
+      core.modelRefreshGate = gate.future;
+      await tester.tap(find.byKey(const ValueKey('refresh-runtimes')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.text('Refreshing agents…'), findsOneWidget);
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('Refresh agents'), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('model-summary')));
+      await tester.pumpAndSettle();
+      expect(find.text('Copilot after login'), findsOneWidget);
+      expect(core.activeSessionId, session);
+      expect(core.createdSessions, isEmpty);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'model list fits short catalogs and scrolls long catalogs in a small window',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(640, 500));

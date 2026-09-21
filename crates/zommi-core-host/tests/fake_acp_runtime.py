@@ -14,6 +14,10 @@ session_id = os.environ.get("ZOMMI_FAKE_ACP_SESSION", "acp-session-new")
 pending_prompt = None
 request_log = os.environ.get("ZOMMI_FAKE_REQUEST_LOG")
 
+# Read once, like an agent that discovers credentials/models at startup.
+model_file = os.environ.get("ZOMMI_FAKE_ACP_MODEL_FILE")
+model_config = json.load(open(model_file, encoding="utf-8")) if model_file else None
+
 
 def send(message):
     sys.stdout.write(json.dumps(message, separators=(",", ":")) + "\n")
@@ -80,6 +84,10 @@ for line in sys.stdin:
             },
         }
     elif method == "session/load":
+        if model_config and model_config.get("failLoad"):
+            send({"jsonrpc": "2.0", "id": request_id,
+                  "error": {"code": -32000, "message": "Session not found"}})
+            continue
         loaded = request["params"]["sessionId"]
         session_id = loaded
         send(
@@ -228,6 +236,11 @@ for line in sys.stdin:
             }
         )
         continue
+    if model_config is not None and method in ("session/new", "session/load", "session/set_config_option", "session/set_model"):
+        result["models"] = {
+            "currentModelId": request.get("params", {}).get("value", model_config.get("current", "provider:model-b")),
+            "availableModels": model_config["models"],
+        }
     if os.environ.get("ZOMMI_FAKE_ACP_CONFIG_OPTIONS") == "1" and "models" in result:
         models = result.pop("models")
         result["configOptions"] = [{"id": "provider-model", "category": "model", "name": "Model", "type": "select",

@@ -636,11 +636,16 @@ final class ZommiController extends ChangeNotifier {
     if (_closed ||
         starting ||
         runtimeBusy ||
+        sessionBusy ||
+        sessionSettingsBusy ||
+        submitting ||
+        anyTurnActive ||
         runtimeDiscoveryBusy ||
         runtimeOverrideBusy) {
       return;
     }
     runtimeDiscoveryBusy = true;
+    runtimeBusy = true;
     runtimeDiscoveryError = null;
     _notify();
     try {
@@ -650,6 +655,39 @@ final class ZommiController extends ChangeNotifier {
       );
       if (_closed) return;
       _replaceDiscovery(discovery);
+      if (core case final RuntimeModelRefreshBridge refreshable) {
+        final failures = <String>[];
+        await Future.wait([
+          for (final target in visibleRuntimeTargets)
+            () async {
+              try {
+                final inventory = await refreshable.refreshRuntimeModels(
+                  runtimeTargetId: target.id,
+                );
+                if (_closed || inventory == null) return;
+                _modelCatalogs[target.id] = List.of(inventory);
+                if (inventory.isNotEmpty) {
+                  (_runtimeCapabilities[target.id] ??= {}).add(
+                    'model.select.v1',
+                  );
+                }
+                if (activeRuntime?.id == target.id) {
+                  models
+                    ..clear()
+                    ..addAll(inventory);
+                  capabilities =
+                      _runtimeCapabilities[target.id] ?? capabilities;
+                }
+              } on Object {
+                failures.add(target.displayName);
+              }
+            }(),
+        ]);
+        if (!_closed && failures.isNotEmpty) {
+          runtimeDiscoveryError =
+              'Could not refresh models for ${failures.toSet().join(', ')}. Try again.';
+        }
+      }
       _prepareRuntimes(except: activeRuntime?.id);
     } on Object {
       if (!_closed) {
@@ -657,6 +695,7 @@ final class ZommiController extends ChangeNotifier {
       }
     } finally {
       runtimeDiscoveryBusy = false;
+      runtimeBusy = false;
       _notify();
     }
   }

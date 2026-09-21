@@ -457,7 +457,10 @@ class _NewAgentMenu extends StatelessWidget {
             autofocus: firstCreatable == null,
             closeOnActivate: false,
             style: actionStyle,
-            onPressed: busy || controller.runtimeDiscoveryBusy
+            onPressed:
+                busy ||
+                    controller.runtimeDiscoveryBusy ||
+                    controller.anyTurnActive
                 ? null
                 : () => unawaited(controller.refreshRuntimes()),
             leadingIcon: controller.runtimeDiscoveryBusy

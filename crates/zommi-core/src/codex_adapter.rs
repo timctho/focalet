@@ -1582,7 +1582,7 @@ impl CodexAdapter {
         }
     }
 
-    async fn load_models(&self) -> Result<Vec<Value>, CodexError> {
+    pub async fn load_models(&self) -> Result<Vec<Value>, CodexError> {
         let result = self
             .inner
             .request("model/list", json!({"limit": 100, "includeHidden": false}))

@@ -10,6 +10,7 @@ class RichFakeCore
     implements
         CoreBridge,
         RuntimeConfigurationBridge,
+        RuntimeModelRefreshBridge,
         SessionCatalogBridge,
         SessionRewindBridge,
         GoalControlBridge {
@@ -86,6 +87,25 @@ class RichFakeCore
   String? connectErrorCode;
   String? readSessionErrorCode;
   String connectErrorMessage = 'Authentication required';
+  final List<String> modelRefreshRequests = [];
+  final Set<String> modelRefreshFailures = {};
+  Future<void>? modelRefreshGate;
+
+  @override
+  Future<List<Map<String, Object?>>?> refreshRuntimeModels({
+    required String runtimeTargetId,
+  }) async {
+    modelRefreshRequests.add(runtimeTargetId);
+    await modelRefreshGate;
+    if (modelRefreshFailures.contains(runtimeTargetId)) {
+      throw const CoreProtocolException(
+        'runtime-unavailable',
+        'Refresh failed',
+      );
+    }
+    return modelCatalogByRuntime[runtimeTargetId];
+  }
+
   bool? lastDiscoveryForce;
   Future<void>? discoveryGate;
   bool discoveryFails = false;

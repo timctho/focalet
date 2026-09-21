@@ -4,7 +4,7 @@ use std::{
     process::Stdio,
     sync::{
         Arc, Weak,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
 
@@ -57,6 +57,8 @@ pub struct AcpAdapter {
 struct Inner {
     target: RuntimeTarget,
     cwd: PathBuf,
+    command: RuntimeCommand,
+    emit_events: AtomicBool,
     stdin: Mutex<ChildStdin>,
     pending: Mutex<HashMap<String, PendingRequest>>,
     state: Mutex<State>,
@@ -83,6 +85,7 @@ struct State {
     capabilities: Vec<String>,
     agent_capabilities: Value,
     session_id: Option<String>,
+    session_cwd: Option<String>,
     active_model: Option<String>,
     model_config_id: Option<String>,
     models: Vec<Value>,
@@ -105,6 +108,14 @@ struct PendingApproval {
 
 impl AcpAdapter {
     pub async fn connect(config: AcpConfig, event_tx: EventSender) -> Result<Self, CodexError> {
+        Self::connect_with_events(config, event_tx, true).await
+    }
+
+    async fn connect_with_events(
+        config: AcpConfig,
+        event_tx: EventSender,
+        emit_events: bool,
+    ) -> Result<Self, CodexError> {
         let mut command = Command::new(&config.command.command);
         command
             .args(&config.command.args)
@@ -140,6 +151,8 @@ impl AcpAdapter {
             inner: Arc::new(Inner {
                 target: config.target,
                 cwd: config.cwd,
+                command: config.command,
+                emit_events: AtomicBool::new(emit_events),
                 stdin: Mutex::new(stdin),
                 pending: Mutex::new(HashMap::new()),
                 state: Mutex::new(State::default()),
@@ -318,6 +331,99 @@ impl AcpAdapter {
         Ok(())
     }
 
+    /// ACP has no model-list RPC. Start a fresh process to pick up provider
+    /// credentials, then load the exact existing session without replaying its
+    /// history into the UI. Keep the original adapter usable if this fails.
+    pub async fn refreshed(&self) -> Result<Self, CodexError> {
+        let (session_id, cwd, model) = {
+            let state = self.inner.state.lock().await;
+            if !state.active_turns.is_empty() {
+                return Err(adapter_error(
+                    "session-busy",
+                    "Finish the active turn before refreshing models.",
+                ));
+            }
+            if state.session_id.is_some()
+                && state
+                    .agent_capabilities
+                    .get("loadSession")
+                    .and_then(Value::as_bool)
+                    != Some(true)
+            {
+                return Err(adapter_error(
+                    "capability-unavailable",
+                    "This ACP runtime cannot reload the current session to refresh models.",
+                ));
+            }
+            (
+                state.session_id.clone(),
+                state.session_cwd.clone(),
+                state.active_model.clone(),
+            )
+        };
+        let replacement = Self::connect_with_events(
+            AcpConfig {
+                target: self.inner.target.clone(),
+                command: self.inner.command.clone(),
+                cwd: cwd
+                    .as_ref()
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| self.inner.cwd.clone()),
+                preferred_session_id: None,
+                list_only: true,
+            },
+            self.inner.event_tx.clone(),
+            false,
+        )
+        .await?;
+        let restored = async {
+            if let Some(session_id) = session_id {
+                replacement
+                    .open_session_with_cwd(&session_id, cwd.as_deref())
+                    .await?;
+                let (available, current) = {
+                    let state = replacement.inner.state.lock().await;
+                    (state.models.clone(), state.active_model.clone())
+                };
+                if let Some(model) = model
+                    && current.as_deref() != Some(&model)
+                    && available
+                        .iter()
+                        .any(|item| item["id"].as_str() == Some(&model))
+                {
+                    replacement.set_model(&model).await?;
+                }
+            }
+            Ok::<(), CodexError>(())
+        }
+        .await;
+        if let Err(error) = restored {
+            replacement.shutdown().await;
+            return Err(error);
+        }
+        {
+            let previous = self.inner.state.lock().await;
+            let mut next = replacement.inner.state.lock().await;
+            // This is an inventory refresh, not a history refresh. ACP replay
+            // synthesizes turn IDs, so retain the original transcript identities.
+            next.histories = previous.histories.clone();
+            for (id, commands) in &previous.command_catalogs {
+                next.command_catalogs
+                    .entry(id.clone())
+                    .or_insert_with(|| commands.clone());
+            }
+            next.sessions = previous.sessions.clone();
+        }
+        self.shutdown().await;
+        replacement.inner.emit_events.store(true, Ordering::Release);
+        Ok(replacement)
+    }
+
+    pub async fn model_inventory(&self) -> Option<Vec<Value>> {
+        let state = self.inner.state.lock().await;
+        state.session_id.as_ref().map(|_| state.models.clone())
+    }
+
     pub async fn is_running(&self) -> bool {
         let state = self.inner.state.lock().await;
         !state.exited && !state.stopping
@@ -410,6 +516,7 @@ impl AcpAdapter {
             )
             .await?;
         self.select_session(session_id, &result).await?;
+        self.inner.state.lock().await.session_cwd = cwd.map(str::to_owned);
         self.connection_value().await
     }
 
@@ -705,6 +812,7 @@ impl AcpAdapter {
                 adapter_error("invalid-response", "ACP returned a session without an id.")
             })?;
         self.select_session(session_id, &result).await?;
+        self.inner.state.lock().await.session_cwd = cwd.map(str::to_owned);
         if let Some(model) = model {
             self.set_model(model).await?;
         }
@@ -1268,6 +1376,9 @@ impl Inner {
         operation_id: Option<&str>,
         payload: Value,
     ) {
+        if !self.emit_events.load(Ordering::Acquire) {
+            return;
+        }
         let _ = self.event_tx.send(CoreEvent {
             name: name.into(),
             sequence: self

@@ -78,7 +78,7 @@ void main() {
     },
   );
 
-  test('runtime refresh only discovers, coalesces clicks, and preserves the active chat', () async {
+  test('runtime refresh reloads models, coalesces clicks, and preserves the active chat', () async {
     final core = RichFakeCore()..historyCount = 0;
     final controller = ZommiController(
       core: core,
@@ -93,13 +93,19 @@ void main() {
     final discoveries = core.discoveryCount;
     final session = controller.activeSessionId;
     final status = controller.status;
+    final model = controller.selectedModel;
+    final settings = controller.activeSessionSettings;
+    core.modelCatalogByRuntime[controller.activeRuntime!.id] = [
+      ...controller.models,
+      {'id': 'provider/new-after-login', 'displayName': 'New after login'},
+    ];
     final gate = Completer<void>();
     core.discoveryGate = gate.future;
 
     final refresh = controller.refreshRuntimes();
     expect(controller.runtimeDiscoveryBusy, isTrue);
     expect(core.lastDiscoveryForce, isTrue);
-    expect(controller.runtimeBusy, isFalse);
+    expect(controller.runtimeBusy, isTrue);
     await controller.refreshRuntimes();
     expect(core.discoveryCount, discoveries + 1);
     gate.complete();
@@ -113,6 +119,63 @@ void main() {
     expect(core.openedSessions, isEmpty);
     expect(controller.activeSessionId, session);
     expect(controller.status, status);
+    expect(controller.runtimeBusy, isFalse);
+    expect(core.modelRefreshRequests, contains(controller.activeRuntime!.id));
+    expect(
+      controller.models.map((m) => m['id']),
+      contains('provider/new-after-login'),
+    );
+    expect(controller.selectedModel, model);
+    expect(controller.activeSessionSettings.model, settings.model);
+    expect(controller.activeSessionSettings.effort, settings.effort);
+    expect(controller.activeSessionSettings.workspace, settings.workspace);
+    expect(controller.activeSessionSettings.profile, settings.profile);
+  });
+
+  test('model refresh retains catalogs on failure, retries, and clears empty inventories', () async {
+    final core = RichFakeCore()..historyCount = 0;
+    final controller = ZommiController(
+      core: core,
+      desktop: FakeDesktopBridge(),
+    );
+    addTearDown(controller.close);
+    await controller.initialize();
+    final original = List.of(controller.models);
+    final targetId = controller.activeRuntime!.id;
+    core.modelRefreshFailures.add(targetId);
+    await controller.refreshRuntimes();
+    expect(controller.models, original);
+    expect(controller.runtimeDiscoveryError, contains('models for Codex'));
+    core.modelRefreshFailures.clear();
+    core.modelCatalogByRuntime[targetId] = [];
+    await controller.refreshRuntimes();
+    expect(controller.models, isEmpty);
+    expect(controller.runtimeDiscoveryError, isNull);
+    expect(controller.activeSessionId, 'session-1');
+  });
+
+  test('refresh waits for active turns and does not allow a new turn during model reload', () async {
+    final core = RichFakeCore()..historyCount = 0;
+    final controller = ZommiController(
+      core: core,
+      desktop: FakeDesktopBridge(),
+    );
+    addTearDown(controller.close);
+    await controller.initialize();
+    final gate = Completer<void>();
+    core.modelRefreshGate = gate.future;
+    final refresh = controller.refreshRuntimes();
+    await Future<void>.delayed(Duration.zero);
+    await controller.submit('must stay a draft');
+    expect(core.startedTurns, isEmpty);
+    gate.complete();
+    await refresh;
+    await controller.submit('hold this turn');
+    expect(controller.anyTurnActive, isTrue);
+    final requests = core.modelRefreshRequests.length;
+    await controller.refreshRuntimes();
+    expect(core.modelRefreshRequests, hasLength(requests));
+    expect(core.interrupted, isNull);
   });
 
   test(

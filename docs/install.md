@@ -60,7 +60,10 @@ session support. See [runtime commands](runtime-commands.md).
 
 OpenCode connects through [`opencode acp`](https://opencode.ai/docs/acp/).
 Install a version with ACP support and run `opencode auth login` to connect your
-provider, then select **OpenCode** in Zommi. Its models, tools, permissions and
+provider, then select **OpenCode** in Zommi. After signing in or changing providers,
+choose **New agent → Refresh agents** to reload the model lists without restarting
+Zommi. Refresh is available when agents are idle and preserves your current chat and
+model selection. Its models, tools, permissions and
 saved sessions remain in OpenCode. Images, saved-chat loading and commands use
 the capabilities advertised by that version; built-in `/undo` and `/redo` are
 currently unavailable through OpenCode ACP.

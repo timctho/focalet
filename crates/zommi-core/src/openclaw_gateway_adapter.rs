@@ -980,6 +980,19 @@ impl OpenClawGatewayAdapter {
         Ok(sessions)
     }
 
+    pub async fn reload_models(&self) -> Result<Vec<Value>, CodexError> {
+        let result = self
+            .inner
+            .request(
+                "models.list",
+                json!({"view": "configured", "includeProviderCapabilities": true}),
+            )
+            .await?;
+        let models = models_for_ui(result.get("models").unwrap_or(&Value::Null));
+        self.inner.state.lock().await.models = models.clone();
+        Ok(models)
+    }
+
     async fn refresh_models(&self) {
         match self
             .inner

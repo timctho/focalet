@@ -264,6 +264,161 @@ void main() {
     });
   }
 
+  for (final prepared in [false, true]) {
+    test(
+      'OpenCode refresh picks up login models and preserves state (prepared=$prepared)',
+      () async {
+        final temporary = await Directory.systemTemp.createTemp(
+          'zommi-acp-refresh-',
+        );
+        addTearDown(() => temporary.delete(recursive: true));
+        final fixture = File(
+          '${Directory.current.path}/../../crates/zommi-core-host/tests/fake_acp_runtime.py',
+        ).absolute;
+        final binding = File('${temporary.path}/binding.json');
+        final requestLog = File('${temporary.path}/requests.jsonl');
+        final modelFile = File('${temporary.path}/models.json');
+        Future<void> writeModels({
+          bool expanded = false,
+          bool failLoad = false,
+        }) => modelFile.writeAsString(
+          jsonEncode({
+            'failLoad': failLoad,
+            'models': [
+              {'modelId': 'provider:model-a', 'name': 'Model A'},
+              {'modelId': 'provider:model-b', 'name': 'Model B'},
+              if (expanded)
+                {'modelId': 'provider:after-login', 'name': 'After login'},
+            ],
+          }),
+        );
+        await writeModels();
+        final bridge = ProcessCoreBridge(
+          executablePath: _coreHostPath(),
+          environment: {
+            'ZOMMI_OPENCODE_COMMAND': await _findPython(),
+            'ZOMMI_OPENCODE_ARGS_JSON': jsonEncode([fixture.path]),
+            'ZOMMI_CORE_STATE_PATH': binding.path,
+            'ZOMMI_FAKE_REQUEST_LOG': requestLog.path,
+            'ZOMMI_FAKE_ACP_CONFIG_OPTIONS': '1',
+            'ZOMMI_FAKE_ACP_MODEL_FILE': modelFile.path,
+          },
+        );
+        addTearDown(bridge.close);
+        final events = <CoreEvent>[];
+        final subscription = bridge.events.listen(events.add);
+        addTearDown(subscription.cancel);
+        await bridge.initialize();
+        final target = (await bridge.discoverRuntimeTargets()).targets
+            .singleWhere((t) => t.runtimeId == 'opencode');
+        if (prepared) {
+          await bridge.prepareRuntime(runtimeTargetId: target.id);
+          await writeModels(expanded: true);
+          expect(
+            await bridge.refreshRuntimeModels(runtimeTargetId: target.id),
+            isNull,
+          );
+          expect(await binding.exists(), isFalse);
+        }
+        final connection = await bridge.connectRuntime(
+          runtimeTargetId: target.id,
+          preferredSessionId: 'exact-saved-chat',
+          cwd: temporary.path,
+        );
+        final beforeBinding = await binding.readAsString();
+        final beforeHistory = await bridge.readSession(
+          runtimeTargetId: target.id,
+          sessionId: connection.sessionId,
+        );
+        await writeModels(expanded: true);
+        events.clear();
+        final models = await bridge.refreshRuntimeModels(
+          runtimeTargetId: target.id,
+        );
+        expect(
+          models!.map((m) => m['id']),
+          containsAll([
+            'provider:model-a',
+            'provider:model-b',
+            'provider:after-login',
+          ]),
+        );
+        expect(await binding.readAsString(), beforeBinding);
+        expect(
+          await bridge.readSession(
+            runtimeTargetId: target.id,
+            sessionId: connection.sessionId,
+          ),
+          beforeHistory,
+        );
+        expect(events.where((e) => e.name == 'item.update'), isEmpty);
+        final refreshed = await bridge.connectRuntime(
+          runtimeTargetId: target.id,
+        );
+        expect(refreshed.sessionId, 'exact-saved-chat');
+        expect(refreshed.sessionMetadata['activeModel'], 'provider:model-b');
+
+        await writeModels(failLoad: true);
+        await expectLater(
+          bridge.refreshRuntimeModels(runtimeTargetId: target.id),
+          throwsA(isA<CoreProtocolException>()),
+        );
+        expect(await binding.readAsString(), beforeBinding);
+        expect(
+          await bridge.readSession(
+            runtimeTargetId: target.id,
+            sessionId: connection.sessionId,
+          ),
+          beforeHistory,
+        );
+        expect(
+          (await bridge.connectRuntime(runtimeTargetId: target.id)).models
+              .map((m) => m['id']),
+          contains('provider:after-login'),
+        );
+        await writeModels(expanded: true);
+        await bridge.refreshRuntimeModels(runtimeTargetId: target.id);
+
+        final receipt = await bridge.startTurn(
+          runtimeTargetId: target.id,
+          sessionId: connection.sessionId,
+          message: 'hold-for-interrupt',
+          model: 'provider:after-login',
+        );
+        await expectLater(
+          bridge.refreshRuntimeModels(runtimeTargetId: target.id),
+          throwsA(
+            isA<CoreProtocolException>().having(
+              (e) => e.code,
+              'code',
+              'session-busy',
+            ),
+          ),
+        );
+        await bridge.interruptTurn(
+          runtimeTargetId: target.id,
+          sessionId: connection.sessionId,
+          turnId: receipt.turnId,
+        );
+        final requests = (await requestLog.readAsLines())
+            .map(jsonDecode)
+            .whereType<Map>()
+            .toList();
+        expect(requests.where((r) => r['method'] == 'session/new'), isEmpty);
+        expect(
+          requests
+              .where((r) => r['method'] == 'session/load')
+              .every(
+                (r) =>
+                    r['params']['sessionId'] == 'exact-saved-chat' &&
+                    r['params']['cwd'] == temporary.path,
+              ),
+          isTrue,
+        );
+      },
+    );
+  }
+
   test('OpenClaw ACP keeps authentication inside its runtime bridge', () async {
     final fixture = File(
       '${Directory.current.path}/../../crates/zommi-core-host/tests/'

@@ -1293,6 +1293,30 @@ impl HermesGatewayAdapter {
         Ok(())
     }
 
+    pub async fn reload_models(&self) -> Result<Vec<Value>, CodexError> {
+        let (session_id, profile) = {
+            let state = self.inner.state.lock().await;
+            (
+                state.runtime_session_id.clone().unwrap_or_default(),
+                state.session_info["profile_name"]
+                    .as_str()
+                    .unwrap_or(&state.active_profile)
+                    .to_owned(),
+            )
+        };
+        let value = self
+            .inner
+            .request("model.options", json!({"session_id": session_id}))
+            .await?;
+        let models = models_for_ui(&value);
+        let mut state = self.inner.state.lock().await;
+        state
+            .model_catalogs
+            .insert(profile, (Instant::now(), models.clone()));
+        state.models = models.clone();
+        Ok(models)
+    }
+
     async fn refresh_models(&self) {
         let (runtime_session_id, profile) = {
             let mut state = self.inner.state.lock().await;
