@@ -2,7 +2,7 @@
 
 Use Amazon shopping, latency investigation and interactive Sheets editing, in
 that order. The difficult part is identifying the exact objects or context the
-user means. Target roughly 25–40 seconds per edited clip, with quick gestures,
+user means. Target roughly 25–45 seconds per edited clip, with quick gestures,
 short prompts and readable results. The [gallery](../../docs/demos/README.md)
 contains the reviewed recordings; this brief alone is not acceptance evidence.
 
@@ -10,7 +10,7 @@ contains the reviewed recordings; this brief alone is not acceptance evidence.
 | --- | --- | --- | --- |
 | Amazon | Five similar products, exact variants, and misleading dual-monitor labels | One loose rectangle around a row of real listing cards | Agent checks every exact listing against an M1 Air's display limit |
 | Dashboard | Which latency spike, time buckets, metric definition and query | Select only the spike interval | Agent receives the full executed query and selected points, then investigates the database |
-| Sheets | Which rows should change while the rest stays intact | Frame the two tables and draw arrows to two rows | Only the marked table rows become pale yellow and bold |
+| Sheets | Two groups spanning three tables, their destinations, and a crossed-out exception | Use Pen loops, connections and a cross-out in one native selection | Agent builds two linked quotes and only the connected quote recalculates |
 
 ## 1. Amazon: one grid, all candidates
 
@@ -54,38 +54,46 @@ outside the spike, unfinished analysis and modified source data. This fixture
 explicitly exposes its query; the demo does not establish hidden-query discovery
 for arbitrary dashboard applications.
 
-## 3. Sheets: the drawing decides which rows change
+## 3. Sheets: the sketch defines two quotes
 
-Use the private synthetic [Event layout fixture](sheets/README.md), with the
-existing navy budget and orange schedule. Capture both tables in one region.
-Use the native **Arrow** tool to point to one body row in each table, then
-press **Attach**. The actual annotated PNG must reach the agent with two marks.
+Use the private synthetic [Quote builder fixture](sheets/README.md). Capture
+all three source tables and both quote boxes in one region. Use native **Pen**
+strokes for the loops, connections, arrowheads and cross-out, then **Attach**.
 
-Ask: **“Make only the table rows marked by arrows pale yellow and bold. Keep all
-values and formulas, and leave the other cells alone.”**
+Ask: **“Turn my sketch into the two quotes. Each loop feeds the box it points to;
+skip the crossed-out option. Link to source cells and calculate subtotal, tax
+and total. Leave source data alone.”**
 
-Supply no row names, addresses or document URL in the prompt. The real agent
-must use the drawing to identify the intended rows, inspect the captured
-Google Sheet and edit it with its own browser tools. Do not apply the result
-on the agent's behalf.
+Supply no item names, addresses or document URL in the prompt. The actual agent
+must interpret the sketched groups and exception, read the Sheet and create the
+formulas with its own browser tools. Do not apply the result on its behalf.
+Keep the fixture guide and answer key out of its empty workspace.
 
-Retain a private visual review of the arrow endpoints and the corresponding
-cell addresses. `sheets_drawing_proof.py` verifies the completed turn, native
-annotation provenance, actual browser actions, and ordered authenticated XLSX
-exports. Every marked cell must become pale yellow and bold; unmarked cells,
-other tabs, values, formulas and the remaining layout must stay unchanged.
-Show both arrows being drawn and both resulting rows. Label trimmed agent
-waits; zoomed crops may improve readability without changing the recorded UI.
+Retain a private visual review of the native attachment. The published take uses
+17 Pen strokes, with coral connections to Plan A and blue connections to Plan B.
+`sheets_quote_proof.py` checks the completed turn, native annotation provenance,
+actual browser actions, six formula cells and four ordered whole-workbook XLSX
+exports. The exports cover baseline, completed edit, source-price change and
+restoration. Verify the marked source references, correct taxes, exclusion and
+that only the connected quote changes. Other tabs, source data and formatting
+outside the quote amounts must remain unchanged; confirm **Saved to Drive**.
+
+Show the native strokes and both resulting quotes. After the agent finishes,
+record the source-price change and restoration. Label trimmed agent waits;
+zoomed crops may improve readability without changing the recorded UI.
 
 ## First-run setup
 
 `scripts/demo/record-setup-windows.ps1` starts the actual packaged app with a
-fresh private settings profile. Select an installed, already authenticated
+fresh private settings profile. Select a real installed
 agent in **Welcome to Zommi**, then choose **Connect and continue**. The recorder
 requires persisted setup completion and a real runtime/session binding.
-It does not seed a chat or generate an agent response. Capture the ready
-composer, crop account/workspace details, and keep the raw profile private.
-The published example uses Codex; the README lists all supported agents beside it.
+It does not seed a chat or generate an agent response. Open the model picker,
+select an advertised model and record the **entire ready app window**, including
+the sidebar, header and composer. Use a clean actual runtime profile so personal
+chat titles and workspace paths never need to be cropped from the ending. Keep
+raw profiles private. The README lists supported agents and model families next
+to the accelerated selection video. Do not copy credentials into demo profiles.
 
 ## Editing and review
 

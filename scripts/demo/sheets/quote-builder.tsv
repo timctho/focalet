@@ -1,0 +1,19 @@
+POP-UP QUOTE BUILDER					Build two quotes
+EQUIPMENT
+Item	Qty	Unit price	Tax		PLAN A	Amount
+Lighting kit	4	90	8%		Subtotal
+Display	2	180	8%		Tax
+Seating	24	12	8%		Total
+Audio	1	250	8%
+PRINT / BUILD
+Item	Qty	Unit price	Tax
+Backdrop	1	300	8%
+Signage	6	25	8%
+Table wrap	2	45	8%		PLAN B	Amount
+Floor marks	10	8	8%		Subtotal
+HOSPITALITY					Tax
+Item	Qty	Unit price	Tax		Total
+Water	40	3	10%
+Coffee	40	4	10%
+Snack box	30	8	10%
+Staff meal	8	18	10%

@@ -4,39 +4,39 @@
   "recordings": [
     {
       "name": "setup",
-      "buildCommit": "eb002e379186dbbb9cf24574b555c5f2c137b838",
+      "buildCommit": "98190010df32d10386051abcc762e2888978c6d5",
       "platform": "windows",
       "display": "windows-desktop",
-      "runtime": "Codex",
+      "runtime": "OpenCode",
       "response": "setup-only",
       "syntheticSource": true,
       "sourceKind": "synthetic",
       "audio": false,
       "review": {
         "ocrStatus": "no-matches",
-        "exportedFramesScanned": 454,
+        "exportedFramesScanned": 306,
         "visualReview": true
       },
       "assets": [
         {
           "file": "setup.mp4",
-          "bytes": 181497,
-          "sha256": "38cee2b33fc01bb754c4b90b63b63a1562462b21e6bc5e8e15bfbc3ea99a2675"
+          "bytes": 173723,
+          "sha256": "f254f5e278493847bb54c2e8818d460d14e8007207827b5997f96f3c601c5f0c"
         },
         {
           "file": "setup.gif",
-          "bytes": 274772,
-          "sha256": "33e5b5af2b4fe31914d92ca177886cac8ba3b09d3722d215cc771286e8411e77"
+          "bytes": 333784,
+          "sha256": "b922e04b833539de58e1a4f76317b62e2f6df91ad9e10d78789234fb3a48a29c"
         },
         {
           "file": "setup-poster.webp",
-          "bytes": 29780,
-          "sha256": "19fcd4b51e2bcdec5d77c78195879d35e75198e80f7707ea112ba727f7b7bf8a"
+          "bytes": 21922,
+          "sha256": "2181749f461838389f7b6f159a08d8d1c00f3fb47755ccf8a9586b16de4d3454"
         },
         {
           "file": "setup-preview.webp",
-          "bytes": 227182,
-          "sha256": "df648a248c374286a9e79be95b14d0c76e57a4a87b783b5d8c27dbc5bbe20954"
+          "bytes": 223510,
+          "sha256": "18369765c9307ac0adb182425b282738f67e5ad0812f76d442157dc812323869"
         }
       ]
     },
@@ -118,7 +118,7 @@
     },
     {
       "name": "sheets",
-      "buildCommit": "eb002e379186dbbb9cf24574b555c5f2c137b838",
+      "buildCommit": "98190010df32d10386051abcc762e2888978c6d5",
       "platform": "windows",
       "display": "windows-desktop",
       "runtime": "Codex",
@@ -128,29 +128,29 @@
       "audio": false,
       "review": {
         "ocrStatus": "no-matches",
-        "exportedFramesScanned": 1350,
+        "exportedFramesScanned": 1655,
         "visualReview": true
       },
       "assets": [
         {
           "file": "sheets.mp4",
-          "bytes": 751213,
-          "sha256": "931ccc2f38ffce0691c7400fe3d9df124170436b6acafca6d9ee4bc6507c6c3c"
+          "bytes": 1330932,
+          "sha256": "30d7eec48ea027ef69493ae25da92586b2c0b16a429dd0530b272a3370cd9d37"
         },
         {
           "file": "sheets.gif",
-          "bytes": 845638,
-          "sha256": "94377baa7ab861948aac0b88393553a99dcb68a3ba1f8deb9ab811a55503689f"
+          "bytes": 1396109,
+          "sha256": "749be2345f0bb567e74dee58de1f3fecd90f1a0ddcea2df5b59be37a03045c04"
         },
         {
           "file": "sheets-poster.webp",
-          "bytes": 72532,
-          "sha256": "da4d69897a8db8e189cd3478ea37a8febc877c6f36fb33f5286b675558a3e28b"
+          "bytes": 54318,
+          "sha256": "0d034dd86e8eaacafb6f56de767857c1c85c8277b7e13686dacb8049c8001da7"
         },
         {
           "file": "sheets-preview.webp",
-          "bytes": 768332,
-          "sha256": "adf89d3e9425914eb66a5cce888dda139d0a07b320d27b91be9c4f5689a163ab"
+          "bytes": 1439228,
+          "sha256": "2d25a7b8eb14f3f9b5023c01b2a586f80b86d6d3be7b5acf3b92d99c6614ec02"
         }
       ]
     }

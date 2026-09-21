@@ -17,12 +17,13 @@ you can get straight to the request.
 Uses your existing agent account. No separate model API key to enter in Zommi.
 [Setup guide](docs/install.md) · [See it in action ↓](#see-it-in-action)
 
-## Connect your agent
+## Connect your agent and choose a model
 
-Choose your installed agent, connect, and start your first chat. If sign-in is
-needed, Zommi opens your agent’s own sign-in flow.
+Choose your installed agent, connect, then pick a model from the chat header. If
+sign-in is needed, Zommi opens your agent’s own sign-in flow. The demo speeds up
+selection and ends on the full, ready-to-use Zommi window.
 
-[![First launch: choose an agent, connect and start chatting](docs/demos/setup-preview.webp)](docs/demos/setup.mp4)
+[![First launch: choose an agent and model, then see the full Zommi window](docs/demos/setup-preview.webp)](docs/demos/setup.mp4)
 
 [Watch the setup demo](docs/demos/setup.mp4) · [Step-by-step setup](docs/install.md)
 
@@ -35,15 +36,22 @@ needed, Zommi opens your agent’s own sign-in flow.
 | **OpenClaw** | ACP or local Gateway | Chats and commands exposed by the configured agent |
 | **Claude CLI** | Terminal compatibility | Text-only interaction; image attachments unsupported |
 
-Your agent keeps its account, models, tools and permissions. Features depend on
-the installed runtime and protocol version.
+**Model families:** GPT and Codex models through Codex; GPT, Claude, Gemini and
+other provider models through OpenCode or Pi, plus OpenCode Zen's catalog through
+OpenCode. Hermes and OpenClaw use the model configured in their runtime; Claude
+CLI uses its own Claude configuration.
+
+Your installed agent supplies the available models, tools and permissions.
+Availability depends on your account, provider configuration and runtime version.
+After signing in or adding a provider, choose **New agent → Refresh agents** to
+update the model list without restarting Zommi.
 [Agent setup](docs/install.md#2-choose-the-agent-you-already-have) ·
 [Runtime command support](docs/runtime-commands.md).
 
 ## See it in action
 
-Three things that are easier to point at than explain. Each demo is under
-40 seconds. Animated previews play automatically; click one for the clearer video.
+Three things that are easier to point at than explain. Animated previews play
+automatically; click one for the clearer video.
 
 ### Compare the products you're actually considering
 
@@ -74,26 +82,30 @@ p95 jump from 256 to 1,450 ms to an inventory-pool change.
 
 [Watch dashboard demo · 26 seconds](docs/demos/dashboard.mp4)
 
-### Draw what you want changed
+### Sketch two quotes across a sheet
 
-Select the sheet and draw arrows to two rows.
+Use the **Pen** to loop items in three separate tables, draw connections to two
+quote boxes, and cross out one option inside a loop.
 
-> Make only the table rows marked by arrows pale yellow and bold. Keep all values
-> and formulas, and leave the other cells alone.
+> Turn my sketch into the two quotes. Each loop feeds the box it points to; skip
+> the crossed-out option. Link to source cells and calculate subtotal, tax and
+> total. Leave source data alone.
 
-[![Draw arrows to two rows, then see the agent change only those rows](docs/demos/sheets-preview.webp)](docs/demos/sheets.mp4)
+[![Freehand loops and connections become two linked quotes, excluding a crossed-out item](docs/demos/sheets-preview.webp)](docs/demos/sheets.mp4)
 
-**The drawing decides where the edit lands.** The agent reads the annotated
-image and updates just the marked rows. No cell addresses or row names are
-needed in the prompt. Values, formulas and the other cells stay intact.
+**The sketch defines the groups and the exception.** The agent combines items
+from different tables into two formula-driven quotes, including each item's tax
+rate. The prompt contains no item names or cell addresses. Change a source price
+and only the connected quote recalculates; the other quote stays unchanged.
 
-[Watch the Sheets drawing demo](docs/demos/sheets.mp4)
+[Watch the Sheets sketch demo](docs/demos/sheets.mp4)
 
 <details>
 <summary>About these recordings</summary>
 
 Real selections, agent replies and sheet edits, recorded with the Windows
-development build and Codex. The downloadable preview may differ. Clips speed
+development build. Setup uses OpenCode; the three task demos use Codex.
+The downloadable preview may differ. Clips speed
 up gestures and typing, trim waits and include labelled context illustrations.
 The dashboard and sheet use synthetic data.
 

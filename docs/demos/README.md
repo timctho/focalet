@@ -1,20 +1,25 @@
 # See what you can stop describing
 
 Start with a real first launch, then see three native Windows examples:
-a row of similar products, one spike inside a dashboard, and a drawing that
-identifies exactly which spreadsheet rows to change. Previews play automatically;
+a row of similar products, one spike inside a dashboard, and a freehand sketch
+that defines two spreadsheet quotes across three tables. Previews play automatically;
 click them to open the clearer MP4.
 
-## First launch: connect your existing agent
+## First launch: connect an agent and select a model
 
-Choose an installed agent in **Welcome to Zommi**, then click **Connect and
-continue**. This take uses an already authenticated Codex installation in WSL.
-The actual app saves setup completion and binds a real empty chat; the clip ends
-at the ready composer. No agent reply is simulated.
+Choose **OpenCode** in **Welcome to Zommi**, then **Connect and continue**. Open
+the model picker and choose a model. Selection is accelerated; the ending shows
+the full Zommi window with its sidebar, selected model and ready composer.
 
-[![Choose an installed agent, connect and reach the ready composer](setup-preview.webp)](setup.mp4)
+This take uses the real installed OpenCode ACP runtime with an isolated demo
+history and its public model catalog. No credentials are copied into the demo
+profile. The app persists setup completion and binds a real empty session.
+Model availability in your installation depends on your agent, providers and
+account. No agent reply is simulated.
 
-[Watch setup](setup.mp4) · [Installation guide](../install.md)
+[![Connect OpenCode, choose a model and see the complete ready app](setup-preview.webp)](setup.mp4)
+
+[Watch setup](setup.mp4) · [Agents and model families](../../README.md#connect-your-agent-and-choose-a-model) · [Installation guide](../install.md)
 
 ## 1. Amazon: one box around all the candidates
 
@@ -47,38 +52,51 @@ traffic stay steady. The source database and query remain unchanged.
 
 [Watch · 26 seconds](dashboard.mp4) · [View the analysis](dashboard-poster.webp)
 
-## 3. Sheets: draw the rows you mean
+## 3. Sheets: a sketch becomes two linked quotes
 
-Frame both tables, choose the native **Arrow** tool, and point to one row in each.
-Attach the annotated image and ask:
-**“Make only the table rows marked by arrows pale yellow and bold. Keep all
-values and formulas, and leave the other cells alone.”**
+Select the **Quote builder** sheet, then use the native **Pen** to loop rows,
+connect them to two quote boxes, and cross out an option inside one loop. Ask:
+**“Turn my sketch into the two quotes. Each loop feeds the box it points to;
+skip the crossed-out option. Link to source cells and calculate subtotal, tax
+and total. Leave source data alone.”**
 
-The drawing identifies the **Demo displays** and **Hands-on workshop** rows.
-The agent reads the actual Sheet and changes just those table rows. Their names,
-cell addresses and document URL are absent from the prompt. Both arrows are
-baked into the attached image; they are not added during video editing.
+The coral loops combine **Lighting kit + Coffee** in Plan A. The blue loops
+combine **Display + Signage + Snack box** in Plan B, excluding the crossed-out
+**Staff meal**. The agent has to trace connections across three source tables,
+handle the exception and apply the different tax rates. No item names, cell
+addresses or document URL are supplied in the prompt.
 
-[![Draw two arrows and let the agent emphasize only the marked table rows](sheets-preview.webp)](sheets.mp4)
+[![Native freehand loops, connections and a crossed-out option become two linked quotes](sheets-preview.webp)](sheets.mp4)
 
-[Watch the drawing demo](sheets.mp4) · [View the result](sheets-poster.webp)
+[Watch the sketch demo](sheets.mp4) · [View the result](sheets-poster.webp)
 
-Whole-workbook readbacks verify that marked cells become pale yellow and bold,
-and every value, formula, unmarked cell and other tab remains unchanged.
+The single actual attachment contains **17 Pen strokes**. The agent writes six
+formulas and displays the quote amounts with two decimal places. Plan A totals
+**564.80**; Plan B totals **814.80**. In the recorded verification, changing the
+Display unit price **180 → 230** changes only Plan B, to **922.80**. Restoring 180
+restores its original total.
+
+Whole-workbook exports verify the six output cells, source references, the
+excluded option, recalculation and restoration. Source values/formulas,
+formatting outside the output amounts, layout and other tabs stay unchanged.
+The live page confirms **Saved to Drive**. The temporary source-price change is
+a maintainer verification after the agent's completed turn.
 
 ## What was recorded
 
-Recorded September 20–21, 2026 with the native Windows app and a real Codex runtime.
+Recorded September 20–21, 2026 with the native Windows app. Setup uses OpenCode;
+the three task demos use Codex.
 Amazon uses signed-out public product pages; listings and availability can
 change. The dashboard and private Google Sheet contain synthetic data.
 
 Selections, prompts, agent replies and sheet edits are real. The edited clips
 shorten waits and accelerate gestures and typing. Amazon and dashboard include
-five-second labelled context illustrations; setup and drawing use native footage
-with explanatory captions and zoomed crops. Results retain reading time. There is no audio
+five-second labelled context illustrations; the drawing uses native footage
+with explanatory captions and zoomed crops. Setup retains the full app window
+after the model is selected. Results retain reading time. There is no audio
 or scripted agent response. Discarded capture attempts are omitted.
 
-Sheets uses one annotated selection and one request. The selection, arrows and
+Sheets uses one annotated selection and one request. The selection, freehand strokes and
 completed live result belong to the same native take and agent session.
 
 The sample dashboard explicitly exposes its executed SQL through the chart's
@@ -111,9 +129,10 @@ app, inspect the actual attachment source, and keep account chrome out of crops.
 Proof guards require completed agent sessions, real tool activity and source
 readbacks before generating the illustrations. The dashboard guard also rejects
 missing query metadata or points outside the selected interval. The Sheets guard
-checks native annotation provenance, the visually reviewed arrow targets, pale
-yellow/bold emphasis, and preservation of all other cells, values and formulas.
-A decorative drawing or a different edit range fails this scenario.
+checks native Pen provenance, visually reviewed groupings and exclusion, the
+six formula cells, live recalculation/restoration and preservation of source
+cells, formatting and other tabs. A decorative drawing, hardcoded totals or an
+edit outside the requested outputs fails this scenario.
 Timing markers alone do not prove that a capture or edit succeeded.
 
 ```sh
