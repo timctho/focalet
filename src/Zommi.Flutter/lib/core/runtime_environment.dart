@@ -18,6 +18,7 @@ Map<String, String> coreRuntimeEnvironment({
       '$home/.local/bin',
       '$home/.npm-global/bin',
       '$home/.bun/bin',
+      '$home/.opencode/bin',
     ],
     '/opt/homebrew/bin',
     '/usr/local/bin',

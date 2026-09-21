@@ -1,7 +1,45 @@
 {
   "schemaVersion": 1,
-  "recordedAt": "2026-09-20",
+  "recordedAt": "2026-09-21",
   "recordings": [
+    {
+      "name": "setup",
+      "buildCommit": "eb002e379186dbbb9cf24574b555c5f2c137b838",
+      "platform": "windows",
+      "display": "windows-desktop",
+      "runtime": "Codex",
+      "response": "setup-only",
+      "syntheticSource": true,
+      "sourceKind": "synthetic",
+      "audio": false,
+      "review": {
+        "ocrStatus": "no-matches",
+        "exportedFramesScanned": 454,
+        "visualReview": true
+      },
+      "assets": [
+        {
+          "file": "setup.mp4",
+          "bytes": 181497,
+          "sha256": "38cee2b33fc01bb754c4b90b63b63a1562462b21e6bc5e8e15bfbc3ea99a2675"
+        },
+        {
+          "file": "setup.gif",
+          "bytes": 274772,
+          "sha256": "33e5b5af2b4fe31914d92ca177886cac8ba3b09d3722d215cc771286e8411e77"
+        },
+        {
+          "file": "setup-poster.webp",
+          "bytes": 29780,
+          "sha256": "19fcd4b51e2bcdec5d77c78195879d35e75198e80f7707ea112ba727f7b7bf8a"
+        },
+        {
+          "file": "setup-preview.webp",
+          "bytes": 227182,
+          "sha256": "df648a248c374286a9e79be95b14d0c76e57a4a87b783b5d8c27dbc5bbe20954"
+        }
+      ]
+    },
     {
       "name": "amazon",
       "buildCommit": "e21bf1c2be2eb70830d8e893f63a712a6255c9b9",
@@ -14,7 +52,7 @@
       "audio": false,
       "review": {
         "ocrStatus": "no-matches",
-        "exportedFramesScanned": 929,
+        "exportedFramesScanned": 1160,
         "visualReview": true
       },
       "assets": [
@@ -32,6 +70,11 @@
           "file": "amazon-poster.webp",
           "bytes": 53170,
           "sha256": "7c0b7b8c53e7a62f23ffd9b85e67b6b1cb3a55c5a08b177c16d89ffa7d99e827"
+        },
+        {
+          "file": "amazon-preview.webp",
+          "bytes": 1223750,
+          "sha256": "47ce0ea6d0d268992eb2e764ff00bf88bfd3d8a89a479b3ce0fca5f6f01302cd"
         }
       ]
     },
@@ -47,7 +90,7 @@
       "audio": false,
       "review": {
         "ocrStatus": "no-matches",
-        "exportedFramesScanned": 825,
+        "exportedFramesScanned": 1031,
         "visualReview": true
       },
       "assets": [
@@ -65,12 +108,17 @@
           "file": "dashboard-poster.webp",
           "bytes": 57442,
           "sha256": "5727f928b5481c1e8d651dc453a50813c4214845196614e307672048e087ad30"
+        },
+        {
+          "file": "dashboard-preview.webp",
+          "bytes": 1039056,
+          "sha256": "674fa90b164bb09de0a0201761c40b6c3bcab375870df1fc823eb9052929ae1f"
         }
       ]
     },
     {
       "name": "sheets",
-      "buildCommit": "e21bf1c2be2eb70830d8e893f63a712a6255c9b9",
+      "buildCommit": "eb002e379186dbbb9cf24574b555c5f2c137b838",
       "platform": "windows",
       "display": "windows-desktop",
       "runtime": "Codex",
@@ -80,24 +128,29 @@
       "audio": false,
       "review": {
         "ocrStatus": "no-matches",
-        "exportedFramesScanned": 733,
+        "exportedFramesScanned": 1350,
         "visualReview": true
       },
       "assets": [
         {
           "file": "sheets.mp4",
-          "bytes": 789743,
-          "sha256": "c7f6c9db72132a6157812daf5f5970ed153f5f96213ed0e155de09f9b5159188"
+          "bytes": 751213,
+          "sha256": "931ccc2f38ffce0691c7400fe3d9df124170436b6acafca6d9ee4bc6507c6c3c"
         },
         {
           "file": "sheets.gif",
-          "bytes": 1027986,
-          "sha256": "9b7ec0f010ddae36e90017c0ff9b218c4428517baf777584e3aca9a8d200c063"
+          "bytes": 845638,
+          "sha256": "94377baa7ab861948aac0b88393553a99dcb68a3ba1f8deb9ab811a55503689f"
         },
         {
           "file": "sheets-poster.webp",
-          "bytes": 57278,
-          "sha256": "6f0a652dc736d6afab50f47237ae4eb44dd61756c245cfd727a660f3e47fbaff"
+          "bytes": 72532,
+          "sha256": "da4d69897a8db8e189cd3478ea37a8febc877c6f36fb33f5286b675558a3e28b"
+        },
+        {
+          "file": "sheets-preview.webp",
+          "bytes": 768332,
+          "sha256": "adf89d3e9425914eb66a5cce888dda139d0a07b320d27b91be9c4f5689a163ab"
         }
       ]
     }

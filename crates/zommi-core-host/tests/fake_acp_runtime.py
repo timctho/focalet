@@ -72,7 +72,7 @@ for line in sys.stdin:
         result = {
             "sessionId": session_id,
             "models": {
-                "currentModelId": "provider:model-a",
+                "currentModelId": "provider:model-b" if os.environ.get("ZOMMI_FAKE_ACP_CONFIG_OPTIONS") == "1" else "provider:model-a",
                 "availableModels": [
                     {"modelId": "provider:model-a", "name": "Model A"},
                     {"modelId": "provider:model-b", "name": "Model B"},
@@ -120,6 +120,10 @@ for line in sys.stdin:
                 ],
             }
         }
+    elif method == "session/set_config_option":
+        assert request["params"]["configId"] == "provider-model"
+        result = {"models": {"currentModelId": request["params"]["value"],
+                             "availableModels": [{"modelId": request["params"]["value"], "name": "Selected model"}]}}
     elif method == "session/prompt":
         pending_prompt = request_id
         active_session = request["params"]["sessionId"]
@@ -224,6 +228,11 @@ for line in sys.stdin:
             }
         )
         continue
+    if os.environ.get("ZOMMI_FAKE_ACP_CONFIG_OPTIONS") == "1" and "models" in result:
+        models = result.pop("models")
+        result["configOptions"] = [{"id": "provider-model", "category": "model", "name": "Model", "type": "select",
+            "currentValue": models["currentModelId"], "options": [{"group": "provider", "name": "Provider",
+            "options": [{"value": m["modelId"], "name": m["name"]} for m in models["availableModels"]]}]}]
     send({"jsonrpc": "2.0", "id": request_id, "result": result})
     if method in ("session/new", "session/load"):
         send({"jsonrpc":"2.0", "method":"session/update", "params":{"sessionId":session_id,"update":{"sessionUpdate":"available_commands_update", "availableCommands":[{"name":"inspect", "description":"Inspect this session", "input":{"hint":"target"}}]}}})

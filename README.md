@@ -17,10 +17,33 @@ you can get straight to the request.
 Uses your existing agent account. No separate model API key to enter in Zommi.
 [Setup guide](docs/install.md) · [See it in action ↓](#see-it-in-action)
 
+## Connect your agent
+
+Choose your installed agent, connect, and start your first chat. If sign-in is
+needed, Zommi opens your agent’s own sign-in flow.
+
+[![First launch: choose an agent, connect and start chatting](docs/demos/setup-preview.webp)](docs/demos/setup.mp4)
+
+[Watch the setup demo](docs/demos/setup.mp4) · [Step-by-step setup](docs/install.md)
+
+| Agent runtime | Connection | Support in Zommi |
+| --- | --- | --- |
+| **Codex** | Native app-server | Chats, saved sessions, models, approvals and native skills |
+| **OpenCode** | ACP | Chats, image context, saved sessions, models, approvals and advertised commands |
+| **Pi** | RPC | Chats, image context, models and runtime commands |
+| **Hermes** | ACP or Gateway | Chats and commands exposed by the runtime and profile |
+| **OpenClaw** | ACP or local Gateway | Chats and commands exposed by the configured agent |
+| **Claude CLI** | Terminal compatibility | Text-only interaction; image attachments unsupported |
+
+Your agent keeps its account, models, tools and permissions. Features depend on
+the installed runtime and protocol version.
+[Agent setup](docs/install.md#2-choose-the-agent-you-already-have) ·
+[Runtime command support](docs/runtime-commands.md).
+
 ## See it in action
 
 Three things that are easier to point at than explain. Each demo is under
-30 seconds.
+40 seconds. Animated previews play automatically; click one for the clearer video.
 
 ### Compare the products you're actually considering
 
@@ -29,7 +52,7 @@ Draw **one box around all five candidates** on the Amazon listing grid.
 > Which of these would let my M1 MacBook Air run two independent monitors?
 > Check the exact listings.
 
-
+[![Select five products and receive a sourced comparison](docs/demos/amazon-preview.webp)](docs/demos/amazon.mp4)
 
 **Five exact links, one selection.** The agent checks each product and Apple's
 display limits, then returns a sourced comparison. In this case, none of the
@@ -43,7 +66,7 @@ Select **just the interval that looks wrong** on the latency chart.
 
 > Why did latency spike here? Check the underlying query and source data.
 
-
+[![Select a latency spike and investigate its cause](docs/demos/dashboard-preview.webp)](docs/demos/dashboard.mp4)
 
 **“Here” comes with context.** The selected interval and the chart's exposed
 query reach the agent together. It investigates the source data and traces the
@@ -51,20 +74,20 @@ p95 jump from 256 to 1,450 ms to an inventory-pool change.
 
 [Watch dashboard demo · 26 seconds](docs/demos/dashboard.mp4)
 
-### Two selections. Two different layouts.
+### Draw what you want changed
 
-Loosely frame two areas of a Google Sheet. Zommi labels them **A** and **B**.
+Select the sheet and draw arrows to two rows.
 
-> Make A compact with navy headers. Make B spacious with orange headers,
-> taller rows and larger text. Keep values and formulas.
+> Make only the table rows marked by arrows pale yellow and bold. Keep all values
+> and formulas, and leave the other cells alone.
 
+[![Draw arrows to two rows, then see the agent change only those rows](docs/demos/sheets-preview.webp)](docs/demos/sheets.mp4)
 
+**The drawing decides where the edit lands.** The agent reads the annotated
+image and updates just the marked rows. No cell addresses or row names are
+needed in the prompt. Values, formulas and the other cells stay intact.
 
-**Each instruction lands in the right place.** The agent turns A into a compact
-navy table and B into a roomy orange agenda. Values and formulas stay intact.
-The selections supply the document context; the prompt only refers to A and B.
-
-[Watch Sheets demo · 23 seconds](docs/demos/sheets.mp4)
+[Watch the Sheets drawing demo](docs/demos/sheets.mp4)
 
 <details>
 <summary>About these recordings</summary>
@@ -116,21 +139,6 @@ data, and the handoff asks the agent to obtain fresh state before acting.
 
 Choose a package actually listed in [Releases](https://github.com/timctho/zommi-releases/releases).
 [Installation and permissions](docs/install.md) · [Build from source](CONTRIBUTING.md).
-
-## Bring your agent
-
-| Agent runtime | Connection | Support in Zommi |
-| --- | --- | --- |
-| **Codex** | Native app-server | Chats, saved sessions, models, approvals and native skills |
-| **Pi** | RPC | Chats, image context, models and runtime commands |
-| **Hermes** | ACP or Gateway | Chats and commands exposed by the runtime and profile |
-| **OpenClaw** | ACP or local Gateway | Chats and commands exposed by the configured agent |
-| **Claude CLI** | Terminal compatibility | Text-only interaction; image attachments unsupported |
-
-Your agent keeps its account, models, tools and permissions. Features depend on
-the installed runtime and protocol version.
-[Agent setup](docs/install.md#2-choose-the-agent-you-already-have) ·
-[Runtime command support](docs/runtime-commands.md).
 
 ## Try it on the thing you're looking at
 

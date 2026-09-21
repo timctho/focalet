@@ -48,6 +48,7 @@ No agent installed yet? Follow your preferred runtime's installation guide,
 sign in there, and return to Zommi:
 [Codex](https://github.com/openai/codex),
 [Pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent),
+[OpenCode](https://opencode.ai/docs/),
 [Hermes](https://github.com/NousResearch/hermes-agent), or
 [OpenClaw](https://github.com/openclaw/openclaw).
 
@@ -56,6 +57,13 @@ not merge histories across agents or move credentials into its settings. Native
 commands and session actions depend on the protocol your runtime exposes.
 Claude CLI uses limited terminal compatibility rather than full structured
 session support. See [runtime commands](runtime-commands.md).
+
+OpenCode connects through [`opencode acp`](https://opencode.ai/docs/acp/).
+Install a version with ACP support and run `opencode auth login` to connect your
+provider, then select **OpenCode** in Zommi. Its models, tools, permissions and
+saved sessions remain in OpenCode. Images, saved-chat loading and commands use
+the capabilities advertised by that version; built-in `/undo` and `/redo` are
+currently unavailable through OpenCode ACP.
 
 ### An installed agent is missing
 

@@ -1,4 +1,25 @@
-# Event layout: two references, different layouts
+# Drawing-directed row emphasis
+
+Use the private synthetic **Event layout** tab with the compact navy budget and
+spacious orange schedule from the earlier layout take. Select both tables in
+one native capture and draw two arrows to body rows. The published recording
+points to A4:E4 and A15:E15; these addresses are maintainer verification inputs,
+never part of the agent prompt or its empty capture workspace.
+
+Ask only for the marked table rows to become pale yellow and bold, preserving
+all other cells, values and formulas. Verify arrow endpoints in the actual
+annotated image. Export the entire workbook before and after via its ordinary
+authenticated XLSX export (browser fetch credentials `same-origin`, so the
+signed download redirect does not carry cross-origin credentials).
+
+Run `sheets_drawing_proof.py` against the completed real-agent session and these
+readbacks. It rejects missing annotations, substitute target rows, edits outside
+the marks, changed formulas/data and changes to other tabs. Also verify the
+live page reports **Saved to Drive**, and visually inspect the final native
+footage. Raw exports, URLs, agent sessions and reviewed target receipts stay
+private.
+
+## Earlier two-reference layout fixture
 
 Create a private Google Sheet or add an **Event layout** tab to the disposable
 sample workbook. Paste `event-overview.tsv` at A1, with formulas and numeric

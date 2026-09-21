@@ -1,4 +1,4 @@
-# Three demos: point once, skip the explanation
+# First-run setup and three demos
 
 Use Amazon shopping, latency investigation and interactive Sheets editing, in
 that order. The difficult part is identifying the exact objects or context the
@@ -10,7 +10,7 @@ contains the reviewed recordings; this brief alone is not acceptance evidence.
 | --- | --- | --- | --- |
 | Amazon | Five similar products, exact variants, and misleading dual-monitor labels | One loose rectangle around a row of real listing cards | Agent checks every exact listing against an M1 Air's display limit |
 | Dashboard | Which latency spike, time buckets, metric definition and query | Select only the spike interval | Agent receives the full executed query and selected points, then investigates the database |
-| Sheets | Which region each different layout instruction refers to | Loosely frame both blocks, then ask once | A becomes compact and navy; B becomes spacious and orange |
+| Sheets | Which rows should change while the rest stays intact | Frame the two tables and draw arrows to two rows | Only the marked table rows become pale yellow and bold |
 
 ## 1. Amazon: one grid, all candidates
 
@@ -54,43 +54,53 @@ outside the spike, unfinished analysis and modified source data. This fixture
 explicitly exposes its query; the demo does not establish hidden-query discovery
 for arbitrary dashboard applications.
 
-## 3. Sheets: A and B get different layouts
+## 3. Sheets: the drawing decides which rows change
 
-Use the private synthetic [Event layout fixture](sheets/README.md). Capture
-both blocks in one native selection: hold Ctrl for the first rectangle, draw
-the second, then attach both. Leave extra space and cross cell borders
-naturally. The outlines should feel casual.
+Use the private synthetic [Event layout fixture](sheets/README.md), with the
+existing navy budget and orange schedule. Capture both tables in one region.
+Use the native **Arrow** tool to point to one body row in each table, then
+press **Attach**. The actual annotated PNG must reach the agent with two marks.
 
-Ask: **“Make A compact with navy headers. Make B spacious with orange headers,
-taller rows and larger text. Keep values and formulas.”**
+Ask: **“Make only the table rows marked by arrows pale yellow and bold. Keep all
+values and formulas, and leave the other cells alone.”**
 
-The prompt supplies no URL or cell addresses. The real agent must use the
-captured source identity and images to distinguish A from B, inspect the actual
-cells, and apply each instruction to its own area through its browser tools.
+Supply no row names, addresses or document URL in the prompt. The real agent
+must use the drawing to identify the intended rows, inspect the captured
+Google Sheet and edit it with its own browser tools. Do not apply the result
+on the agent's behalf.
 
-Keep a clear shot of the cramped, unstyled original, both quick selections,
-the single request, and a large view of the completed layout. Verify both
-blocks' styles against ordered authenticated workbook exports: the upper
-reference must have navy headers; the lower must have orange headers, taller
-rows and larger text. A color-only difference or swapped styles is insufficient.
-Preserve all values and formulas,
-including the unrelated original tab. `sheets_layout_proof.py` gates this
-`contrasting-layouts` scenario, including the captured reference order and
-explicit references in the request. Older verifiers remain for historical takes.
+Retain a private visual review of the arrow endpoints and the corresponding
+cell addresses. `sheets_drawing_proof.py` verifies the completed turn, native
+annotation provenance, actual browser actions, and ordered authenticated XLSX
+exports. Every marked cell must become pale yellow and bold; unmarked cells,
+other tabs, values, formulas and the remaining layout must stay unchanged.
+Show both arrows being drawn and both resulting rows. Label trimmed agent
+waits; zoomed crops may improve readability without changing the recorded UI.
+
+## First-run setup
+
+`scripts/demo/record-setup-windows.ps1` starts the actual packaged app with a
+fresh private settings profile. Select an installed, already authenticated
+agent in **Welcome to Zommi**, then choose **Connect and continue**. The recorder
+requires persisted setup completion and a real runtime/session binding.
+It does not seed a chat or generate an agent response. Capture the ready
+composer, crop account/workspace details, and keep the raw profile private.
+The published example uses Codex; the README lists all supported agents beside it.
 
 ## Editing and review
 
 Keep the successful selection, attachment, short prompt and actual result.
 Remove abandoned setup, permission dialogs and idle waits. Accelerate selection
 and typing segments by about 1.5–3× using the reviewed cut list's `speed` field.
-Use a five-second context illustration labelled **agent wait trimmed**. It must
+The Amazon and dashboard clips use a five-second context illustration labelled
+**agent wait trimmed**. It must
 be generated from verified session evidence, use the actual attachment labels
 and explain what was captured versus what the agent read with its own tools.
 
 Never substitute an agent response, source mutation or successful capture.
 Record cut ranges and speeds privately. Keep account chrome, unrelated windows,
 local user paths and private document identifiers out of every exported frame.
-Decode and OCR all final MP4/GIF/poster frames, review the edited sequences and
+Decode and OCR all final MP4/GIF/WebP frames, review the edited sequences and
 metadata, then update the checksum manifest for those exact bytes. Publish only
 the reviewed assets; raw sessions, profiles, receipts and recordings stay private.
 

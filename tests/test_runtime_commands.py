@@ -95,7 +95,7 @@ class RuntimeCommandsTests(unittest.TestCase):
                 env.update(ZOMMI_OPENCLAW_GATEWAY_URL=endpoint, ZOMMI_OPENCLAW_GATEWAY_AGENT_ID="main",
                            OPENCLAW_GATEWAY_TOKEN="fixture-runtime-owned-token")
             else:
-                runtime = {"codex-app-server":"CODEX", "pi-rpc":"PI"}.get(adapter, "HERMES")
+                runtime = {"codex-app-server":"CODEX", "pi-rpc":"PI", "opencode-acp":"OPENCODE"}.get(adapter, "HERMES")
                 args = [str(FIXTURES / fixture)]
                 suffix = "ARGS_JSON"
                 if adapter == "hermes-gateway":
@@ -110,7 +110,7 @@ class RuntimeCommandsTests(unittest.TestCase):
                 target = next(t for t in targets if t["adapterId"] == adapter and (adapter == "openclaw-gateway" or t["executionHost"]["kind"] == "native"))
                 connection = core.request("runtime.connect", {"runtimeTargetId":target["id"], "cwd":directory})
                 identity = {"runtimeTargetId":target["id"], "sessionId":connection["sessionId"]}
-                if adapter == "hermes-acp":
+                if adapter.endswith("-acp"):
                     # ACP MAY publish after session/new responds.
                     while not any(e["name"] == "commands.updated" for e in core.events):
                         core.receive()
@@ -138,7 +138,7 @@ class RuntimeCommandsTests(unittest.TestCase):
                     inputs = calls[0]["params"]["input"]
                     self.assertIn({"type":"skill", "name":"inspect", "path":"/skills/inspect/SKILL.md"}, inputs)
                     self.assertNotIn("/skill:inspect", inputs[0]["text"])
-                elif adapter == "hermes-acp":
+                elif adapter.endswith("-acp"):
                     self.assertEqual(calls[0]["params"]["prompt"][0]["text"], command)
                 elif adapter == "pi-rpc":
                     self.assertEqual(calls[0]["message"], command)
@@ -163,6 +163,9 @@ class RuntimeCommandsTests(unittest.TestCase):
 
     def test_acp_advertised_command(self):
         self.exercise("hermes-acp", "fake_acp_runtime.py", "/inspect src", "session/prompt")
+
+    def test_opencode_advertised_command(self):
+        self.exercise("opencode-acp", "fake_acp_runtime.py", "/inspect src", "session/prompt")
 
     def test_pi_prompt_command(self):
         self.exercise("pi-rpc", "fake_pi_rpc.py", "/inspect src", "prompt")

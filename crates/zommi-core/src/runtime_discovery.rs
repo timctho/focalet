@@ -113,6 +113,15 @@ const RUNTIME_CATALOG: &[CatalogEntry] = &[
         capability_hints: PI_CAPABILITY_HINTS,
     },
     CatalogEntry {
+        executable: "opencode",
+        runtime_id: "opencode",
+        adapter_id: "opencode-acp",
+        display_name: "OpenCode",
+        protocol_name: "ACP",
+        priority: 25,
+        capability_hints: ACP_CAPABILITY_HINTS,
+    },
+    CatalogEntry {
         executable: "hermes",
         runtime_id: "hermes",
         adapter_id: "hermes-acp",
@@ -1137,7 +1146,7 @@ fn launch_args(adapter_id: &str) -> &'static [&'static str] {
     match adapter_id {
         "codex-app-server" => &["app-server"],
         "pi-rpc" => &["--mode", "rpc"],
-        "hermes-acp" | "openclaw-acp" => &["acp"],
+        "hermes-acp" | "openclaw-acp" | "opencode-acp" => &["acp"],
         "hermes-gateway" => &[
             "serve",
             "--port",
@@ -1218,9 +1227,47 @@ mod tests {
     }
 
     #[test]
+    fn opencode_discovery_launches_native_and_wsl_acp() {
+        let environment = HashMap::from([
+            (
+                "ZOMMI_OPENCODE_COMMAND".into(),
+                "/opt/OpenCode bin/opencode".into(),
+            ),
+            (
+                "ZOMMI_RUNTIME_DISCOVERY_MODE".into(),
+                "configured-only".into(),
+            ),
+        ]);
+        let targets = discover_runtime_targets_with(&environment, "linux");
+        assert_eq!(targets.len(), 1);
+        let target = &targets[0];
+        assert_eq!(target.runtime_id, "opencode");
+        assert_eq!(target.display_name, "OpenCode");
+        assert_eq!(command_for_target(target).args, ["acp"]);
+        assert_eq!(
+            command_for_target(target).command,
+            "/opt/OpenCode bin/opencode"
+        );
+        let wsl = runtime_targets_from_wsl_probe("Ubuntu", true,
+            b"__ZOMMI_RUNTIME_HOME__/home/u\n__ZOMMI_RUNTIME_PATH__opencode\t/home/u/.opencode/bin/opencode\n");
+        let command = command_for_target(&wsl[0]);
+        assert_eq!(
+            &command.args[command.args.len() - 2..],
+            ["/home/u/.opencode/bin/opencode", "acp"]
+        );
+        assert!(
+            super::runtime_discovery_settings(&targets, &[])["adapters"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|adapter| adapter["adapterId"] == "opencode-acp")
+        );
+    }
+
+    #[test]
     fn shared_wsl_probe_restores_every_detected_runtime() {
         let script = wsl_runtime_probe_script();
-        for executable in ["codex", "pi", "hermes", "openclaw", "claude"] {
+        for executable in ["codex", "pi", "opencode", "hermes", "openclaw", "claude"] {
             assert!(script.contains(&format!("'{executable}'")));
         }
         let targets = runtime_targets_from_wsl_probe(
@@ -1229,11 +1276,12 @@ mod tests {
             b"__ZOMMI_RUNTIME_HOME__/home/u\n\
               __ZOMMI_RUNTIME_PATH__codex\t/home/u/.local/bin/codex\n\
               __ZOMMI_RUNTIME_PATH__pi\t/home/u/.local/bin/pi\n\
+              __ZOMMI_RUNTIME_PATH__opencode\t/home/u/.opencode/bin/opencode\n\
               __ZOMMI_RUNTIME_PATH__hermes\t/home/u/.local/bin/hermes\n\
               __ZOMMI_RUNTIME_PATH__openclaw\t/home/u/.local/bin/openclaw\n\
               __ZOMMI_RUNTIME_PATH__claude\t/home/u/.local/bin/claude\n",
         );
-        assert_eq!(targets.len(), 6, "Hermes exposes ACP and Gateway targets");
+        assert_eq!(targets.len(), 7, "Hermes exposes ACP and Gateway targets");
         let adapters = targets
             .iter()
             .map(|target| target.adapter_id.as_str())
@@ -1241,6 +1289,7 @@ mod tests {
         for adapter in [
             "codex-app-server",
             "pi-rpc",
+            "opencode-acp",
             "hermes-acp",
             "hermes-gateway",
             "openclaw-acp",

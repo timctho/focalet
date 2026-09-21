@@ -18,6 +18,7 @@ void main() {
         '/Users/test/.local/bin',
         '/Users/test/.npm-global/bin',
         '/Users/test/.bun/bin',
+        '/Users/test/.opencode/bin',
       ]),
     );
     expect(path.where((value) => value == '/usr/bin').length, 1);

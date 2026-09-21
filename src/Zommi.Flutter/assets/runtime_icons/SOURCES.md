@@ -4,6 +4,7 @@
 
 - codex: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/openai.svg
 - pi: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/pi.svg
+- opencode: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/opencode.svg (monochrome mark)
 - openclaw: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/openclaw-color.svg
 - claude: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/claude-color.svg
 - hermes: the official portrait app icon at https://raw.githubusercontent.com/NousResearch/hermes-agent/main/apps/desktop/assets/icon.png, also corroborated by the portrait favicon on https://hermes-agent.nousresearch.com/.

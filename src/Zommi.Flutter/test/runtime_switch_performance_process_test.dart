@@ -9,6 +9,7 @@ void main() {
     'hermes-gateway',
     'openclaw-gateway',
     'hermes-acp',
+    'opencode-acp',
     'pi-rpc',
   ]) {
     test('$adapter returns exact inline history without relisting known sessions', () async {
@@ -23,6 +24,8 @@ void main() {
           ? 'HERMES'
           : adapter.startsWith('openclaw')
           ? 'OPENCLAW'
+          : adapter.startsWith('opencode')
+          ? 'OPENCODE'
           : 'PI';
       final fixture = gateway
           ? 'fake_gateway_runtime.py'

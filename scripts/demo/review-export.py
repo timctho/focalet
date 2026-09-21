@@ -8,6 +8,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+from PIL import Image
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from verify_demo_assets import ALLOWED_TAGS, probe_media
 
@@ -36,19 +38,28 @@ def main():
         directory = args.output / str(index)
         frames = directory / "frames"
         frames.mkdir(parents=True)
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-v",
-                "error",
-                "-i",
-                str(media),
-                "-vsync",
-                "0",
-                str(frames / "%06d.png"),
-            ],
-            check=True,
-        )
+        animated_webp = False
+        if media.suffix.lower() == ".webp":
+            with Image.open(media) as picture:
+                animated_webp = getattr(picture, "is_animated", False)
+                if animated_webp:
+                    for frame in range(picture.n_frames):
+                        picture.seek(frame)
+                        picture.convert("RGB").save(frames / f"{frame + 1:06d}.png")
+        if not animated_webp:
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-v",
+                    "error",
+                    "-i",
+                    str(media),
+                    "-vsync",
+                    "0",
+                    str(frames / "%06d.png"),
+                ],
+                check=True,
+            )
         result = subprocess.run(
             [
                 sys.executable,

@@ -7,6 +7,8 @@ from pathlib import Path
 import tempfile
 import unittest
 
+from PIL import Image
+
 spec = importlib.util.spec_from_file_location(
     "demos", Path(__file__).resolve().parents[1] / "scripts/verify_demo_assets.py"
 )
@@ -15,6 +17,25 @@ spec.loader.exec_module(demos)
 
 
 class DemoAssetsTests(unittest.TestCase):
+    def test_animated_webp_is_inspected_without_static_only_ffprobe_support(self):
+        path = self.root / "animation.webp"
+        first, second = Image.new("RGB", (16, 12), "red"), Image.new("RGB", (16, 12), "blue")
+        first.save(path, save_all=True, append_images=[second], duration=[100, 200], loop=0, lossless=True)
+        metadata = demos.probe_media(path)
+        self.assertEqual(metadata["streams"], [{"codec_type": "video", "width": 16, "height": 12}])
+        self.assertEqual(metadata["format"]["tags"], {})
+
+    def test_animated_webp_cannot_hide_private_metadata(self):
+        path = self.root / "animation.webp"
+        first, second = Image.new("RGB", (16, 12), "red"), Image.new("RGB", (16, 12), "blue")
+        first.save(path, save_all=True, append_images=[second], duration=100, loop=0, lossless=True,
+                   exif=b"private fixture metadata")
+        metadata = demos.probe_media(path)
+        self.assertIn("exif", metadata["format"]["tags"])
+        path.unlink()
+        with self.assertRaisesRegex(ValueError, "metadata"):
+            self.verify(metadata)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)

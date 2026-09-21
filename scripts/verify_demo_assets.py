@@ -7,6 +7,8 @@ from pathlib import Path
 import re
 import subprocess
 
+from PIL import Image
+
 ROOT = Path(__file__).resolve().parents[1] / "docs/demos"
 ALLOWED_TAGS = {
     "major_brand",
@@ -20,6 +22,20 @@ ALLOWED_TAGS = {
 
 
 def probe_media(path):
+    # ffprobe does not decode animated WebP on several supported toolchains.
+    # Pillow exposes its animation frames and metadata without treating it as
+    # a static poster or dropping EXIF/XMP from the privacy check.
+    if Path(path).suffix.lower() == ".webp":
+        with Image.open(path) as picture:
+            if getattr(picture, "is_animated", False):
+                private_tags = {
+                    name: "present" for name in picture.info
+                    if name not in {"loop", "background", "duration", "timestamp"}
+                }
+                return {
+                    "streams": [{"codec_type": "video", "width": picture.width, "height": picture.height}],
+                    "format": {"tags": private_tags},
+                }
     return json.loads(
         subprocess.check_output(
             [

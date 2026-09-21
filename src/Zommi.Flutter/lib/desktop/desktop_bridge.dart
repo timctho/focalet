@@ -946,6 +946,7 @@ final class FlutterDesktopBridge
       'codex-app-server' => const ['login'],
       'pi-rpc' => const ['onboard'],
       'hermes-acp' => const ['acp', '--setup'],
+      'opencode-acp' => const ['auth', 'login'],
       'openclaw-acp' => const ['onboard'],
       _ => const <String>[],
     };

@@ -8,7 +8,7 @@ class RuntimeLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const brands = {'codex', 'hermes', 'pi', 'openclaw', 'claude'};
+    const brands = {'codex', 'hermes', 'pi', 'openclaw', 'opencode', 'claude'};
     return brands.contains(runtimeId)
         ? Image.asset(
             'assets/runtime_icons/$runtimeId.png',
@@ -17,7 +17,9 @@ class RuntimeLogo extends StatelessWidget {
             excludeFromSemantics: true,
             // Monochrome marks need a light foreground on dark rows.
             color:
-                (runtimeId == 'codex' || runtimeId == 'pi') &&
+                (runtimeId == 'codex' ||
+                        runtimeId == 'pi' ||
+                        runtimeId == 'opencode') &&
                     Theme.of(context).brightness == Brightness.dark
                 ? Theme.of(context).colorScheme.onSurface
                 : null,

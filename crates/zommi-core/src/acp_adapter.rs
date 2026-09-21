@@ -84,6 +84,7 @@ struct State {
     agent_capabilities: Value,
     session_id: Option<String>,
     active_model: Option<String>,
+    model_config_id: Option<String>,
     models: Vec<Value>,
     sessions: Vec<Value>,
     histories: HashMap<String, Vec<Value>>,
@@ -365,6 +366,7 @@ impl AcpAdapter {
             "runtimeVersion": state.runtime_version,
             "capabilities": state.capabilities,
             "models": state.models,
+            "sessionMetadata": {"activeModel": state.active_model},
             "sessions": state.sessions,
             "history": {"thread": {"id": session_id, "turns": state.histories.get(&session_id).cloned().unwrap_or_default()}}
         }))
@@ -724,16 +726,28 @@ impl AcpAdapter {
 
     async fn set_model(&self, model: &str) -> Result<(), CodexError> {
         let session_id = self.active_session_id().await?;
-        let result = self
-            .inner
-            .request(
-                "session/set_model",
-                json!({"sessionId": session_id, "modelId": model}),
-                REQUEST_TIMEOUT,
-            )
-            .await?;
-        let model_state = result.get("models").unwrap_or(&result).clone();
-        self.apply_models(&model_state).await;
+        let config_id = self.inner.state.lock().await.model_config_id.clone();
+        let result = if let Some(config_id) = config_id {
+            self.inner
+                .request(
+                    "session/set_config_option",
+                    json!({"sessionId": session_id, "configId": config_id, "value": model}),
+                    REQUEST_TIMEOUT,
+                )
+                .await?
+        } else {
+            self.inner
+                .request(
+                    "session/set_model",
+                    json!({"sessionId": session_id, "modelId": model}),
+                    REQUEST_TIMEOUT,
+                )
+                .await?
+        };
+        let mut state = self.inner.state.lock().await;
+        // Legacy ACP set_model commonly acknowledges with an empty result.
+        state.active_model = Some(model.into());
+        apply_model_configuration(&mut state, &result);
         Ok(())
     }
 
@@ -749,43 +763,15 @@ impl AcpAdapter {
             state.session_id = Some(session_id.into());
             state.histories.entry(session_id.into()).or_default();
         }
-        if let Some(models) = result.get("models") {
-            self.apply_models(models).await;
-        }
-        Ok(())
-    }
-
-    async fn apply_models(&self, model_state: &Value) {
         let mut state = self.inner.state.lock().await;
-        state.active_model = model_state
-            .get("currentModelId")
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-            .or_else(|| state.active_model.clone());
-        state.models = model_state
-            .get("availableModels")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|model| {
-                let id = model.get("modelId")?.as_str()?;
-                Some(json!({
-                    "id": id,
-                    "model": id,
-                    "displayName": model.get("name").and_then(Value::as_str).unwrap_or(id),
-                    "description": model.get("description").and_then(Value::as_str).unwrap_or(""),
-                    "supportedReasoningEfforts": []
-                }))
-            })
-            .collect();
-        if !state.models.is_empty()
-            && !state
-                .capabilities
-                .iter()
-                .any(|capability| capability == "model.select.v1")
-        {
-            state.capabilities.push("model.select.v1".into());
-        }
+        state.model_config_id = None;
+        state.active_model = None;
+        state.models.clear();
+        state
+            .capabilities
+            .retain(|value| value != "model.select.v1");
+        apply_model_configuration(&mut state, result);
+        Ok(())
     }
 
     async fn load_sessions(&self) -> Result<Vec<Value>, CodexError> {
@@ -1096,6 +1082,12 @@ impl Inner {
             .get("sessionUpdate")
             .and_then(Value::as_str)
             .unwrap_or_default();
+        if kind == "config_option_update" {
+            if state.session_id.as_deref() == Some(session_id.as_str()) {
+                apply_model_configuration(&mut state, &update);
+            }
+            return;
+        }
         if kind == "available_commands_update" {
             let Some(values) = update.get("availableCommands").and_then(Value::as_array) else {
                 return;
@@ -1346,6 +1338,73 @@ async fn read_stderr(inner: Weak<Inner>, stderr: tokio::process::ChildStderr) {
     }
 }
 
+// New ACP agents expose models as a categorized session configuration option;
+// older agents still use the experimental models/session.set_model extension.
+fn apply_model_configuration(state: &mut State, result: &Value) {
+    let model_state = if let Some(options) = result.get("configOptions").and_then(Value::as_array) {
+        let model = options.iter().find(|option| {
+            option.get("category").and_then(Value::as_str) == Some("model")
+                && option.get("type").and_then(Value::as_str) == Some("select")
+                && option.get("id").and_then(Value::as_str).is_some()
+        });
+        state.model_config_id = model
+            .and_then(|option| option["id"].as_str())
+            .map(str::to_owned);
+        let mut models = Vec::new();
+        if let Some(model) = model {
+            for option in model
+                .get("options")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                // ACP select options may be flat or grouped by provider.
+                let values = option
+                    .get("options")
+                    .and_then(Value::as_array)
+                    .map(Vec::as_slice)
+                    .unwrap_or_else(|| std::slice::from_ref(option));
+                for value in values {
+                    if let Some(id) = value.get("value").and_then(Value::as_str) {
+                        models.push(json!({"modelId": id, "name": value.get("name"), "description": value.get("description")}));
+                    }
+                }
+            }
+        }
+        json!({"currentModelId": model.and_then(|option| option.get("currentValue")), "availableModels": models})
+    } else if let Some(models) = result.get("models") {
+        models.clone()
+    } else if result.get("currentModelId").is_some() || result.get("availableModels").is_some() {
+        result.clone()
+    } else {
+        return;
+    };
+    state.active_model = model_state
+        .get("currentModelId")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    if let Some(models) = model_state.get("availableModels").and_then(Value::as_array) {
+        state.models = models
+            .iter()
+            .filter_map(|model| {
+                let id = model.get("modelId")?.as_str()?;
+                Some(json!({
+                    "id": id, "model": id,
+                    "displayName": model.get("name").and_then(Value::as_str).unwrap_or(id),
+                    "description": model.get("description").and_then(Value::as_str).unwrap_or(""),
+                    "supportedReasoningEfforts": []
+                }))
+            })
+            .collect();
+    }
+    state
+        .capabilities
+        .retain(|value| value != "model.select.v1");
+    if !state.models.is_empty() {
+        state.capabilities.push("model.select.v1".into());
+    }
+}
+
 fn negotiated_capabilities(initialized: &Value) -> Vec<String> {
     let agent = initialized
         .get("agentCapabilities")
@@ -1514,7 +1573,48 @@ fn short_id(value: &str) -> &str {
 mod tests {
     use serde_json::json;
 
-    use super::{acp_image, negotiated_capabilities};
+    use super::{State, acp_image, apply_model_configuration, negotiated_capabilities};
+
+    #[test]
+    fn model_configuration_handles_grouped_options_and_authoritative_updates() {
+        let mut state = State::default();
+        apply_model_configuration(
+            &mut state,
+            &json!({"configOptions": [{
+                "id": "provider-model", "category": "model", "type": "select",
+                "currentValue": "provider/a", "options": [
+                    {"value": "provider/a", "name": "A"},
+                    {"group": "provider", "name": "Provider", "options": [
+                        {"value": "provider/b", "name": "B"}
+                    ]}
+                ]
+            }]}),
+        );
+        assert_eq!(state.model_config_id.as_deref(), Some("provider-model"));
+        assert_eq!(state.active_model.as_deref(), Some("provider/a"));
+        assert_eq!(state.models.len(), 2);
+        assert_eq!(state.models[1]["displayName"], "B");
+        assert!(state.capabilities.contains(&"model.select.v1".into()));
+        apply_model_configuration(&mut state, &json!({}));
+        assert_eq!(
+            state.models.len(),
+            2,
+            "empty legacy acknowledgement preserves inventory"
+        );
+        apply_model_configuration(&mut state, &json!({"configOptions": []}));
+        assert!(state.models.is_empty());
+        assert!(state.model_config_id.is_none());
+        assert!(!state.capabilities.contains(&"model.select.v1".into()));
+        apply_model_configuration(
+            &mut state,
+            &json!({
+                "currentModelId": "legacy/a",
+                "availableModels": [{"modelId": "legacy/a", "name": "Legacy A"}]
+            }),
+        );
+        assert_eq!(state.active_model.as_deref(), Some("legacy/a"));
+        assert_eq!(state.models[0]["id"], "legacy/a");
+    }
 
     #[test]
     fn capabilities_come_from_the_acp_handshake() {
