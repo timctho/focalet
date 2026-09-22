@@ -15,8 +15,8 @@ VERSION = re.compile(
 )
 
 
-def read_version(pubspec: Path = PUBSPEC) -> dict:
-    values = re.findall(r"^version:[ \t]*(\S+)[ \t]*$", pubspec.read_text(encoding="utf-8"), re.M)
+def parse_version(source: str) -> dict:
+    values = re.findall(r"^version:[ \t]*(\S+)[ \t]*$", source, re.M)
     match = VERSION.fullmatch(values[0]) if len(values) == 1 else None
     if match is None:
         raise ValueError("pubspec.yaml needs one version: major.minor.patch[-preview.N][+build-number].")
@@ -24,6 +24,10 @@ def read_version(pubspec: Path = PUBSPEC) -> dict:
     release = version + ("-" + match["preview"] if match["preview"] else "")
     return {"version": version, "releaseVersion": release, "tag": "v" + release,
             "prerelease": match["preview"] is not None, "buildNumber": match["build"] or "1"}
+
+
+def read_version(pubspec: Path = PUBSPEC) -> dict:
+    return parse_version(pubspec.read_text(encoding="utf-8"))
 
 
 def main() -> None:

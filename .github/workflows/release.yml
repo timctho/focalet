@@ -1,6 +1,9 @@
 name: Build and publish release
 
 on:
+  push:
+    branches: [main]
+    paths: [src/Zommi.Flutter/pubspec.yaml]
   workflow_dispatch:
     inputs:
       platforms:
@@ -17,12 +20,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: release
+  group: release-${{ github.sha }}
   cancel-in-progress: false
 
 env:
-  RELEASE_PLATFORMS: ${{ inputs.platforms }}
-  RELEASE_PUBLISH: ${{ inputs.publish }}
   CARGO_BUILD_JOBS: '4'
 
 jobs:
@@ -30,18 +31,26 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
+      build: ${{ steps.plan.outputs.build }}
       matrix: ${{ steps.plan.outputs.matrix }}
       tag: ${{ steps.plan.outputs.tag }}
+      platforms: ${{ steps.plan.outputs.platforms }}
+      publish: ${{ steps.plan.outputs.publish }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Validate main revision, version and platform selection
         id: plan
+        env:
+          RELEASE_PLATFORMS: ${{ inputs.platforms }}
+          RELEASE_PUBLISH: ${{ inputs.publish }}
         run: python3 scripts/release_workflow.py plan
 
   build:
     needs: plan
+    if: needs.plan.outputs.build == 'true'
     env:
       RELEASE_TAG: ${{ needs.plan.outputs.tag }}
     strategy:
@@ -141,6 +150,12 @@ jobs:
 
   release:
     needs: [plan, build]
+    concurrency:
+      group: release-tag-${{ needs.plan.outputs.tag }}
+      cancel-in-progress: false
+    env:
+      RELEASE_PLATFORMS: ${{ needs.plan.outputs.platforms }}
+      RELEASE_PUBLISH: ${{ needs.plan.outputs.publish }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:

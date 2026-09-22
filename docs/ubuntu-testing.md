@@ -26,7 +26,7 @@ zommi
 `sudo dpkg -i Zommi-Ubuntu-amd64.deb` also works, but does not fetch dependencies;
 follow it with `sudo apt-get -f install` if needed. The package installs under
 `/opt/zommi` with an app-menu entry. You do not need Flutter, Rust or .NET to run
-it. The [manual release workflow](public-releases.md#run-a-release-from-github-actions)
+it. The [release workflow](public-releases.md#run-a-release-from-github-actions)
 can build and publish this asset. Existing previews without a `.deb` still
 require a source build.
 

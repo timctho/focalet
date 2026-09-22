@@ -17,25 +17,28 @@ private and is not uploaded by the publisher.
 | Trigger | Workflow / machine | Result |
 | --- | --- | --- |
 | Every PR, including forks; every push to `main`; manual dispatch | [PR checks](../.github/workflows/checks.yml), GitHub-hosted `ubuntu-24.04`, `windows-2025`, `macos-15` | Tests and a native release-mode package on each platform; no installer upload or published Release |
-| Manual dispatch of Build and publish release | [Release workflow](../.github/workflows/release.yml), GitHub-hosted Ubuntu, Windows and selected Mac architectures | Builds installers and optionally publishes a GitHub Release after every selected build passes |
+| A release version change pushed to `main` | [Release workflow](../.github/workflows/release.yml), GitHub-hosted Ubuntu and Windows | Builds, checks and automatically publishes both installers |
+| Manual dispatch of Build and publish release | Same release workflow, GitHub-hosted runners for the selected platforms | Builds installers and optionally publishes after every selected build passes |
 | Manual dispatch of Native acceptance | [Native acceptance](../.github/workflows/ci.yml); Ubuntu/Windows on opted-in self-hosted runners, Mac on GitHub-hosted runners | Native acceptance and optional package artifacts; Mac can create an installer in a draft release |
 | Maintainer runs `publish_release.py --publish` with accepted installer metadata | Maintainer's build/publication environment | Publishes the verified installers, checksums and source manifest to GitHub Releases |
 
-There are no path filters: a documentation-only PR also runs PR checks. Uploading
-an Actions artifact and publishing a GitHub Release are separate operations.
-The release workflow is **manual only**. Pushing a version tag or changing the
-repository to public does not trigger it.
+PR checks have no path filters: a documentation-only PR also runs those checks.
+Automatic releases watch `src/Zommi.Flutter/pubspec.yaml` on `main` and compare
+its release version before and after the whole push. An unchanged release
+version, a dependency/description edit or a build-number-only change skips
+installer builds and publication. Pushing a Git tag does not trigger a release.
 
 Making the repository public preserves these triggers and runner choices.
 [Standard GitHub-hosted runners are free for public repositories](https://docs.github.com/en/billing/concepts/product-billing/github-actions);
 larger runners are billed separately. Actions still has to be enabled, and fork
 contributions can require approval before their workflow runs. Public visibility
-does not move self-hosted jobs to GitHub's machines or make manual releases automatic.
+does not move self-hosted jobs to GitHub's machines or change release triggers.
 
 ## Run a release from GitHub Actions
 
-Open **Actions → Build and publish release → Run workflow** and select `main`.
-You do not need to create or enter a Git tag. The committed `version` in
+Change the app version in a PR, review the changes and merge it into `main`.
+That version change starts the release automatically; no extra button or manual
+Git tag is needed. The committed `version` in
 [`src/Zommi.Flutter/pubspec.yaml`](../src/Zommi.Flutter/pubspec.yaml) is the source:
 
 ```yaml
@@ -49,6 +52,18 @@ creates the tag at the exact built commit when publishing. Before a subsequent
 release, bump the version in a PR (for example to `0.1.0-preview.9+2`); changing
 only `+N` does not create a new release version. Published tags are never overwritten.
 
+Automatic releases use the `windows-ubuntu` platform set. The workflow builds
+the installers once, runs the release checks below and publishes those same
+files only if every selected platform succeeds. A failed or cancelled check
+prevents publication. Adding this workflow without a version change does not
+retroactively publish the version already in the file.
+
+### Manual builds and retries
+
+The manual entry remains available for build-only checks, other platform sets
+and recovery. Open **Actions → Build and publish release → Run workflow**, select
+`main` and choose:
+
 | Input | Meaning |
 | --- | --- |
 | `platforms` | `windows-ubuntu` (default), `all`, `windows`, `ubuntu`, or `macos` (both Mac architectures) |
@@ -61,8 +76,16 @@ gh workflow run release.yml --ref main \
   -f platforms=windows-ubuntu -f publish=false
 ```
 
-Set `publish=true` to build and publish in one run. All jobs use the dispatch's
-exact source SHA even if `main` advances. The workflow requires `main`, pins its
+Set `publish=true` to build and publish in one run. For an infrastructure failure,
+rerun the original failed workflow to keep its exact source SHA. If a code fix is
+needed, merge it and manually build/publish the corrected `main`, or bump the
+release version in that PR. An already published version always needs a new tag.
+A new manual dispatch rebuilds from the selected `main`; it does not promote
+artifacts from an earlier build-only run.
+
+All jobs use the triggering push or dispatch's exact source SHA even if `main`
+advances. Runs for different commits do not cancel each other; publication for
+the same tag is serialized. The workflow requires `main`, pins its
 actions, gives build jobs read-only access, and grants `contents: write` only to
 the final publication job. It needs no personal access token or self-hosted
 runner; `GITHUB_TOKEN` publishes into this repository.
