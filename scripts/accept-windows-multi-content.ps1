@@ -97,7 +97,8 @@ foreach ($case in $cases) {
     try {
         $fixture.Raise()
         Start-Sleep -Milliseconds 200
-        $result = Invoke-CaptureRequest -Executable $CaptureHost -Method 'selectContent' -Parameters @{browserPageDetails=$false} -Interact {
+        # Pin contrasting probe colors; responsiveness must not depend on the default theme.
+        $result = Invoke-CaptureRequest -Executable $CaptureHost -Method 'selectContent' -Parameters @{browserPageDetails=$false;theme=@{accent=0xffc5ecd4L;outline=0xff8eb09dL;surface=0xff191f1eL}} -Interact {
             param($process)
             $selector = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi content selection'
             [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(220,220) | Out-Null
@@ -169,7 +170,7 @@ try {
     $fixture.ShowGrid()
     foreach ($row in @(0,2)) {
         $bounds = $fixture.GridCellBounds($row,0)
-        $result = Invoke-CaptureRequest -Executable $CaptureHost -Method 'selectContent' -Parameters @{browserPageDetails=$false} -Interact {
+        $result = Invoke-CaptureRequest -Executable $CaptureHost -Method 'selectContent' -Parameters @{browserPageDetails=$false;theme=@{accent=0xffc5ecd4L;outline=0xff8eb09dL;surface=0xff191f1eL}} -Interact {
             param($process)
             $selector = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi content selection'
             [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,($bounds[0]+15),($bounds[1]+8),($bounds[0]+110),($bounds[1]+25))

@@ -28,7 +28,8 @@ foreach ($case in $cases) {
         Start-Sleep -Milliseconds 200
         if ($case -eq 'controls') { $fixture.ShowControls() }
         if ($case -eq 'overlap-back') { $fixture.BringBackToFront() }
-        $result = Invoke-CaptureRequest -Executable $CaptureHost -Method 'selectContent' -Parameters @{browserPageDetails=$false} -Interact {
+        # Pin contrasting probe colors; responsiveness must not depend on the default theme.
+        $result = Invoke-CaptureRequest -Executable $CaptureHost -Method 'selectContent' -Parameters @{browserPageDetails=$false;theme=@{accent=0xffc5ecd4L;outline=0xff8eb09dL;surface=0xff191f1eL}} -Interact {
             param($process)
             $selector = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi content selection'
             $deadline = [DateTime]::UtcNow.AddSeconds(5)
