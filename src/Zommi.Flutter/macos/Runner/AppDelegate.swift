@@ -4,8 +4,7 @@ import FlutterMacOS
 @main
 class AppDelegate: FlutterAppDelegate {
   override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-    // Capture temporarily orders out the only window. Keep the tray app alive;
-    // explicit Quit and the custom close button terminate it separately.
+    // Closing or capturing hides the window. Only explicit Quit exits the app.
     return false
   }
 

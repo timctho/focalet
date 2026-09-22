@@ -547,7 +547,9 @@ final class FlutterDesktopBridge
     }
     if (_useNativeSurface) WidgetsBinding.instance.addObserver(this);
     windowManager.addListener(this);
-    await windowManager.setPreventClose(false);
+    // Keep sessions and shortcuts alive when the OS closes the window. Quit
+    // explicitly destroys it and bypasses this close interception.
+    await windowManager.setPreventClose(true);
     await windowManager.setAlwaysOnTop(false);
     await setSurface(expanded: true, animate: false);
     await windowManager.show();
@@ -906,8 +908,7 @@ final class FlutterDesktopBridge
   Future<void> hide() => windowManager.minimize();
 
   @override
-  Future<void> closeWindow() =>
-      Platform.isMacOS ? windowManager.destroy() : windowManager.close();
+  Future<void> closeWindow() => windowManager.hide();
 
   @override
   Future<bool> toggleMaximized() async {
@@ -1127,7 +1128,7 @@ final class FlutterDesktopBridge
   }
 
   @override
-  void onWindowClose() {}
+  void onWindowClose() => unawaited(closeWindow());
 
   @override
   void onWindowFocus() {}

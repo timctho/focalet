@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tray_manager/tray_manager.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
@@ -124,12 +125,13 @@ void main() {
         const native = MethodChannel('zommi/window_animation');
         const tray = MethodChannel('tray_manager');
         final calls = <MethodCall>[];
+        final windowCalls = <MethodCall>[];
         final messenger = tester.binding.defaultBinaryMessenger;
         for (final channel in [hotkeyEvents, window, tray]) {
-          messenger.setMockMethodCallHandler(
-            channel,
-            (call) async => call.method == 'isMinimized' ? false : null,
-          );
+          messenger.setMockMethodCallHandler(channel, (call) async {
+            if (channel == window) windowCalls.add(call);
+            return call.method == 'isMinimized' ? false : null;
+          });
         }
         messenger.setMockMethodCallHandler(hotkey, (call) async {
           calls.add(call);
@@ -165,6 +167,13 @@ void main() {
         );
         expect(ready.contextShortcut, isTrue);
         expect(ready.imageShortcut, isFalse);
+        expect(
+          windowCalls
+              .where((call) => call.method == 'setPreventClose')
+              .single
+              .arguments,
+          {'isPreventClose': true},
+        );
         if (Platform.isWindows) {
           expect(calls.single.arguments, {'key': 65, 'modifiers': 1});
           await bridge.close();
@@ -189,6 +198,48 @@ void main() {
       });
     },
   );
+
+  testWidgets('closing hides the window, tray reopens it, and Quit exits', (
+    tester,
+  ) async {
+    const window = MethodChannel('window_manager');
+    final calls = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(window, (
+      call,
+    ) async {
+      calls.add(call.method);
+      return false;
+    });
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        window,
+        null,
+      ),
+    );
+    final bridge = FlutterDesktopBridge();
+    final invocations = <DesktopInvocation>[];
+    final subscription = bridge.invocations.listen(invocations.add);
+    addTearDown(subscription.cancel);
+
+    // The custom X and native close requests (such as Alt+F4) both hide.
+    await bridge.closeWindow();
+    bridge.onWindowClose();
+    await tester.pump();
+    expect(calls, ['hide', 'hide']);
+
+    bridge.onTrayIconMouseDown();
+    bridge.onTrayMenuItemClick(MenuItem(key: 'open'));
+    await tester.pump();
+    expect(invocations.map((event) => event.kind), [
+      DesktopInvocationKind.open,
+      DesktopInvocationKind.open,
+    ]);
+    expect(calls, ['hide', 'hide']);
+
+    bridge.onTrayMenuItemClick(MenuItem(key: 'exit'));
+    await tester.pump();
+    expect(calls, ['hide', 'hide', 'destroy']);
+  });
 
   test(
     'Windows selection batches preserve each image and its own coordinates',
