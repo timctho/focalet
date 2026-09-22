@@ -27,7 +27,7 @@ Future<void> runDocumentPreviewProbe(DesktopBridge desktop) async {
     final view = await windows.open(artifact);
     if (view == null) throw StateError('Document window was closed.');
     await Future<void>.delayed(const Duration(seconds: 3));
-    report['document'] = await view.evaluateJavaScript('''(() => {
+    final document = await view.evaluateJavaScript('''(() => {
       const target=document.getElementById(location.hash.slice(1));
       return {hash:location.hash,ready:document.readyState,
         stylesheets:document.styleSheets.length,scripts:document.scripts.length,
@@ -39,6 +39,7 @@ Future<void> runDocumentPreviewProbe(DesktopBridge desktop) async {
         copyButtons:document.querySelectorAll('pre button').length,
         viewport:{width:innerWidth,height:innerHeight}};
     })()''');
+    report['document'] = document is String ? jsonDecode(document) : document;
     report['status'] = 'opened';
     if (Platform.environment['ZOMMI_DOCUMENT_PREVIEW_NOTIFY'] == '1') {
       await desktop.notifyResponseReady(

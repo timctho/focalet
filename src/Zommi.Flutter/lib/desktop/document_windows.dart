@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:desktop_webview_window/desktop_webview_window.dart';
@@ -40,13 +41,36 @@ final class DocumentWindows {
       }
       _windows[view] = server;
       view.setOnUrlRequestCallback(server.allowsNavigation);
-      view.launch(server.uri.toString());
+      // The initial URL is created by us. Avoid the native cancel/relaunch
+      // handshake while the secondary Flutter view is still starting.
+      view.launch(server.uri.toString(), triggerOnUrlRequestEvent: false);
       unawaited(
         view.onClose.then((_) async {
           _windows.remove(view);
           await server.close();
         }),
       );
+      try {
+        final deadline = DateTime.now().add(const Duration(seconds: 15));
+        while (true) {
+          final ready = await view
+              .evaluateJavaScript(
+                "document.readyState === 'complete' && "
+                'location.origin === ${jsonEncode(server.uri.origin)}',
+              )
+              .timeout(const Duration(seconds: 5));
+          if (ready == 'true') break;
+          if (DateTime.now().isAfter(deadline)) {
+            throw StateError('Document did not load. Close it and try again.');
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+        }
+      } on Object {
+        view.close();
+        _windows.remove(view);
+        rethrow;
+      }
+      await view.bringToForeground();
       return view;
     } on Object {
       await server.close();
