@@ -180,12 +180,14 @@ class _DocumentPreviewState extends State<DocumentPreview> {
               }
             },
             onWebContentProcessDidTerminate: (_) {
-              if (_server == server)
+              if (_server == server) {
                 _fail('Document renderer stopped. Retry to recover.');
+              }
             },
             onRenderProcessGone: (_, detail) {
-              if (_server == server)
+              if (_server == server) {
                 _fail('Document renderer stopped. Retry to recover.');
+              }
             },
           ),
         if (!_ready) const Center(child: CircularProgressIndicator()),
