@@ -2,7 +2,8 @@
 """Export the selected Relay identity for desktop platforms (CairoSVG/Pillow)."""
 from pathlib import Path
 from io import BytesIO
-import importlib.util
+import html
+import re
 
 import cairosvg
 from PIL import Image
@@ -14,23 +15,56 @@ OCEAN = "#387DA8"  # ZommiThemeColor.ocean
 OCEAN_LIGHT = "#ACCEE6"
 
 
+def read_master(name):
+    value = (DESIGN / 'masters' / f'{name}.svg').read_text()
+    vb = re.search(r'viewBox="([^"]+)"', value).group(1)
+    inner = value.split('>', 1)[1].rsplit('</svg>', 1)[0]
+    inner = re.sub(r'<title[^>]*>.*?</title>', '', inner)
+    return vb, inner
+
+
+def nested(name, x, y, width, height, color=OCEAN):
+    vb, inner = read_master(name)
+    return (f'<svg x="{x}" y="{y}" width="{width}" height="{height}" '
+            f'viewBox="{vb}" color="{color}" fill="currentColor">{inner}</svg>')
+
+
+def document(width, height, content, title):
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+            f'viewBox="0 0 {width} {height}" role="img" aria-labelledby="title">'
+            f'<title id="title">{html.escape(title)}</title>{content}</svg>\n')
+
+
+def rect(x, y, w, h, fill, radius=0, stroke=None):
+    outline = f' stroke="{stroke}"' if stroke else ''
+    return f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{radius}" fill="{fill}"{outline}/>'
+
+
+def lockup(name, color=OCEAN):
+    return document(490, 132, nested(name, 0, 2, 128, 128, color) +
+                    nested('wordmark', 157, 27, 321, 78, color), 'Zommi logo')
+
+
+def app_icon(name, background=OCEAN, foreground="#FFFFFF", size=1024):
+    return document(size, size, rect(0, 0, size, size, background, size * .235) +
+                    nested(name, size * .08, size * .08, size * .84, size * .84, foreground),
+                    f'Zommi {name} app icon')
+
+
 def ocean_exports() -> Path:
-    """Use the original Relay geometry without rewriting the archived study."""
-    spec = importlib.util.spec_from_file_location("logo_study", DESIGN / "build_assets.py")
-    study = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(study)
+    """Generate the Ocean logo from the maintained vector masters."""
     folder = DESIGN / "exports/ocean"
     folder.mkdir(parents=True, exist_ok=True)
     for tone, color in (("light", OCEAN), ("dark", OCEAN_LIGHT)):
-        (folder / f"lockup-{tone}.svg").write_text(study.lockup("relay", color))
-    (folder / "mark.svg").write_text(study.document(
-        128, 128, study.nested("relay", 0, 0, 128, 128, OCEAN), "Zommi Ocean"))
-    (folder / "app.svg").write_text(study.app_icon("relay", OCEAN, "#FFFFFF"))
+        (folder / f"lockup-{tone}.svg").write_text(lockup("relay", color))
+    (folder / "mark.svg").write_text(document(
+        128, 128, nested("relay", 0, 0, 128, 128, OCEAN), "Zommi Ocean"))
+    (folder / "app.svg").write_text(app_icon("relay", OCEAN, "#FFFFFF"))
     for name, source in (("zommi-mark.svg", "mark.svg"),
                          ("zommi-wordmark.svg", None),
                          ("zommi-logo.svg", "lockup-light.svg")):
-        content = (folder / source).read_text() if source else study.document(
-            321, 78, study.nested("wordmark", 0, 0, 321, 78, OCEAN), "Zommi")
+        content = (folder / source).read_text() if source else document(
+            321, 78, nested("wordmark", 0, 0, 321, 78, OCEAN), "Zommi")
         (DESIGN / "exports" / name).write_text(content)
     return folder
 

@@ -16,7 +16,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--seconds", type=float, default=5)
     parser.add_argument(
-        "--scene", choices=("dashboard", "amazon", "sheets"), default="dashboard"
+        "--scene", choices=("dashboard", "amazon"), default="dashboard"
     )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--evidence", type=Path)

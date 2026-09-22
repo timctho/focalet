@@ -5,6 +5,7 @@ import importlib.util
 import json
 from pathlib import Path
 import tempfile
+import tarfile
 from types import SimpleNamespace
 import unittest
 from unittest import mock
@@ -86,6 +87,24 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertEqual(result["entrypoint"], "zommi")
         self.assertEqual(result["captureHost"], "zommi-x11-capture")
         self.assertEqual(result["files"], 5 + len(verify_release.LINUX_RUNTIME_LIBRARIES))
+
+    def test_licensed_package_cannot_omit_notices_even_with_valid_checksums(self) -> None:
+        manifest_path = self.root / "release-manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["license"] = "Apache-2.0"
+        manifest_path.write_text(json.dumps(manifest))
+        assemble_release._copy_licenses(self.root)
+        for relative in verify_release.LICENSE_DOCUMENTS:
+            with self.subTest(document=relative):
+                path = self.root / relative
+                content = path.read_bytes()
+                path.unlink()
+                self._write_checksums()
+                with self.assertRaisesRegex(
+                    verify_release.ReleaseValidationError, "License document is missing"
+                ):
+                    verify_release.verify_package(self.root, smoke_processes=False)
+                path.write_bytes(content)
 
     def test_windows_manifest_requires_persistent_wsl_transport(self) -> None:
         manifest_path = self.root / "release-manifest.json"
@@ -489,6 +508,57 @@ class ReleaseAssemblyTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
+    def assert_license_payload(self, directory: Path) -> None:
+        for source, relative in assemble_release.LICENSE_FILES.items():
+            self.assertEqual(
+                (directory / relative).read_bytes(),
+                (SCRIPTS.parent / source).read_bytes(),
+                relative,
+            )
+
+    def test_windows_and_linux_archives_include_project_and_third_party_licenses(self) -> None:
+        for platform in ("windows", "linux"):
+            with self.subTest(platform=platform):
+                inputs = self.root / platform
+                flutter = inputs / "flutter"
+                flutter.mkdir(parents=True)
+                entrypoint = "Zommi.exe" if platform == "windows" else "zommi"
+                (flutter / entrypoint).write_text("flutter")
+                libraries = (
+                    (*verify_release.WINDOWS_RUNTIME_LIBRARIES, "vcruntime140_1.dll")
+                    if platform == "windows" else verify_release.LINUX_RUNTIME_LIBRARIES
+                )
+                for relative in libraries:
+                    library = flutter / relative
+                    library.parent.mkdir(parents=True, exist_ok=True)
+                    library.write_text("runtime")
+                core = inputs / "core"
+                core.write_text("rust")
+                capture = inputs / "capture"
+                capture.mkdir()
+                capture_binary = capture / "Zommi.Capture.exe"
+                capture_binary.write_text("capture")
+                package, archive = assemble_release.assemble(SimpleNamespace(
+                    platform=platform, architecture="x64", flutter_output=flutter,
+                    core_host=core, capture_host=capture, linux_capture_host=capture_binary,
+                    output_root=inputs / "output", git_commit="license-contract-sha",
+                    document=[], signing_status="unsigned", signing_mechanism="none",
+                ))
+                self.assert_license_payload(package)
+                self.assertEqual(
+                    json.loads((package / "release-manifest.json").read_text())["license"],
+                    "Apache-2.0",
+                )
+                verify_release.verify_package(package, smoke_processes=False)
+                if platform == "windows":
+                    with zipfile.ZipFile(archive) as bundle:
+                        names = bundle.namelist()
+                else:
+                    with tarfile.open(archive) as bundle:
+                        names = bundle.getnames()
+                for relative in verify_release.LICENSE_DOCUMENTS:
+                    self.assertIn(f"{package.name}/{relative}", names)
+
     def test_directory_replacement_is_complete(self) -> None:
         assemble_release._replace_directory(self.pending, self.destination)
         self.assertEqual(
@@ -565,10 +635,14 @@ class ReleaseAssemblyTests(unittest.TestCase):
             linux_capture_host=None,
         )
 
+        def sign_with_notices(application, identity):
+            self.assert_license_payload(application / "Contents/Resources")
+            return {"status": "ad-hoc", "mechanism": "codesign"}
+
         with mock.patch.object(
             assemble_release,
             "_sign_macos",
-            return_value={"status": "ad-hoc", "mechanism": "codesign"},
+            side_effect=sign_with_notices,
         ) as sign:
             package, archive = assemble_release.assemble(arguments)
 
@@ -592,6 +666,7 @@ class ReleaseAssemblyTests(unittest.TestCase):
         sign.assert_called_once()
         self.assertEqual(sign.call_args.args[0].name, "Zommi.app")
         self.assertIsNone(sign.call_args.args[1])
+        self.assert_license_payload(package / "Zommi.app/Contents/Resources")
 
         self.assertTrue(archive.is_file())
         self.assertTrue(Path(f"{archive}.sha256").is_file())
@@ -605,6 +680,10 @@ class ReleaseAssemblyTests(unittest.TestCase):
             "zommi-macos-x64/Zommi.app/Contents/MacOS/zommi-core-host",
             names,
         )
+        for relative in verify_release.LICENSE_DOCUMENTS:
+            self.assertIn(
+                f"zommi-macos-x64/Zommi.app/Contents/Resources/{relative}", names
+            )
 
     def test_macos_distribution_signing_requests_hardened_runtime(self) -> None:
         application = self.root / "Zommi.app"

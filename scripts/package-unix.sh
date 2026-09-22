@@ -102,7 +102,6 @@ assembler_arguments=(
   --git-commit "$git_commit"
   --document "$repository_root/README.md"
   --document "$repository_root/docs/install.md"
-  --document "$repository_root/docs/flutter-rust-migration.md"
 )
 if [[ "$target_platform" == macos ]]; then
   assembler_arguments+=(--document "$repository_root/docs/macos-testing.md")

@@ -10,8 +10,8 @@ import zipfile
 import xml.etree.ElementTree as ET
 from urllib.parse import urlsplit
 
-from dashboard_proof import inline_objects_after
-from sheets_layout_proof import inspect
+from session_evidence import inline_objects_after
+from workbook_evidence import inspect
 
 OUTPUTS = {"G4", "G5", "G6", "G13", "G14", "G15"}
 EXPECTED = {"G4": 520, "G5": 44.8, "G6": 564.8,

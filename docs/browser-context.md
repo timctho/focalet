@@ -128,13 +128,6 @@ Windows accessibility remain available; DOM text and image/product URLs may be
 missing. The preference persists and is on by default. It does not change
 connections made by the agent's separate browser tools.
 
-Reading page context does not inherently require debugging permission. This
-implementation uses CDP, so Chrome authorizes a debugging connection even for
-read-only capture. A future extension could use `activeTab` and `scripting`
-without `debugger`, after the user invokes sharing in the browser. That requires
-an installed extension and browser activation; Zommi's global shortcut alone
-does not grant `activeTab`. No such extension is included in this build.
-
 Without an available connection, Windows accessibility capture remains usable.
 The DOM implementation currently runs in the Windows native capture helper;
 Linux and macOS keep their existing platform capture providers.

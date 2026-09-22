@@ -7,13 +7,13 @@ import unittest
 import xml.etree.ElementTree as ET
 import zipfile
 
-import test_demo_sheets_layout as fixture
+import demo_workbook_fixture as fixture
 import sheets_quote_proof as proof
 
 
 class SheetQuoteTests(unittest.TestCase):
     def setUp(self):
-        sample = fixture.SheetsLayoutTests()
+        sample = fixture.WorkbookFixture()
         sample.setUp()
         self.session = sample.session
         text = ('<user_message>Turn my sketch into two quotes. Skip the crossed-out '

@@ -2,7 +2,7 @@
 
 Zommi connects a desktop selection to an existing agent. Keep credentials,
 canonical history, tools and permissions with that agent. See the
-[desktop reference](docs/desktop-reference.md) and [domain terms](CONTEXT.md).
+[desktop reference](docs/desktop-reference.md) for the source layout.
 
 ## Set up
 
@@ -120,7 +120,7 @@ platform jobs succeed; a skipped or cancelled dependency fails the gate.
 
 Repository maintainers should require **PR checks passed** in the `main` branch
 rules and require review for workflow changes. This file does not enable GitHub
-branch protection by itself. A billing-blocked job is unverified, not a pass.
+branch protection by itself.
 The **Native acceptance** workflow is manual and reserved for reviewed source.
 Do not dispatch unreviewed fork code onto a persistent runner.
 
@@ -129,3 +129,9 @@ native checks still needed. Include a regression for a behavior change. Never
 upload personal transcripts, settings, session catalogs, tokens, or raw desktop
 logs. Public demos must use synthetic content and pass the
 [recording review](docs/demos/README.md).
+
+## License
+
+Contributions are provided under the repository's [Apache 2.0 license](LICENSE).
+Preserve third-party copyright and license notices when updating dependencies
+or assets; see [third-party notices](THIRD_PARTY_NOTICES.md).

@@ -11,4 +11,4 @@ PRODUCT_NAME = Zommi
 PRODUCT_BUNDLE_IDENTIFIER = com.zommi.desktop
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 com.zommi. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 Zommi contributors. Apache-2.0.

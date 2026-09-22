@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import re
 
-from dashboard_proof import inline_objects_after, objects_after, sha256
+from session_evidence import inline_objects_after, objects_after, sha256
 
 ROOT = Path(__file__).parent
 spec = importlib.util.spec_from_file_location("latency_sample", ROOT / "latency/app.py")

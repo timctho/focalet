@@ -18,6 +18,23 @@ import uuid
 import zipfile
 
 
+REPOSITORY = Path(__file__).resolve().parents[1]
+LICENSE_FILES = {
+    "LICENSE": "LICENSE",
+    "THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
+    "third_party/hotkey_manager_linux/LICENSE": "licenses/hotkey_manager_linux-LICENSE.txt",
+    "src/Zommi.Flutter/assets/runtime_icons/SOURCES.md": "licenses/runtime-icons-NOTICES.md",
+    "design/zommi-logo/Manrope-OFL.txt": "licenses/Manrope-OFL.txt",
+}
+
+
+def _copy_licenses(destination: Path) -> None:
+    for source, relative in LICENSE_FILES.items():
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(REPOSITORY / source, target)
+
+
 def _copy_contents(source: Path, destination: Path) -> None:
     if not source.is_dir():
         raise ValueError(f"Flutter output directory does not exist: {source}")
@@ -118,6 +135,7 @@ def _write_manifest(
         "schemaVersion": 1,
         "product": "Zommi",
         "version": "0.1.0",
+        "license": "Apache-2.0",
         "gitCommit": commit,
         "platform": target_platform,
         "architecture": architecture,
@@ -261,6 +279,8 @@ def assemble(args: argparse.Namespace) -> tuple[Path, Path]:
             core_destination = pending / core_relative
             shutil.copy2(args.core_host, core_destination)
             core_destination.chmod(core_destination.stat().st_mode | 0o111)
+            # Keep notices with the installed app and include them in its signature.
+            _copy_licenses(application / "Contents/Resources")
             signing = _sign_macos(application, args.macos_signing_identity)
         else:
             _copy_contents(args.flutter_output, pending)
@@ -296,6 +316,7 @@ def assemble(args: argparse.Namespace) -> tuple[Path, Path]:
             shutil.copy2(args.core_host, core_destination)
             if args.platform == "linux":
                 core_destination.chmod(core_destination.stat().st_mode | 0o111)
+            _copy_licenses(pending)
 
         for document in args.document:
             document = document.resolve()

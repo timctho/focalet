@@ -25,6 +25,13 @@ LINUX_RUNTIME_LIBRARIES = (
 )
 
 WINDOWS_RUNTIME_LIBRARIES = ("msvcp140.dll", "vcruntime140.dll")
+LICENSE_DOCUMENTS = (
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "licenses/hotkey_manager_linux-LICENSE.txt",
+    "licenses/runtime-icons-NOTICES.md",
+    "licenses/Manrope-OFL.txt",
+)
 
 
 def _sha256(path: Path) -> str:
@@ -241,6 +248,13 @@ def verify_package(
             raise ReleaseValidationError("Linux launcher does not load bundled runtime libraries.")
         for relative in LINUX_RUNTIME_LIBRARIES:
             _inside(root, relative, "Bundled Linux runtime library")
+    # Older preview packages predate the license manifest field.
+    if "license" in manifest:
+        if manifest["license"] != "Apache-2.0":
+            raise ReleaseValidationError("Unsupported project license in manifest.")
+        prefix = "Zommi.app/Contents/Resources/" if manifest["platform"] == "macos" else ""
+        for relative in LICENSE_DOCUMENTS:
+            _inside(root, prefix + relative, "License document")
     file_count = _verify_checksums(root)
     if smoke_processes:
         _smoke_core(core_host)

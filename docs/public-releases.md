@@ -20,6 +20,9 @@ never describe jobs that did not start as passed.
 Keep persistent runners reserved for operator-invoked native acceptance. Build Windows locally with
 `scripts/package-windows.ps1 -Runtime win-x64`, then run the packaged Windows
 acceptance scripts. The package bundles MSVC and .NET runtime libraries.
+All platforms include the Apache 2.0 license and retained third-party notices.
+On macOS these are copied inside the app before code signing, so they survive
+installation from the DMG.
 
 With NSIS 3 installed, create the Windows installer:
 

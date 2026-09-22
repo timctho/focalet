@@ -93,7 +93,7 @@ BEGIN
             VALUE "FileDescription", "Zommi" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "Zommi" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.zommi. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 Zommi contributors. Apache-2.0." "\0"
             VALUE "OriginalFilename", "Zommi.exe" "\0"
             VALUE "ProductName", "Zommi" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"

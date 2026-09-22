@@ -348,16 +348,18 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(1400, 680));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.runAsync(() async {
+      final fontDirectory =
+          '${File(Platform.resolvedExecutable).parent.parent.parent.path}/material_fonts';
       await (FontLoader(codexUiFontFamily)..addFont(
-            File('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf')
+            File('$fontDirectory/Roboto-Regular.ttf')
                 .readAsBytes()
                 .then(ByteData.sublistView),
           ))
           .load();
       await (FontLoader('MaterialIcons')..addFont(
-            File(
-              '/home/example/.local/share/flutter-toolchains/flutter-3.47.2/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
-            ).readAsBytes().then(ByteData.sublistView),
+            File('$fontDirectory/MaterialIcons-Regular.otf')
+                .readAsBytes()
+                .then(ByteData.sublistView),
           ))
           .load();
       await Directory(directory).create(recursive: true);

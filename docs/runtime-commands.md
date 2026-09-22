@@ -12,7 +12,7 @@ commands action. A failed or unsupported discovery request does not prevent chat
 | Pi RPC | `get_commands` | `prompt`, preserving command text. Extension commands that finish without agent events receive a completed turn after the runtime confirms it is idle. |
 | Hermes Gateway | `commands.catalog` | `slash.exec`, or `command.dispatch` for skills and quick commands; runtime-produced skill/prompt expansions go to `prompt.submit`. Plain command output is rendered without a model prompt. |
 | OpenClaw Gateway | `commands.list` for the session's agent and text scope | `chat.send`, preserving command text. |
-| Terminal compatibility (Claude CLI) | None | No structured command discovery. A Claude Agent SDK adapter would be a separate change. |
+| Terminal compatibility (Claude CLI) | None | No structured command discovery. |
 
 Catalogs describe the commands available through each protocol, not every command
 in the runtime's terminal application. Pi explicitly omits built-in terminal
