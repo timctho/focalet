@@ -10,6 +10,9 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  crypto: ^3.0.7
+  desktop_webview_window: ^0.3.0
+  path: ^1.9.1
   flutter_html: ^3.0.0
   flutter_markdown_plus: ^1.0.12
   flutter_local_notifications: ^22.3.1

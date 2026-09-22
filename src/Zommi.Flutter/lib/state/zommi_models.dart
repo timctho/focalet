@@ -313,6 +313,7 @@ final class ArtifactPreview {
     this.cwd,
     this.dataUrl,
     this.html,
+    this.fileUri,
   });
 
   factory ArtifactPreview.fromJson(Map<String, Object?> json) =>
@@ -338,18 +339,21 @@ final class ArtifactPreview {
   final String? cwd;
   final String? dataUrl;
   final String? html;
+  final Uri? fileUri;
 
   String get identity => path ?? dataUrl ?? id;
 
-  ArtifactPreview copyWith({String? dataUrl, String? html}) => ArtifactPreview(
-    id: id,
-    kind: kind,
-    title: title,
-    path: path,
-    cwd: cwd,
-    dataUrl: dataUrl ?? this.dataUrl,
-    html: html ?? this.html,
-  );
+  ArtifactPreview copyWith({String? dataUrl, String? html, Uri? fileUri}) =>
+      ArtifactPreview(
+        id: id,
+        kind: kind,
+        title: title,
+        path: path,
+        cwd: cwd,
+        dataUrl: dataUrl ?? this.dataUrl,
+        html: html ?? this.html,
+        fileUri: fileUri ?? this.fileUri,
+      );
 }
 
 final class TranscriptBlock {

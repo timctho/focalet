@@ -16,6 +16,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/desktop/capture_permissions.dart';
+import 'package:zommi_flutter/desktop/document_windows.dart';
 import 'package:zommi_flutter/desktop/capture_shortcut.dart';
 import 'package:zommi_flutter/desktop/response_notifications.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
@@ -198,6 +199,8 @@ abstract interface class DesktopBridge {
 
   Future<void> openExternalUrl(Uri uri);
 
+  Future<void> openDocumentPreview(ArtifactPreview artifact);
+
   Future<void> close();
 }
 
@@ -277,6 +280,9 @@ final class NoopDesktopBridge implements DesktopBridge {
   Future<void> openExternalUrl(Uri uri) async {}
 
   @override
+  Future<void> openDocumentPreview(ArtifactPreview artifact) async {}
+
+  @override
   Future<void> close() async {}
 }
 
@@ -310,6 +316,8 @@ final class FlutterDesktopBridge
            FileDesktopAcceptanceRecorder.fromEnvironment();
 
   final bool _useNativeSurface;
+  final DocumentWindows _documents = DocumentWindows();
+
   late final ResponseNotifications _notifications = ResponseNotifications(
     isForeground: () async =>
         await windowManager.isVisible() &&
@@ -1048,6 +1056,11 @@ final class FlutterDesktopBridge
   }
 
   @override
+  Future<void> openDocumentPreview(ArtifactPreview artifact) async {
+    await _documents.open(artifact);
+  }
+
+  @override
   Future<void> openExternalUrl(Uri uri) async {
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
       throw StateError('The default browser could not open $uri.');
@@ -1170,6 +1183,7 @@ final class FlutterDesktopBridge
   Future<void> close() async {
     WidgetsBinding.instance.removeObserver(this);
     _notifications.close();
+    await _documents.close();
     _windowAnimationChannel.setMethodCallHandler(null);
     windowManager.removeListener(this);
     trayManager.removeListener(this);

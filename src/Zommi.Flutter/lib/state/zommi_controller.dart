@@ -2231,11 +2231,16 @@ final class ZommiController extends ChangeNotifier {
     previewArtifact = artifact;
     _notify();
     try {
-      previewArtifact = await artifactLoader.load(
-        artifact,
-        target: activeRuntime,
-      );
+      final loaded = await artifactLoader.load(artifact, target: activeRuntime);
+      if (_closed || !identical(previewArtifact, artifact)) return;
+      if (loaded.kind == 'html' || loaded.kind == 'markdown') {
+        await desktop.openDocumentPreview(loaded);
+        if (identical(previewArtifact, artifact)) previewArtifact = null;
+      } else {
+        previewArtifact = loaded;
+      }
     } on Object catch (error) {
+      if (_closed || !identical(previewArtifact, artifact)) return;
       previewArtifact = ArtifactPreview(
         id: artifact.id,
         kind: 'error',
@@ -2657,6 +2662,20 @@ final class ZommiController extends ChangeNotifier {
   Future<void> copyImage(String dataUrl) => desktop.copyImage(dataUrl);
 
   Future<void> openExternalLink(String value) async {
+    final kind = artifactKindFromPath(value);
+    if (kind != null &&
+        !RegExp(r'^https?:', caseSensitive: false).hasMatch(value)) {
+      await showArtifact(
+        ArtifactPreview(
+          id: value,
+          kind: kind,
+          title: Uri.tryParse(value)?.pathSegments.lastOrNull ?? 'Document',
+          path: value,
+          cwd: selectedWorkspace,
+        ),
+      );
+      return;
+    }
     final uri = Uri.tryParse(value.trim());
     if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
       _setStatus('Only web links can be opened in the browser.', warning: true);

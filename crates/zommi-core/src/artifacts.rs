@@ -146,7 +146,7 @@ pub fn artifacts_from_text(text: &str, cwd: Option<&str>) -> Vec<Value> {
         add_path_artifact(&mut artifacts, path, title, cwd);
     }
     let bare_path = Regex::new(
-        r#"(?i)(?:^|[\s("'`])((?:file:///[^\s"'<>]+|[a-z]:[\\/][^\s"'<>]+|/[^\s"'<>]+)\.(?:png|jpe?g|gif|webp|bmp|svg|html?))(?:$|[\s),.;])"#,
+        r#"(?i)(?:^|[\s("'`])((?:file://[^\s"'<>]+|[a-z]:[\\/][^\s"'<>]+|/[^\s"'<>]+)\.(?:png|jpe?g|gif|webp|bmp|svg|html?|md|markdown)(?:[?#][^\s\"'<>)]*)?)(?:$|[\s),.;])"#,
     )
     .expect("artifact path regex");
     for captures in bare_path.captures_iter(text) {
@@ -167,6 +167,7 @@ pub fn artifact_kind_from_path(value: &str) -> Option<&'static str> {
     match extension {
         "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "svg" => Some("image"),
         "html" | "htm" => Some("html"),
+        "md" | "markdown" => Some("markdown"),
         _ => None,
     }
 }
@@ -403,7 +404,7 @@ fn add_artifact(artifacts: &mut Vec<Value>, artifact: Value, cwd: Option<&str>) 
     let Some(kind) = object.get("kind").and_then(Value::as_str) else {
         return;
     };
-    if !matches!(kind, "image" | "html")
+    if !matches!(kind, "image" | "html" | "markdown")
         || !["dataUrl", "path", "html"].iter().any(|name| {
             object
                 .get(*name)
@@ -501,7 +502,9 @@ fn item_id<'a>(item: &'a Value, fallback: &'a str) -> &'a str {
 }
 
 fn artifact_title(kind: &str) -> &'static str {
-    if kind == "html" {
+    if kind == "markdown" {
+        "Markdown preview"
+    } else if kind == "html" {
         "HTML preview"
     } else {
         "Generated image"
@@ -537,6 +540,26 @@ mod tests {
     use serde_json::json;
 
     use super::{artifacts_from_content, artifacts_from_text, artifacts_from_thread_item};
+
+    #[test]
+    fn document_links_preserve_wsl_hosts_and_fragments() {
+        let link = "file://wsl.localhost/Ubuntu/home/example/deck.html#slide-12";
+        let artifacts = artifacts_from_text(
+            &format!("{link}\n[guide](./guide.md#next-steps)"),
+            Some("/workspace"),
+        );
+        assert_eq!(artifacts.len(), 2);
+        assert!(
+            artifacts
+                .iter()
+                .any(|a| a["path"] == link && a["kind"] == "html")
+        );
+        assert!(
+            artifacts
+                .iter()
+                .any(|a| a["path"] == "./guide.md#next-steps" && a["kind"] == "markdown")
+        );
+    }
 
     #[test]
     fn extracts_generated_images_and_previewable_file_changes() {
