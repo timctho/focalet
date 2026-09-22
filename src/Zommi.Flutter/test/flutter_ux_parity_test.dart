@@ -1523,15 +1523,12 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 200));
       final viewer = find.byKey(const ValueKey('artifact-viewer'));
-      expect(viewer, findsOneWidget);
+      expect(viewer, findsNothing);
       expect(
-        tester.getTopLeft(viewer).dy,
-        greaterThanOrEqualTo(
-          tester.getBottomLeft(find.byKey(const ValueKey('model-summary'))).dy,
-        ),
+        desktop.calls.where((call) => call.startsWith('document:')),
+        hasLength(1),
       );
-      await tester.tap(find.byTooltip('Close artifact preview'));
-      await tester.pump();
+      expect(find.byKey(const ValueKey('zommi-composer')), findsOneWidget);
 
       core.emit(
         _event(
