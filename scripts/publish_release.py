@@ -53,6 +53,8 @@ def collect_assets(metadata: list[Path], commit: str, *, windows_only: bool = Fa
             raise ValueError("Unexpected installer filename.")
         if target[0] == "linux" and tag is not None and value.get("releaseTag") != tag:
             raise ValueError("Ubuntu installer version does not match the release tag.")
+        if tag is not None and value.get("releaseTag") is not None and value["releaseTag"] != tag:
+            raise ValueError("Installer source version does not match the release tag.")
         if version is not None and value.get("version") != version:
             raise ValueError("Installer versions differ.")
         version = value.get("version")

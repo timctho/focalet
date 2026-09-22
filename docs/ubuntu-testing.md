@@ -58,12 +58,12 @@ Rust broker and capture helper. To create the Debian installer locally, install
 
 ```sh
 python3 scripts/build_installer.py artifacts/zommi-linux-x64 \
-  --expected-commit "$(git rev-parse HEAD)" --release-tag v0.1.0-preview.8 \
+  --expected-commit "$(git rev-parse HEAD)" \
   --output artifacts/installers
 ```
 
-Use a tag matching the source app version. Windows release assets cannot run
-as the Ubuntu app.
+The package retains the release version from `src/Zommi.Flutter/pubspec.yaml`;
+no manual tag is needed. Windows release assets cannot run as the Ubuntu app.
 
 ## Try the desktop flow
 

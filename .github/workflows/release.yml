@@ -3,10 +3,6 @@ name: Build and publish release
 on:
   workflow_dispatch:
     inputs:
-      tag:
-        description: New version tag matching the app version (for example v0.1.0-preview.8)
-        required: true
-        type: string
       platforms:
         description: Installers to build
         type: choice
@@ -16,23 +12,17 @@ on:
         description: Publish to GitHub Releases after all selected builds pass
         type: boolean
         default: false
-      prerelease:
-        description: Mark as a preview (uncheck only for a stable version tag)
-        type: boolean
-        default: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ inputs.tag }}
+  group: release
   cancel-in-progress: false
 
 env:
-  RELEASE_TAG: ${{ inputs.tag }}
   RELEASE_PLATFORMS: ${{ inputs.platforms }}
   RELEASE_PUBLISH: ${{ inputs.publish }}
-  RELEASE_PRERELEASE: ${{ inputs.prerelease }}
   CARGO_BUILD_JOBS: '4'
 
 jobs:
@@ -41,6 +31,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
+      tag: ${{ steps.plan.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -51,6 +42,8 @@ jobs:
 
   build:
     needs: plan
+    env:
+      RELEASE_TAG: ${{ needs.plan.outputs.tag }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}

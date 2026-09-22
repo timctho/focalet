@@ -104,11 +104,14 @@ def main() -> int:
     parser.add_argument("--expected-commit", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--makensis", default="makensis")
-    parser.add_argument("--release-tag", help="Version tag, used for Ubuntu's apt upgrade ordering")
+    parser.add_argument("--release-tag", help="Tag for legacy packages without a committed source version")
     args = parser.parse_args()
     package, output = args.package.resolve(), args.output.resolve()
     # A Linux machine may wrap a Windows package with NSIS, but cannot execute it.
     manifest = json.loads((package / "release-manifest.json").read_text(encoding="utf-8"))
+    release_tag = manifest.get("releaseTag") or args.release_tag
+    if args.release_tag and release_tag != args.release_tag:
+        raise ValueError("The requested release tag differs from the packaged source version.")
     if manifest.get("architecture") not in {"arm64", "x64"}:
         raise ValueError("Unsupported installer architecture.")
     native_host = {"Windows": "windows", "Darwin": "macos", "Linux": "linux"}[platform.system()]
@@ -120,7 +123,7 @@ def main() -> int:
     elif manifest["platform"] == "macos":
         asset = macos_installer(package, output, manifest)
     elif manifest["platform"] == "linux":
-        asset = ubuntu_installer(package, output, manifest, args.release_tag)
+        asset = ubuntu_installer(package, output, manifest, release_tag)
     else:
         raise ValueError("Unsupported installer platform.")
     if inventory(package) != before:
@@ -131,7 +134,7 @@ def main() -> int:
         "file": asset.name, "sha256": _sha256(asset), "packageFiles": before,
         "applicationSigning": manifest["signing"],
         "installerSigning": "not-notarized" if manifest["platform"] == "macos" else "unsigned",
-        **({"releaseTag": args.release_tag} if manifest["platform"] == "linux" else {}),
+        **({"releaseTag": release_tag} if release_tag or manifest["platform"] == "linux" else {}),
     }
     asset.with_name(asset.name + ".release.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     asset.with_name(asset.name + ".sha256").write_text(f"{result['sha256']}  {asset.name}\n", encoding="ascii")

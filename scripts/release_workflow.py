@@ -10,6 +10,7 @@ import subprocess
 import sys
 
 from publish_release import ASSETS, PROFILES, validate_tag
+from release_version import read_version
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNERS = {
@@ -40,24 +41,25 @@ def main() -> None:
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     if not re.fullmatch(r"[0-9a-f]{40}", commit) or commit != os.environ["GITHUB_SHA"]:
         raise ValueError("The checkout must match the workflow's exact source revision.")
-    tag, profile = os.environ["RELEASE_TAG"], os.environ["RELEASE_PLATFORMS"]
-    prerelease, publish = os.environ["RELEASE_PRERELEASE"], os.environ["RELEASE_PUBLISH"]
-    if prerelease not in {"true", "false"} or publish not in {"true", "false"}:
-        raise ValueError("Invalid release switches.")
-    version = re.search(r"^version: (\d+\.\d+\.\d+)",
-                        (ROOT / "src/Zommi.Flutter/pubspec.yaml").read_text(), re.M).group(1)
-    matrix = plan(profile, tag, version, stable=prerelease == "false")
+    identity = read_version(ROOT / "src/Zommi.Flutter/pubspec.yaml")
+    tag, prerelease = identity["tag"], identity["prerelease"]
+    profile, publish = os.environ["RELEASE_PLATFORMS"], os.environ["RELEASE_PUBLISH"]
+    if publish not in {"true", "false"}:
+        raise ValueError("Invalid publish switch.")
+    matrix = plan(profile, tag, identity["version"], stable=not prerelease)
     if args.command == "plan":
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
             output.write("matrix=" + json.dumps(matrix, separators=(",", ":")) + "\n")
-        print(json.dumps({"source": commit, "tag": tag, "publish": publish, **matrix}, indent=2))
+            output.write(f"tag={tag}\nprerelease={str(prerelease).lower()}\n")
+        print(json.dumps({"source": commit, "tag": tag, "prerelease": prerelease,
+                          "publish": publish, **matrix}, indent=2))
         return
     command = [sys.executable, str(ROOT / "scripts/publish_release.py"),
                "--repository", os.environ["GITHUB_REPOSITORY"], "--tag", tag,
                "--expected-commit", commit, "--platforms", profile, "--output", "artifacts/release"]
     for metadata in sorted((ROOT / "artifacts/installers").rglob("*.release.json")):
         command += ["--metadata", str(metadata)]
-    if prerelease == "false":
+    if not prerelease:
         command.append("--stable")
     if publish == "true":
         command.append("--publish")

@@ -65,6 +65,14 @@ class PublicReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Ubuntu installer version"):
             publish.collect_assets([path], self.commit, platforms="ubuntu", tag="v0.1.0-preview.9")
 
+    def test_windows_and_mac_source_version_cannot_be_relabelled(self):
+        for path, profile in ((self.metadata[0], "windows"), (self.metadata[1], None)):
+            value = json.loads(path.read_text())
+            value["releaseTag"] = "v0.1.0-preview.8"
+            path.write_text(json.dumps(value))
+            with self.assertRaisesRegex(ValueError, "source version"):
+                publish.collect_assets([path], self.commit, platforms=profile, tag="v0.1.0-preview.9")
+
     def test_stable_and_preview_tag_validation(self):
         publish.validate_tag("v0.1.0", "0.1.0", stable=True)
         publish.validate_tag("v0.1.0-preview.8", "0.1.0")

@@ -68,11 +68,19 @@ case "$machine_architecture" in
   *) echo "unsupported release architecture: $machine_architecture" >&2; exit 2 ;;
 esac
 git_commit=$(git -C "$repository_root" rev-parse HEAD)
+version_arguments=()
+if [[ "$target_platform" == macos ]]; then
+  # CFBundleShortVersionString needs three numeric components. The release tag
+  # keeps the prerelease suffix from pubspec; Flutter still uses its build number.
+  native_version=$(python3 "$repository_root/scripts/release_version.py" --field version)
+  build_number=$(python3 "$repository_root/scripts/release_version.py" --field buildNumber)
+  version_arguments=("--build-name=$native_version" "--build-number=$build_number")
+fi
 
 (
   cd "$flutter_directory"
   flutter pub get
-  flutter build "$target_platform" --release --no-pub "--dart-define=ZOMMI_BUILD_REVISION=$git_commit"
+  flutter build "$target_platform" --release --no-pub "--dart-define=ZOMMI_BUILD_REVISION=$git_commit" "${version_arguments[@]}"
 )
 cargo build \
   --manifest-path "$repository_root/Cargo.toml" \

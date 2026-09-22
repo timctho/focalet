@@ -35,20 +35,30 @@ does not move self-hosted jobs to GitHub's machines or make manual releases auto
 ## Run a release from GitHub Actions
 
 Open **Actions → Build and publish release → Run workflow** and select `main`.
+You do not need to create or enter a Git tag. The committed `version` in
+[`src/Zommi.Flutter/pubspec.yaml`](../src/Zommi.Flutter/pubspec.yaml) is the source:
+
+```yaml
+version: 0.1.0-preview.8+1
+```
+
+This produces tag `v0.1.0-preview.8` and a prerelease. A version such as
+`0.1.0+2` produces the stable tag `v0.1.0` and marks the release as latest.
+The `+N` is Flutter's build number; it is not part of the Git tag. The workflow
+creates the tag at the exact built commit when publishing. Before a subsequent
+release, bump the version in a PR (for example to `0.1.0-preview.9+2`); changing
+only `+N` does not create a new release version. Published tags are never overwritten.
 
 | Input | Meaning |
 | --- | --- |
-| `tag` | A new tag matching the app version, such as `v0.1.0-preview.8` |
 | `platforms` | `windows-ubuntu` (default), `all`, `windows`, `ubuntu`, or `macos` (both Mac architectures) |
 | `publish` | Off: retain installers as Actions artifacts. On: publish them to this repository's Releases after all selected builds pass |
-| `prerelease` | On by default. Off requires the exact stable app tag, such as `v0.1.0`, and marks it as the latest release |
 
 For example, build a Windows/Ubuntu preview without publishing:
 
 ```sh
 gh workflow run release.yml --ref main \
-  -f tag=v0.1.0-preview.8 -f platforms=windows-ubuntu \
-  -f publish=false -f prerelease=true
+  -f platforms=windows-ubuntu -f publish=false
 ```
 
 Set `publish=true` to build and publish in one run. All jobs use the dispatch's
@@ -129,7 +139,7 @@ authenticated local `gh` session, prepare a Windows preview:
 
 ```sh
 python scripts/publish_release.py --repository timctho/zommi \
-  --tag v0.1.0-preview.6 --expected-commit <main-sha> \
+  --tag "$(python scripts/release_version.py)" --expected-commit <main-sha> \
   --windows-only \
   --metadata installers/Zommi-Setup-x64.exe.release.json \
   --output artifacts/release

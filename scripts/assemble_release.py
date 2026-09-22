@@ -17,6 +17,7 @@ import time
 import uuid
 import zipfile
 
+from release_version import read_version
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 LICENSE_FILES = {
@@ -131,10 +132,12 @@ def _write_manifest(
     capture_host: str | None,
     signing: dict[str, str],
 ) -> None:
+    identity = read_version(REPOSITORY / "src/Zommi.Flutter/pubspec.yaml")
     manifest = {
         "schemaVersion": 1,
         "product": "Zommi",
-        "version": "0.1.0",
+        "version": identity["version"],
+        "releaseTag": identity["tag"],
         "license": "Apache-2.0",
         "gitCommit": commit,
         "platform": target_platform,

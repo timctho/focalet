@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import sys
 import tempfile
 import tarfile
 from types import SimpleNamespace
@@ -13,6 +14,7 @@ import zipfile
 
 
 SCRIPTS = Path(__file__).parents[1] / "scripts"
+sys.path.insert(0, str(SCRIPTS))
 
 
 def _load_script(name: str):
