@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:zommi_flutter/desktop/notification_icon.dart';
 
@@ -29,7 +30,7 @@ final class ResponseNotifications {
 
   Future<bool> _initialize() async {
     try {
-      if (Platform.isWindows) {
+      if (defaultTargetPlatform == TargetPlatform.windows) {
         final source = File.fromUri(
           File(Platform.resolvedExecutable).parent.uri
               .resolve('data/flutter_assets/assets/branding/app-icon.png'),

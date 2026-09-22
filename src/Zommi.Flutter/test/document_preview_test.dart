@@ -37,7 +37,7 @@ void main() {
       localDistribution: 'Ubuntu',
     );
     expect(
-      linux.replace(fragment: '').toFilePath(),
+      linux.replace(fragment: '').toFilePath(windows: false),
       '/home/example/My Files/deck.html',
     );
     expect(linux.fragment, 'slide-12');
