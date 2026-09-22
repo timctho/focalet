@@ -9,7 +9,7 @@
 existing agent. Select a region, add a sketch if useful, and send the image with
 available text, links and structure.
 
-### [Download the Windows preview →](https://github.com/timctho/zommi/releases/download/v0.1.0-preview.7/Zommi-Setup-x64.exe)
+### [Download the latest release →](https://github.com/timctho/zommi/releases)
 
 Uses your existing agent account. [Installation guide](docs/install.md) ·
 [Build from source](CONTRIBUTING.md)
@@ -93,7 +93,7 @@ policies apply. [Capture controls and limitations](docs/browser-context.md)
 | Platform | Availability | Capture support |
 | --- | --- | --- |
 | **Windows 10/11 · x64** | Preview installer | Multiple regions, drawing, accessibility and optional browser context |
-| **macOS 12+ · Apple Silicon / Intel** | Source / test builds; desktop validation pending | Native region images and screen geometry |
+| **macOS 12+ · Apple Silicon / Intel** | `.dmg` when listed in a release | Native region images and screen geometry |
 | **Ubuntu 24.04 LTS · x64 · X11** | `.deb` when listed in a release; [install and test](docs/ubuntu-testing.md) | Native region images |
 | **Ubuntu 24.04 LTS · x64 · Wayland** | Experimental; requires compatible desktop portals | Portal screenshots; global shortcuts depend on the desktop |
 

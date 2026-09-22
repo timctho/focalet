@@ -14,7 +14,7 @@ from release_version import parse_version, read_version
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION_FILE = "src/Zommi.Flutter/pubspec.yaml"
-AUTOMATIC_PLATFORMS = "windows-ubuntu"
+AUTOMATIC_PLATFORMS = "all"
 RUNNERS = {
     ("windows", "x64"): "windows-2025",
     ("linux", "x64"): "ubuntu-24.04",

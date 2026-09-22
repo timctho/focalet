@@ -74,9 +74,9 @@ contracts, the capture helper and deployment retry logic. Linux runs the full
 widget suite and its pixel baselines. The macOS PR job runs the full Flutter
 suite with its own baselines and native selection geometry tests. All three PR
 jobs compile and verify a native desktop package. **Build and publish release**
-automatically builds and publishes Windows/Ubuntu installers when a PR changing
-the app's release version lands on `main`. It also accepts manual builds and
-retries. **Native acceptance** retains additional interactive desktop
+automatically builds and publishes Windows, Ubuntu and both macOS installers
+when a PR changing the app's release version lands on `main`. It also accepts
+manual builds and retries. **Native acceptance** retains additional interactive desktop
 checks. See [release preparation](docs/public-releases.md).
 
 To build a native package locally or run interactive acceptance:

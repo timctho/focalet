@@ -77,6 +77,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
             "branches": ["main"], "paths": ["src/Zommi.Flutter/pubspec.yaml"],
         })
         self.assertEqual(set(workflow["on"]["workflow_dispatch"]["inputs"]), {"platforms", "publish"})
+        self.assertEqual(workflow["on"]["workflow_dispatch"]["inputs"]["platforms"]["default"], "all")
         self.assertEqual(workflow["permissions"], {"contents": "read"})
         self.assertNotIn("self-hosted", raw)
         self.assertNotIn("secrets.", raw)
@@ -150,16 +151,23 @@ class ReleasePushTests(unittest.TestCase):
             release.main()
         return dict(line.split("=", 1) for line in self.output.read_text().splitlines())
 
-    def test_version_bump_automatically_publishes_windows_and_ubuntu(self):
+    def test_version_bump_automatically_publishes_every_platform_and_architecture(self):
         self.commit("0.1.0-preview.9+2")
         outputs = self.run_plan()
         self.assertEqual(outputs["build"], "true")
         self.assertEqual(outputs["publish"], "true")
-        self.assertEqual(outputs["platforms"], "windows-ubuntu")
+        self.assertEqual(outputs["platforms"], "all")
         self.assertEqual(outputs["tag"], "v0.1.0-preview.9")
         self.assertEqual(outputs["prerelease"], "true")
-        self.assertEqual({item["platform"] for item in json.loads(outputs["matrix"])["include"]},
-                         {"windows", "linux"})
+        entries = json.loads(outputs["matrix"])["include"]
+        self.assertEqual(len(entries), 4)
+        self.assertEqual({(item["platform"], item["architecture"], item["os"], item["asset"])
+                          for item in entries}, {
+            ("windows", "x64", "windows-2025", "Zommi-Setup-x64.exe"),
+            ("linux", "x64", "ubuntu-24.04", "Zommi-Ubuntu-amd64.deb"),
+            ("macos", "arm64", "macos-15", "Zommi-macOS-arm64.dmg"),
+            ("macos", "x64", "macos-15-intel", "Zommi-macOS-x64.dmg"),
+        })
 
     def test_build_number_only_and_other_pubspec_changes_skip(self):
         for version in ("0.1.0-preview.8+2", "0.1.0-preview.8"):

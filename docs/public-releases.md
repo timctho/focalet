@@ -17,7 +17,7 @@ private and is not uploaded by the publisher.
 | Trigger | Workflow / machine | Result |
 | --- | --- | --- |
 | Every PR, including forks; every push to `main`; manual dispatch | [PR checks](../.github/workflows/checks.yml), GitHub-hosted `ubuntu-24.04`, `windows-2025`, `macos-15` | Tests and a native release-mode package on each platform; no installer upload or published Release |
-| A release version change pushed to `main` | [Release workflow](../.github/workflows/release.yml), GitHub-hosted Ubuntu and Windows | Builds, checks and automatically publishes both installers |
+| A release version change pushed to `main` | [Release workflow](../.github/workflows/release.yml), GitHub-hosted Windows, Ubuntu and both Mac architectures | Builds, checks and automatically publishes all four installers |
 | Manual dispatch of Build and publish release | Same release workflow, GitHub-hosted runners for the selected platforms | Builds installers and optionally publishes after every selected build passes |
 | Manual dispatch of Native acceptance | [Native acceptance](../.github/workflows/ci.yml); Ubuntu/Windows on opted-in self-hosted runners, Mac on GitHub-hosted runners | Native acceptance and optional package artifacts; Mac can create an installer in a draft release |
 | Maintainer runs `publish_release.py --publish` with accepted installer metadata | Maintainer's build/publication environment | Publishes the verified installers, checksums and source manifest to GitHub Releases |
@@ -52,9 +52,10 @@ creates the tag at the exact built commit when publishing. Before a subsequent
 release, bump the version in a PR (for example to `0.1.0-preview.9+2`); changing
 only `+N` does not create a new release version. Published tags are never overwritten.
 
-Automatic releases use the `windows-ubuntu` platform set. The workflow builds
-the installers once, runs the release checks below and publishes those same
-files only if every selected platform succeeds. A failed or cancelled check
+Automatic releases use the `all` platform set: Windows x64, Ubuntu x64, macOS
+Apple Silicon and macOS Intel. The workflow builds the installers once, runs
+the release checks below and publishes those same files only if every selected
+platform succeeds. A failed or cancelled check
 prevents publication. Adding this workflow without a version change does not
 retroactively publish the version already in the file.
 
@@ -66,14 +67,14 @@ and recovery. Open **Actions → Build and publish release → Run workflow**, s
 
 | Input | Meaning |
 | --- | --- |
-| `platforms` | `windows-ubuntu` (default), `all`, `windows`, `ubuntu`, or `macos` (both Mac architectures) |
+| `platforms` | `all` (default), `windows-ubuntu`, `windows`, `ubuntu`, or `macos` (both Mac architectures) |
 | `publish` | Off: retain installers as Actions artifacts. On: publish them to this repository's Releases after all selected builds pass |
 
-For example, build a Windows/Ubuntu preview without publishing:
+For example, build all four installers without publishing:
 
 ```sh
 gh workflow run release.yml --ref main \
-  -f platforms=windows-ubuntu -f publish=false
+  -f platforms=all -f publish=false
 ```
 
 Set `publish=true` to build and publish in one run. For an infrastructure failure,
@@ -184,10 +185,11 @@ After publication, download the actual installer and checksum files from
 downloads for a private repository; also verify anonymous downloads if it is
 public. Keep the repository's visibility unchanged.
 
-GitHub does not select prereleases for `/releases/latest`. Point the README's
-Windows buttons and installation guide at
-`/releases/download/<tag>/Zommi-Setup-x64.exe` for the current accepted preview.
-General release links point to this repository's `/releases` page.
+The README and installation guide link to this repository's `/releases` page,
+which includes newly published previews and stable versions without changing
+documentation for each release. GitHub's `/releases/latest` excludes prereleases
+and returns 404 while only previews exist. Keep direct versioned installer links
+in each release's notes, where they identify that release's exact assets.
 
 ## Signing
 

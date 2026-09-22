@@ -9,8 +9,8 @@ on:
       platforms:
         description: Installers to build
         type: choice
-        default: windows-ubuntu
-        options: [windows-ubuntu, all, windows, ubuntu, macos]
+        default: all
+        options: [all, windows-ubuntu, windows, ubuntu, macos]
       publish:
         description: Publish to GitHub Releases after all selected builds pass
         type: boolean

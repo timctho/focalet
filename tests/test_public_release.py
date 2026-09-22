@@ -56,6 +56,17 @@ class PublicReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "selected platforms"):
                 publish.collect_assets(incomplete, self.commit, platforms="windows-ubuntu")
 
+    def test_all_platform_release_requires_both_mac_architectures_windows_and_ubuntu(self):
+        paths, manifest = publish.collect_assets(self.metadata, self.commit, platforms="all")
+        self.assertEqual(len(paths), 4)
+        self.assertEqual({(item["platform"], item["architecture"]) for item in manifest["assets"]}, {
+            ("windows", "x64"), ("linux", "x64"), ("macos", "arm64"), ("macos", "x64"),
+        })
+        for missing in self.metadata:
+            with self.subTest(missing=missing.name), self.assertRaisesRegex(ValueError, "selected platforms"):
+                publish.collect_assets([item for item in self.metadata if item != missing],
+                                       self.commit, platforms="all")
+
     def test_ubuntu_archive_version_must_match_publication_tag(self):
         path = self.metadata[-1]
         value = json.loads(path.read_text())
