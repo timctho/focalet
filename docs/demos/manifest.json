@@ -14,29 +14,29 @@
       "audio": false,
       "review": {
         "ocrStatus": "no-matches",
-        "exportedFramesScanned": 425,
+        "exportedFramesScanned": 418,
         "visualReview": true
       },
       "assets": [
         {
           "file": "setup.mp4",
-          "bytes": 303232,
-          "sha256": "b980f9df6ba512e63ddc4b56f3d5415400ab70665b68a31b4a31d0425cc379b4"
+          "bytes": 250635,
+          "sha256": "16229326d14ef507d0f1a2f14e89d6d413cb66dc85b78ec52e0d868db477e3ea"
         },
         {
           "file": "setup.gif",
-          "bytes": 448354,
-          "sha256": "86a2913a369df49d5eea131497508f4b12f762c5a85d6e2a17026a0a421efa28"
+          "bytes": 537325,
+          "sha256": "892c0a75f7f1f2ef931a02ba8ea4fbf3385f411104f23ab3252133e3b8fdb7d2"
         },
         {
           "file": "setup-poster.webp",
-          "bytes": 25548,
-          "sha256": "60843596cf5bec99ffa079e5a3df0e978db63bcd60ea801ec0cde81adf04976e"
+          "bytes": 38142,
+          "sha256": "54308d1de288fbb07afdc972cab07f33a031918eeccf66501a3c922b637f91fd"
         },
         {
           "file": "setup-preview.webp",
-          "bytes": 322020,
-          "sha256": "50816372b6773499385c878270f5174b91509de383f4e29c297338e1d444c856"
+          "bytes": 286754,
+          "sha256": "abbf82a4f76d455d73bfc9f9a2ef89b168884e48e64c2c757135258152c8e4a9"
         }
       ]
     },

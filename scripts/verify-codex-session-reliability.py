@@ -6,6 +6,8 @@ read, and no request is sent to a model provider. This is a protocol acceptance
 check, not a packaged Windows UI test.
 """
 
+from runtime_environment import without_parent_context
+
 import argparse
 import asyncio
 import importlib.util
@@ -36,7 +38,7 @@ async def verify(args):
             f'base_url = "http://127.0.0.1:{server.server_port}/v1"\n'
             'wire_api = "responses"\nrequires_openai_auth = false\n'
         )
-        environment = {k: v for k, v in os.environ.items() if not k.startswith("PARENT_APP_")}
+        environment = without_parent_context(os.environ)
         environment.update({
             "CODEX_HOME": str(root),
             "ZOMMI_CODEX_COMMAND": str(Path(args.codex).absolute()),

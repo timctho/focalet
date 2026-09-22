@@ -721,30 +721,63 @@ pub fn select_default_target<'a>(
     usable.into_iter().next()
 }
 
-/// parent application injects hook routing metadata into terminals it owns. Zommi may reuse
-/// the user's Codex home for authentication and canonical history, but a
-/// runtime child must never impersonate the parent application pane that launched it.
-pub const PARENT_APP_RUNTIME_ENVIRONMENT_KEYS: &[&str] = &[
-    "PARENT_APP_AGENT_HOOK_ENDPOINT",
-    "PARENT_APP_AGENT_HOOK_ENV",
-    "PARENT_APP_AGENT_HOOK_PORT",
-    "PARENT_APP_AGENT_HOOK_TOKEN",
-    "PARENT_APP_AGENT_HOOK_TRANSPORT",
-    "PARENT_APP_AGENT_HOOK_VERSION",
-    "PARENT_APP_AGENT_LAUNCH_TOKEN",
-    "PARENT_APP_CLI_COMMAND",
-    "PARENT_APP_CODEX_HOME",
-    "PARENT_APP_CODEX_LAUNCH_PREFLIGHT",
-    "PARENT_APP_ORCHESTRATION_COMPATIBILITY_HOST_ID",
-    "PARENT_APP_ORCHESTRATION_COMPATIBILITY_HOST_INCARNATION",
-    "PARENT_APP_ORCHESTRATION_COMPATIBILITY_HOST_KIND",
-    "PARENT_APP_PANE_KEY",
-    "PARENT_APP_SHELL_READY_ROOT",
-    "PARENT_APP_TAB_ID",
-    "PARENT_APP_TERMINAL_HANDLE",
-    "PARENT_APP_USER_DATA_PATH",
-    "PARENT_APP_WORKTREE_ID",
-];
+/// Child runtimes keep their own authentication and history, but must not
+/// inherit routing or launch identity from a parent desktop application.
+/// Recognize the namespace by its context keys, without depending on a host.
+pub fn parent_runtime_environment_keys(keys: &[String]) -> Vec<String> {
+    const MARKERS: &[&str] = &[
+        "_AGENT_HOOK_",
+        "_AGENT_LAUNCH_",
+        "_ORCHESTRATION_",
+        "_PANE_",
+        "_SHELL_READY_",
+        "_TAB_",
+        "_TERMINAL_",
+        "_USER_DATA_",
+        "_WORKTREE_",
+    ];
+    const SUFFIXES: &[&str] = &["_CLI_COMMAND", "_CODEX_HOME", "_CODEX_LAUNCH_PREFLIGHT"];
+    let namespaces = keys
+        .iter()
+        .filter_map(|key| {
+            let upper = key.to_ascii_uppercase();
+            if upper.starts_with("ZOMMI_") {
+                return None;
+            }
+            let prefix = MARKERS
+                .iter()
+                .filter_map(|marker| upper.find(marker))
+                .min()
+                .or_else(|| {
+                    SUFFIXES
+                        .iter()
+                        .find_map(|suffix| upper.strip_suffix(suffix).map(str::len))
+                })?;
+            let namespace = &upper[..prefix];
+            (!namespace.is_empty()).then(|| format!("{namespace}_"))
+        })
+        .collect::<HashSet<_>>();
+    let mut removed = keys
+        .iter()
+        .filter(|key| {
+            let upper = key.to_ascii_uppercase();
+            namespaces
+                .iter()
+                .any(|namespace| upper.starts_with(namespace))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    removed.sort();
+    removed
+}
+
+pub fn inherited_parent_environment_keys() -> Vec<String> {
+    parent_runtime_environment_keys(
+        &env::vars_os()
+            .filter_map(|(key, _)| key.into_string().ok())
+            .collect::<Vec<_>>(),
+    )
+}
 
 /// GUI-launched Windows processes do not always inherit a PATH that Rust can
 /// use for Win32 executable lookup. Prefer the stable System32 location and
@@ -782,8 +815,8 @@ pub fn command_for_target(target: &RuntimeTarget) -> RuntimeCommand {
             args.extend(["--cd".into(), home.clone()]);
         }
         args.extend(["-e".into(), "/usr/bin/env".into()]);
-        for variable in PARENT_APP_RUNTIME_ENVIRONMENT_KEYS {
-            args.extend(["-u".into(), (*variable).into()]);
+        for variable in inherited_parent_environment_keys() {
+            args.extend(["-u".into(), variable]);
         }
         args.push("ZOMMI_RUNTIME_CHILD=1".into());
         if target.adapter_id == "codex-app-server" {
@@ -1187,12 +1220,49 @@ mod tests {
     use std::{collections::HashMap, fs};
 
     use super::{
-        ConfiguredRuntimeOverride, ExecutionHost, PARENT_APP_RUNTIME_ENVIRONMENT_KEYS,
-        RuntimeDiscoveryCacheStore, RuntimeOverrideStore, RuntimeTarget, command_for_target,
-        discover_runtime_targets_resilient_with, discover_runtime_targets_with,
-        reconcile_wsl_discovery_cache, runtime_discovery_settings, runtime_targets_from_wsl_probe,
-        select_default_target, target_from_override, wsl_runtime_probe_script,
+        ConfiguredRuntimeOverride, ExecutionHost, RuntimeDiscoveryCacheStore, RuntimeOverrideStore,
+        RuntimeTarget, command_for_target, discover_runtime_targets_resilient_with,
+        discover_runtime_targets_with, inherited_parent_environment_keys,
+        parent_runtime_environment_keys, reconcile_wsl_discovery_cache, runtime_discovery_settings,
+        runtime_targets_from_wsl_probe, select_default_target, target_from_override,
+        wsl_runtime_probe_script,
     };
+
+    #[test]
+    fn runtime_children_drop_parent_namespaces_but_keep_agent_configuration() {
+        let keys = [
+            "DESKTOP_HOST_AGENT_HOOK_ENDPOINT",
+            "DESKTOP_HOST_FUTURE_ROUTING_KEY",
+            "Editor_Tab_Id",
+            "Editor_Secret",
+            "SECOND_HOST_CODEX_HOME",
+            "SECOND_HOST_PANE_KEY",
+            "CODEX_HOME",
+            "OPENAI_API_KEY",
+            "AWS_SESSION_TOKEN",
+            "PATH",
+            "HOME",
+            "ZOMMI_CODEX_HOME",
+            "ZOMMI_FAKE_CODEX_HOME",
+            "ZOMMI_FAKE_CODEX_HOME_LOG",
+            "ZOMMI_RUNTIME_CHILD",
+        ]
+        .map(str::to_owned);
+        assert_eq!(
+            parent_runtime_environment_keys(&keys),
+            [
+                "DESKTOP_HOST_AGENT_HOOK_ENDPOINT",
+                "DESKTOP_HOST_FUTURE_ROUTING_KEY",
+                "Editor_Secret",
+                "Editor_Tab_Id",
+                "SECOND_HOST_CODEX_HOME",
+                "SECOND_HOST_PANE_KEY",
+            ]
+        );
+        assert!(
+            parent_runtime_environment_keys(&["CODEX_HOME".into(), "API_KEY".into()]).is_empty()
+        );
+    }
 
     #[test]
     fn configured_only_discovery_ignores_installed_native_agents() {
@@ -1384,9 +1454,9 @@ mod tests {
             .into_iter()
             .map(str::to_owned)
             .chain(
-                PARENT_APP_RUNTIME_ENVIRONMENT_KEYS
-                    .iter()
-                    .flat_map(|variable| ["-u".to_owned(), (*variable).to_owned()]),
+                inherited_parent_environment_keys()
+                    .into_iter()
+                    .flat_map(|variable| ["-u".to_owned(), variable]),
             )
             .chain([
                 "ZOMMI_RUNTIME_CHILD=1".into(),

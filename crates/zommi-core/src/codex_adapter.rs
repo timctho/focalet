@@ -26,7 +26,7 @@ use crate::{
     artifacts::artifacts_from_thread_item,
     build_context_handoff,
     codex_home::{CodexHomeStore, pin_wsl_home},
-    runtime_discovery::PARENT_APP_RUNTIME_ENVIRONMENT_KEYS,
+    runtime_discovery::inherited_parent_environment_keys,
     sanitize_diagnostic, validate_turn_input,
 };
 
@@ -286,7 +286,7 @@ impl CodexAdapter {
             .stderr(Stdio::piped())
             .env("CODEX_INTERNAL_ORIGINATOR_OVERRIDE", "codex_exec")
             .kill_on_drop(true);
-        for variable in PARENT_APP_RUNTIME_ENVIRONMENT_KEYS {
+        for variable in inherited_parent_environment_keys() {
             command.env_remove(variable);
         }
         #[cfg(unix)]

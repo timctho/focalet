@@ -1053,8 +1053,7 @@ mod tests {
     }
 
     #[test]
-    fn embedded_relay_strips_parent_app_routing_from_every_runtime_child() {
-        assert!(RELAY_SOURCE.contains("key.startsWith('PARENT_APP_')"));
+    fn embedded_relay_isolates_parent_context_for_every_runtime_child() {
         assert_eq!(RELAY_SOURCE.matches("env: runtimeEnvironment()").count(), 2);
     }
 

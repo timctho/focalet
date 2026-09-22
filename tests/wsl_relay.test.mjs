@@ -67,7 +67,7 @@ function runRuntime(endpoint, invocation = {}) {
         command: '/bin/sh',
         args: [
           '-c',
-          'read value; printf "out:%s\\n" "$value"; [ -z "${PARENT_APP_LEAK_PROBE+x}" ] || printf "parent-app-env-leaked\\n"; printf "err:%s\\n" "$value" >&2; exit 7',
+          'read value; printf "out:%s\\n" "$value"; [ -z "${PARENT_APP_LEAK_PROBE+x}" ] || printf "parent-env-leaked\\n"; printf "err:%s\\n" "$value" >&2; exit 7',
         ],
         cwd: '/',
         ...invocation,
@@ -86,6 +86,8 @@ process.stdin.resume();
 process.stdin.on('end', () => console.log(JSON.stringify({
   args: process.argv.slice(2),
   home: process.env.CODEX_HOME,
+  providerKey: process.env.PUBLIC_API_KEY,
+  fixtureHome: process.env.ZOMMI_FAKE_CODEX_HOME,
   leaked: process.env.PARENT_APP_LEAK_PROBE,
 })));
 `, { mode: 0o755 });
@@ -95,7 +97,9 @@ process.stdin.on('end', () => console.log(JSON.stringify({
   ], {
     // The relay can find Node by absolute path, just like the launcher does for
     // nvm installations. Its children still need Node for npm CLI shebangs.
-    env: { ...process.env, PATH: temporary, PARENT_APP_LEAK_PROBE: 'must-not-reach-runtime' },
+    env: { ...process.env, PATH: temporary, PUBLIC_API_KEY: 'fixture-provider-key',
+      ZOMMI_FAKE_CODEX_HOME: '/fixture',
+      PARENT_APP_AGENT_HOOK_ENDPOINT: 'http://127.0.0.1:1', PARENT_APP_LEAK_PROBE: 'must-not-reach-runtime' },
     stdio: ['ignore', 'ignore', 'pipe'],
   });
   try {
@@ -106,7 +110,8 @@ process.stdin.on('end', () => console.log(JSON.stringify({
     });
     assert.equal(result.exitCode, 0, result.stderr);
     assert.deepEqual(JSON.parse(result.stdout), {
-      args: ['app-server'], home: '/home/test/Agent Data',
+      args: ['app-server'], home: '/home/test/Agent Data', providerKey: 'fixture-provider-key',
+      fixtureHome: '/fixture',
     });
     const proxy = await runRustProxy(endpointPath, [
       '/usr/bin/env', 'CODEX_HOME=/home/test/Agent Data', cli, 'app-server',
@@ -164,7 +169,8 @@ test('persistent WSL relay authenticates and frames runtime stdio', async () => 
     '--version', String(TRANSPORT_VERSION),
     '--distribution', 'test',
   ], {
-    env: { ...process.env, PARENT_APP_LEAK_PROBE: 'must-not-reach-runtime' },
+    env: { ...process.env, PARENT_APP_AGENT_HOOK_ENDPOINT: 'http://127.0.0.1:1',
+      PARENT_APP_LEAK_PROBE: 'must-not-reach-runtime' },
     stdio: ['ignore', 'ignore', 'pipe'],
   });
   const diagnostics = [];

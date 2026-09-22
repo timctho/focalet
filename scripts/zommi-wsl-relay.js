@@ -38,8 +38,16 @@ function runtimeEnvironment() {
   // Give both transports the same working interpreter without shell startup
   // scripts, and preserve the rest of the distribution's search path.
   environment.PATH = [path.dirname(process.execPath), environment.PATH].filter(Boolean).join(path.delimiter);
+  // Remove a parent application's entire routing namespace, including future
+  // keys, while retaining agent credentials and Zommi's own launch settings.
+  const contextNamespace = /^(.+?)_(?:AGENT_(?:HOOK|LAUNCH)_|ORCHESTRATION_|PANE_|SHELL_READY_|TAB_|TERMINAL_|USER_DATA_|WORKTREE_|CLI_COMMAND$|CODEX_(?:HOME|LAUNCH_PREFLIGHT)$)/i;
+  const namespaces = Object.keys(environment).flatMap((key) => {
+    if (key.toUpperCase().startsWith('ZOMMI_')) return [];
+    const match = key.match(contextNamespace);
+    return match ? [`${match[1].toUpperCase()}_`] : [];
+  });
   for (const key of Object.keys(environment)) {
-    if (key.startsWith('PARENT_APP_')) delete environment[key];
+    if (namespaces.some((prefix) => key.toUpperCase().startsWith(prefix))) delete environment[key];
   }
   return environment;
 }

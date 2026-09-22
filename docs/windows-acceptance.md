@@ -122,7 +122,7 @@ without moving the pointer. It checks painted outlines and returned bounds.
 Dragging and cancelling must remain responsive during provider timeouts.
 
 Whole-window selection uses the visible DWM frame and excludes the taskbar edge
-for windows on one monitor. Check snapped parent application windows, whose native resize
+for windows on one monitor. Check snapped desktop windows, whose native resize
 borders extend outside that frame. The native gate also covers rejection when a
 different window covers the selected window; trimming borders must not disable
 that check.
@@ -151,7 +151,7 @@ an independent selector during a slow UIA read in the same helper,
 Ctrl release before a queued click resolves, retained blue outlines, ordered
 Enter submission, Escape and atomic source-change rejection. A real DataGridView
 fixture checks partial crops from data rows 1 and 3, including column headers.
-For parent application/Redis reports, repeat the user's actual selection against the exact
+For application-specific reports, repeat the user's actual selection against the exact
 packaged helper and retain that evidence separately from the fixture results.
 
 ## Multiline composer

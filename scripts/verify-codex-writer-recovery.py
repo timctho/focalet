@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Exercise real Codex writer contention using only a local model fixture."""
+from runtime_environment import without_parent_context
+
 import argparse
 import importlib.util
 import json
@@ -38,7 +40,7 @@ def verify(core_host, codex):
         clients = []
 
         def connect(name, preferred=None):
-            environment = {k: v for k, v in os.environ.items() if not k.startswith('PARENT_APP_')}
+            environment = without_parent_context(os.environ)
             environment.update(CODEX_HOME=str(root), ZOMMI_CODEX_COMMAND=str(Path(codex).absolute()),
                                ZOMMI_CODEX_ARGS_JSON='["app-server"]',
                                ZOMMI_CORE_STATE_PATH=str(root / name / 'binding.json'),

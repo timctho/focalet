@@ -236,7 +236,7 @@ static void AccessibilityPreviewStaysCompact()
                     new AccessibilityNodeInfo
                     {
                         Role = "Custom",
-                        Name = "example",
+                        Name = "example-user",
                         Row = 1,
                         Column = 0,
                     },

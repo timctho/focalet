@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Verify native runtime rewinds via Rust using isolated homes and a local model."""
+from runtime_environment import without_parent_context
+
 import argparse
 import asyncio
 import hashlib
@@ -55,7 +57,7 @@ async def verify(mode, root):
     server.requests = []
     threading.Thread(target=server.serve_forever, daemon=True).start()
     # Retain the user's shell/runtime launch tools, but isolate provider config.
-    environment = {k: v for k, v in os.environ.items() if not any(fragment in k for fragment in ['API_KEY', 'TOKEN', 'SECRET', 'PASSWORD']) and not k.startswith(('ZOMMI_', 'PARENT_APP_'))}
+    environment = {k: v for k, v in without_parent_context(os.environ).items() if not any(fragment in k for fragment in ['API_KEY', 'TOKEN', 'SECRET', 'PASSWORD']) and not k.startswith('ZOMMI_')}
     environment.update({
         'ZOMMI_CORE_STATE_PATH': str(root / 'binding.json'),
         'ZOMMI_RUNTIME_OVERRIDES_PATH': str(root / 'overrides.json'),
