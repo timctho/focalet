@@ -3,8 +3,8 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
-  desktop_webview_window
   file_selector_windows
+  flutter_inappwebview_windows
   hotkey_manager_windows
   irondash_engine_context
   screen_capturer_windows

@@ -11,6 +11,7 @@ import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 import 'package:zommi_flutter/theme/zommi_typography.dart';
 import 'package:zommi_flutter/widgets/content_views.dart';
+import 'package:zommi_flutter/widgets/document_preview.dart';
 import 'package:zommi_flutter/widgets/capture_permission_setup.dart';
 import 'package:zommi_flutter/widgets/frosted_surface.dart';
 import 'package:zommi_flutter/widgets/runtime_logo.dart';
@@ -2330,10 +2331,17 @@ class ArtifactViewerDialog extends StatelessWidget {
             ),
             const Divider(height: 1),
             Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(18),
-                child: ArtifactSurface(artifact: artifact),
-              ),
+              child:
+                  (artifact.kind == 'html' || artifact.kind == 'markdown') &&
+                      artifact.html != null
+                  ? DocumentPreview(
+                      key: ValueKey(artifact.id),
+                      artifact: artifact,
+                    )
+                  : SingleChildScrollView(
+                      padding: const EdgeInsets.all(18),
+                      child: ArtifactSurface(artifact: artifact),
+                    ),
             ),
           ],
         ),

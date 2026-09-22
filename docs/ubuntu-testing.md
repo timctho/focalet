@@ -38,7 +38,7 @@ Install the Ubuntu build dependencies:
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev \
+sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libwpewebkit-1.0-dev libwpebackend-fdo-1.0-dev libepoxy-dev \
   libayatana-appindicator3-dev libx11-dev libsqlite3-dev python3 python3-venv
 flutter config --enable-linux-desktop
 flutter doctor -v

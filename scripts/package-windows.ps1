@@ -43,6 +43,9 @@ if ($DeployToDownloads) {
 }
 
 if (-not $SkipBuild) {
+    if (-not (Get-Command nuget -ErrorAction SilentlyContinue)) {
+        throw 'Install the NuGet CLI and add it to PATH before building Windows document previews.'
+    }
     Push-Location $flutterDirectory
     try {
         flutter pub get

@@ -894,11 +894,6 @@ class FakeDesktopBridge
   }
 
   @override
-  Future<void> openDocumentPreview(ArtifactPreview artifact) async {
-    calls.add('document:${artifact.path ?? artifact.id}');
-  }
-
-  @override
   Future<void> openExternalUrl(Uri uri) async {
     openedUrl = uri;
   }

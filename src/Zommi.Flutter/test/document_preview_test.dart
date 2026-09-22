@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:win32_registry/win32_registry.dart';
 import 'package:zommi_flutter/desktop/artifact_loader.dart';
 import 'package:zommi_flutter/desktop/artifact_paths.dart';
 import 'package:zommi_flutter/desktop/document_server.dart';
@@ -74,7 +75,7 @@ void main() {
   );
 
   test(
-    'HTML is loaded intact and local links open in the document window',
+    'HTML is loaded intact and local links stay in the floating preview',
     () async {
       final root = await Directory.systemTemp.createTemp('zommi-doc-test-');
       addTearDown(() => root.delete(recursive: true));
@@ -95,8 +96,8 @@ void main() {
       );
       addTearDown(controller.close);
       await controller.openExternalLink(link);
-      expect(desktop.calls, contains('document:$link'));
-      expect(controller.previewArtifact, isNull);
+      expect(controller.previewArtifact?.html, html);
+      expect(controller.previewArtifact?.fileUri?.fragment, 'slide-12');
       expect(desktop.openedUrl, isNull);
     },
   );
@@ -191,8 +192,42 @@ print("example");
       await source.writeAsBytes([4, 5, 6]);
       final updated = await prepareNotificationIcon(source, cache);
       expect(updated, isNot(first));
+      expect(
+        notificationApplicationId(updated),
+        isNot(notificationApplicationId(first)),
+      );
       expect(await File.fromUri(first).readAsBytes(), [1, 2, 3]);
       expect(await File.fromUri(updated).readAsBytes(), [4, 5, 6]);
     },
+  );
+
+  test(
+    'branding migration preserves muted notifications and existing choices',
+    () {
+      final user = Registry.openPath(
+        RegistryHive.currentUser,
+        desiredAccessRights: AccessRights.allAccess,
+      );
+      final name =
+          r'Software\Zommi\NotificationIdentityTests\'
+          '$pid';
+      final settings = user.createKey(name);
+      addTearDown(() {
+        settings.close();
+        user.deleteKey(name, recursive: true);
+        user.close();
+      });
+      final old = settings.createKey('previous');
+      old.createValue(const RegistryValue.int32('Enabled', 0));
+      old.close();
+      copyNotificationPreferences(settings, 'previous', 'current');
+      final current = settings.createKey('current');
+      expect(current.getIntValue('Enabled'), 0);
+      current.createValue(const RegistryValue.int32('Enabled', 1));
+      copyNotificationPreferences(settings, 'previous', 'current');
+      expect(current.getIntValue('Enabled'), 1);
+      current.close();
+    },
+    skip: !Platform.isWindows,
   );
 }

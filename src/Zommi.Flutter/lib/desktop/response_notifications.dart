@@ -25,6 +25,7 @@ final class ResponseNotifications {
   bool _closed = false;
 
   Uri? _windowsIconUri;
+  String _windowsApplicationId = 'Zommi.Desktop';
 
   Future<bool> initialize() => _initialization ??= _initialize();
 
@@ -40,13 +41,17 @@ final class ResponseNotifications {
           '${local ?? Directory.systemTemp.path}/Zommi/notification-icons',
         );
         _windowsIconUri = await prepareNotificationIcon(source, cache);
+        _windowsApplicationId = await prepareNotificationIdentity(
+          _windowsIconUri!,
+          cache,
+        );
       }
       final initialized =
           await _plugin.initialize(
             settings: InitializationSettings(
               windows: WindowsInitializationSettings(
                 appName: 'Zommi',
-                appUserModelId: 'Zommi.Desktop',
+                appUserModelId: _windowsApplicationId,
                 guid: 'f67d24b5-b13b-4b5e-aa39-88a40caec356',
                 iconPath: _windowsIconUri?.toFilePath(windows: true),
               ),

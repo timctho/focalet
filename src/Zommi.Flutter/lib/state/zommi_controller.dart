@@ -2233,12 +2233,7 @@ final class ZommiController extends ChangeNotifier {
     try {
       final loaded = await artifactLoader.load(artifact, target: activeRuntime);
       if (_closed || !identical(previewArtifact, artifact)) return;
-      if (loaded.kind == 'html' || loaded.kind == 'markdown') {
-        await desktop.openDocumentPreview(loaded);
-        if (identical(previewArtifact, artifact)) previewArtifact = null;
-      } else {
-        previewArtifact = loaded;
-      }
+      previewArtifact = loaded;
     } on Object catch (error) {
       if (_closed || !identical(previewArtifact, artifact)) return;
       previewArtifact = ArtifactPreview(

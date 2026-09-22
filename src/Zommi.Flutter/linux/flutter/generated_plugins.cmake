@@ -3,8 +3,8 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
-  desktop_webview_window
   file_selector_linux
+  flutter_inappwebview_linux
   hotkey_manager_linux
   irondash_engine_context
   screen_capturer_linux
