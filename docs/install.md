@@ -15,6 +15,7 @@ include Windows. Do not use GitHub's “Source code” archive as an installer.
 | Windows 10/11, x64 | [Zommi-Setup-x64.exe](https://github.com/timctho/zommi/releases/download/v0.1.0-preview.7/Zommi-Setup-x64.exe) | Run the installer, then launch Zommi from Start |
 | Mac with Apple Silicon | `Zommi-macOS-arm64.dmg`, when available | Open the DMG; drag Zommi into Applications |
 | Mac with Intel | `Zommi-macOS-x64.dmg`, when available | Open the DMG; drag Zommi into Applications |
+| Ubuntu 24.04 LTS, x64 | `Zommi-Ubuntu-amd64.deb`, when listed in the release | `sudo apt install ./Zommi-Ubuntu-amd64.deb` |
 
 Windows installs for your account without administrator access and includes
 runtime libraries. You do not need Rust, Flutter, Visual Studio or .NET to use
@@ -31,8 +32,11 @@ After checking the release source and checksum, Windows may require
 **System Settings → Privacy & Security → Open Anyway** for a trusted download.
 
 On Linux, Zommi targets **Ubuntu 24.04 LTS x64** with **Ubuntu on Xorg**.
-There is no Ubuntu installer in the current preview. Follow the
-[Ubuntu build and testing guide](ubuntu-testing.md) to build and run it.
+Install the `.deb` when it is listed in the selected release; `apt` also installs
+its dependencies. You can use `sudo dpkg -i Zommi-Ubuntu-amd64.deb`, then
+`sudo apt-get -f install` if dependencies are missing. Open **Zommi** from the app
+menu or run `zommi`. Follow the [Ubuntu testing guide](ubuntu-testing.md) to test
+the installer or build it from source.
 Wayland is experimental: capture needs a screenshot portal and Alt+A also
 needs a compatible global-shortcut portal. Other distributions are outside
 the supported scope.
@@ -143,6 +147,10 @@ the deleted cache. Other WSL processes and distributions are left running.
 
 If a pinned Windows shortcut still shows the previous logo after updating,
 unpin it and pin Zommi again from the refreshed Start menu shortcut.
+
+On Ubuntu, choose **Quit**, then install the newer `.deb` with the same `apt`
+command. Use `sudo apt remove zommi` to uninstall. Removing or purging the package
+retains your Zommi settings and agent-owned accounts/history in your home directory.
 
 Each public release includes `SHA256SUMS.txt` and `zommi-release.json` with its
 source revision and installer hashes. Compare your download before opening:

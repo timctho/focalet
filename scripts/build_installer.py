@@ -13,6 +13,7 @@ import subprocess
 import tempfile
 
 from verify_release import _sha256, verify_package
+from ubuntu_installer import ubuntu_installer
 
 
 def inventory(root: Path) -> dict[str, str]:
@@ -103,6 +104,7 @@ def main() -> int:
     parser.add_argument("--expected-commit", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--makensis", default="makensis")
+    parser.add_argument("--release-tag", help="Version tag, used for Ubuntu's apt upgrade ordering")
     args = parser.parse_args()
     package, output = args.package.resolve(), args.output.resolve()
     # A Linux machine may wrap a Windows package with NSIS, but cannot execute it.
@@ -117,8 +119,10 @@ def main() -> int:
         asset = windows_installer(package, output, manifest, args.makensis)
     elif manifest["platform"] == "macos":
         asset = macos_installer(package, output, manifest)
+    elif manifest["platform"] == "linux":
+        asset = ubuntu_installer(package, output, manifest, args.release_tag)
     else:
-        raise ValueError("Only Windows and macOS installers are supported.")
+        raise ValueError("Unsupported installer platform.")
     if inventory(package) != before:
         raise ValueError("The source package changed while creating the installer.")
     result = {
@@ -126,7 +130,8 @@ def main() -> int:
         "platform": manifest["platform"], "architecture": manifest["architecture"],
         "file": asset.name, "sha256": _sha256(asset), "packageFiles": before,
         "applicationSigning": manifest["signing"],
-        "installerSigning": "unsigned" if manifest["platform"] == "windows" else "not-notarized",
+        "installerSigning": "not-notarized" if manifest["platform"] == "macos" else "unsigned",
+        **({"releaseTag": args.release_tag} if manifest["platform"] == "linux" else {}),
     }
     asset.with_name(asset.name + ".release.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     asset.with_name(asset.name + ".sha256").write_text(f"{result['sha256']}  {asset.name}\n", encoding="ascii")

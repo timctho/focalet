@@ -13,7 +13,24 @@ and global-shortcut portals. A headless server or WSL terminal can run automated
 checks, but does not verify Ubuntu's tray, permissions or desktop capture.
 Other Linux distributions are outside the supported scope.
 
-## Build and launch
+## Install a release
+
+When an Ubuntu asset is listed in [Releases](https://github.com/timctho/zommi/releases),
+download `Zommi-Ubuntu-amd64.deb` and check it against `SHA256SUMS.txt`, then run:
+
+```sh
+sudo apt install ./Zommi-Ubuntu-amd64.deb
+zommi
+```
+
+`sudo dpkg -i Zommi-Ubuntu-amd64.deb` also works, but does not fetch dependencies;
+follow it with `sudo apt-get -f install` if needed. The package installs under
+`/opt/zommi` with an app-menu entry. You do not need Flutter, Rust or .NET to run
+it. The [manual release workflow](public-releases.md#run-a-release-from-github-actions)
+can build and publish this asset. Existing previews without a `.deb` still
+require a source build.
+
+## Build and launch from source
 
 Clone the repository, then install Rust **1.93.0** and Flutter **3.47.2** with
 their commands on `PATH` (see [toolchain setup](../CONTRIBUTING.md#set-up)).
@@ -36,8 +53,17 @@ bash scripts/package-unix.sh linux
 
 The output includes `artifacts/zommi-linux-x64.tar.gz` and its SHA-256 sidecar.
 Keep the extracted directory together: the app needs its adjacent libraries,
-Rust broker and capture helper. There is no Ubuntu installer in the current
-preview; Windows release assets cannot run as the Ubuntu app.
+Rust broker and capture helper. To create the Debian installer locally, install
+`dpkg-dev` and run:
+
+```sh
+python3 scripts/build_installer.py artifacts/zommi-linux-x64 \
+  --expected-commit "$(git rev-parse HEAD)" --release-tag v0.1.0-preview.8 \
+  --output artifacts/installers
+```
+
+Use a tag matching the source app version. Windows release assets cannot run
+as the Ubuntu app.
 
 ## Try the desktop flow
 
@@ -52,6 +78,8 @@ XDG_STATE_HOME="$zommi_test_profile/state" \
 XDG_CACHE_HOME="$zommi_test_profile/cache" \
   ./artifacts/zommi-linux-x64/zommi
 ```
+
+For a `.deb` installation, replace the last line with `zommi`.
 
 This isolates Zommi preferences, detection and local history metadata. Agent CLIs
 inherit these XDG directories too, so agents that use them may need sign-in or

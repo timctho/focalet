@@ -37,7 +37,7 @@ class PublicReleaseTests(unittest.TestCase):
 
     def test_all_installers_share_a_source_revision_and_public_manifest(self):
         paths, manifest = publish.collect_assets(self.metadata, self.commit)
-        self.assertEqual(len(paths), 3)
+        self.assertEqual(len(paths), len(publish.ASSETS))
         self.assertEqual(manifest["gitCommit"], self.commit)
         self.assertEqual({item["file"] for item in manifest["assets"]}, set(publish.ASSETS.values()))
         self.assertNotIn(str(self.root), json.dumps(manifest))
@@ -46,6 +46,32 @@ class PublicReleaseTests(unittest.TestCase):
         (self.root / "Zommi-Setup-x64.exe").write_bytes(b"changed after acceptance")
         with self.assertRaisesRegex(ValueError, "checksum mismatch"):
             publish.collect_assets(self.metadata, self.commit)
+
+    def test_selected_platforms_cannot_silently_publish_a_partial_build(self):
+        windows_ubuntu = [self.metadata[0], self.metadata[-1]]
+        paths, manifest = publish.collect_assets(windows_ubuntu, self.commit, platforms="windows-ubuntu")
+        self.assertEqual({item["platform"] for item in manifest["assets"]}, {"windows", "linux"})
+        self.assertEqual(len(paths), 2)
+        for incomplete in ([], windows_ubuntu[:1], windows_ubuntu[1:], self.metadata):
+            with self.assertRaisesRegex(ValueError, "selected platforms"):
+                publish.collect_assets(incomplete, self.commit, platforms="windows-ubuntu")
+
+    def test_ubuntu_archive_version_must_match_publication_tag(self):
+        path = self.metadata[-1]
+        value = json.loads(path.read_text())
+        value["releaseTag"] = "v0.1.0-preview.8"
+        path.write_text(json.dumps(value))
+        publish.collect_assets([path], self.commit, platforms="ubuntu", tag="v0.1.0-preview.8")
+        with self.assertRaisesRegex(ValueError, "Ubuntu installer version"):
+            publish.collect_assets([path], self.commit, platforms="ubuntu", tag="v0.1.0-preview.9")
+
+    def test_stable_and_preview_tag_validation(self):
+        publish.validate_tag("v0.1.0", "0.1.0", stable=True)
+        publish.validate_tag("v0.1.0-preview.8", "0.1.0")
+        for tag, stable in (("v0.2.0", False), ("v0.1.0-preview.8", True),
+                            ("v0.1.0;echo bad", False), ("v0.1.0-", False)):
+            with self.assertRaises(ValueError):
+                publish.validate_tag(tag, "0.1.0", stable=stable)
 
     def test_mixed_revisions_are_rejected(self):
         path = self.metadata[1]
@@ -88,7 +114,7 @@ class PublicReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "tag points to a different"):
                 publish.verify_destination("timctho/zommi", self.commit, "v0.1.0-preview.5")
 
-    def run_windows_publication(self, *, tamper_digest=False):
+    def run_windows_publication(self, *, tamper_digest=False, stable=False):
         calls, uploaded = [], {}
         output = self.root / "release"
 
@@ -110,9 +136,11 @@ class PublicReleaseTests(unittest.TestCase):
                 return "https://github.com/timctho/zommi/releases/tag/v0.1.0-preview.5"
             return ""
 
-        argv = ["publish_release.py", "--tag", "v0.1.0-preview.5",
+        argv = ["publish_release.py", "--tag", "v0.1.0" if stable else "v0.1.0-preview.5",
                 "--expected-commit", self.commit, "--metadata", str(self.metadata[0]),
                 "--windows-only", "--output", str(output), "--publish"]
+        if stable:
+            argv.append("--stable")
         with patch("sys.argv", argv), patch("builtins.print"), patch.object(publish, "gh", side_effect=github), \
                 patch.object(publish.subprocess, "run", return_value=SimpleNamespace(returncode=1)):
             if tamper_digest:
@@ -135,6 +163,40 @@ class PublicReleaseTests(unittest.TestCase):
     def test_upload_digest_mismatch_leaves_the_release_unpublished(self):
         calls, _ = self.run_windows_publication(tamper_digest=True)
         self.assertFalse(any(c[:2] == ("release", "edit") for c in calls))
+
+    def test_stable_publication_is_latest_and_preview_is_not(self):
+        for stable in (False, True):
+            calls, _ = self.run_windows_publication(stable=stable)
+            edit = next(c for c in calls if c[:2] == ("release", "edit"))
+            self.assertIn(f"--latest={'true' if stable else 'false'}", edit)
+            self.assertIn(f"--prerelease={'false' if stable else 'true'}", edit)
+
+    def test_ubuntu_build_only_prepares_install_instructions_without_github_writes(self):
+        metadata = self.metadata[-1]
+        value = json.loads(metadata.read_text())
+        value["releaseTag"] = "v0.1.0-preview.8"
+        metadata.write_text(json.dumps(value))
+        output = self.root / "ubuntu-release"
+        argv = ["publish_release.py", "--tag", value["releaseTag"], "--expected-commit", self.commit,
+                "--platforms", "ubuntu", "--metadata", str(metadata), "--output", str(output)]
+        with patch("sys.argv", argv), patch("builtins.print"), patch.object(publish, "gh") as github:
+            self.assertEqual(publish.main(), 0)
+            github.assert_not_called()
+        notes = (output / "release-notes.md").read_text()
+        self.assertIn("sudo apt install ./Zommi-Ubuntu-amd64.deb", notes)
+        self.assertNotIn("Windows: run Setup", notes)
+
+    def test_published_release_cannot_be_overwritten(self):
+        argv = ["publish_release.py", "--tag", "v0.1.0-preview.8", "--expected-commit", self.commit,
+                "--windows-only", "--metadata", str(self.metadata[0]),
+                "--output", str(self.root / "release"), "--publish"]
+        with patch("sys.argv", argv), patch.object(publish, "verify_destination"), \
+                patch.object(publish.subprocess, "run", return_value=SimpleNamespace(
+                    returncode=0, stdout=json.dumps({"isDraft": False, "assets": []}))), \
+                patch.object(publish, "gh") as github:
+            with self.assertRaisesRegex(ValueError, "overwrite a published"):
+                publish.main()
+            github.assert_not_called()
 
     def test_duplicate_platform_and_unexpected_files_are_rejected(self):
         with self.assertRaisesRegex(ValueError, "duplicate"):

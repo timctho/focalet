@@ -73,9 +73,10 @@ This checks the core, all Dart process fixtures, Windows paths/SQLite/desktop
 contracts, the capture helper and deployment retry logic. Linux runs the full
 widget suite and its pixel baselines. The macOS PR job runs the full Flutter
 suite with its own baselines and native selection geometry tests. All three PR
-jobs compile and verify a native desktop package. Interactive OS acceptance and
-signed distribution remain in the manually dispatched **Native acceptance**
-workflow.
+jobs compile and verify a native desktop package. The manual **Build and publish
+release** workflow builds installers on GitHub-hosted runners and optionally
+publishes them. **Native acceptance** retains additional interactive desktop
+checks. See [release preparation](docs/public-releases.md).
 
 To build a native package locally or run interactive acceptance:
 

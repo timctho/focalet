@@ -1,0 +1,177 @@
+name: Build and publish release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: New version tag matching the app version (for example v0.1.0-preview.8)
+        required: true
+        type: string
+      platforms:
+        description: Installers to build
+        type: choice
+        default: windows-ubuntu
+        options: [windows-ubuntu, all, windows, ubuntu, macos]
+      publish:
+        description: Publish to GitHub Releases after all selected builds pass
+        type: boolean
+        default: false
+      prerelease:
+        description: Mark as a preview (uncheck only for a stable version tag)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ inputs.tag }}
+  RELEASE_PLATFORMS: ${{ inputs.platforms }}
+  RELEASE_PUBLISH: ${{ inputs.publish }}
+  RELEASE_PRERELEASE: ${{ inputs.prerelease }}
+  CARGO_BUILD_JOBS: '4'
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Validate main revision, version and platform selection
+        id: plan
+        run: python3 scripts/release_workflow.py plan
+
+  build:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - uses: dtolnay/rust-toolchain@283fb51ee3c8a49cd7c8ff30102f3fcf3cfbe0e1 # 1.93.0
+        with:
+          components: clippy,rustfmt
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          flutter-version: 3.47.2
+          cache: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        if: runner.os == 'Windows'
+        with:
+          dotnet-version: 8.0.x
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        if: runner.os == 'Linux'
+        with:
+          node-version: '22'
+      - name: Install Ubuntu build and desktop test dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libayatana-appindicator3-dev libx11-dev libsqlite3-dev libasound2t64 ffmpeg dpkg-dev desktop-file-utils xvfb xauth libxtst6 dbus-x11 libgl1-mesa-dri
+          python -m pip install -r tests/requirements.txt
+      - name: Check Ubuntu and macOS source
+        if: runner.os != 'Windows'
+        run: python3 scripts/check.py --suite rust --suite flutter
+      - name: Check installer and publication contracts
+        if: runner.os == 'Linux'
+        run: python scripts/check.py --suite contracts
+      - name: Check Windows source
+        if: runner.os == 'Windows'
+        run: python scripts/check.py --suite windows
+      - name: Build Unix desktop package and installer
+        if: runner.os != 'Windows'
+        env:
+          TARGET_PLATFORM: ${{ matrix.platform }}
+          TARGET_ARCHITECTURE: ${{ matrix.architecture }}
+        run: |
+          bash scripts/package-unix.sh "$TARGET_PLATFORM"
+          python3 scripts/build_installer.py "artifacts/zommi-$TARGET_PLATFORM-$TARGET_ARCHITECTURE" --expected-commit "$GITHUB_SHA" --release-tag "$RELEASE_TAG" --output artifacts/installers
+      - name: Test installed Ubuntu package and removal
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install --no-install-recommends -y ./artifacts/installers/Zommi-Ubuntu-amd64.deb
+          python3 scripts/verify_release.py /opt/zommi --expected-platform linux --expected-commit "$GITHUB_SHA"
+          desktop-file-validate /usr/share/applications/com.zommi.desktop.desktop
+          test -x /usr/bin/zommi
+          xvfb-run -a -s "-screen 0 1280x960x24 +extension GLX +render -noreset" dbus-run-session -- env ZOMMI_RUNTIME_DISCOVERY_MODE=configured-only python3 scripts/accept-linux-x11.py /opt/zommi
+          sudo apt-get remove -y zommi
+          test ! -e /opt/zommi/zommi
+          test ! -e /usr/bin/zommi
+          test ! -e /usr/share/applications/com.zommi.desktop.desktop
+      - name: Test native macOS selection geometry
+        if: runner.os == 'macOS'
+        run: |
+          xcrun swiftc -swift-version 5 src/Zommi.Flutter/macos/Runner/MacRegionSelector.swift scripts/test-macos-region-selection.swift -o /tmp/zommi-macos-region-tests
+          /tmp/zommi-macos-region-tests
+      - name: Build Windows desktop package and installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./scripts/package-windows.ps1 -Runtime win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'Windows package failed' }
+          $compiler = Join-Path ${env:ProgramFiles(x86)} 'NSIS/makensis.exe'
+          if (-not (Test-Path $compiler)) {
+            choco install nsis --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'NSIS installation failed' }
+          }
+          python scripts/build_installer.py artifacts/zommi-windows-x64 --expected-commit $env:GITHUB_SHA --output artifacts/installers --makensis $compiler
+          if ($LASTEXITCODE -ne 0) { throw 'Windows installer failed' }
+      - name: Test Windows capture contracts from the package
+        if: runner.os == 'Windows'
+        run: ./scripts/accept-windows-capture.ps1 -PackageDirectory artifacts/zommi-windows-x64 -NonVisualOnly
+      - name: Ensure checks and builds did not rewrite source
+        run: git diff --exit-code
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: installer-${{ matrix.platform }}-${{ matrix.architecture }}-${{ github.sha }}
+          path: artifacts/installers/*
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: true
+          retention-days: 7
+
+  release:
+    needs: [plan, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: installer-*-${{ github.sha }}
+          path: artifacts/installers
+      - name: Verify the complete installer set and prepare or publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release_workflow.py release
+      - name: Record release identity and mode
+        run: |
+          cat artifacts/release/release-notes.md >> "$GITHUB_STEP_SUMMARY"
+          printf '\nPublish requested: %s\n' "$RELEASE_PUBLISH" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-manifest-${{ github.sha }}
+          overwrite: true
+          path: artifacts/release/*
+          if-no-files-found: error
+          retention-days: 7

@@ -17,13 +17,14 @@ private and is not uploaded by the publisher.
 | Trigger | Workflow / machine | Result |
 | --- | --- | --- |
 | Every PR, including forks; every push to `main`; manual dispatch | [PR checks](../.github/workflows/checks.yml), GitHub-hosted `ubuntu-24.04`, `windows-2025`, `macos-15` | Tests and a native release-mode package on each platform; no installer upload or published Release |
+| Manual dispatch of Build and publish release | [Release workflow](../.github/workflows/release.yml), GitHub-hosted Ubuntu, Windows and selected Mac architectures | Builds installers and optionally publishes a GitHub Release after every selected build passes |
 | Manual dispatch of Native acceptance | [Native acceptance](../.github/workflows/ci.yml); Ubuntu/Windows on opted-in self-hosted runners, Mac on GitHub-hosted runners | Native acceptance and optional package artifacts; Mac can create an installer in a draft release |
 | Maintainer runs `publish_release.py --publish` with accepted installer metadata | Maintainer's build/publication environment | Publishes the verified installers, checksums and source manifest to GitHub Releases |
 
 There are no path filters: a documentation-only PR also runs PR checks. Uploading
 an Actions artifact and publishing a GitHub Release are separate operations.
-There is currently **no tag-triggered installer/publishing workflow**. Pushing a
-version tag or changing the repository to public does not start one.
+The release workflow is **manual only**. Pushing a version tag or changing the
+repository to public does not trigger it.
 
 Making the repository public preserves these triggers and runner choices.
 [Standard GitHub-hosted runners are free for public repositories](https://docs.github.com/en/billing/concepts/product-billing/github-actions);
@@ -31,10 +32,45 @@ larger runners are billed separately. Actions still has to be enabled, and fork
 contributions can require approval before their workflow runs. Public visibility
 does not move self-hosted jobs to GitHub's machines or make manual releases automatic.
 
-To automate distribution later, add a separate reviewed workflow triggered by a
-version tag or manual dispatch: build on each platform's GitHub-hosted runner,
-validate the installers, then publish from a job with `contents: write`. Keep
-interactive desktop acceptance separate from compilation and contract checks.
+## Run a release from GitHub Actions
+
+Open **Actions → Build and publish release → Run workflow** and select `main`.
+
+| Input | Meaning |
+| --- | --- |
+| `tag` | A new tag matching the app version, such as `v0.1.0-preview.8` |
+| `platforms` | `windows-ubuntu` (default), `all`, `windows`, `ubuntu`, or `macos` (both Mac architectures) |
+| `publish` | Off: retain installers as Actions artifacts. On: publish them to this repository's Releases after all selected builds pass |
+| `prerelease` | On by default. Off requires the exact stable app tag, such as `v0.1.0`, and marks it as the latest release |
+
+For example, build a Windows/Ubuntu preview without publishing:
+
+```sh
+gh workflow run release.yml --ref main \
+  -f tag=v0.1.0-preview.8 -f platforms=windows-ubuntu \
+  -f publish=false -f prerelease=true
+```
+
+Set `publish=true` to build and publish in one run. All jobs use the dispatch's
+exact source SHA even if `main` advances. The workflow requires `main`, pins its
+actions, gives build jobs read-only access, and grants `contents: write` only to
+the final publication job. It needs no personal access token or self-hosted
+runner; `GITHUB_TOKEN` publishes into this repository.
+
+Ubuntu produces `Zommi-Ubuntu-amd64.deb`, Windows produces `Zommi-Setup-x64.exe`,
+and Mac produces architecture-specific DMGs. Installers are unsigned by this
+workflow; Mac apps use ad-hoc signing and DMGs are not notarized. Ubuntu runs an
+installed-package X11 check in a virtual display and removes the package;
+Windows runs packaged non-visual capture checks; Mac verifies selection geometry
+and the mounted DMG. These checks do not replace real desktop acceptance of tray
+menus, OS permissions, or agent sign-in.
+
+Each selected platform must succeed. Missing platforms, mixed source revisions,
+incorrect Ubuntu package versions and changed installer hashes stop publication.
+The publisher checks uploaded digests before making the draft public, and refuses
+to overwrite a published release. Build-only runs retain artifacts for seven
+days and create no release or tag. Actions must be available for the account;
+jobs blocked by billing or runner availability have not built anything.
 
 ## Build and accept one revision
 
