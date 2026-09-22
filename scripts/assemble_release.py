@@ -146,7 +146,7 @@ def _write_manifest(
             "runtimeCore": "rust",
             "captureProvider": "dotnet-uia" if capture_host else "platform-native",
             **(
-                {"wslTransport": "persistent-authenticated-relay"}
+                {"wslTransport": "persistent-authenticated-relay", "windowsReset": "owned-profile-reset"}
                 if target_platform == "windows"
                 else {}
             ),
@@ -297,6 +297,10 @@ def assemble(args: argparse.Namespace) -> tuple[Path, Path]:
                 if args.capture_host is None:
                     raise ValueError("Windows releases require --capture-host.")
                 shutil.copytree(args.capture_host, pending / "native", symlinks=True)
+                support = pending / "support"
+                support.mkdir()
+                for name in ("stop-zommi-relays.ps1", "stop-zommi-relay.sh"):
+                    shutil.copy2(Path(__file__).parent / name, support / name)
             else:
                 entrypoint = "zommi"
                 core_relative = "zommi-core-host"

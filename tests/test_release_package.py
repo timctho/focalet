@@ -151,6 +151,18 @@ class ReleasePackageTests(unittest.TestCase):
         result = verify_release.verify_package(self.root, smoke_processes=False)
         self.assertEqual(result["platform"], "windows")
 
+        manifest["components"]["windowsReset"] = "owned-profile-reset"
+        manifest_path.write_text(json.dumps(manifest))
+        self._write_checksums()
+        with self.assertRaisesRegex(verify_release.ReleaseValidationError, "Windows reset helper is missing"):
+            verify_release.verify_package(self.root, smoke_processes=False)
+        for name in ("stop-zommi-relays.ps1", "stop-zommi-relay.sh"):
+            helper = self.root / "support" / name
+            helper.parent.mkdir(exist_ok=True)
+            helper.write_text("reset helper")
+        self._write_checksums()
+        verify_release.verify_package(self.root, smoke_processes=False)
+
     def test_missing_linux_runtime_library_is_rejected(self) -> None:
         (self.root / verify_release.LINUX_RUNTIME_LIBRARIES[0]).unlink()
         self._write_checksums()

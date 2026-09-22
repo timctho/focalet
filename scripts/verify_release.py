@@ -214,6 +214,10 @@ def verify_package(
         and components.get("wslTransport") != "persistent-authenticated-relay"
     ):
         raise ReleaseValidationError("Windows release does not identify the persistent WSL relay.")
+    if components.get("windowsReset") == "owned-profile-reset":
+        for name in ("stop-zommi-relays.ps1", "stop-zommi-relay.sh"):
+            if not (root / "support" / name).is_file():
+                raise ReleaseValidationError(f"Windows reset helper is missing: {name}")
     if expected_platform and manifest.get("platform") != expected_platform:
         raise ReleaseValidationError("Release platform does not match the requested target.")
     if expected_commit and manifest.get("gitCommit") != expected_commit:

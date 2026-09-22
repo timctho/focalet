@@ -135,6 +135,8 @@ This removes `%APPDATA%\Zommi` and `%LOCALAPPDATA%\Zommi`; the next launch
 shows **Welcome to Zommi** and detects agents again. Leave it unchecked to keep
 your settings. Automated uninstall can request the same reset with
 `Uninstall.exe /S /PURGE=1`. Agent-owned accounts and conversations are retained.
+Reset also stops Zommi's background WSL connections so they cannot recreate
+the deleted cache. Other WSL processes and distributions are left running.
 
 If a pinned Windows shortcut still shows the previous logo after updating,
 unpin it and pin Zommi again from the refreshed Start menu shortcut.
