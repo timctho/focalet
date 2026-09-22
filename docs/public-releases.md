@@ -43,7 +43,8 @@ python scripts/accept_windows_installer.py artifacts/installers/Zommi-Setup-x64.
 
 This requires an interactive Windows desktop and PowerShell 7, and refuses to
 overwrite an already registered Zommi installation. Existing portable Zommi
-processes are suspended and restored by the capture acceptance helper.
+processes must be closed before the installer runs. The capture acceptance
+helper suspends and restores conflicting app processes during its own checks.
 
 For each Mac architecture, dispatch the manual Native acceptance workflow on the same
 main revision:
@@ -68,7 +69,7 @@ authenticated local `gh` session, prepare a Windows preview:
 
 ```sh
 python scripts/publish_release.py --repository timctho/zommi \
-  --tag v0.1.0-preview.5 --expected-commit <main-sha> \
+  --tag v0.1.0-preview.6 --expected-commit <main-sha> \
   --windows-only \
   --metadata installers/Zommi-Setup-x64.exe.release.json \
   --output artifacts/release

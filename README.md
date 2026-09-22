@@ -9,7 +9,7 @@
 existing agent. Select a region, add a sketch if useful, and send the image with
 available text, links and structure.
 
-### [Download the Windows preview →](https://github.com/timctho/zommi/releases/download/v0.1.0-preview.5/Zommi-Setup-x64.exe)
+### [Download the Windows preview →](https://github.com/timctho/zommi/releases/download/v0.1.0-preview.6/Zommi-Setup-x64.exe)
 
 Uses your existing agent account. [Installation guide](docs/install.md) ·
 [Build from source](CONTRIBUTING.md)

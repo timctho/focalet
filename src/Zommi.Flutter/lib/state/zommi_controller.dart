@@ -127,6 +127,10 @@ final class ZommiController extends ChangeNotifier {
   List<Map<String, Object?>> profiles = [];
   String status = 'Connecting to Rust core…';
   bool statusWarning = false;
+  bool coreConnectionFailed = false;
+  String? connectionErrorTargetId;
+  String? connectionErrorSessionId;
+  bool _retryCreatesSession = false;
   bool initialized = false;
   bool starting = true;
   bool runtimeBusy = false;
@@ -475,6 +479,7 @@ final class ZommiController extends ChangeNotifier {
       await _restoreSessionCatalog();
       if (_closed) return;
       final coreStatus = await core.initialize();
+      coreConnectionFailed = false;
       _setStatus('Finding agent runtimes…');
       final discovery = await core.discoverRuntimeTargets();
       if (_closed) return;
@@ -547,6 +552,7 @@ final class ZommiController extends ChangeNotifier {
         }
       }
     } on Object catch (error) {
+      coreConnectionFailed = _startupRuntimeId == null && activeRuntime == null;
       if (error is CoreProtocolException &&
           !{
             'core-exited',
@@ -559,6 +565,9 @@ final class ZommiController extends ChangeNotifier {
         );
       } else {
         _setStatus('Rust core unavailable · $error', warning: true);
+      }
+      if ((_startupRuntimeId ?? activeRuntime?.id) case final target?) {
+        _rememberConnectionFailure(target, session: activeSessionId);
       }
     } finally {
       await desktopInitialization;
@@ -573,7 +582,9 @@ final class ZommiController extends ChangeNotifier {
   }
 
   void _prepareRuntimes({String? except}) {
-    if (_closed || core is! RuntimePreparationBridge) return;
+    if (_closed || runtimeSetupPending || core is! RuntimePreparationBridge) {
+      return;
+    }
     for (final target in visibleRuntimeTargets) {
       if (target.id == except ||
           !const {
@@ -655,7 +666,9 @@ final class ZommiController extends ChangeNotifier {
       );
       if (_closed) return;
       _replaceDiscovery(discovery);
-      if (core case final RuntimeModelRefreshBridge refreshable) {
+      coreConnectionFailed = false;
+      if (!runtimeSetupPending && core is RuntimeModelRefreshBridge) {
+        final refreshable = core as RuntimeModelRefreshBridge;
         final failures = <String>[];
         await Future.wait([
           for (final target in visibleRuntimeTargets)
@@ -727,19 +740,28 @@ final class ZommiController extends ChangeNotifier {
 
   Future<bool> connectRuntimeForSetup(String targetId) async {
     if (starting || runtimeBusy || runtimeOverrideBusy) return false;
+    _cancelSwitchRecovery();
+    final epoch = _switchEpoch;
     runtimeBusy = true;
+    switchingRuntimeId = targetId;
     _setStatus('Connecting to agent…');
     try {
-      await _connectRuntime(targetId);
+      await _connectRuntime(targetId, selectionEpoch: epoch);
+      if (_closed || epoch != _switchEpoch) return false;
       return activeRuntime?.id == targetId && activeSessionId != null;
     } on Object catch (error) {
+      if (_closed || epoch != _switchEpoch) return false;
+      _rememberConnectionFailure(targetId);
       if (!_applyConnectionError(targetId, error, activateTarget: false)) {
         _setStatus('Could not connect · $error', warning: true);
       }
       return false;
     } finally {
-      runtimeBusy = false;
-      _notify();
+      if (epoch == _switchEpoch) {
+        runtimeBusy = false;
+        switchingRuntimeId = null;
+        _notify();
+      }
     }
   }
 
@@ -928,6 +950,7 @@ final class ZommiController extends ChangeNotifier {
     }
     _cancelSwitchRecovery();
     runtimeBusy = true;
+    final epoch = _switchEpoch;
     switchingRuntimeId = targetId;
     approval = null;
     question = null;
@@ -935,8 +958,9 @@ final class ZommiController extends ChangeNotifier {
     closeTransientPanels();
     _setStatus('Switching to ${switchingRuntimeName ?? 'agent'}…');
     try {
-      await _connectRuntime(targetId);
+      await _connectRuntime(targetId, selectionEpoch: epoch);
     } on Object catch (error) {
+      if (_closed || epoch != _switchEpoch) return;
       if (!_applyConnectionError(
         targetId,
         error,
@@ -945,10 +969,13 @@ final class ZommiController extends ChangeNotifier {
       )) {
         _setStatus('Could not switch agent · $error', warning: true);
       }
+      _rememberConnectionFailure(targetId);
     } finally {
-      runtimeBusy = false;
-      switchingRuntimeId = null;
-      _notify();
+      if (epoch == _switchEpoch) {
+        runtimeBusy = false;
+        switchingRuntimeId = null;
+        _notify();
+      }
     }
   }
 
@@ -1098,6 +1125,8 @@ final class ZommiController extends ChangeNotifier {
       return;
     }
     final version = connection.runtimeVersion ?? coreVersion;
+    coreConnectionFailed = false;
+    connectionErrorTargetId = null;
     _setStatus('$activeRuntimeName${version == null ? '' : ' $version'} ready');
   }
 
@@ -1191,29 +1220,14 @@ final class ZommiController extends ChangeNotifier {
       return;
     }
     _cancelSwitchRecovery();
+    final epoch = _switchEpoch;
     sessionBusy = true;
     final changingRuntime = activeRuntime?.id != target.id;
-    switchingRuntimeId = changingRuntime ? target.id : null;
+    switchingRuntimeId = target.id;
     _rememberActiveSessionSettings();
     final inherited = changingRuntime ? null : activeSessionSettings;
-    _notify();
+    _setStatus('Creating a chat in ${target.displayName}…');
     try {
-      RuntimeConnection? initialConnection;
-      if (changingRuntime || activeRuntime?.status == 'unavailable') {
-        initialConnection = await core.connectRuntime(
-          runtimeTargetId: target.id,
-        );
-        _connectedRuntimes.add(initialConnection.runtimeTargetId);
-        if (!{
-          ...target.capabilityHints,
-          ...initialConnection.capabilities,
-        }.contains('session.create.v1')) {
-          throw const CoreProtocolException(
-            'unsupported-capability',
-            'This agent cannot create chats.',
-          );
-        }
-      }
       final connection = await core.createSession(
         runtimeTargetId: target.id,
         model: _nonEmpty(inherited?.model),
@@ -1221,21 +1235,28 @@ final class ZommiController extends ChangeNotifier {
         cwd: _nonEmpty(inherited?.workspace),
         profile: _nonEmpty(inherited?.profile),
       );
-      if (initialConnection != null) _cacheConnection(initialConnection);
+      if (_closed || epoch != _switchEpoch) return;
       _newSessions.add(
         _sessionKey(connection.runtimeTargetId, connection.sessionId),
       );
       await _applySessionConnection(connection, inherited: inherited);
+      if (_closed || epoch != _switchEpoch) return;
+      coreConnectionFailed = false;
+      connectionErrorTargetId = null;
       _recordSessionActivity(connection.runtimeTargetId, connection.sessionId);
       _setStatus('New chat ready');
     } on Object catch (error) {
+      if (_closed || epoch != _switchEpoch) return;
+      _rememberConnectionFailure(target.id, create: true);
       if (!_applyConnectionError(target.id, error, activateTarget: false)) {
         _setStatus('Could not create chat · $error', warning: true);
       }
     } finally {
-      sessionBusy = false;
-      switchingRuntimeId = null;
-      _notify();
+      if (epoch == _switchEpoch) {
+        sessionBusy = false;
+        switchingRuntimeId = null;
+        _notify();
+      }
     }
   }
 
@@ -1353,6 +1374,8 @@ final class ZommiController extends ChangeNotifier {
       );
       if (_closed || epoch != _switchEpoch) return;
       _switchFailures = 0;
+      coreConnectionFailed = false;
+      connectionErrorTargetId = null;
       _setStatus(
         sessionReadOnly
             ? 'Chat is open elsewhere · reconnecting automatically'
@@ -1367,6 +1390,7 @@ final class ZommiController extends ChangeNotifier {
             ? error.message
             : error.toString();
         _setStatus('Could not open chat · $detail', warning: true);
+        _rememberConnectionFailure(targetId, session: sessionId);
       }
     } finally {
       if (epoch == _switchEpoch) {
@@ -1389,11 +1413,23 @@ final class ZommiController extends ChangeNotifier {
             'session-busy',
             'core-unavailable',
             'core-timeout',
+            'core-exited',
+            'core-transport-failed',
+            'runtime-timeout',
+            'request-expired',
           }.contains(error.code));
 
   void _scheduleSwitchRecovery(String targetId, String sessionId, int epoch) {
     _switchRetryTimer?.cancel();
     _switchFailures++;
+    if (_switchFailures > 3) {
+      _rememberConnectionFailure(targetId, session: sessionId);
+      _setStatus(
+        'Could not reconnect to ${_runtimeTarget(targetId)?.displayName ?? 'agent'}. Your chat and draft are kept. Retry or choose another agent.',
+        warning: true,
+      );
+      return;
+    }
     _setStatus('Reconnecting to chat… Your draft is kept.');
     final delay = Duration(
       seconds: (1 << (_switchFailures - 1).clamp(0, 4)).clamp(1, 15),
@@ -2709,6 +2745,60 @@ final class ZommiController extends ChangeNotifier {
 
   void _handleCoreEvent(CoreEvent event) {
     if (_closed) return;
+    if (event.name == 'core.disconnected') {
+      coreConnectionFailed = true;
+      _cancelSwitchRecovery();
+      _connectedRuntimes.clear();
+      _lastSequences.clear();
+      _runtimePreparations.clear();
+      _runtimePreparationQueue.clear();
+      _commandContexts.clear();
+      _commandCatalogs.clear();
+      _commandRequests.updateAll((_, value) => value + 1);
+      for (final entry in _activeTurns.entries.toList()) {
+        final identity = entry.key.split('\u0000');
+        _handleCoreEvent(
+          CoreEvent(
+            name: 'turn.completed',
+            sequence: 0,
+            runtimeTargetId: identity[0],
+            sessionId: identity[1],
+            turnId: entry.value,
+            payload: {'status': 'unknown', 'error': event.payload['message']},
+          ),
+        );
+      }
+      _pausedQueues.addAll(_messageQueues.keys);
+      for (var index = 0; index < runtimeTargets.length; index++) {
+        final target = runtimeTargets[index];
+        if (target.status == 'ready' ||
+            target.status == 'connecting' ||
+            target.status == 'recovering') {
+          runtimeTargets[index] = target.copyWith(status: 'unavailable');
+        }
+      }
+      if (activeRuntime case final runtime?) {
+        activeRuntime = runtime.copyWith(status: 'unavailable');
+        _rememberConnectionFailure(runtime.id, session: activeSessionId);
+      }
+      starting = false;
+      sessionBusy = false;
+      runtimeBusy = false;
+      switchingRuntimeId = null;
+      _startingSessions.clear();
+      approval = null;
+      question = null;
+      _setStatus(
+        'Agent connection lost. Your chats and drafts are kept; submitted requests were not resent.',
+        warning: true,
+      );
+      final runtime = activeRuntime?.id;
+      final session = activeSessionId;
+      if (runtime != null && session != null && !runtimeSetupPending) {
+        _scheduleSwitchRecovery(runtime, session, _switchEpoch);
+      }
+      return;
+    }
     final sequenceKey = '${event.runtimeTargetId}:${event.sessionId ?? ''}';
     final previous = _lastSequences[sequenceKey] ?? 0;
     if (event.sequence > 0 && event.sequence <= previous) return;
@@ -2826,7 +2916,8 @@ final class ZommiController extends ChangeNotifier {
           }
         }
         if (message?.isNotEmpty == true &&
-            activeRuntime?.id == event.runtimeTargetId) {
+            (activeRuntime?.id == event.runtimeTargetId ||
+                switchingRuntimeId == event.runtimeTargetId)) {
           _setStatus(
             message!,
             warning: event.payload['status']?.toString() == 'degraded',
@@ -3514,6 +3605,64 @@ final class ZommiController extends ChangeNotifier {
   void dismissStatusWarning() {
     statusWarning = false;
     _notify();
+  }
+
+  void _rememberConnectionFailure(
+    String target, {
+    String? session,
+    bool create = false,
+  }) {
+    connectionErrorTargetId = target;
+    connectionErrorSessionId = session;
+    _retryCreatesSession = create;
+    _connectedRuntimes.remove(target);
+  }
+
+  Future<void> retryConnection({bool restart = false}) async {
+    final target = connectionErrorTargetId ?? activeRuntime?.id;
+    final session = connectionErrorSessionId;
+    final create = _retryCreatesSession;
+    if (sessionBusy || runtimeBusy) return;
+    _cancelSwitchRecovery();
+    try {
+      if (restart && core is CoreRecoveryBridge) {
+        await (core as CoreRecoveryBridge).restartCore();
+        _cancelSwitchRecovery();
+      }
+      if (target == null) {
+        await core.initialize();
+        await refreshRuntimes();
+        if (runtimeDiscoveryError == null) {
+          coreConnectionFailed = false;
+          _setStatus('Connection restored. Choose an agent to continue.');
+        }
+        return;
+      }
+      if (create) {
+        await createSession(runtimeTargetId: target);
+      } else if (session != null) {
+        await switchSession(session, runtimeTargetId: target);
+      } else {
+        await connectRuntimeForSetup(target);
+      }
+    } on Object catch (error) {
+      _setStatus('Could not reconnect · $error', warning: true);
+    }
+  }
+
+  void cancelConnectionAttempt() {
+    _cancelSwitchRecovery();
+    sessionBusy = false;
+    runtimeBusy = false;
+    switchingRuntimeId = null;
+    if (core is CoreRecoveryBridge) {
+      unawaited(
+        (core as CoreRecoveryBridge).cancelSelection().catchError(
+          (Object _) {},
+        ),
+      );
+    }
+    _setStatus('Connection cancelled. Your chat and draft are kept.');
   }
 
   void _setStatus(String value, {bool warning = false}) {

@@ -54,6 +54,8 @@ def windows_installer(package: Path, output: Path, manifest: dict, compiler: str
         definitions = {
             "OUTPUT_FILE": asset.as_posix(),
             "APP_VERSION": version,
+            "APP_DISPLAY_VERSION": f"{version}+{manifest['gitCommit'][:8]}",
+            "APP_ICON_RELATIVE": nsis_string(manifest.get("icon", "data/flutter_assets/windows/runner/resources/app_icon.ico").replace("/", "\\")),
             "APP_ICON": (package / "data/flutter_assets/windows/runner/resources/app_icon.ico").as_posix(),
             "INSTALL_FILES": (temp / "install.nsh").as_posix(),
             "UNINSTALL_FILES": (temp / "uninstall.nsh").as_posix(),

@@ -134,6 +134,10 @@ abstract interface class BrowserCaptureSettings {
   void setBrowserPageDetails(bool enabled);
 }
 
+abstract interface class CaptureThemeSettings {
+  void setCaptureTheme(Map<String, int> colors);
+}
+
 abstract interface class TrayMenuAppearance {
   void setTrayMenuColors({
     required Color background,
@@ -281,6 +285,7 @@ final class FlutterDesktopBridge
     implements
         DesktopBridge,
         BrowserCaptureSettings,
+        CaptureThemeSettings,
         CapturePermissionBridge,
         CaptureShortcutSettings,
         TrayMenuAppearance {
@@ -306,6 +311,10 @@ final class FlutterDesktopBridge
 
   final bool _useNativeSurface;
   late final ResponseNotifications _notifications = ResponseNotifications(
+    isForeground: () async =>
+        await windowManager.isVisible() &&
+        !await windowManager.isMinimized() &&
+        await windowManager.isFocused(),
     onOpen: (runtime, session) {
       if (!_invocations.isClosed) {
         _invocations.add(
@@ -413,6 +422,13 @@ final class FlutterDesktopBridge
   }
 
   final CaptureProvider _captureProvider;
+  @override
+  void setCaptureTheme(Map<String, int> colors) {
+    if (_captureProvider case final CaptureThemeSettings settings) {
+      settings.setCaptureTheme(colors);
+    }
+  }
+
   final WaylandPortalShortcutClient _waylandPortalShortcutClient;
   final bool _useWaylandPortals;
   final DesktopAcceptanceRecorder? _acceptanceRecorder;

@@ -12,7 +12,7 @@ include Windows. Do not use GitHub's “Source code” archive as an installer.
 
 | Computer | Download | Install |
 | --- | --- | --- |
-| Windows 10/11, x64 | [Zommi-Setup-x64.exe](https://github.com/timctho/zommi/releases/download/v0.1.0-preview.5/Zommi-Setup-x64.exe) | Run the installer, then launch Zommi from Start |
+| Windows 10/11, x64 | [Zommi-Setup-x64.exe](https://github.com/timctho/zommi/releases/download/v0.1.0-preview.6/Zommi-Setup-x64.exe) | Run the installer, then launch Zommi from Start |
 | Mac with Apple Silicon | `Zommi-macOS-arm64.dmg`, when available | Open the DMG; drag Zommi into Applications |
 | Mac with Intel | `Zommi-macOS-x64.dmg`, when available | Open the DMG; drag Zommi into Applications |
 
@@ -112,6 +112,8 @@ Zommi does not restart or reconfigure your browser.
 | --- | --- |
 | No agents found | Verify the CLI works in the same Windows/WSL/Mac environment; scan again or configure its executable |
 | Agent needs authentication | Sign in through that agent, then retry in Zommi |
+| Connecting or creating a chat times out | Use **Cancel** to keep navigating, then **Retry**. If it still fails, use **Restart agent connections**; confirm that the CLI works in the selected host |
+| An agent disconnects during a reply | Zommi keeps the chat and draft and attempts to reconnect. The unfinished request is not resent, and queued messages stay paused until you resume them |
 | Alt+A does nothing | Try **Select**; check the configured shortcut and OS permissions |
 | Capture says **Image only** | The source did not expose reliable text/structure; the selected image is still attached |
 | Mac capture is blocked | Check Accessibility and Screen Recording for the app in Applications, then restart it |
@@ -122,8 +124,18 @@ Zommi does not restart or reconfigure your browser.
 
 Close Zommi before installing an update. On Windows, remove it through
 **Settings → Apps → Installed apps → Zommi**. On Mac, remove the app from
-Applications. Agent-owned accounts and history remain with the agent;
-Zommi's local settings are retained by the Windows uninstaller.
+Applications. The Windows installer asks you to close Zommi, including its tray
+icon, before replacing files. **App settings** shows the installed build revision.
+
+For a fresh Windows setup, select **Remove all Zommi settings, cached agent
+detection and local session metadata** in the uninstaller, then reinstall.
+This removes `%APPDATA%\Zommi` and `%LOCALAPPDATA%\Zommi`; the next launch
+shows **Welcome to Zommi** and detects agents again. Leave it unchecked to keep
+your settings. Automated uninstall can request the same reset with
+`Uninstall.exe /S /PURGE=1`. Agent-owned accounts and conversations are retained.
+
+If a pinned Windows shortcut still shows the previous logo after updating,
+unpin it and pin Zommi again from the refreshed Start menu shortcut.
 
 Each public release includes `SHA256SUMS.txt` and `zommi-release.json` with its
 source revision and installer hashes. Compare your download before opening:

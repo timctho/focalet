@@ -5,7 +5,13 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 /// Uses the OS notification sound so volume and Do Not Disturb remain native.
 final class ResponseNotifications {
-  ResponseNotifications({required this.onOpen, required this.record});
+  ResponseNotifications({
+    required this.onOpen,
+    required this.record,
+    required this.isForeground,
+  });
+
+  final Future<bool> Function() isForeground;
 
   final void Function(String runtimeTargetId, String sessionId) onOpen;
   final Future<void> Function(String event, Map<String, Object?> details)
@@ -88,7 +94,8 @@ final class ResponseNotifications {
     required String runtimeName,
     required String sessionTitle,
   }) async {
-    if (_closed || !await initialize() || _closed) return;
+    if (_closed || await isForeground()) return;
+    if (!await initialize() || _closed || await isForeground()) return;
     final id = _nextId = (_nextId + 1) % 0x7fffffff;
     await _plugin.show(
       id: id,

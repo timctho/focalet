@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
@@ -25,6 +27,66 @@ CoreEvent recovered({String sessionId = 'session-1'}) => CoreEvent(
 );
 
 void main() {
+  test(
+    'broker loss marks an active turn unknown and pauses queued work',
+    () async {
+      final core = RichFakeCore()..historyCount = 0;
+      final controller = ZommiController(
+        core: core,
+        desktop: FakeDesktopBridge(),
+      );
+      addTearDown(controller.close);
+      await controller.initialize();
+      await controller.submit('in flight');
+      await controller.submit('queued');
+      core.emit(
+        const CoreEvent(
+          name: 'core.disconnected',
+          sequence: 0,
+          runtimeTargetId: '',
+          payload: {'message': 'Transport stopped'},
+        ),
+      );
+      expect(controller.turnActive, isFalse);
+      expect(controller.queuePaused, isTrue);
+      expect(controller.queuedMessages.single.text, 'queued');
+      expect(core.startedTurns, hasLength(1));
+      expect(
+        controller.turns.single.blocks
+            .where((b) => b.kind == TranscriptKind.error)
+            .single
+            .text,
+        contains('not resent'),
+      );
+      expect(controller.runtimeBusy, isFalse);
+      expect(controller.sessionBusy, isFalse);
+    },
+  );
+
+  test('cancel releases navigation and a late new chat cannot replace the selection', () async {
+    final core = RichFakeCore();
+    final controller = ZommiController(
+      core: core,
+      desktop: FakeDesktopBridge(),
+    );
+    addTearDown(controller.close);
+    await controller.initialize();
+    final pending = Completer<void>();
+    core.createSessionGate = pending.future;
+    final creation = controller.createSession(runtimeTargetId: 'runtime-pi');
+    expect(controller.sessionBusy, isTrue);
+    controller.cancelConnectionAttempt();
+    expect(controller.sessionBusy, isFalse);
+    await controller.switchSession(
+      'session-2',
+      runtimeTargetId: 'runtime-codex',
+    );
+    pending.complete();
+    await creation;
+    expect(controller.activeRuntime?.id, 'runtime-codex');
+    expect(controller.activeSessionId, 'session-2');
+  });
+
   test(
     'recovery preserves selected chat, settings, and interrupted transcript',
     () async {

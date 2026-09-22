@@ -16,6 +16,7 @@ internal class ContentSelectionForm : PointSelectionForm
     private readonly Bitmap desktop;
     private readonly DateTimeOffset frozenAt;
     private readonly CaptureToolbar toolbar;
+    private readonly CaptureTheme theme;
     private readonly int maximumSelections;
     private readonly float scale;
     private Point? anchor;
@@ -28,7 +29,7 @@ internal class ContentSelectionForm : PointSelectionForm
     private readonly List<AnnotationPoint> points = [];
     private ImageAnnotation? pendingStroke;
 
-    public ContentSelectionForm(uint returnProcessId, Bitmap capturedDesktop, int maximumSelections = 8) : base(returnProcessId)
+    public ContentSelectionForm(uint returnProcessId, Bitmap capturedDesktop, int maximumSelections = 8, CaptureTheme? theme = null) : base(returnProcessId)
     {
         Text = "Zommi content selection";
         this.maximumSelections = maximumSelections;
@@ -37,7 +38,8 @@ internal class ContentSelectionForm : PointSelectionForm
         frozenAt = DateTimeOffset.UtcNow;
         desktop = capturedDesktop;
         scale = Math.Max(1, DeviceDpi / 96f);
-        toolbar = new CaptureToolbar(scale);
+        this.theme = theme ?? CaptureTheme.Default;
+        toolbar = new CaptureToolbar(scale, this.theme);
         toolbar.Invoked += InvokeTool;
         Controls.Add(toolbar);
         UpdateToolbar(reposition: true);
@@ -262,7 +264,7 @@ internal class ContentSelectionForm : PointSelectionForm
         {
             foreach (var entry in entries) { var r = entry.Selection.Region; r.Offset(-Left, -Top); dimmed.Exclude(r); }
             if (!dragged.IsEmpty) { var r = dragged; r.Offset(-Left, -Top); dimmed.Exclude(r); }
-            using var shade = new SolidBrush(Color.FromArgb(135, 7, 15, 11));
+            using var shade = new SolidBrush(Color.FromArgb(135, theme.Surface));
             g.FillRegion(shade, dimmed);
         }
         g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -278,11 +280,11 @@ internal class ContentSelectionForm : PointSelectionForm
             DrawFrame(g, bounds, index == activeIndex);
             var badge = Badge(entry.Selection.Region);
             using var badgePath = CaptureToolbar.Rounded(badge, 6 * scale);
-            using var badgeFill = new SolidBrush(index == activeIndex ? CaptureToolbar.Accent : CaptureToolbar.Surface);
+            using var badgeFill = new SolidBrush(index == activeIndex ? theme.Accent : theme.Surface);
             g.FillPath(badgeFill, badgePath);
             using var font = new Font("Segoe UI Semibold", 10f);
             TextRenderer.DrawText(g, ((char)('A' + index)).ToString(), font, badge,
-                index == activeIndex ? CaptureToolbar.Surface : CaptureToolbar.Accent, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                index == activeIndex ? theme.OnAccent : theme.Accent, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
         }
         if (!dragged.IsEmpty)
         {
@@ -290,8 +292,8 @@ internal class ContentSelectionForm : PointSelectionForm
             DrawFrame(g, rectangle, true);
             using var font = new Font("Segoe UI Semibold", 10f);
             var label = new Rectangle(rectangle.Left + 8, rectangle.Top + 8, 150, 26);
-            using var fill = new SolidBrush(CaptureToolbar.Surface); g.FillRectangle(fill, label);
-            TextRenderer.DrawText(g, $"{rectangle.Width} × {rectangle.Height}", font, label, CaptureToolbar.Accent, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            using var fill = new SolidBrush(theme.Surface); g.FillRectangle(fill, label);
+            TextRenderer.DrawText(g, $"{rectangle.Width} × {rectangle.Height}", font, label, theme.Accent, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
         }
         for (var i = 3; i > 0; i--)
         {
@@ -303,10 +305,10 @@ internal class ContentSelectionForm : PointSelectionForm
 
     private void DrawFrame(Graphics g, Rectangle bounds, bool active)
     {
-        using var border = new Pen(active ? CaptureToolbar.Accent : Color.FromArgb(142, 176, 157), active ? 2f : 1f);
+        using var border = new Pen(active ? theme.Accent : theme.Outline, active ? 2f : 1f);
         g.DrawRectangle(border, bounds);
         if (!active) return;
-        using var corner = new Pen(CaptureToolbar.Accent, 3f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+        using var corner = new Pen(theme.Accent, 3f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
         var length = Math.Min(12, Math.Min(bounds.Width, bounds.Height) / 3);
         foreach (var (x, y, dx, dy) in new[]
         {

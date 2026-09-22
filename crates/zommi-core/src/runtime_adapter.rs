@@ -303,18 +303,19 @@ impl RuntimeAdapter {
         profile: Option<&str>,
     ) -> Result<Value, CodexError> {
         match self {
-            Self::Codex(adapter) => serde_json::to_value(
-                adapter
+            Self::Codex(adapter) => {
+                let connection = adapter
                     .ready()
                     .await?
                     .create_session(model, effort, cwd)
-                    .await?,
-            )
-            .map_err(|error| CodexError {
-                code: "protocol-error".into(),
-                message: error.to_string(),
-                retryable: false,
-            }),
+                    .await?;
+                adapter.ensure_monitor().await;
+                serde_json::to_value(connection).map_err(|error| CodexError {
+                    code: "protocol-error".into(),
+                    message: error.to_string(),
+                    retryable: false,
+                })
+            }
             Self::Acp(adapter) => adapter.create_session(model).await,
             Self::HermesGateway(adapter) => {
                 adapter.create_session(model, effort, cwd, profile).await

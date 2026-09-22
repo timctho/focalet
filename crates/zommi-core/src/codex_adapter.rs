@@ -168,7 +168,7 @@ struct Inner {
     target_id: String,
     cwd: PathBuf,
     stdin: Mutex<ChildStdin>,
-    pending: Mutex<HashMap<String, oneshot::Sender<Result<Value, CodexError>>>>,
+    pending: std::sync::Mutex<HashMap<String, oneshot::Sender<Result<Value, CodexError>>>>,
     state: Mutex<AdapterState>,
     next_request_id: AtomicU64,
     received_messages: AtomicU64,
@@ -177,6 +177,19 @@ struct Inner {
     wait_task: Mutex<Option<JoinHandle<()>>>,
     stdout_task: Mutex<Option<JoinHandle<()>>>,
     stderr_task: Mutex<Option<JoinHandle<()>>>,
+}
+
+// A host deadline can cancel an RPC before its own timeout completes.
+// Always remove its completion sender when that future is dropped.
+struct PendingRequest<'a> {
+    inner: &'a Inner,
+    id: String,
+}
+
+impl Drop for PendingRequest<'_> {
+    fn drop(&mut self) {
+        self.inner.pending.lock().unwrap().remove(&self.id);
+    }
 }
 
 impl Drop for Inner {
@@ -308,7 +321,7 @@ impl CodexAdapter {
                 target_id: config.target.id.clone(),
                 cwd: config.cwd,
                 stdin: Mutex::new(stdin),
-                pending: Mutex::new(HashMap::new()),
+                pending: std::sync::Mutex::new(HashMap::new()),
                 state: Mutex::new(AdapterState::default()),
                 next_request_id: AtomicU64::new(0),
                 received_messages: AtomicU64::new(0),
@@ -415,7 +428,7 @@ impl CodexAdapter {
         preferred_session_id: Option<String>,
         cwd: Option<&str>,
     ) -> Result<(), CodexError> {
-        tokio::try_join!(self.load_models(), self.list_sessions())?;
+        self.refresh_connection_catalogs().await;
         if let Some(session_id) = preferred_session_id {
             let connection = self.open_session(&session_id).await?;
             self.inner.state.lock().await.initial_history = connection.history;
@@ -900,12 +913,54 @@ impl CodexAdapter {
         cwd: Option<&str>,
     ) -> Result<CodexConnection, CodexError> {
         let _selection = self.inner.session_selection.lock().await;
+        if self.inner.state.lock().await.models.is_empty() {
+            self.refresh_connection_catalogs().await;
+        }
         self.start_thread(model, cwd).await?;
         if let Some(effort) = effort {
             self.inner.state.lock().await.active_effort = Some(effort.into());
         }
-        self.list_sessions().await?;
         self.connection().await
+    }
+
+    async fn refresh_connection_catalogs(&self) {
+        // Catalogs improve the menus but must not gate creating a usable chat.
+        // Give each request its own deadline so cancellation removes its pending entry.
+        let deadline = self.inner.request_timeout.min(Duration::from_secs(5));
+        let (models, sessions) = tokio::join!(
+            self.inner.request_with_timeout("model/list", json!({"limit":100,"includeHidden":false}), deadline),
+            self.inner.request_with_timeout("thread/list", json!({"limit":100,"sortKey":"updated_at","sortDirection":"desc","sourceKinds":["appServer","vscode"],"archived":false,"useStateDbOnly":true}), deadline)
+        );
+        let mut state = self.inner.state.lock().await;
+        if let Ok(result) = &models {
+            state.models = result["data"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|model| model.get("hidden").and_then(Value::as_bool) != Some(true))
+                .cloned()
+                .collect();
+        }
+        if let Ok(result) = &sessions {
+            for thread in result["data"].as_array().into_iter().flatten() {
+                if thread.get("threadSource").and_then(Value::as_str) == Some("zommi")
+                    || thread
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .is_some_and(|name| name.starts_with("Zommi · "))
+                    || thread
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .is_some_and(|id| state.sessions.contains_key(id))
+                {
+                    remember_session(&mut state.sessions, thread);
+                }
+            }
+        }
+        drop(state);
+        if models.is_err() || sessions.is_err() {
+            self.inner.emit_status("Some Codex models or saved chats could not be loaded. Use Refresh agents to retry.", "degraded", None, None);
+        }
     }
 
     pub async fn fork_session(&self, session_id: &str) -> Result<CodexConnection, CodexError> {
@@ -1573,7 +1628,7 @@ impl CodexAdapter {
         if let Some(task) = self.inner.stderr_task.lock().await.take() {
             task.abort();
         }
-        let pending = std::mem::take(&mut *self.inner.pending.lock().await);
+        let pending = std::mem::take(&mut *self.inner.pending.lock().unwrap());
         for (_, completion) in pending {
             let _ = completion.send(Err(CodexError::new(
                 "runtime-stopped",
@@ -1728,7 +1783,11 @@ impl Inner {
             .saturating_add(1)
             .to_string();
         let (sender, receiver) = oneshot::channel();
-        self.pending.lock().await.insert(id.clone(), sender);
+        self.pending.lock().unwrap().insert(id.clone(), sender);
+        let _pending = PendingRequest {
+            inner: self,
+            id: id.clone(),
+        };
         let result = timeout(deadline, async {
             self.write_json(&json!({"method": method, "id": id, "params": params}))
                 .await?;
@@ -1740,7 +1799,6 @@ impl Inner {
             })
         })
         .await;
-        self.pending.lock().await.remove(&id);
         match result {
             Ok(result) => result,
             Err(_) => {
@@ -1849,7 +1907,7 @@ impl Inner {
         if id.is_empty() {
             return;
         }
-        let Some(completion) = self.pending.lock().await.remove(&id) else {
+        let Some(completion) = self.pending.lock().unwrap().remove(&id) else {
             return;
         };
         let result = if let Some(error) = message.get("error") {
@@ -2104,7 +2162,7 @@ impl Inner {
         let operations = std::mem::take(&mut state.turn_client_operations);
         drop(state);
 
-        let pending = std::mem::take(&mut *self.pending.lock().await);
+        let pending = std::mem::take(&mut *self.pending.lock().unwrap());
         for (_, completion) in pending {
             let _ = completion.send(Err(CodexError::new("runtime-exited", &message)));
         }

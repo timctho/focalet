@@ -23,10 +23,12 @@ class FirstRunSetup extends StatefulWidget {
 class _FirstRunSetupState extends State<FirstRunSetup> {
   String? _selectedTarget;
   bool _saving = false;
+  int _attemptEpoch = 0;
   String? _error;
 
   Future<void> _finish({String? targetId}) async {
     if (_saving) return;
+    final epoch = ++_attemptEpoch;
     setState(() {
       _saving = true;
       _error = null;
@@ -38,13 +40,14 @@ class _FirstRunSetupState extends State<FirstRunSetup> {
           !await widget.controller.connectRuntimeForSetup(targetId)) {
         return;
       }
+      if (!mounted || epoch != _attemptEpoch) return;
       await widget.onCompleted();
     } on Object {
-      if (mounted) {
+      if (mounted && epoch == _attemptEpoch) {
         setState(() => _error = 'Could not save setup. Please try again.');
       }
     } finally {
-      if (mounted) setState(() => _saving = false);
+      if (mounted && epoch == _attemptEpoch) setState(() => _saving = false);
     }
   }
 
@@ -186,6 +189,25 @@ class _FirstRunSetupState extends State<FirstRunSetup> {
                     Wrap(
                       alignment: WrapAlignment.center,
                       children: [
+                        if (controller.coreConnectionFailed)
+                          TextButton(
+                            onPressed: busy
+                                ? null
+                                : () =>
+                                      controller.retryConnection(restart: true),
+                            child: const Text('Restart agent connections'),
+                          ),
+                        if (controller.runtimeBusy &&
+                            !controller.runtimeDiscoveryBusy)
+                          TextButton(
+                            key: const ValueKey('setup-cancel-connection'),
+                            onPressed: () {
+                              _attemptEpoch++;
+                              controller.cancelConnectionAttempt();
+                              setState(() => _saving = false);
+                            },
+                            child: const Text('Cancel connection'),
+                          ),
                         TextButton.icon(
                           key: const ValueKey('setup-rescan'),
                           onPressed: busy ? null : controller.refreshRuntimes,

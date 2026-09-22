@@ -25,6 +25,9 @@ use zommi_core::{
 
 mod wsl_relay;
 
+#[cfg(target_os = "windows")]
+mod windows_lifetime;
+
 #[cfg(target_os = "linux")]
 mod parent_lifetime;
 
@@ -38,6 +41,8 @@ struct CoreRequest {
     id: Option<String>,
     protocol_version: Option<u64>,
     operation: Option<String>,
+    #[serde(default)]
+    timeout_ms: Option<u64>,
     #[serde(default = "empty_object")]
     payload: Value,
 }
@@ -188,6 +193,10 @@ impl HostState {
                     "question.resolve.v1"
                 ]
             })),
+            "core.cancelSelection" => {
+                *self.binding_generation.lock().unwrap() += 1;
+                Ok(json!({"cancelled":true}))
+            }
             "context.buildHandoff" => {
                 let message = payload
                     .get("message")
@@ -294,6 +303,23 @@ impl HostState {
                 Ok(json!({"data": adapter.list_sessions().await?}))
             }
             "session.create" => {
+                let target_id = required_string(payload, "runtimeTargetId")?;
+                let running = match self.adapters.get(target_id) {
+                    Some(adapter) => adapter.is_running().await,
+                    None => false,
+                };
+                if !running {
+                    let preparable = self
+                        .targets
+                        .iter()
+                        .find(|target| target.id == target_id)
+                        .is_some_and(|target| {
+                            RuntimeAdapter::supports_preparation(&target.adapter_id)
+                        });
+                    let mut fresh = payload.clone();
+                    fresh["newSession"] = json!(true);
+                    self.connect_runtime(&fresh, false, preparable).await?;
+                }
                 let adapter = self.exact_adapter(payload)?;
                 let connection = adapter
                     .create_session(
@@ -303,6 +329,7 @@ impl HostState {
                         payload.get("profile").and_then(Value::as_str),
                     )
                     .await?;
+                self.prepared.remove(adapter.target_id());
                 let session_id = adapter.active_session_id().await?;
                 self.save_binding(
                     adapter.target_id(),
@@ -762,6 +789,9 @@ impl HostState {
             .filter(|value| !value.is_empty())
             .map(str::to_owned);
         let preferred_session_id = explicit_session_id.clone().or_else(|| {
+            if payload.get("newSession").and_then(Value::as_bool) == Some(true) {
+                return None;
+            }
             binding
                 .as_ref()
                 .filter(|binding| binding.runtime_target_id == target.id)
@@ -791,9 +821,15 @@ impl HostState {
                     return Ok(json!({"prepared": true}));
                 }
                 let connection = if self.prepared.contains(&target.id) {
-                    let connection = adapter
+                    let activation = adapter
                         .activate(preferred_session_id.clone(), cwd.to_str())
-                        .await?;
+                        .await;
+                    if activation.is_err() {
+                        self.adapters.remove(&target.id);
+                        self.prepared.remove(&target.id);
+                        adapter.shutdown().await;
+                    }
+                    let connection = activation?;
                     self.prepared.remove(&target.id);
                     connection
                 } else {
@@ -1070,6 +1106,7 @@ struct RuntimeWork {
     request: CoreRequest,
     targets: Vec<zommi_core::RuntimeTarget>,
     generation: u64,
+    deadline: tokio::time::Instant,
 }
 
 struct RuntimeWorker {
@@ -1136,10 +1173,24 @@ fn runtime_worker(
             };
             state.targets = work.targets;
             state.request_generation = work.generation;
-            let action = tokio::select! {
-                biased;
-                _ = shutdown.changed() => break,
-                action = Box::pin(state.handle(work.request)) => action,
+            let request_id = work.request.id.clone();
+            let operation = work.request.operation.clone().unwrap_or_default();
+            let action = if tokio::time::Instant::now() >= work.deadline {
+                failure(
+                    request_id,
+                    "request-expired",
+                    "Request expired in the runtime queue and was not executed.",
+                    true,
+                )
+            } else {
+                tokio::select! {
+                    biased;
+                    _ = shutdown.changed() => break,
+                    result = tokio::time::timeout_at(work.deadline, Box::pin(state.handle(work.request))) => {
+                        result.unwrap_or_else(|_| failure(request_id, "runtime-timeout",
+                            format!("Agent did not finish '{operation}' before its deadline. Retry the connection or choose another agent. Requests are not resent automatically."), true))
+                    },
+                }
             };
             if let Ok(value) = serde_json::to_value(action.response) {
                 let _ = output.send(value);
@@ -1154,6 +1205,8 @@ fn runtime_worker(
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
+    #[cfg(target_os = "windows")]
+    windows_lifetime::contain_children()?;
     #[cfg(target_os = "linux")]
     parent_lifetime::bind_to_parent()?;
     let arguments = env::args().skip(1).collect::<Vec<_>>();
@@ -1287,6 +1340,10 @@ async fn main() -> io::Result<()> {
                         }
                     }
                     let target_id = runtime_request_target(&request).unwrap().to_owned();
+                    let deadline = tokio::time::Instant::now()
+                        + Duration::from_millis(
+                            request.timeout_ms.unwrap_or(75_000).clamp(1, 120_000),
+                        );
                     let generation = {
                         let mut current = state.binding_generation.lock().unwrap();
                         if selects_session(request.operation.as_deref()) {
@@ -1309,6 +1366,7 @@ async fn main() -> io::Result<()> {
                             request,
                             targets: state.targets.clone(),
                             generation,
+                            deadline,
                         })
                         .map_err(|_| {
                             io::Error::new(io::ErrorKind::BrokenPipe, "runtime worker closed")
@@ -1401,11 +1459,67 @@ mod tests {
     use super::{CORE_PROTOCOL_VERSION, CoreRequest, HostState};
 
     #[tokio::test]
+    async fn expired_work_is_never_polled_and_does_not_block_later_requests() {
+        let (events, _) = mpsc::unbounded_channel();
+        let (output, mut responses) = mpsc::unbounded_channel();
+        let (shutdown, receiver) = tokio::sync::watch::channel(false);
+        let generation = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let worker = super::runtime_worker(
+            events,
+            generation.clone(),
+            Default::default(),
+            output,
+            receiver,
+        );
+        for (id, operation, deadline) in [
+            (
+                "expired",
+                "core.cancelSelection",
+                tokio::time::Instant::now(),
+            ),
+            (
+                "live",
+                "core.initialize",
+                tokio::time::Instant::now() + std::time::Duration::from_secs(5),
+            ),
+        ] {
+            worker
+                .sender
+                .send(super::RuntimeWork {
+                    request: CoreRequest {
+                        id: Some(id.into()),
+                        protocol_version: Some(CORE_PROTOCOL_VERSION),
+                        operation: Some(operation.into()),
+                        timeout_ms: None,
+                        payload: json!({}),
+                    },
+                    targets: vec![],
+                    generation: 0,
+                    deadline,
+                })
+                .unwrap();
+        }
+        let expired = responses.recv().await.unwrap();
+        assert_eq!(expired["error"]["code"], "request-expired");
+        assert_eq!(
+            *generation.lock().unwrap(),
+            0,
+            "expired handler was executed"
+        );
+        let live = responses.recv().await.unwrap();
+        assert_eq!(live["id"], "live");
+        assert!(live.get("error").is_none_or(Value::is_null));
+        shutdown.send(true).unwrap();
+        worker.task.await.unwrap();
+    }
+
+    #[tokio::test]
     async fn initializes_a_versioned_event_capable_core() {
         let (event_tx, _events) = mpsc::unbounded_channel();
         let mut host = HostState::new(event_tx);
         let action = host
             .handle(CoreRequest {
+                timeout_ms: None,
                 id: Some("1".into()),
                 protocol_version: Some(CORE_PROTOCOL_VERSION),
                 operation: Some("core.initialize".into()),
@@ -1436,6 +1550,7 @@ mod tests {
         let mut host = HostState::new(event_tx);
         let action = host
             .handle(CoreRequest {
+                timeout_ms: None,
                 id: Some("2".into()),
                 protocol_version: Some(CORE_PROTOCOL_VERSION),
                 operation: Some("context.buildHandoff".into()),
@@ -1461,6 +1576,7 @@ mod tests {
         let mut host = HostState::new(event_tx);
         let action = host
             .handle(CoreRequest {
+                timeout_ms: None,
                 id: Some("3".into()),
                 protocol_version: Some(99),
                 operation: Some("core.initialize".into()),
@@ -1478,6 +1594,7 @@ mod tests {
         let mut host = HostState::new(event_tx);
         let action = host
             .handle(CoreRequest {
+                timeout_ms: None,
                 id: Some("4".into()),
                 protocol_version: Some(CORE_PROTOCOL_VERSION),
                 operation: Some("runtime.addOverride".into()),

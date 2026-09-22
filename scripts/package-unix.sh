@@ -72,7 +72,7 @@ git_commit=$(git -C "$repository_root" rev-parse HEAD)
 (
   cd "$flutter_directory"
   flutter pub get
-  flutter build "$target_platform" --release --no-pub
+  flutter build "$target_platform" --release --no-pub "--dart-define=ZOMMI_BUILD_REVISION=$git_commit"
 )
 cargo build \
   --manifest-path "$repository_root/Cargo.toml" \

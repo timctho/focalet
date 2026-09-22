@@ -212,13 +212,13 @@ internal static class CaptureNativeHost
                 return false;
             }
             case "selectContent":
-                result = SelectContent(ReturnProcessId(request.Params));
+                result = SelectContent(ReturnProcessId(request.Params), CaptureTheme.FromParameters(request.Params));
                 return false;
             case "selectContext":
                 result = SelectContext(capture!, ReturnProcessId(request.Params));
                 return false;
             case "selectImage":
-                result = SelectImage(ReturnProcessId(request.Params));
+                result = SelectImage(ReturnProcessId(request.Params), CaptureTheme.FromParameters(request.Params));
                 return false;
             case "shutdown":
                 result = new { stopped = true };
@@ -248,11 +248,11 @@ internal static class CaptureNativeHost
             ? processId
             : 0;
 
-    private static object SelectImage(uint returnProcessId)
+    private static object SelectImage(uint returnProcessId, CaptureTheme theme)
     {
         // Read the desktop before constructing any topmost/layered selector HWND.
         using var desktop = ScreenCapture.CaptureBitmap(SystemInformation.VirtualScreen);
-        using var selector = new RegionSelectionForm(returnProcessId, desktop);
+        using var selector = new RegionSelectionForm(returnProcessId, desktop, theme);
         var dialogResult = selector.ShowDialog();
         if (dialogResult != DialogResult.OK || selector.Selections.Count == 0)
         {
@@ -287,10 +287,10 @@ internal static class CaptureNativeHost
             },
         };
 
-    private static object SelectContent(uint returnProcessId)
+    private static object SelectContent(uint returnProcessId, CaptureTheme theme)
     {
         using var desktop = ScreenCapture.CaptureBitmap(SystemInformation.VirtualScreen);
-        using var selector = new ContentSelectionForm(returnProcessId, desktop);
+        using var selector = new ContentSelectionForm(returnProcessId, desktop, theme: theme);
         if (selector.ShowDialog() != DialogResult.OK || selector.Selections.Count == 0)
             return new { Cancelled = true, selector.ErrorMessage };
         Application.DoEvents();

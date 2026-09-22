@@ -106,6 +106,8 @@ for line in sys.stdin:
     log(request)
     request_id = request.get("id")
     method = request.get("method")
+    if control and (control / "stall-catalogs").exists() and method in ("model/list", "thread/list"):
+        continue
     if request_id is None:
         continue
     if method in ("thread/resume", "thread/read", "thread/list"):

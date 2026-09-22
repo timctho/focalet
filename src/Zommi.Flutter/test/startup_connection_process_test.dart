@@ -9,7 +9,7 @@ import 'package:zommi_flutter/state/zommi_controller.dart';
 void main() {
   for (final scenario in [
     'slow startup',
-    'late connection',
+    'timed out startup',
     'first start fails',
   ]) {
     test('Hermes $scenario opens the saved chat without a sidebar click', () async {
@@ -22,8 +22,8 @@ void main() {
           '../../target/debug/zommi-core-host${Platform.isWindows ? '.exe' : ''}',
         ).absolute.path,
         requestTimeout: const Duration(milliseconds: 500),
-        connectionTimeout: scenario == 'late connection'
-            ? const Duration(milliseconds: 250)
+        connectionTimeout: scenario == 'timed out startup'
+            ? const Duration(seconds: 1)
             : const Duration(seconds: 90),
         environment: {
           'ZOMMI_HERMES_COMMAND': Platform.isWindows ? 'python' : 'python3',
@@ -34,7 +34,11 @@ void main() {
             '--mode',
             'hermes',
           ]),
-          'ZOMMI_FAKE_STARTUP_DELAY': '1',
+          'ZOMMI_FAKE_STARTUP_DELAY': scenario == 'timed out startup'
+              ? '2'
+              : '1',
+          if (scenario == 'timed out startup')
+            'ZOMMI_FAKE_STARTUP_DELAY_MARKER': '${directory.path}/delayed-once',
           if (scenario == 'first start fails')
             'ZOMMI_FAKE_STARTUP_FAILURE_MARKER':
                 '${directory.path}/failed-once',

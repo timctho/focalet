@@ -183,6 +183,11 @@ abstract interface class RuntimePreparationBridge {
   Future<void> prepareRuntime({required String runtimeTargetId});
 }
 
+abstract interface class CoreRecoveryBridge {
+  Future<void> restartCore();
+  Future<void> cancelSelection();
+}
+
 abstract interface class SessionStatusBridge {
   Future<Map<String, Object?>> sessionStatus({
     required String runtimeTargetId,
@@ -407,6 +412,7 @@ final class CoreProtocolException implements Exception {
 final class ProcessCoreBridge
     implements
         CoreBridge,
+        CoreRecoveryBridge,
         RuntimeConfigurationBridge,
         RuntimePreparationBridge,
         RuntimeModelRefreshBridge,
@@ -873,6 +879,26 @@ final class ProcessCoreBridge
     String operation, [
     Map<String, Object?> payload = const {},
   ]) async {
+    final timeout =
+        const {
+          'runtime.discover',
+          'runtime.connect',
+          'runtime.prepare',
+          'runtime.refreshModels',
+          'session.open',
+          'session.create',
+        }.contains(operation)
+        ? connectionTimeout
+        : requestTimeout;
+    final elapsed = Stopwatch()..start();
+    Duration remaining() {
+      final value = timeout - elapsed.elapsed;
+      if (value <= Duration.zero) {
+        throw TimeoutException('Request deadline reached');
+      }
+      return value;
+    }
+
     void checkOpen() {
       if (_closing && operation != 'core.shutdown') {
         throw const CoreProtocolException(
@@ -883,7 +909,7 @@ final class ProcessCoreBridge
     }
 
     checkOpen();
-    await _ensureStarted();
+    await _ensureStarted().timeout(timeout);
     checkOpen();
     final process = _process;
     if (process == null) {
@@ -900,11 +926,21 @@ final class ProcessCoreBridge
     completer.future.ignore();
     final write = _writeTail.then((_) async {
       checkOpen();
+      if (!identical(_process, process)) {
+        throw const CoreProtocolException(
+          'core-exited',
+          'The connection was replaced.',
+        );
+      }
+      final availableMs = remaining().inMilliseconds;
+      final hostTimeoutMs = (availableMs - (availableMs ~/ 10).clamp(1, 250))
+          .clamp(1, 120000);
       process.stdin.writeln(
         jsonEncode(<String, Object?>{
           'id': id,
           'protocolVersion': coreProtocolVersion,
           'operation': operation,
+          'timeoutMs': hostTimeoutMs,
           'payload': payload,
         }),
       );
@@ -914,25 +950,20 @@ final class ProcessCoreBridge
     // so background catalogs can overlap history, chat, and runtime recovery.
     _writeTail = write.catchError((Object _) {});
     try {
-      await write;
+      await write.timeout(remaining());
     } on Object {
       _pending.remove(id);
+      _disconnect(
+        process,
+        const CoreProtocolException(
+          'core-transport-failed',
+          'The agent connection stopped accepting requests. Reconnect to continue.',
+        ),
+      );
       rethrow;
     }
-    // Cold discovery and connection include runtime startup, which can exceed
-    // the deadline for ordinary RPCs (Hermes alone allows 45 seconds to start).
-    final timeout =
-        const {
-          'runtime.discover',
-          'runtime.connect',
-          'runtime.prepare',
-          'runtime.refreshModels',
-          'session.open',
-        }.contains(operation)
-        ? connectionTimeout
-        : requestTimeout;
     try {
-      return await completer.future.timeout(timeout);
+      return await completer.future.timeout(remaining());
     } on TimeoutException {
       _pending.remove(id);
       throw CoreProtocolException(
@@ -956,6 +987,10 @@ final class ProcessCoreBridge
   }
 
   Future<void> _startProcess() async {
+    await _stdoutSubscription?.cancel();
+    await _stderrSubscription?.cancel();
+    _stderr = '';
+    _writeTail = Future<void>.value();
     final process = await Process.start(
       _resolveExecutablePath(),
       _catalogWorker ? const ['--session-catalog-worker'] : const [],
@@ -967,10 +1002,22 @@ final class ProcessCoreBridge
     _stdoutSubscription = process.stdout
         .transform(utf8.decoder)
         .transform(const LineSplitter())
-        .listen(_handleLine);
+        .listen(
+          (line) {
+            if (identical(_process, process)) _handleLine(line);
+          },
+          onError: (Object error) => _disconnect(
+            process,
+            const CoreProtocolException(
+              'core-protocol-failed',
+              'The agent connection returned invalid data. Reconnect to continue.',
+            ),
+          ),
+        );
     _stderrSubscription = process.stderr.transform(utf8.decoder).listen((
       chunk,
     ) {
+      if (!identical(_process, process)) return;
       _stderr = '$_stderr$chunk';
       if (_stderr.length > 4000) {
         _stderr = _stderr.substring(_stderr.length - 4000);
@@ -978,9 +1025,9 @@ final class ProcessCoreBridge
     });
     unawaited(
       process.exitCode.then((exitCode) {
-        if (identical(_process, process)) _process = null;
-        if (_closing) return;
-        _failPending(
+        if (!identical(_process, process)) return;
+        _disconnect(
+          process,
           CoreProtocolException(
             'core-exited',
             'The Rust core exited with code $exitCode.'
@@ -993,6 +1040,54 @@ final class ProcessCoreBridge
 
   String _resolveExecutablePath() {
     return resolveCoreHostExecutable(configured: executablePath);
+  }
+
+  void _disconnect(Process process, CoreProtocolException error) {
+    if (!identical(_process, process)) return;
+    _process = null;
+    process.kill();
+    _writeTail = Future<void>.value();
+    _failPending(error);
+    if (!_closing && !_events.isClosed) {
+      // A listener can request a restart while this synchronous stream is
+      // delivering a turn event. Deliver lifecycle changes after that event.
+      scheduleMicrotask(() {
+        if (_closing || _events.isClosed) return;
+        _events.add(
+          CoreEvent(
+            name: 'core.disconnected',
+            sequence: 0,
+            runtimeTargetId: '',
+            payload: {'message': error.message},
+          ),
+        );
+      });
+    }
+  }
+
+  @override
+  Future<void> restartCore() async {
+    final process = _process;
+    if (process != null) {
+      _disconnect(
+        process,
+        const CoreProtocolException(
+          'core-restarted',
+          'The agent connection was restarted. Submitted requests were not resent.',
+        ),
+      );
+      try {
+        await process.exitCode.timeout(const Duration(seconds: 2));
+      } on TimeoutException {
+        process.kill(ProcessSignal.sigkill);
+      }
+    }
+    await initialize();
+  }
+
+  @override
+  Future<void> cancelSelection() async {
+    await _request('core.cancelSelection');
   }
 
   void _handleLine(String line) {

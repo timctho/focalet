@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Text.Json;
 using Zommi.Capture;
 using Zommi.Windows;
 
@@ -9,6 +10,7 @@ var tests = new (string Name, Action Run)[]
     ("Unchanged pixels preserve source context and identify user marks", PreserveContext),
     ("Changed source drops live metadata and preserves the frozen annotated image", FrozenFallback),
     ("Unmarked images preserve their original bytes", Unmarked),
+    ("Capture palette uses the requested theme and rejects malformed colors", ThemePalette),
 };
 var failed = 0;
 foreach (var test in tests)
@@ -17,6 +19,16 @@ foreach (var test in tests)
     catch (Exception error) { failed++; Console.Error.WriteLine($"FAIL {test.Name}: {error}"); }
 }
 return failed == 0 ? 0 : 1;
+
+static void ThemePalette()
+{
+    using var input = JsonDocument.Parse("{\"theme\":{\"accent\":4281892264,\"surface\":4294967295,\"onAccent\":4278190080}}");
+    var theme = CaptureTheme.FromParameters(input.RootElement);
+    Assert(theme.Accent.ToArgb() == Color.FromArgb(56, 125, 168).ToArgb(), "Theme accent was ignored.");
+    Assert(theme.Surface.ToArgb() == Color.White.ToArgb(), "Light theme surface was ignored.");
+    using var invalid = JsonDocument.Parse("{\"theme\":{\"accent\":\"bad\",\"surface\":-1}}");
+    Assert(CaptureTheme.FromParameters(invalid.RootElement) == CaptureTheme.Default, "Invalid palette must use defaults.");
+}
 
 static byte[] Image(Color color)
 {

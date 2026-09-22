@@ -647,6 +647,13 @@ def main() -> int:
                 marker.write("failed once")
             return 1
         startup_delay = float(os.environ.get("ZOMMI_FAKE_STARTUP_DELAY", "0"))
+        delay_marker = os.environ.get("ZOMMI_FAKE_STARTUP_DELAY_MARKER")
+        if delay_marker:
+            if os.path.exists(delay_marker):
+                startup_delay = 0
+            else:
+                with open(delay_marker, "w") as marker:
+                    marker.write("delayed once")
         if startup_delay:
             write_log({"method": "fixture.startup", "pid": os.getpid(), "delay": startup_delay})
             time.sleep(startup_delay)

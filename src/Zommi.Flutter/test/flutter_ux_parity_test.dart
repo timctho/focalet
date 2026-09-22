@@ -307,9 +307,9 @@ void main() {
       expect(
         find.descendant(
           of: find.byType(InlineAttachmentTile),
-          matching: find.byType(Text),
+          matching: find.text('A.'),
         ),
-        findsNothing,
+        findsOneWidget,
       );
       expect(find.byKey(const ValueKey('context-chips')), findsNothing);
 
@@ -361,8 +361,10 @@ void main() {
           of: find.byType(InlineAttachmentTile),
           matching: find.byType(Text),
         ),
-        findsNothing,
+        findsNWidgets(2),
       );
+      expect(find.text('A.'), findsOneWidget);
+      expect(find.text('B.'), findsOneWidget);
 
       final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
       addTearDown(mouse.removePointer);
@@ -466,7 +468,7 @@ void main() {
       expect(find.text('Not detected'), findsNothing);
 
       final switchGate = Completer<void>();
-      core.connectGate = switchGate.future;
+      core.createSessionGate = switchGate.future;
       await tester.tap(find.byKey(const ValueKey('create-session-runtime-pi')));
       await tester.pump();
       await tester.pump();

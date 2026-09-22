@@ -8,6 +8,7 @@ enum WindowSizeSetting { standard, wide, maximized }
 
 enum ZommiThemeColor {
   ocean('ocean', 'Ocean', Color(0xff387da8)),
+  mint('mint', 'Mint', Color(0xffc5ecd4)),
   mist('mist', 'Macaron grey', Color(0xffb4b8c1)),
   cream('cream', 'Macaron cream', Color(0xffe8dcc9)),
   custom('custom', 'Custom color', Color(0xff8178c9));

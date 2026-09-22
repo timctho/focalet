@@ -49,7 +49,7 @@ if (-not $SkipBuild) {
         if ($LASTEXITCODE -ne 0) {
             throw "Flutter dependency restore failed with exit code $LASTEXITCODE."
         }
-        $flutterArguments = @('build', 'windows', '--release', '--no-pub')
+        $flutterArguments = @('build', 'windows', '--release', '--no-pub', "--dart-define=ZOMMI_BUILD_REVISION=$gitCommit")
         if ($Runtime -eq 'win-arm64') {
             $flutterArguments += '--target-platform=windows-arm64'
         }

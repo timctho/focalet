@@ -86,6 +86,11 @@ impl SupervisedCodex {
         cwd: Option<&str>,
     ) -> Result<(), CodexError> {
         self.ready().await?.activate(session_id, cwd).await?;
+        self.ensure_monitor().await;
+        Ok(())
+    }
+
+    pub async fn ensure_monitor(&self) {
         let mut task = self.inner.task.lock().await;
         if task.is_none() && !self.inner.stopped.load(Ordering::Acquire) {
             *task = Some(tokio::spawn(monitor(
@@ -93,7 +98,6 @@ impl SupervisedCodex {
                 HealthPolicy::default(),
             )));
         }
-        Ok(())
     }
 
     // The host must retain this supervisor while it replaces the child.

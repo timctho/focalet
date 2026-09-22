@@ -4,20 +4,19 @@ namespace Zommi.Windows;
 
 internal sealed class CaptureToolbar : Panel
 {
-    internal static readonly Color Surface = Color.FromArgb(25, 31, 30);
-    internal static readonly Color Accent = Color.FromArgb(197, 236, 212);
-    internal static readonly Color Muted = Color.FromArgb(166, 183, 176);
+    private readonly CaptureTheme theme;
     private readonly Dictionary<string, CaptureToolButton> buttons = [];
     private readonly ToolTip tips = new() { InitialDelay = 350, ReshowDelay = 100 };
     private readonly Label hint;
     private readonly float scale;
     public event Action<string>? Invoked;
 
-    public CaptureToolbar(float scale)
+    public CaptureToolbar(float scale, CaptureTheme theme)
     {
+        this.theme = theme;
         this.scale = scale;
         DoubleBuffered = true;
-        BackColor = Surface;
+        BackColor = theme.Surface;
         AccessibleName = "Capture drawing toolbar";
         Size = new Size(S(554), S(98));
         var x = 12;
@@ -42,7 +41,7 @@ internal sealed class CaptureToolbar : Panel
         hint = new Label
         {
             AutoSize = false, Bounds = new Rectangle(S(248), S(62), S(292), S(24)),
-            ForeColor = Muted, BackColor = Surface, TextAlign = ContentAlignment.MiddleRight,
+            ForeColor = theme.Muted, BackColor = theme.Surface, TextAlign = ContentAlignment.MiddleRight,
             Font = new Font("Segoe UI", 9f),
         };
         Controls.Add(hint);
@@ -52,7 +51,7 @@ internal sealed class CaptureToolbar : Panel
     private void Add(string id, string label, Rectangle bounds, string text = "")
     {
         var name = label.Split(" (", StringSplitOptions.None)[0];
-        var button = new CaptureToolButton(id) { Bounds = bounds, Text = text.Length > 0 ? text : name, AccessibleName = name, AccessibleDescription = label, Font = new Font("Segoe UI Semibold", 9f) };
+        var button = new CaptureToolButton(id, theme) { Bounds = bounds, Text = text.Length > 0 ? text : name, AccessibleName = name, AccessibleDescription = label, Font = new Font("Segoe UI Semibold", 9f) };
         button.Click += (_, _) => Invoked?.Invoke(id);
         buttons.Add(id, button);
         Controls.Add(button);
@@ -83,9 +82,9 @@ internal sealed class CaptureToolbar : Panel
         base.OnPaint(e);
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         using var path = Rounded(new RectangleF(.5f, .5f, Width - 1, Height - 1), S(14));
-        using var line = new Pen(Color.FromArgb(64, 83, 74));
+        using var line = new Pen(theme.Outline);
         e.Graphics.DrawPath(line, path);
-        using var divider = new Pen(Color.FromArgb(45, 58, 52));
+        using var divider = new Pen(theme.Outline);
         e.Graphics.DrawLine(divider, S(14), S(52), Width - S(14), S(52));
     }
 
@@ -118,7 +117,7 @@ internal sealed class CaptureToolbar : Panel
     }
 }
 
-internal sealed class CaptureToolButton(string icon) : Button
+internal sealed class CaptureToolButton(string icon, CaptureTheme theme) : Button
 {
     public bool Selected { get; set; }
     private bool hovered;
@@ -128,12 +127,12 @@ internal sealed class CaptureToolButton(string icon) : Button
     {
         var g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
-        g.Clear(CaptureToolbar.Surface);
+        g.Clear(theme.Surface);
         var active = Enabled && (Selected || icon == "attach");
         using var path = CaptureToolbar.Rounded(new RectangleF(1, 1, Width - 2, Height - 2), 8);
-        using var fill = new SolidBrush(active ? CaptureToolbar.Accent : hovered && Enabled ? Color.FromArgb(49, 63, 56) : CaptureToolbar.Surface);
+        using var fill = new SolidBrush(active ? theme.Accent : hovered && Enabled ? theme.Hover : theme.Surface);
         g.FillPath(fill, path);
-        var color = !Enabled ? Color.FromArgb(80, 95, 88) : active ? Color.FromArgb(25, 44, 34) : Color.FromArgb(224, 235, 229);
+        var color = !Enabled ? theme.Outline : active ? theme.OnAccent : theme.OnSurface;
         using var pen = new Pen(color, 1.8f) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
         using var brush = new SolidBrush(color);
         if (icon == "attach")
@@ -180,7 +179,7 @@ internal sealed class CaptureToolButton(string icon) : Button
         }
         if (Focused && ShowFocusCues)
         {
-            using var focus = new Pen(CaptureToolbar.Muted) { DashStyle = DashStyle.Dot };
+            using var focus = new Pen(theme.Muted) { DashStyle = DashStyle.Dot };
             g.DrawPath(focus, path);
         }
     }

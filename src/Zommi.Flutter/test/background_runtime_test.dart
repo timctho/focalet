@@ -112,23 +112,20 @@ void main() {
     core.prepareGate.complete();
   });
 
-  test(
-    'setup prepares transports without choosing or creating a chat',
-    () async {
-      final core = BackgroundCore();
-      final controller = ZommiController(
-        core: core,
-        desktop: FakeDesktopBridge(),
-        runtimeSetupPending: true,
-      );
-      addTearDown(controller.close);
-      await controller.initialize();
-      expect(controller.starting, isFalse);
-      expect(controller.activeSessionId, isNull);
-      expect(core.connectCount, 0);
-      expect(core.prepares, ['runtime-codex']);
-      expect(core.createdSessions, isEmpty);
-      core.prepareGate.complete();
-    },
-  );
+  test('setup only detects runtimes until the user chooses one', () async {
+    final core = BackgroundCore();
+    final controller = ZommiController(
+      core: core,
+      desktop: FakeDesktopBridge(),
+      runtimeSetupPending: true,
+    );
+    addTearDown(controller.close);
+    await controller.initialize();
+    expect(controller.starting, isFalse);
+    expect(controller.activeSessionId, isNull);
+    expect(core.connectCount, 0);
+    expect(core.prepares, isEmpty);
+    expect(core.createdSessions, isEmpty);
+    core.prepareGate.complete();
+  });
 }

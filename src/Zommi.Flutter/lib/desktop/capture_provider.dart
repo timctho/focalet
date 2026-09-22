@@ -174,7 +174,11 @@ CaptureProvider platformCaptureProvider() => Platform.isWindows
     : PortableCaptureProvider();
 
 final class WindowsCaptureProvider
-    implements CaptureProvider, BrowserCaptureSettings {
+    implements CaptureProvider, BrowserCaptureSettings, CaptureThemeSettings {
+  Map<String, int> _theme = const {};
+  @override
+  void setCaptureTheme(Map<String, int> colors) =>
+      _theme = Map.unmodifiable(colors);
   bool _browserPageDetails = true;
   @override
   bool get supportsBrowserPageDetails => true;
@@ -237,6 +241,7 @@ final class WindowsCaptureProvider
     final response = await _selectorClient.request(
       'selectContent',
       parameters: {
+        'theme': _theme,
         'returnProcessId': pid,
         'browserPageDetails': _browserPageDetails,
       },
@@ -278,6 +283,7 @@ final class WindowsCaptureProvider
     final response = await _selectorClient.request(
       'selectImage',
       parameters: {
+        'theme': _theme,
         'returnProcessId': pid,
         'browserPageDetails': _browserPageDetails,
       },

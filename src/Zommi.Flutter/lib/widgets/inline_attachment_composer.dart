@@ -360,7 +360,7 @@ class _InlineAttachmentTileState extends State<InlineAttachmentTile> {
         onTap: () => widget.onEnter?.call(context),
         child: Semantics(
           button: widget.onEnter != null,
-          label: '${attachment.reference}: ${attachment.excerpt}',
+          label: '${attachment.reference}. ${attachment.excerpt}',
           child: Container(
             key: ValueKey('$keyPrefix-attachment-${attachment.id}'),
             height: 34,
@@ -376,16 +376,15 @@ class _InlineAttachmentTileState extends State<InlineAttachmentTile> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (image == null)
-                  Text(
-                    attachment.reference,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.primary,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                    ),
+                Text(
+                  '${attachment.reference}.',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.primary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
                   ),
-                if (image == null) const SizedBox(width: 6),
+                ),
+                const SizedBox(width: 6),
                 if (image != null) ...[
                   ClipRRect(
                     borderRadius: BorderRadius.circular(4),

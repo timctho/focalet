@@ -546,7 +546,12 @@ class ConversationTurnView extends StatelessWidget {
                             Padding(
                               padding: const EdgeInsets.only(bottom: 5),
                               child: Text(
-                                turn.contextTokens.join(' '),
+                                turn.contextTokens
+                                    .map(
+                                      (token) =>
+                                          '${token.replaceAll(RegExp(r'[\[\]]'), '')}.',
+                                    )
+                                    .join(' '),
                                 style: TextStyle(
                                   color: Theme.of(context).colorScheme.primary,
                                   fontSize: 10,

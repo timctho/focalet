@@ -342,6 +342,12 @@ class RichFakeCore
     if (connectErrorCode case final code?) {
       throw CoreProtocolException(code, connectErrorMessage);
     }
+    if (preferredSessionId != null && openSessionFails) {
+      throw const CoreProtocolException(
+        'session-unavailable',
+        'Chat unavailable',
+      );
+    }
     activeTargetId = runtimeTargetId;
     activeSessionId =
         preferredSessionId ??

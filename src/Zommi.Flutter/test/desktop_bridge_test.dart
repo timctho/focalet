@@ -247,6 +247,28 @@ void main() {
     expect(ordinary.requestParameters.last['browserPageDetails'], isTrue);
     await provider.close();
   });
+  test(
+    'capture theme follows preference changes for both selection entry points',
+    () async {
+      final client = _FakeNativeCaptureClient(
+        onRequest: (_) async => {'cancelled': true},
+      );
+      final provider = WindowsCaptureProvider(captureClient: client);
+      provider.setCaptureTheme({'accent': 0xff387da8, 'surface': 0xff282828});
+      await provider.selectContext();
+      expect(client.requestParameters.last['theme'], {
+        'accent': 0xff387da8,
+        'surface': 0xff282828,
+      });
+      provider.setCaptureTheme({'accent': 0xffc5ecd4, 'surface': 0xffffffff});
+      await provider.selectImage();
+      expect(client.requestParameters.last['theme'], {
+        'accent': 0xffc5ecd4,
+        'surface': 0xffffffff,
+      });
+      await provider.close();
+    },
+  );
   testWidgets('native resize feedback reports the actual physical viewport', (
     tester,
   ) async {

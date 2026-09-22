@@ -1167,6 +1167,13 @@ class AppSettingsPanel extends StatelessWidget {
               'App settings',
               style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
             ),
+            const Text(
+              'Build ${String.fromEnvironment('ZOMMI_BUILD_REVISION', defaultValue: 'development')}',
+              key: ValueKey('build-revision'),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 10),
+            ),
             if (controller.desktop case final CapturePermissionBridge bridge
                 when bridge.supportsCapturePermissions)
               CapturePermissionSetup(bridge: bridge),
@@ -1916,7 +1923,7 @@ class ContextPreviewPanel extends StatelessWidget {
                               CrossAxisAlignment.stretch,
                           children: [
                             SelectableText(
-                              '${attachment.reference} · ${attachment.sourceTitle}',
+                              '${attachment.reference}. ${attachment.sourceTitle}',
                               style: const TextStyle(
                                 fontWeight: FontWeight.w700,
                               ),

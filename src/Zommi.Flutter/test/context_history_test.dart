@@ -177,10 +177,10 @@ void main() {
     await tester.tap(image.first);
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('context-preview')), findsOneWidget);
-    expect(find.text('C · Source chart'), findsNothing);
+    expect(find.text('C. Source chart'), findsNothing);
     await tester.tap(find.text('Details'));
     await tester.pumpAndSettle();
-    expect(find.text('C · Source chart'), findsOneWidget);
+    expect(find.text('C. Source chart'), findsOneWidget);
     await controller.switchSession('session-1');
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('context-preview')), findsNothing);

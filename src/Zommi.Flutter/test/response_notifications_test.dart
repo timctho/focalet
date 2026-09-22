@@ -177,6 +177,7 @@ void main() {
     late List<String> events;
     Map<String, Object?>? launch;
     var available = true;
+    var foreground = false;
 
     setUp(() {
       debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
@@ -186,6 +187,7 @@ void main() {
       events = [];
       launch = null;
       available = true;
+      foreground = false;
       messenger.setMockMethodCallHandler(channel, (call) async {
         calls.add(call);
         if (call.method == 'initialize') return available;
@@ -193,6 +195,7 @@ void main() {
         return null;
       });
       notifications = ResponseNotifications(
+        isForeground: () async => foreground,
         onOpen: (runtime, session) => opened.add((runtime, session)),
         record: (event, details) async => events.add(event),
       );
@@ -269,5 +272,38 @@ void main() {
       expect(calls.where((call) => call.method == 'show'), isEmpty);
       expect(events, ['notification.unavailable']);
     });
+
+    test('foreground app is silent; background app can notify again', () async {
+      foreground = true;
+      await show();
+      expect(calls, isEmpty);
+      foreground = false;
+      await show();
+      expect(calls.where((call) => call.method == 'show'), hasLength(1));
+      foreground = true;
+      await show();
+      expect(calls.where((call) => call.method == 'show'), hasLength(1));
+    });
+
+    test(
+      'returning to the app during notification initialization stays silent',
+      () async {
+        final initialized = Completer<void>();
+        messenger.setMockMethodCallHandler(channel, (call) async {
+          calls.add(call);
+          if (call.method == 'initialize') {
+            await initialized.future;
+            return true;
+          }
+          return null;
+        });
+        final pending = show();
+        await Future<void>.delayed(Duration.zero);
+        foreground = true;
+        initialized.complete();
+        await pending;
+        expect(calls.where((call) => call.method == 'show'), isEmpty);
+      },
+    );
   });
 }

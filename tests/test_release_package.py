@@ -88,6 +88,22 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertEqual(result["captureHost"], "zommi-x11-capture")
         self.assertEqual(result["files"], 5 + len(verify_release.LINUX_RUNTIME_LIBRARIES))
 
+    def test_windows_icon_path_changes_when_icon_bytes_change(self) -> None:
+        icon = self.root / "data/flutter_assets/windows/runner/resources/app_icon.ico"
+        icon.parent.mkdir(parents=True)
+        names = []
+        for content in (b"previous-icon", b"ocean-icon"):
+            icon.write_bytes(content)
+            assemble_release._write_manifest(
+                self.root, target_platform="windows", architecture="x64",
+                commit="a" * 40, entrypoint="Zommi.exe", core_host="zommi-core-host.exe",
+                capture_host="native/Zommi.Capture.exe", signing={"status": "unsigned"},
+            )
+            name = json.loads((self.root / "release-manifest.json").read_text())["icon"]
+            self.assertEqual((self.root / name).read_bytes(), content)
+            names.append(name)
+        self.assertNotEqual(*names)
+
     def test_licensed_package_cannot_omit_notices_even_with_valid_checksums(self) -> None:
         manifest_path = self.root / "release-manifest.json"
         manifest = json.loads(manifest_path.read_text())
@@ -432,7 +448,7 @@ class ReleasePackageTests(unittest.TestCase):
         native = SCRIPTS.parent / "src/Zommi.Windows"
         region = (native / "RegionSelectionForm.cs").read_text(encoding="utf-8")
         content = (native / "ContentSelectionForm.cs").read_text(encoding="utf-8")
-        self.assertIn(": ContentSelectionForm(returnProcessId, capturedDesktop, 1)", region)
+        self.assertIn(": ContentSelectionForm(returnProcessId, capturedDesktop, 1, theme)", region)
         self.assertIn("base.OnShown(e);", region)
         self.assertIn("ContentSelectionForm : PointSelectionForm", content)
         # Both selectors inherit foreground ownership from the shared form.

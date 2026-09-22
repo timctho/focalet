@@ -163,6 +163,18 @@ class _ZommiAppState extends State<ZommiApp> {
 
     return MaterialApp(
       builder: (context, child) {
+        if (widget.desktop case final CaptureThemeSettings capture) {
+          final colors = Theme.of(context).colorScheme;
+          capture.setCaptureTheme({
+            'accent': colors.primary.toARGB32(),
+            'onAccent': colors.onPrimary.toARGB32(),
+            'surface': colors.surfaceContainerLow.toARGB32(),
+            'onSurface': colors.onSurface.toARGB32(),
+            'muted': colors.onSurfaceVariant.toARGB32(),
+            'outline': colors.outlineVariant.toARGB32(),
+            'hover': colors.surfaceContainerHigh.toARGB32(),
+          });
+        }
         if (widget.desktop case final TrayMenuAppearance tray) {
           final colors = Theme.of(context).colorScheme;
           tray.setTrayMenuColors(
@@ -712,6 +724,29 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                   ),
                 ),
                 const SizedBox(width: 8),
+                if (_controller.connectionErrorTargetId != null ||
+                    _controller.coreConnectionFailed) ...[
+                  TextButton(
+                    key: const ValueKey('retry-connection'),
+                    onPressed:
+                        _controller.runtimeBusy || _controller.sessionBusy
+                        ? null
+                        : () => unawaited(_controller.retryConnection()),
+                    child: const Text('Retry'),
+                  ),
+                  if (widget.core is CoreRecoveryBridge)
+                    IconButton(
+                      key: const ValueKey('restart-connection'),
+                      tooltip: 'Restart agent connections',
+                      onPressed:
+                          _controller.runtimeBusy || _controller.sessionBusy
+                          ? null
+                          : () => unawaited(
+                              _controller.retryConnection(restart: true),
+                            ),
+                      icon: const Icon(Icons.restart_alt),
+                    ),
+                ],
                 IconButton(
                   key: const ValueKey('dismiss-operation-warning'),
                   tooltip: 'Dismiss error',
@@ -890,6 +925,40 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                                   ),
                                 if (_controller.queuedMessages.isNotEmpty)
                                   _buildMessageQueue(),
+                                if ((_controller.sessionBusy ||
+                                        _controller.runtimeBusy) &&
+                                    _controller.switchingRuntimeId != null)
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 24,
+                                      vertical: 4,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        const SizedBox.square(
+                                          dimension: 14,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            _controller.status,
+                                            maxLines: 2,
+                                          ),
+                                        ),
+                                        TextButton(
+                                          key: const ValueKey(
+                                            'cancel-connection',
+                                          ),
+                                          onPressed: _controller
+                                              .cancelConnectionAttempt,
+                                          child: const Text('Cancel'),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
                                 if (_controller.statusWarning)
                                   _buildStatusWarning(),
                                 _buildComposer(),

@@ -155,6 +155,12 @@ def _write_manifest(
     }
     if capture_host:
         manifest["captureHost"] = capture_host
+    if target_platform == "windows":
+        icon = root / "data/flutter_assets/windows/runner/resources/app_icon.ico"
+        if icon.is_file():
+            icon_name = f"zommi-icon-{_sha256(icon)[:16]}.ico"
+            shutil.copy2(icon, root / icon_name)
+            manifest["icon"] = icon_name
     (root / "release-manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -67,6 +68,29 @@ void main() {
     await tester.tap(button);
     await tester.pumpAndSettle();
   }
+
+  testWidgets(
+    'cancelled setup unlocks controls and ignores the late connection',
+    (tester) async {
+      final core = RichFakeCore();
+      final store = _Store();
+      await launch(tester, core, store, FakeDesktopBridge());
+      final gate = Completer<void>();
+      core.connectGate = gate.future;
+      await tester.tap(find.byKey(const ValueKey('setup-continue')));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('setup-cancel-connection')));
+      await tester.pump();
+      final skip = tester.widget<TextButton>(
+        find.byKey(const ValueKey('setup-skip')),
+      );
+      expect(skip.onPressed, isNotNull);
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(store.saves, 0);
+      expect(find.text('Welcome to Zommi'), findsOneWidget);
+    },
+  );
 
   testWidgets(
     'detects without connecting, then connects the chosen runtime and remembers completion',
