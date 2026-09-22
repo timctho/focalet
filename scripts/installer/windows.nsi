@@ -43,8 +43,18 @@ FunctionEnd
 Function ${Prefix}RequireClosed
 retry:
   System::Call 'kernel32::OpenMutexW(i 0x00100000, i 0, w "Local\Zommi.Desktop.SingleInstance") p.r0'
-  StrCmp $0 0 done
+  StrCmp $0 0 checkFile
   System::Call 'kernel32::CloseHandle(p r0)'
+  Goto busy
+checkFile:
+  ; Earlier desktop versions did not own the current single-instance mutex.
+  IfFileExists "$INSTDIR\Zommi.exe" 0 done
+  ClearErrors
+  FileOpen $0 "$INSTDIR\Zommi.exe" a
+  IfErrors busy
+  FileClose $0
+  Goto done
+busy:
   IfSilent fail
   MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "Close Zommi (including its tray icon) before continuing. This prevents an incomplete update or reset." IDRETRY retry
 fail:
@@ -82,10 +92,20 @@ FunctionEnd
 
 Section "Zommi"
   SetShellVarContext current
+  Call RequireClosed
   !include "${INSTALL_FILES}"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   CreateDirectory "$SMPROGRAMS\Zommi"
   CreateShortcut "$SMPROGRAMS\Zommi\Zommi.lnk" "$INSTDIR\Zommi.exe" "" "$INSTDIR\${APP_ICON_RELATIVE}"
+  ; Refresh shortcuts created by earlier installers without adding new ones.
+  ${If} ${FileExists} "$SMPROGRAMS\Zommi.lnk"
+    CreateShortcut "$SMPROGRAMS\Zommi.lnk" "$INSTDIR\Zommi.exe" "" "$INSTDIR\${APP_ICON_RELATIVE}"
+    WriteRegDWORD HKCU "Software\Zommi" "LegacyStartShortcut" 1
+  ${EndIf}
+  ${If} ${FileExists} "$DESKTOP\Zommi.lnk"
+    CreateShortcut "$DESKTOP\Zommi.lnk" "$INSTDIR\Zommi.exe" "" "$INSTDIR\${APP_ICON_RELATIVE}"
+    WriteRegDWORD HKCU "Software\Zommi" "DesktopShortcut" 1
+  ${EndIf}
   WriteRegStr HKCU "Software\Zommi" "InstallDir" "$INSTDIR"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Zommi" "DisplayName" "Zommi"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Zommi" "DisplayVersion" "${APP_DISPLAY_VERSION}"
@@ -123,6 +143,14 @@ Section "Uninstall"
   RMDir "$INSTDIR"
   Delete "$SMPROGRAMS\Zommi\Zommi.lnk"
   RMDir "$SMPROGRAMS\Zommi"
+  ReadRegDWORD $0 HKCU "Software\Zommi" "LegacyStartShortcut"
+  ${If} $0 == 1
+    Delete "$SMPROGRAMS\Zommi.lnk"
+  ${EndIf}
+  ReadRegDWORD $0 HKCU "Software\Zommi" "DesktopShortcut"
+  ${If} $0 == 1
+    Delete "$DESKTOP\Zommi.lnk"
+  ${EndIf}
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Zommi"
   DeleteRegKey HKCU "Software\Zommi"
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'

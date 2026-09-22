@@ -126,6 +126,8 @@ Close Zommi before installing an update. On Windows, remove it through
 **Settings → Apps → Installed apps → Zommi**. On Mac, remove the app from
 Applications. The Windows installer asks you to close Zommi, including its tray
 icon, before replacing files. **App settings** shows the installed build revision.
+Existing Zommi desktop and Start menu shortcuts are updated to the installed
+copy and its current icon, including shortcuts from earlier desktop versions.
 
 For a fresh Windows setup, select **Remove all Zommi settings, cached agent
 detection and local session metadata** in the uninstaller, then reinstall.
