@@ -438,16 +438,7 @@ fn discover_runtime_targets_resilient_with(
     let (mut targets, wsl_probe_succeeded) =
         discover_runtime_targets_with_status(environment, platform, probe_wsl);
     if platform == "windows" {
-        if wsl_probe_succeeded {
-            let wsl_targets = targets
-                .iter()
-                .filter(|target| target.execution_host.kind == "wsl")
-                .cloned()
-                .collect::<Vec<_>>();
-            let _ = cache.save(&wsl_targets);
-        } else if let Ok(cached) = cache.load() {
-            targets.extend(cached);
-        }
+        targets = reconcile_wsl_discovery_cache(targets, wsl_probe_succeeded, cache);
     }
     targets.extend(
         overrides
@@ -458,6 +449,24 @@ fn discover_runtime_targets_resilient_with(
         targets: deduplicate_targets(targets),
         wsl_probe_succeeded,
     }
+}
+
+fn reconcile_wsl_discovery_cache(
+    mut targets: Vec<RuntimeTarget>,
+    probe_succeeded: bool,
+    cache: &RuntimeDiscoveryCacheStore,
+) -> Vec<RuntimeTarget> {
+    let found_wsl_target = targets.iter().any(valid_cached_wsl_target);
+    if !probe_succeeded && let Ok(cached) = cache.load() {
+        targets.extend(cached);
+    }
+    // A failed secondary distribution must not prevent a working runtime from
+    // surviving the next launch. Fresh entries take precedence over the cache.
+    let targets = deduplicate_targets(targets);
+    if probe_succeeded || found_wsl_target {
+        let _ = cache.save(&targets);
+    }
+    targets
 }
 
 pub fn target_from_override(
@@ -1181,8 +1190,8 @@ mod tests {
         ConfiguredRuntimeOverride, ExecutionHost, PARENT_APP_RUNTIME_ENVIRONMENT_KEYS,
         RuntimeDiscoveryCacheStore, RuntimeOverrideStore, RuntimeTarget, command_for_target,
         discover_runtime_targets_resilient_with, discover_runtime_targets_with,
-        runtime_discovery_settings, runtime_targets_from_wsl_probe, select_default_target,
-        target_from_override, wsl_runtime_probe_script,
+        reconcile_wsl_discovery_cache, runtime_discovery_settings, runtime_targets_from_wsl_probe,
+        select_default_target, target_from_override, wsl_runtime_probe_script,
     };
 
     #[test]
@@ -1514,6 +1523,61 @@ mod tests {
             profile_id: None,
         };
         assert!(target_from_override(&native, "linux").is_err());
+    }
+
+    #[test]
+    fn partial_wsl_discovery_survives_a_failed_probe_on_next_launch() {
+        let root =
+            std::env::temp_dir().join(format!("zommi-partial-wsl-cache-{}", uuid::Uuid::new_v4()));
+        let path = root.join("runtime-targets.json");
+        let store = RuntimeDiscoveryCacheStore::at(path.clone());
+        let detected = runtime_targets_from_wsl_probe(
+            "Ubuntu",
+            true,
+            b"__ZOMMI_RUNTIME_HOME__/home/u\n__ZOMMI_RUNTIME_PATH__codex\t/home/u/bin/codex\n",
+        );
+        assert_eq!(detected.len(), 1);
+        let id = detected[0].id.clone();
+        let first = reconcile_wsl_discovery_cache(detected, false, &store);
+        assert_eq!(first[0].id, id);
+        let bytes = fs::read(&path).expect("partial discovery persisted");
+
+        // Reopen the store as another process would, with no successful probe.
+        let reopened = RuntimeDiscoveryCacheStore::at(path.clone());
+        let next = reconcile_wsl_discovery_cache(Vec::new(), false, &reopened);
+        assert_eq!(next.len(), 1);
+        assert_eq!(next[0].id, id);
+        assert_eq!(next[0].source.as_deref(), Some("last-known-good"));
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+
+        // A complete successful scan can still remove an uninstalled runtime.
+        assert!(reconcile_wsl_discovery_cache(Vec::new(), true, &reopened).is_empty());
+        assert!(reopened.load().unwrap().is_empty());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn partial_wsl_discovery_merges_fresh_and_cached_distributions() {
+        let root =
+            std::env::temp_dir().join(format!("zommi-partial-wsl-merge-{}", uuid::Uuid::new_v4()));
+        let store = RuntimeDiscoveryCacheStore::at(root.join("runtime-targets.json"));
+        let probe = b"__ZOMMI_RUNTIME_PATH__codex\t/home/u/bin/codex\n";
+        let mut cached = runtime_targets_from_wsl_probe("Ubuntu", true, probe);
+        cached.extend(runtime_targets_from_wsl_probe("Debian", false, probe));
+        store.save(&cached).unwrap();
+
+        let mut fresh = runtime_targets_from_wsl_probe("Ubuntu", true, probe);
+        fresh[0].display_name = "Updated Codex".into();
+        let merged = reconcile_wsl_discovery_cache(fresh, false, &store);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].display_name, "Updated Codex");
+        assert_ne!(merged[0].source.as_deref(), Some("last-known-good"));
+        assert_eq!(merged[1].execution_host.name.as_deref(), Some("Debian"));
+        assert_eq!(merged[1].source.as_deref(), Some("last-known-good"));
+        let persisted = store.load().unwrap();
+        assert_eq!(persisted.len(), 2);
+        assert_eq!(persisted[0].display_name, "Updated Codex");
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
