@@ -14,16 +14,21 @@ Clone the repository and install:
   `ffprobe`, for reviewed demo metadata).
 - Chromium, Chrome or Edge for browser capture tests. Set `ZOMMI_TEST_CHROMIUM`
   to the executable if it is not on `PATH`.
-- Linux: SQLite, GTK and Chromium's runtime dependencies. On Ubuntu 24.04:
+- Ubuntu 24.04 LTS x64 (the supported Linux target): SQLite, GTK and Chromium's runtime dependencies:
   `sudo apt-get install libsqlite3-dev libgtk-3-0t64 libasound2t64 ffmpeg`.
 - Windows: Visual Studio 2022 or later C++ tools for Rust and native builds;
   ATL is also needed for Flutter packaging. Use PowerShell 7 for native checks.
 
-Install the Python test dependencies:
+Install the Python test dependencies in a virtual environment (required for
+Ubuntu's OS-managed Python):
 
 ```sh
-python3 -m pip install -r tests/requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r tests/requirements.txt
 ```
+
+In PowerShell, activate it with `.\.venv\Scripts\Activate.ps1` instead.
 
 You do **not** need an agent account, model credentials, or a running gateway to
 run contract tests. Process tests launch the Rust broker with local protocol
@@ -35,7 +40,7 @@ fixtures supply explicit commands; ordinary app launches still discover agents.
 
 ## Run checks
 
-From the repository root on Linux:
+From the repository root on Ubuntu:
 
 ```sh
 python3 scripts/check.py
@@ -84,7 +89,8 @@ bash scripts/package-unix.sh linux
 ```
 
 Native Linux builds additionally need Clang, Ninja, pkg-config, GTK development
-headers, X11 and Ayatana AppIndicator. See [Windows acceptance](docs/windows-acceptance.md),
+headers, X11 and Ayatana AppIndicator. See [Ubuntu testing](docs/ubuntu-testing.md),
+[Windows acceptance](docs/windows-acceptance.md),
 [Mac testing](docs/macos-testing.md) and [release preparation](docs/public-releases.md).
 
 ## Choose the right regression test
@@ -128,7 +134,7 @@ Keep changes focused and describe the user-visible result, validation and any
 native checks still needed. Include a regression for a behavior change. Never
 upload personal transcripts, settings, session catalogs, tokens, or raw desktop
 logs. Public demos must use synthetic content and pass the
-[recording review](docs/demos/README.md).
+[recording review](scripts/demo/README.md).
 
 ## License
 

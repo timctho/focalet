@@ -47,7 +47,7 @@ ownership while preserving its draft. For missing Codex history, check the
 | Platform | Archive | Entrypoint |
 | --- | --- | --- |
 | Windows x64 | `zommi-windows-x64.zip` | `Zommi.exe` |
-| Linux x64/arm64 | `zommi-linux-<arch>.tar.gz` | `zommi` |
+| Ubuntu 24.04 LTS x64 | `zommi-linux-x64.tar.gz` | `zommi` |
 | macOS x64/arm64 | `zommi-macos-<arch>.zip` | `Zommi.app` |
 
 Packages include the Rust host, platform capture helper, licenses,

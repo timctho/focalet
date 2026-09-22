@@ -12,7 +12,7 @@ include Windows. Do not use GitHub's “Source code” archive as an installer.
 
 | Computer | Download | Install |
 | --- | --- | --- |
-| Windows 10/11, x64 | [Zommi-Setup-x64.exe](https://github.com/timctho/zommi/releases/download/v0.1.0-preview.6/Zommi-Setup-x64.exe) | Run the installer, then launch Zommi from Start |
+| Windows 10/11, x64 | [Zommi-Setup-x64.exe](https://github.com/timctho/zommi/releases/download/v0.1.0-preview.7/Zommi-Setup-x64.exe) | Run the installer, then launch Zommi from Start |
 | Mac with Apple Silicon | `Zommi-macOS-arm64.dmg`, when available | Open the DMG; drag Zommi into Applications |
 | Mac with Intel | `Zommi-macOS-x64.dmg`, when available | Open the DMG; drag Zommi into Applications |
 
@@ -30,10 +30,12 @@ After checking the release source and checksum, Windows may require
 **More info → Run anyway**. On Mac, use
 **System Settings → Privacy & Security → Open Anyway** for a trusted download.
 
-Linux native archives can be [built from source](../CONTRIBUTING.md). Extract
-`zommi-linux-<arch>.tar.gz` and run `./zommi`. X11 supports direct region capture;
-Wayland needs working screenshot/global-shortcut portals and provides less
-window context. Linux download availability is listed on each release.
+On Linux, Zommi targets **Ubuntu 24.04 LTS x64** with **Ubuntu on Xorg**.
+There is no Ubuntu installer in the current preview. Follow the
+[Ubuntu build and testing guide](ubuntu-testing.md) to build and run it.
+Wayland is experimental: capture needs a screenshot portal and Alt+A also
+needs a compatible global-shortcut portal. Other distributions are outside
+the supported scope.
 
 ## 2. Choose the agent you already have
 
@@ -98,7 +100,7 @@ use **Attach** or **Enter**. Refer to the attachments as **A**, **B**, etc.
 You can also use **Add region** in the drawing toolbar. Each region keeps its
 own annotations and undo history.
 **Escape** cancels without attaching. Change Alt+A in **App settings** if another
-app already uses it. [Recorded examples](demos/README.md).
+app already uses it. [Examples](../README.md#see-it-in-action).
 
 A browser connection is optional. Without it, images and available accessibility
 context still work. On Windows, **Full webpage details** can enrich a selection
@@ -122,7 +124,8 @@ Zommi does not restart or reconfigure your browser.
 
 ## Update, uninstall and verify
 
-Close Zommi before installing an update. On Windows, remove it through
+Choose **Quit** from Zommi's tray menu before installing an update; the window's
+**X** only hides it. On Windows, remove it through
 **Settings → Apps → Installed apps → Zommi**. On Mac, remove the app from
 Applications. The Windows installer asks you to close Zommi, including its tray
 icon, before replacing files. **App settings** shows the installed build revision.

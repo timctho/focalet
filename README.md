@@ -1,6 +1,6 @@
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="design/zommi-logo/exports/ocean/lockup-dark.svg">
-  <img src="design/zommi-logo/exports/ocean/lockup-light.svg" alt="Zommi" width="240">
+  <source media="(prefers-color-scheme: dark)" srcset="design/zommi-logo/exports/ocean/lockup-dark.png">
+  <img src="design/zommi-logo/exports/ocean/lockup-light.png" alt="Zommi" width="240">
 </picture>
 
 # Show your agent what you mean.
@@ -9,7 +9,7 @@
 existing agent. Select a region, add a sketch if useful, and send the image with
 available text, links and structure.
 
-### [Download the Windows preview →](https://github.com/timctho/zommi/releases/download/v0.1.0-preview.6/Zommi-Setup-x64.exe)
+### [Download the Windows preview →](https://github.com/timctho/zommi/releases/download/v0.1.0-preview.7/Zommi-Setup-x64.exe)
 
 Uses your existing agent account. [Installation guide](docs/install.md) ·
 [Build from source](CONTRIBUTING.md)
@@ -73,12 +73,6 @@ boxes, and cross out an option. The agent turns the sketch into linked formulas.
 
 [![Freehand groups, connections and an exclusion become two linked quotes](docs/demos/sheets-preview.webp)](docs/demos/sheets.mp4)
 
-Recorded with the Windows development build in Ocean; the downloadable preview
-may differ. Task demos use Codex with real selections, replies and edits.
-Clips shorten waits and speed up gestures; context illustrations are labelled.
-The dashboard and sheet use synthetic data. Your agent supplies the tools and
-permissions to research or edit. [Recording details](docs/demos/README.md)
-
 ## Capture and share
 
 Press **Alt+A**, select a region, review the attachment and ask your question.
@@ -100,8 +94,10 @@ policies apply. [Capture controls and limitations](docs/browser-context.md)
 | --- | --- | --- |
 | **Windows 10/11 · x64** | Preview installer | Multiple regions, drawing, accessibility and optional browser context |
 | **macOS 12+ · Apple Silicon / Intel** | Source / test builds; desktop validation pending | Native region images and screen geometry |
-| **Linux · X11** | Source build | Native region images |
-| **Linux · Wayland** | Source build; requires desktop portals | Portal screenshots and shortcuts; reduced window context |
+| **Ubuntu 24.04 LTS · x64 · X11** | Source build; [testing guide](docs/ubuntu-testing.md) | Native region images |
+| **Ubuntu 24.04 LTS · x64 · Wayland** | Experimental; requires compatible desktop portals | Portal screenshots; global shortcuts depend on the desktop |
+
+Linux support is limited to Ubuntu. Start with **Ubuntu on Xorg** for desktop testing.
 
 [Releases](https://github.com/timctho/zommi/releases) ·
 [Installation and permissions](docs/install.md) ·

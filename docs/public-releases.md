@@ -12,6 +12,30 @@ contain only the per-user Windows installer. Mac disk images are included when
 built and accepted on that same revision. Raw desktop acceptance evidence stays
 private and is not uploaded by the publisher.
 
+## When builds run
+
+| Trigger | Workflow / machine | Result |
+| --- | --- | --- |
+| Every PR, including forks; every push to `main`; manual dispatch | [PR checks](../.github/workflows/checks.yml), GitHub-hosted `ubuntu-24.04`, `windows-2025`, `macos-15` | Tests and a native release-mode package on each platform; no installer upload or published Release |
+| Manual dispatch of Native acceptance | [Native acceptance](../.github/workflows/ci.yml); Ubuntu/Windows on opted-in self-hosted runners, Mac on GitHub-hosted runners | Native acceptance and optional package artifacts; Mac can create an installer in a draft release |
+| Maintainer runs `publish_release.py --publish` with accepted installer metadata | Maintainer's build/publication environment | Publishes the verified installers, checksums and source manifest to GitHub Releases |
+
+There are no path filters: a documentation-only PR also runs PR checks. Uploading
+an Actions artifact and publishing a GitHub Release are separate operations.
+There is currently **no tag-triggered installer/publishing workflow**. Pushing a
+version tag or changing the repository to public does not start one.
+
+Making the repository public preserves these triggers and runner choices.
+[Standard GitHub-hosted runners are free for public repositories](https://docs.github.com/en/billing/concepts/product-billing/github-actions);
+larger runners are billed separately. Actions still has to be enabled, and fork
+contributions can require approval before their workflow runs. Public visibility
+does not move self-hosted jobs to GitHub's machines or make manual releases automatic.
+
+To automate distribution later, add a separate reviewed workflow triggered by a
+version tag or manual dispatch: build on each platform's GitHub-hosted runner,
+validate the installers, then publish from a job with `contents: write`. Keep
+interactive desktop acceptance separate from compilation and contract checks.
+
 ## Build and accept one revision
 
 Run the checks required by [CONTRIBUTING.md](../CONTRIBUTING.md) for the revision

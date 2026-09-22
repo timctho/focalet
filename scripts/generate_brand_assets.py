@@ -56,7 +56,15 @@ def ocean_exports() -> Path:
     folder = DESIGN / "exports/ocean"
     folder.mkdir(parents=True, exist_ok=True)
     for tone, color in (("light", OCEAN), ("dark", OCEAN_LIGHT)):
-        (folder / f"lockup-{tone}.svg").write_text(lockup("relay", color))
+        logo = lockup("relay", color)
+        (folder / f"lockup-{tone}.svg").write_text(logo)
+        # Supersample the README image, then filter its transparent edges.
+        # Keep ample resolution for the 240 px lockup on high-DPI displays.
+        with Image.open(BytesIO(cairosvg.svg2png(
+            bytestring=logo.encode(), output_width=1960, output_height=528,
+        ))) as rendered:
+            rendered.resize((980, 264), Image.Resampling.LANCZOS).save(
+                folder / f"lockup-{tone}.png", optimize=True)
     (folder / "mark.svg").write_text(document(
         128, 128, nested("relay", 0, 0, 128, 128, OCEAN), "Zommi Ocean"))
     (folder / "app.svg").write_text(app_icon("relay", OCEAN, "#FFFFFF"))

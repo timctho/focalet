@@ -12,6 +12,10 @@ Editable geometry is in `masters/`; the wordmark is outlined Manrope. Preserve
 the supplied proportions and leave at least one symbol stroke width of clear
 space. The font's [SIL Open Font License](Manrope-OFL.txt) is retained here.
 
+The README uses transparent 980 × 264 PNG exports displayed at 240 px wide.
+They are rendered from the same vectors with supersampling for smooth edges
+on standard and high-DPI screens; light and dark variants match the page theme.
+
 To regenerate SVGs and the Flutter, Windows and macOS icons from the repository
 root, install CairoSVG and Pillow, then run:
 
