@@ -101,7 +101,7 @@ fn capture_bytes(
     Ok(png)
 }
 
-fn client_window(connection: &RustConnection, window: Window) -> AppResult<Window> {
+pub(super) fn client_window(connection: &RustConnection, window: Window) -> AppResult<Window> {
     let pid_atom = atom(connection, b"_NET_WM_PID")?;
     let mut pending = vec![(window, 0)];
     let mut visited = 0;

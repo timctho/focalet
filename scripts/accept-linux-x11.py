@@ -128,6 +128,10 @@ class X11:
             c_ulong,
             ctypes.POINTER(XWindowAttributes),
         ]
+        lib.XTranslateCoordinates.argtypes = [
+            c_void_p, c_ulong, c_ulong, c_int, c_int,
+            ctypes.POINTER(c_int), ctypes.POINTER(c_int), ctypes.POINTER(c_ulong),
+        ]
         lib.XGetWindowAttributes.restype = c_int
         lib.XKeysymToKeycode.argtypes = [c_void_p, c_ulong]
         lib.XKeysymToKeycode.restype = c_uint
@@ -303,6 +307,16 @@ class X11:
             raise RuntimeError(f"Could not inspect X11 window {window}.")
         return attributes
 
+    def center(self, window: int) -> tuple[int, int]:
+        attributes = self.attributes(window)
+        x, y, child = c_int(), c_int(), c_ulong()
+        if not self.lib.XTranslateCoordinates(
+            self.display, window, self.root, attributes.width // 2, attributes.height // 2,
+            byref(x), byref(y), byref(child),
+        ):
+            raise RuntimeError(f"Could not locate X11 window {window}.")
+        return x.value, y.value
+
     def find_zommi_window(self) -> int | None:
         pending = [(window, 0) for window in self.children(self.root)]
         while pending:
@@ -466,7 +480,7 @@ def select_point_context(capture: Path, x11: X11, fixture: int) -> dict[str, obj
     )
     try:
         time.sleep(0.15)
-        x11.click_point((100, 100))
+        x11.click_point(x11.center(fixture))
         stdout, stderr = process.communicate(timeout=10)
     except BaseException:
         stop_process(process)
@@ -661,6 +675,10 @@ def run_acceptance(package: Path) -> int:
             if pointed.get("windowTitle") != fixture_title:
                 raise RuntimeError(
                     f"Point context did not preserve the clicked window title: {pointed}"
+                )
+            if pointed.get("windowId") != fixture or pointed.get("processId") != os.getpid():
+                raise RuntimeError(
+                    f"Point context selected a decoration instead of the application: {pointed}"
                 )
 
             cancelled = run_case(
