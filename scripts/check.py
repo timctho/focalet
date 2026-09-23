@@ -234,6 +234,7 @@ def check_windows():
             "session_catalog_cache",
             "response_notifications",
             "document_preview",
+            "document_preview_thumbnail",
             "runtime_environment",
             "capture_shortcut",
             "first_run_setup",

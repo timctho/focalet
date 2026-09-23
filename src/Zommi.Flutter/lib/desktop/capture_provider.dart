@@ -354,7 +354,7 @@ final class LinuxCaptureProvider implements CaptureProvider {
     url: '',
     limitation:
         response['limitation']?.toString() ??
-        'X11 semantic enrichment depends on AT-SPI.',
+        'Ubuntu DOM and AT-SPI accessibility capture are not yet implemented.',
   );
 
   @override

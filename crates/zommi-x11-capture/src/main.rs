@@ -286,7 +286,7 @@ fn context_value(connection: &RustConnection, window: Window) -> AppResult<Value
         "windowTitle": title,
         "windowId": window,
         "processId": process_id,
-        "limitation": "X11 exposes active-window metadata only; semantic enrichment depends on AT-SPI.",
+        "limitation": "X11 exposes active-window metadata only. Zommi does not yet collect browser DOM or AT-SPI accessibility data on Ubuntu.",
     }))
 }
 

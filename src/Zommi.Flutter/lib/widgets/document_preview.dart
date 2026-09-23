@@ -1,8 +1,8 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:zommi_flutter/desktop/document_environment.dart';
 import 'package:zommi_flutter/desktop/document_server.dart';
 import 'package:zommi_flutter/diagnostics/document_preview_probe.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
@@ -16,7 +16,6 @@ class DocumentPreview extends StatefulWidget {
 }
 
 class _DocumentPreviewState extends State<DocumentPreview> {
-  static Future<WebViewEnvironment>? _windowsEnvironment;
   DocumentServer? _server;
   WebViewEnvironment? _environment;
   Timer? _timeout;
@@ -46,31 +45,7 @@ class _DocumentPreviewState extends State<DocumentPreview> {
     });
     await previous?.close();
     try {
-      if (InAppWebViewPlatform.instance == null) {
-        throw StateError(
-          'Document renderer unavailable. Restart Zommi and retry.',
-        );
-      }
-      if (Platform.isWindows) {
-        if (await WebViewEnvironment.getAvailableVersion() == null) {
-          throw StateError(
-            'Install Microsoft Edge WebView2 Runtime to preview documents.',
-          );
-        }
-        final local =
-            Platform.environment['LOCALAPPDATA'] ?? Directory.systemTemp.path;
-        try {
-          _environment =
-              await (_windowsEnvironment ??= WebViewEnvironment.create(
-                settings: WebViewEnvironmentSettings(
-                  userDataFolder: '$local/Zommi/document-webview',
-                ),
-              )).timeout(const Duration(seconds: 15));
-        } on Object {
-          _windowsEnvironment = null;
-          rethrow;
-        }
-      }
+      _environment = await documentEnvironment();
       final server = await DocumentServer.start(
         content: widget.artifact.html!,
         fileUri: widget.artifact.fileUri,
@@ -138,15 +113,7 @@ class _DocumentPreviewState extends State<DocumentPreview> {
             key: ValueKey(_attempt),
             webViewEnvironment: _environment,
             initialUrlRequest: URLRequest(url: WebUri(server.uri.toString())),
-            initialSettings: InAppWebViewSettings(
-              javaScriptEnabled: true,
-              javaScriptBridgeEnabled: false,
-              useShouldOverrideUrlLoading: true,
-              supportMultipleWindows: false,
-              allowFileAccess: false,
-              allowContentAccess: false,
-              disableContextMenu: true,
-            ),
+            initialSettings: documentBrowserSettings(),
             shouldOverrideUrlLoading: (_, action) async =>
                 server.allowsNavigation(action.request.url?.toString() ?? '')
                 ? NavigationActionPolicy.ALLOW

@@ -42,12 +42,14 @@ internal sealed class BrowserObservationBridge : IDisposable
 
     internal CaptureRectangle Viewport => viewport;
 
-    public static BrowserObservationBridge? TryOpen(nint window, Action<string>? diagnostic = null)
+    public static BrowserObservationBridge? TryOpen(nint window, Action<string>? diagnostic = null,
+        Action<string>? unavailable = null)
     {
         BrowserConnectionPool connections;
+        bool enabled;
         lock (ConnectionSettings)
         {
-            if (!pageDetailsEnabled) return null;
+            enabled = pageDetailsEnabled;
             connections = Connections;
         }
         var processId = NativeCaptureWindow.ProcessId(window);
@@ -60,28 +62,49 @@ internal sealed class BrowserObservationBridge : IDisposable
             if (processName is not ("chrome" or "msedge" or "brave" or "opera")) return null;
         }
         catch (ArgumentException) { return null; }
+        if (!enabled)
+        {
+            unavailable?.Invoke("Full webpage details is turned off.");
+            return null;
+        }
         // Leave time for the first Chrome authorization; subsequent captures reuse the socket.
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var attempted = false;
         foreach (var endpoint in Endpoints(processName))
         {
+            attempted = true;
             BrowserDomSession? session = null;
             try
             {
                 session = connections.OpenAsync(endpoint, processId,
                     title => NativeCaptureWindow.IsUniqueBrowserWindow(window, processId, title), timeout.Token).GetAwaiter().GetResult();
-                if (session is null) { diagnostic?.Invoke($"No unique visible tab matched native HWND {window}, PID {processId}, title {NativeCaptureWindow.Title(window)}."); continue; }
+                if (session is null)
+                {
+                    diagnostic?.Invoke($"No unique visible tab matched native HWND {window}, PID {processId}, title {NativeCaptureWindow.Title(window)}.");
+                    unavailable?.Invoke("The browser tab could not be matched unambiguously to this window.");
+                    continue;
+                }
                 var stamp = session.StampAsync(timeout.Token).GetAwaiter().GetResult();
                 var viewport = ReadViewport(window, stamp, diagnostic);
                 if (viewport is null || !GeometryMatches(viewport, stamp))
                 {
                     diagnostic?.Invoke($"Viewport mismatch: native={viewport}; CSS={stamp.Width}x{stamp.Height}; scale={stamp.ViewportScale}.");
+                    unavailable?.Invoke("The browser's page coordinates could not be aligned with this window.");
                     session.Dispose();
                     continue;
                 }
                 return new BrowserObservationBridge(window, processId, session, viewport);
             }
-            catch (Exception exception) when (IsUnavailable(exception)) { diagnostic?.Invoke(exception.Message); session?.Dispose(); }
+            catch (Exception exception) when (IsUnavailable(exception))
+            {
+                diagnostic?.Invoke(exception.Message);
+                unavailable?.Invoke(exception is OperationCanceledException
+                    ? "The browser connection timed out. Check browser authorization before retrying."
+                    : "The browser DOM connection is temporarily unavailable.");
+                session?.Dispose();
+            }
         }
+        if (!attempted) unavailable?.Invoke("No authorized browser debugging connection was found.");
         return null;
     }
 
@@ -147,7 +170,10 @@ internal sealed class BrowserObservationBridge : IDisposable
         try
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
-            return Validate(timeout.Token) == observation.Stamp;
+            var current = Validate(timeout.Token);
+            return observation.Mode == "region"
+                ? current.SameViewportAndDocument(observation.Stamp)
+                : current == observation.Stamp;
         }
         catch (Exception exception) when (IsUnavailable(exception)) { return false; }
     }
@@ -162,7 +188,7 @@ internal sealed class BrowserObservationBridge : IDisposable
         if (NativeCaptureWindow.ForRegion(region) != window)
             throw new InvalidOperationException("The selected browser region is covered.");
         var pixels = ScreenCapture.CapturePng(region);
-        if (Validate(timeout.Token) != stamp || NativeCaptureWindow.ForRegion(region) != window)
+        if (!Validate(timeout.Token).SameViewportAndDocument(stamp) || NativeCaptureWindow.ForRegion(region) != window)
             throw new InvalidOperationException("The page changed while capturing the image.");
         return new BrowserRegionImage(pixels, region.Width, region.Height, stamp);
     }

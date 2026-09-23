@@ -15,41 +15,50 @@ internal static class RegionContextCapture
         var windowBounds = NativeCaptureWindow.Bounds(window);
         try
         {
-            using var browser = BrowserObservationBridge.TryOpen(window);
-            if (browser is not null && browser.Viewport.Contains(BrowserObservationBridge.ToRectangle(region)))
+            string? browserLimitation = null;
+            try
             {
-                var observation = browser.Read(new Point(region.X + region.Width / 2, region.Y + region.Height / 2), region);
-                var image = browser.CaptureImage(region);
-                var png = image.Png;
-                if (NativeCaptureWindow.ForRegion(region) != window || image.Stamp != observation.Stamp || !browser.StillMatches(observation) ||
-                    JsonSerializer.Serialize(browser.Read(new Point(region.X, region.Y), region).Context) != JsonSerializer.Serialize(observation.Context))
-                    return ImageOnly(region, "The page changed while the image was captured.", png, source);
-                var snapshot = browser.Snapshot(observation, region: region);
-                snapshot = snapshot with
+                using var browser = BrowserObservationBridge.TryOpen(window, unavailable: reason => browserLimitation = reason);
+                if (browser is not null && browser.Viewport.Contains(BrowserObservationBridge.ToRectangle(region)))
                 {
-                    RegionContext = new CapturedRegionContext
-                    {
-                        Elements = observation.Elements.Select(element => browser.RegionElement(element, observation.Stamp, region, image.Width, image.Height)).ToArray(),
-                        Truncated = observation.Truncated, Limitation = observation.Limitation,
-                    },
-                    Region = snapshot.Region! with
-                    {
-                        Mapping = snapshot.Region.Mapping! with
-                        {
-                            ImageBounds = new CaptureRectangle(0, 0, image.Width, image.Height),
-                        },
-                    },
-                };
-                if (observation.Elements.Count == 0)
-                {
-                    var reason = observation.Limitation ?? "No text or accessible object was exposed inside this region.";
+                    var observation = browser.Read(new Point(region.X + region.Width / 2, region.Y + region.Height / 2), region);
+                    var image = browser.CaptureImage(region);
+                    var png = image.Png;
+                    if (NativeCaptureWindow.ForRegion(region) != window || !image.Stamp.SameViewportAndDocument(observation.Stamp) || !browser.StillMatches(observation) ||
+                        !observation.SameRegionContent(browser.Read(new Point(region.X, region.Y), region)))
+                        return ImageOnly(region, "The page changed while the image was captured.", png, source);
+                    var snapshot = browser.Snapshot(observation, region: region);
                     snapshot = snapshot with
                     {
-                        Dom = null, RegionContext = null, Confidence = "limited", Limitation = reason,
-                        Region = snapshot.Region with { Status = "image-only", Reason = reason },
+                        RegionContext = new CapturedRegionContext
+                        {
+                            Elements = observation.Elements.Select(element => browser.RegionElement(element, observation.Stamp, region, image.Width, image.Height)).ToArray(),
+                            Truncated = observation.Truncated, Limitation = observation.Limitation,
+                        },
+                        Region = snapshot.Region! with
+                        {
+                            Mapping = snapshot.Region.Mapping! with
+                            {
+                                ImageBounds = new CaptureRectangle(0, 0, image.Width, image.Height),
+                            },
+                        },
                     };
+                    if (observation.Elements.Count == 0)
+                    {
+                        var reason = observation.Limitation ?? "No text or accessible object was exposed inside this region.";
+                        snapshot = snapshot with
+                        {
+                            Dom = null, RegionContext = null, Confidence = "limited", Limitation = reason,
+                            Region = snapshot.Region with { Status = "image-only", Reason = reason },
+                        };
+                    }
+                    return new RegionSelectionResult(region, png, snapshot, snapshot.Region);
                 }
-                return new RegionSelectionResult(region, png, snapshot, snapshot.Region);
+            }
+            catch (Exception exception) when (BrowserObservationBridge.IsUnavailable(exception))
+            {
+                if (Environment.GetEnvironmentVariable("ZOMMI_CAPTURE_DIAGNOSTICS") == "1") Console.Error.WriteLine(exception);
+                browserLimitation = "Browser DOM capture failed. Windows accessibility was tried instead.";
             }
 
             var before = UiaRegionCapture.Read(window, region);
@@ -61,7 +70,7 @@ internal static class RegionContextCapture
                 return ImageOnly(region, "The window or its accessible content changed while the image was captured.", pixels, source);
             var spatial = before.Cells.Count == 0 ? null : new RegionSpatialContext { Cells = before.Cells };
             if (before.Elements.Count == 0)
-                return ImageOnly(region, "No accessible text or named object was exposed inside this region.", pixels, source, spatial);
+                return ImageOnly(region, string.Join(" ", new[] { browserLimitation, "No accessible text or named object was exposed inside this region." }.Where(value => value is not null)), pixels, source, spatial);
             var now = DateTimeOffset.UtcNow;
             var screenBounds = BrowserObservationBridge.ToRectangle(region);
             var alignment = new RegionAlignment
@@ -85,7 +94,8 @@ internal static class RegionContextCapture
                 },
                 SpatialContext = spatial,
                 Region = alignment, Confidence = "medium",
-                Limitation = "Element bounds are in image pixels. Intersecting elements may expose labels or values beyond the crop; the image is the selected content.",
+                Limitation = string.Join(" ", new[] { browserLimitation,
+                    "Captured Windows accessibility. Element bounds are in image pixels. Intersecting elements may expose labels or values beyond the crop; the image is the selected content." }.Where(value => value is not null)),
             };
             return new RegionSelectionResult(region, pixels, context, alignment);
         }

@@ -181,6 +181,7 @@ try
                     }
                     // Repeat selection after ordinary text capture through the same
                     // actual RPC helper, not merely through a shared test pool.
+                    await Evaluate("(() => { const counter=document.createElement('div'); counter.id='native-background-counter'; counter.style='position:fixed;right:0;top:0;width:30px;height:20px'; document.body.append(counter); let n=0; window.nativeCaptureTimer=setInterval(() => counter.textContent=String(++n), 1); return true; })()");
                     for (var batch = 0; batch < 2; batch++)
                     {
                         NativeContentInput.Activate(browser.MainWindowHandle);
@@ -207,10 +208,11 @@ try
                             await File.WriteAllBytesAsync(Path.Combine(output, $"multi-{batch + 1}-{index + 1}.png"),
                                 Convert.FromBase64String(resultItems[index].GetProperty("dataUrl").GetString()!.Split(',')[1]), token);
                     }
+                    await Evaluate("clearInterval(window.nativeCaptureTimer); document.querySelector('#native-background-counter').remove(); true");
                     Check(nativeProxy.AcceptedConnections == count + 1 && nativeProxy.Count("Target.attachToTarget") == attachments &&
                         nativeProxy.Count("Target.detachFromTarget") == detaches && nativeProxy.Count("Page.captureScreenshot") == 0 &&
                         (await Evaluate("window.__captureResizes")).GetInt32() == 0,
-                        "Text capture and two Ctrl batches share one connection and attachment without screenshot commands or viewport resize");
+                        "Two native Ctrl batches retain DOM during unrelated live updates without reconnecting or resizing the viewport");
                     await policyHost.StandardInput.WriteLineAsync("{\"id\":\"stop\",\"method\":\"shutdown\",\"params\":{}}");
                     await policyHost.StandardInput.FlushAsync(token);
                     await policyHost.WaitForExitAsync(token);
@@ -323,6 +325,17 @@ try
         "A partially selected text node retains its content with an explicit intersection relation");
     Check(partial.Elements.All(element => element.VisibleBounds is { Width: > 0, Height: > 0 }),
         "Every region element has a visible intersection with the user's rectangle");
+    await Evaluate("(() => { const counter=document.createElement('div'); counter.id='background-counter'; counter.style='position:fixed;right:0;bottom:0;width:30px;height:20px'; document.body.append(counter); let n=0; window.captureTimer=setInterval(() => counter.textContent=String(++n), 1); return true; })()");
+    try
+    {
+        for (var attempt = 0; attempt < 15; attempt++)
+        {
+            var stableRegion = await capture.ReadAsync("region", x, y, region, token);
+            Check(JsonSerializer.Serialize(stableRegion.Context) == JsonSerializer.Serialize(cropped.Context),
+                $"Unrelated live page updates preserve selected region context ({attempt + 1}/15)");
+        }
+    }
+    finally { await Evaluate("clearInterval(window.captureTimer); document.querySelector('#background-counter').remove(); true"); }
     var all = await capture.ReadAsync("region", x, y, new CaptureRectangle(0, 0, 1000, 900), token);
     Check(!JsonSerializer.Serialize(all.Context).Contains("DO_NOT_CAPTURE", StringComparison.Ordinal), "Hidden, clipped and password content is excluded");
     var icon = await Bounds("#icon");
@@ -533,6 +546,16 @@ try
             Check(proxy.AcceptedConnections == 1, "Repeated text, picker and image captures use one browser WebSocket");
             Check(proxy.Count("Target.attachToTarget") == 1 && proxy.Count("Target.detachFromTarget") == 0,
                 "Fresh observations reuse one attached tab without debugger banner churn");
+            proxy.BeforeNextRegionReply(async () => { await Evaluate("document.querySelector('#outside').textContent='Updated outside the selection'; true"); });
+            var outsideUpdated = await second.ReadAsync("region", x, y, imageRegion, token);
+            Check(aligned.SameRegionContent(outsideUpdated), "A mutation after the region read is accepted only when region content is unchanged");
+            var originalTarget = (await Evaluate("document.querySelector('#target').textContent")).GetString();
+            proxy.BeforeNextRegionReply(async () => { await Evaluate("document.querySelector('#target').textContent='Changed inside the selection'; true"); });
+            var regionChangedRejected = false;
+            try { await second.ReadAsync("region", x, y, imageRegion, token); }
+            catch (InvalidOperationException) { regionChangedRejected = true; }
+            finally { await Evaluate($"document.querySelector('#target').textContent={JsonSerializer.Serialize(originalTarget)}; true"); }
+            Check(regionChangedRejected, "A mutation inside the selected region is rejected across the same read boundary");
             await Command("Page.reload");
             await Task.Delay(150, token);
             var staleRejected = false;
