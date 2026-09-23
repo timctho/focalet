@@ -400,6 +400,7 @@ fn select_point_context() -> AppResult<()> {
         return emit_json(&json!({"cancelled": true}));
     };
     let target = top_level_window(&connection, root, window)?;
+    let target = unix_context::client_window(&connection, target)?;
     let context = context_value(&connection, target)?;
     emit_json(&json!({
         "cancelled": false,
