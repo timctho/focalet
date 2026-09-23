@@ -76,7 +76,7 @@ for line in sys.stdin:
                 "isStreaming": active,
                 "isCompacting": False,
                 "pendingMessageCount": 0,
-                "model": {"provider": "xai", "id": "grok-test"} if os.environ.get("ZOMMI_FAKE_PI_GROK") == "1" else {"provider": "openai", "id": "gpt-test"},
+                "model": {"provider": "openai", "id": "gpt-test"},
                 "thinkingLevel": "high",
             },
         )
@@ -100,7 +100,7 @@ for line in sys.stdin:
                             "xhigh": None,
                         },
                     }
-                ] + ([{"provider": "xai", "id": "grok-test", "name": "Grok Test", "reasoning": True}] if os.environ.get("ZOMMI_FAKE_PI_GROK") == "1" else [])
+                ]
             },
         )
     elif request_type == "get_messages":

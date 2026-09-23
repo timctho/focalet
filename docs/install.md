@@ -62,14 +62,8 @@ Zommi uses the runtime's existing account, models, tools and permissions. It doe
 not merge histories across agents or move credentials into its settings. Native
 commands and session actions depend on the protocol your runtime exposes.
 Claude CLI uses limited terminal compatibility rather than full structured
-session support; on Windows it currently requires WSL. Codex, Pi, Grok via Pi
+session support; on Windows it currently requires WSL. Codex, Pi
 and OpenCode can use native Windows installations. See [runtime commands](runtime-commands.md).
-
-For **Grok (via Pi)**, install Pi, run `pi --provider xai --models 'xai/*'`, and use `/login` to
-configure your xAI API key in Pi (or supply `XAI_API_KEY` to the runtime).
-Then choose **Grok (via Pi)** in Zommi. Its model picker shows the xAI models
-available to Pi; **Refresh agents** reloads that list. This uses Pi as the agent
-runtime, with credentials, tools and saved conversations kept in Pi.
 
 OpenCode connects through [`opencode acp`](https://opencode.ai/docs/acp/).
 Install a version with ACP support and run `opencode auth login` to connect your

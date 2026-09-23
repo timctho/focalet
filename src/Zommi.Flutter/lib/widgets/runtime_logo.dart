@@ -8,9 +8,6 @@ class RuntimeLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (runtimeId == 'grok') {
-      return Icon(Icons.auto_awesome_rounded, size: size);
-    }
     const brands = {'codex', 'hermes', 'pi', 'openclaw', 'opencode', 'claude'};
     return brands.contains(runtimeId)
         ? Image.asset(
