@@ -1818,94 +1818,132 @@ class _ArtifactCardState extends State<ArtifactCard> {
   @override
   Widget build(BuildContext context) {
     final artifact = _loaded ?? widget.artifact;
+    final colors = Theme.of(context).colorScheme;
     return Container(
       key: ValueKey('artifact-${artifact.id}'),
-      margin: const EdgeInsets.only(top: 10),
+      margin: const EdgeInsets.only(top: 8),
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        color: colors.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: colors.outlineVariant),
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 9, 12, 8),
+            padding: const EdgeInsets.fromLTRB(10, 6, 6, 6),
             child: Row(
               children: [
-                Text(
-                  switch (artifact.kind) {
-                    'html' => 'HTML',
-                    'markdown' => 'Markdown',
-                    _ => 'Image',
-                  },
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.primary,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: colors.primary.withValues(alpha: .1),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    switch (artifact.kind) {
+                      'html' => 'HTML',
+                      'markdown' => 'Markdown',
+                      _ => 'Image',
+                    },
+                    style: TextStyle(
+                      color: colors.primary,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(
-                    artifact.title,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          SizedBox(
-            height: artifact.kind == 'image' ? 150 : 240,
-            child: _error != null
-                ? Center(child: Text('Preview unavailable · $_error'))
-                : (artifact.kind == 'html' || artifact.kind == 'markdown') &&
-                      artifact.html != null
-                ? GestureDetector(
-                    onTap: () =>
-                        unawaited(widget.controller.showArtifact(artifact)),
-                    child: DocumentThumbnail(
-                      key: ValueKey(artifact.id),
-                      artifact: artifact,
-                    ),
-                  )
-                : ArtifactSurface(artifact: artifact, compact: true),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 7, 7, 7),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    artifact.path ?? 'Generated in this chat',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      fontSize: 11,
+                  child: Tooltip(
+                    message: artifact.path ?? artifact.title,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          artifact.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            height: 1.3,
+                          ),
+                        ),
+                        if (artifact.path case final path?)
+                          Text(
+                            path,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: colors.onSurfaceVariant,
+                              fontSize: 11,
+                              height: 1.3,
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                 ),
+                const SizedBox(width: 4),
                 if (widget.showCopyAction &&
                     artifact.kind == 'image' &&
                     artifact.dataUrl != null)
                   IconButton(
                     tooltip: 'Copy image',
+                    constraints: const BoxConstraints.tightFor(
+                      width: 30,
+                      height: 30,
+                    ),
+                    padding: EdgeInsets.zero,
                     onPressed: () => unawaited(
                       widget.controller.copyImage(artifact.dataUrl!),
                     ),
                     icon: const Icon(Icons.copy_rounded, size: 16),
                   ),
-                TextButton(
+                TextButton.icon(
+                  style: TextButton.styleFrom(
+                    minimumSize: const Size(0, 30),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    textStyle: Theme.of(context).textTheme.labelLarge
+                        ?.copyWith(fontSize: 12),
+                  ),
                   onPressed: _error == null
                       ? () =>
                             unawaited(widget.controller.showArtifact(artifact))
                       : null,
-                  child: const Text('Preview'),
+                  icon: const Icon(Icons.open_in_full_rounded, size: 13),
+                  label: const Text('Preview'),
                 ),
               ],
+            ),
+          ),
+          Divider(height: 1, color: colors.outlineVariant),
+          LayoutBuilder(
+            builder: (context, constraints) => SizedBox(
+              height: artifact.kind == 'image'
+                  ? 150
+                  : math.min(180, constraints.maxWidth * 9 / 16),
+              child: _error != null
+                  ? Center(child: Text('Preview unavailable · $_error'))
+                  : (artifact.kind == 'html' || artifact.kind == 'markdown') &&
+                        artifact.html != null
+                  ? GestureDetector(
+                      onTap: () =>
+                          unawaited(widget.controller.showArtifact(artifact)),
+                      child: DocumentThumbnail(
+                        key: ValueKey(artifact.id),
+                        artifact: artifact,
+                      ),
+                    )
+                  : ArtifactSurface(artifact: artifact, compact: true),
             ),
           ),
         ],
