@@ -133,7 +133,9 @@ class RuntimeCommandsTests(unittest.TestCase):
                 env.update(ZOMMI_OPENCLAW_GATEWAY_URL=endpoint, ZOMMI_OPENCLAW_GATEWAY_AGENT_ID="main",
                            OPENCLAW_GATEWAY_TOKEN="fixture-runtime-owned-token")
             else:
-                runtime = {"codex-app-server":"CODEX", "pi-rpc":"PI", "opencode-acp":"OPENCODE"}.get(adapter, "HERMES")
+                runtime = {"codex-app-server":"CODEX", "pi-rpc":"PI", "opencode-acp":"OPENCODE", "gemini-acp":"GEMINI"}.get(adapter, "HERMES")
+                if adapter == "gemini-acp":
+                    env["ZOMMI_FAKE_ACP_GEMINI"] = "1"
                 args = [str(FIXTURES / fixture)]
                 suffix = "ARGS_JSON"
                 if adapter == "hermes-gateway":
@@ -204,6 +206,9 @@ class RuntimeCommandsTests(unittest.TestCase):
 
     def test_opencode_advertised_command(self):
         self.exercise("opencode-acp", "fake_acp_runtime.py", "/inspect src", "session/prompt")
+
+    def test_gemini_advertised_command(self):
+        self.exercise("gemini-acp", "fake_acp_runtime.py", "/inspect src", "session/prompt")
 
     def test_pi_prompt_command(self):
         self.exercise("pi-rpc", "fake_pi_rpc.py", "/inspect src", "prompt")

@@ -591,6 +591,7 @@ final class ZommiController extends ChangeNotifier {
             'codex-app-server',
             'hermes-acp',
             'opencode-acp',
+            'gemini-acp',
             'openclaw-acp',
             'hermes-gateway',
             'openclaw-gateway',

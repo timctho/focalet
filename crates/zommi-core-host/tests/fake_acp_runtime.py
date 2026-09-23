@@ -13,6 +13,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 session_id = os.environ.get("ZOMMI_FAKE_ACP_SESSION", "acp-session-new")
 pending_prompt = None
 request_log = os.environ.get("ZOMMI_FAKE_REQUEST_LOG")
+gemini = os.environ.get("ZOMMI_FAKE_ACP_GEMINI") == "1"
 
 # Read once, like an agent that discovers credentials/models at startup.
 model_file = os.environ.get("ZOMMI_FAKE_ACP_MODEL_FILE")
@@ -20,6 +21,8 @@ model_config = json.load(open(model_file, encoding="utf-8")) if model_file else 
 
 
 def send(message):
+    if gemini and message.get("method") == "session/update":
+        message["params"]["update"].pop("messageId", None)
     sys.stdout.write(json.dumps(message, separators=(",", ":")) + "\n")
     sys.stdout.flush()
 
@@ -59,9 +62,22 @@ for line in sys.stdin:
             if os.environ.get("ZOMMI_FAKE_ACP_NO_AUTH") == "1"
             else [{"id": "provider", "name": "Provider credentials"}],
         }
+        if gemini:
+            # Gemini advertises several login methods but session/new reuses
+            # its configured account. It supports load, not session/list.
+            result["agentCapabilities"].pop("sessionCapabilities")
+            result["authMethods"] = [
+                {"id": "oauth-personal", "name": "Log in with Google"},
+                {"id": "gemini-api-key", "name": "Gemini API key"},
+                {"id": "vertex-ai", "name": "Vertex AI"},
+            ]
     elif method == "authenticate":
+        if gemini:
+            raise AssertionError("Client must not switch Gemini's configured account")
         result = {}
     elif method == "session/list":
+        if gemini:
+            raise AssertionError("Gemini does not advertise session/list")
         result = {
             "sessions": [
                 {
@@ -73,6 +89,12 @@ for line in sys.stdin:
             ]
         }
     elif method == "session/new":
+        auth_state = os.environ.get("ZOMMI_FAKE_ACP_AUTH_STATE_PATH")
+        if auth_state and not os.path.isfile(auth_state):
+            send({"jsonrpc": "2.0", "id": request_id, "error": {
+                "code": -32000, "message": "Gemini API key is missing or not configured."
+            }})
+            continue
         result = {
             "sessionId": session_id,
             "models": {
@@ -246,6 +268,8 @@ for line in sys.stdin:
         result["configOptions"] = [{"id": "provider-model", "category": "model", "name": "Model", "type": "select",
             "currentValue": models["currentModelId"], "options": [{"group": "provider", "name": "Provider",
             "options": [{"value": m["modelId"], "name": m["name"]} for m in models["availableModels"]]}]}]
+    if gemini and method == "session/set_model":
+        result = {}  # Gemini acknowledges a model change without returning its catalog.
     send({"jsonrpc": "2.0", "id": request_id, "result": result})
     if method in ("session/new", "session/load"):
         send({"jsonrpc":"2.0", "method":"session/update", "params":{"sessionId":session_id,"update":{"sessionUpdate":"available_commands_update", "availableCommands":[{"name":"inspect", "description":"Inspect this session", "input":{"hint":"target"}}]}}})

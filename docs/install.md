@@ -55,6 +55,7 @@ sign in there, and return to Zommi:
 [Codex](https://github.com/openai/codex),
 [Pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent),
 [OpenCode](https://opencode.ai/docs/),
+[Gemini CLI](https://geminicli.com/docs/get-started/installation/),
 [Hermes](https://github.com/NousResearch/hermes-agent), or
 [OpenClaw](https://github.com/openclaw/openclaw).
 
@@ -62,8 +63,18 @@ Zommi uses the runtime's existing account, models, tools and permissions. It doe
 not merge histories across agents or move credentials into its settings. Native
 commands and session actions depend on the protocol your runtime exposes.
 Claude CLI uses limited terminal compatibility rather than full structured
-session support; on Windows it currently requires WSL. Codex, Pi
-and OpenCode can use native Windows installations. See [runtime commands](runtime-commands.md).
+session support; on Windows it currently requires WSL. Codex, Pi, OpenCode
+and Gemini CLI can use native Windows installations. See [runtime commands](runtime-commands.md).
+
+Gemini CLI connects through [`gemini --acp`](https://geminicli.com/docs/cli/acp-mode/).
+With Node.js 20 or newer, install a recent version using
+`npm install -g @google/gemini-cli`, then run
+`gemini` in the same host to finish sign-in. Choose **Gemini CLI** in Zommi;
+**Refresh agents** picks up newly installed runtimes and refreshes models after
+sign-in. Zommi uses Gemini CLI's configured Google, API key or Vertex AI account
+without changing its authentication method. Its ACP interface supports resuming
+chats started in Zommi but does not currently advertise a saved-chat listing
+method, so unrelated terminal chats are not imported into the sidebar.
 
 OpenCode connects through [`opencode acp`](https://opencode.ai/docs/acp/).
 Install a version with ACP support and run `opencode auth login` to connect your

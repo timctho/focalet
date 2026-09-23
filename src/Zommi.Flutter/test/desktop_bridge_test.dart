@@ -5,11 +5,72 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tray_manager/tray_manager.dart';
+import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 
 void main() {
+  RuntimeTarget geminiTarget(String path, String hostKind) => RuntimeTarget(
+    id: 'runtime-gemini',
+    runtimeId: 'gemini',
+    adapterId: 'gemini-acp',
+    displayName: 'Gemini CLI',
+    protocolName: 'ACP',
+    executablePath: path,
+    executionHost: {'kind': hostKind, 'name': 'Ubuntu'},
+  );
+
+  test(
+    'Windows sign-in starts an npm launcher with spaces and shell characters',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        "zommi sign-in & quote'-",
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final launcher = File('${directory.path}/gemini.cmd');
+      await launcher.writeAsString('@echo off\r\necho Gemini login\r\n');
+      final command = windowsRuntimeSignInCommand(
+        geminiTarget(launcher.path, 'native'),
+        [],
+      );
+      final result = await Process.run(
+        command.first,
+        command.skip(1).where((argument) => argument != '-NoExit').toList(),
+      );
+      expect(result.exitCode, 0, reason: result.stderr.toString());
+      expect(result.stdout.toString().trim(), 'Gemini login');
+    },
+    skip: !Platform.isWindows,
+  );
+
+  test(
+    'WSL sign-in preserves executable paths and literal arguments',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        "zommi sign-in & quote'-",
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final launcher = File('${directory.path}/gemini');
+      await launcher.writeAsString('#!/bin/sh\nprintf \'%s\' "\$1"\n');
+      expect((await Process.run('chmod', ['+x', launcher.path])).exitCode, 0);
+      const argument = r"literal & $(ignored) ' quoted";
+      final command = windowsRuntimeSignInCommand(
+        geminiTarget(launcher.path, 'wsl'),
+        [argument],
+      );
+      final result = await Process.run('bash', [
+        '--noprofile',
+        '--norc',
+        '-c',
+        command.last,
+      ]);
+      expect(result.exitCode, 0, reason: result.stderr.toString());
+      expect(result.stdout, argument);
+    },
+    skip: Platform.isWindows,
+  );
+
   setUp(() {
     // These unit tests have no Windows runner. A missing native response can
     // otherwise wait on the widget test's fake event loop; individual native
