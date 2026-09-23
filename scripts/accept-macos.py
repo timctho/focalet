@@ -7,18 +7,10 @@ import json
 import os
 from pathlib import Path
 import platform
-import re
 import signal
 import subprocess
 import tempfile
 import time
-
-
-def interactive_selector(startup: str) -> str | None:
-    # The picker now lives inside the app, with no screencapture child. The
-    # launched package logs readiness only after its overlay owns input.
-    events = re.findall(r'^macOS selector: (ready|closed) ([\w-]+)$', startup, re.MULTILINE)
-    return events[-1][1] if events and events[-1][0] == 'ready' else None
 
 
 def main() -> None:
@@ -57,6 +49,7 @@ def main() -> None:
             try:
                 deadline = time.monotonic() + (90 if args.interactive else 45)
                 sent_gestures = {}
+                selected_session = None
                 while not report_path.exists():
                     if process.poll() is not None:
                         raise RuntimeError(f'Packaged app exited {process.returncode}; see startup.log')
@@ -69,13 +62,23 @@ def main() -> None:
                                     (mode == 'select' and 'macOS probe: cancel region' in startup)):
                                 continue
                             attempts, last_sent = sent_gestures.get(mode, (0, 0))
-                            selector = interactive_selector(startup)
+                            trace = output / 'desktop-events.jsonl'
+                            frames = [json.loads(line) for line in trace.read_text().splitlines() if line.strip()] if trace.exists() else []
+                            editor = next((item for item in reversed(frames) if item.get('event') == 'capture.editor.ready'), None)
+                            selector = editor['session'] if editor else None
+                            if mode == 'cancel' and selector == selected_session: continue
                             if selector is not None and attempts < 3 and time.monotonic() - last_sent >= 3:
                                 # Retry only while this app's exact overlay is open.
                                 time.sleep(0.7)
-                                if interactive_selector((output / 'startup.log').read_text(errors='replace')) != selector:
-                                    continue
-                                subprocess.run([str(input_driver), mode], check=True, timeout=10)
+                                trace = output / 'desktop-events.jsonl'
+                                frames = [json.loads(line) for line in trace.read_text().splitlines() if line.strip()] if trace.exists() else []
+                                editor = next((item for item in reversed(frames) if item.get('event') == 'capture.editor.ready'), None)
+                                if editor is None: continue
+                                bounds = editor['bounds']
+                                coordinates = [bounds['x'] + bounds['width'] * .25, bounds['y'] + bounds['height'] * .25,
+                                               bounds['x'] + bounds['width'] * .45, bounds['y'] + bounds['height'] * .45]
+                                subprocess.run([str(input_driver), mode, *map(str, coordinates)], check=True, timeout=10)
+                                if mode == 'select': selected_session = selector
                                 sent_gestures[mode] = (attempts + 1, time.monotonic())
                                 print(f'{mode} gesture {attempts + 1} -> selector {selector}', flush=True)
                     time.sleep(0.25)

@@ -107,8 +107,8 @@ ContextAttachment imageAttachmentFromSelection(
               : 'Screen',
           'region': region,
           'limitation': reason,
-          if (metadata['imageAnnotations'] is Map)
-            'imageAnnotations': metadata['imageAnnotations'],
+          if (selected.snapshot?['imageAnnotations'] is Map)
+            'imageAnnotations': selected.snapshot!['imageAnnotations'],
           if (knownImageSource)
             for (final field in [
               'source',
@@ -165,13 +165,8 @@ Map<String, int>? _pngSize(String dataUrl) {
   }
 }
 
-CaptureProvider platformCaptureProvider() => Platform.isWindows
-    ? WindowsCaptureProvider()
-    : Platform.isLinux
-    ? LinuxCaptureProvider(
-        useWaylandPortals: shouldUseWaylandPortals(Platform.environment),
-      )
-    : PortableCaptureProvider();
+CaptureProvider platformCaptureProvider() =>
+    Platform.isWindows ? WindowsCaptureProvider() : UnixCaptureProvider();
 
 final class WindowsCaptureProvider
     implements CaptureProvider, BrowserCaptureSettings, CaptureThemeSettings {
@@ -352,9 +347,7 @@ final class LinuxCaptureProvider implements CaptureProvider {
     processName: response['processName']?.toString(),
     windowTitle: response['windowTitle']?.toString() ?? '',
     url: '',
-    limitation:
-        response['limitation']?.toString() ??
-        'Ubuntu DOM and AT-SPI accessibility capture are not yet implemented.',
+    limitation: response['limitation']?.toString() ?? 'This quick lookup contains window metadata. Use Select for region images, AT-SPI and supported browser DOM.',
   );
 
   @override
@@ -704,7 +697,7 @@ final class ProcessNativeCaptureClient implements NativeCaptureClient {
     await _ensureStarted();
     final process = _process;
     if (process == null) {
-      throw StateError('Windows capture host is unavailable.');
+      throw StateError('Native capture host is unavailable.');
     }
     final id = (++_nextId).toString();
     final completer = Completer<Map<String, Object?>>();
@@ -721,15 +714,13 @@ final class ProcessNativeCaptureClient implements NativeCaptureClient {
         _ready.remove(id);
         // A timed-out modal selector must not remain above the user's apps.
         if (identical(_process, process)) process.kill();
-        throw TimeoutException(
-          'Windows capture host timed out during $method.',
-        );
+        throw TimeoutException('Native capture host timed out during $method.');
       },
     );
     _writes = _writes
         .then((_) async {
           if (!identical(_process, process)) {
-            throw StateError('Windows capture host stopped before $method.');
+            throw StateError('Native capture host stopped before $method.');
           }
           process.stdin.writeln(
             jsonEncode({
@@ -757,9 +748,7 @@ final class ProcessNativeCaptureClient implements NativeCaptureClient {
 
   Future<void> _startProcess() async {
     if (!await File(executablePath).exists()) {
-      throw StateError(
-        'Windows capture host was not found at $executablePath.',
-      );
+      throw StateError('Native capture host was not found at $executablePath.');
     }
     final process = await Process.start(executablePath, const [
       '--capture-host',
@@ -779,7 +768,7 @@ final class ProcessNativeCaptureClient implements NativeCaptureClient {
       process.exitCode.then((code) {
         if (identical(_process, process)) _process = null;
         final error = StateError(
-          'Windows capture host exited with code $code.'
+          'Native capture host exited with code $code.'
           '${_recentError.trim().isEmpty ? '' : ' ${_recentError.trim()}'}',
         );
         for (final pending in _pending.values) {

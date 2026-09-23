@@ -1,0 +1,274 @@
+import 'dart:convert';
+import 'dart:ui' as ui;
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:zommi_flutter/desktop/desktop_bridge.dart';
+import 'package:zommi_flutter/desktop/region_selection.dart';
+import 'package:zommi_flutter/widgets/region_capture_editor.dart';
+
+Future<CapturedDisplay> display() async {
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder);
+  canvas.drawRect(
+    const Rect.fromLTWH(0, 0, 100, 80),
+    Paint()..color = Colors.white,
+  );
+  canvas.drawRect(
+    const Rect.fromLTWH(12, 12, 10, 10),
+    Paint()..color = Colors.black,
+  );
+  final picture = recorder.endRecording();
+  final image = await picture.toImage(100, 80);
+  picture.dispose();
+  return CapturedDisplay(
+    image: image,
+    bounds: const Rect.fromLTWH(-50, 20, 50, 40),
+    windows: [source],
+    observedAt: DateTime.utc(2026, 9, 23),
+  );
+}
+
+const source = <String, Object?>{
+  'nativeWindowId': 'fixture',
+  'processId': 24,
+  'processStartToken': 'original',
+  'windowTitle': 'Fixture',
+  'application': 'Fixture',
+  'platform': 'linux',
+  'bounds': {'x': -50, 'y': 20, 'width': 50, 'height': 40},
+};
+
+class _ChangingBrowser implements NativeCaptureClient {
+  final methods = <String>[];
+  @override
+  Future<Map<String, Object?>> request(
+    String method, {
+    Map<String, Object?> parameters = const {},
+    void Function()? onReady,
+  }) async {
+    methods.add(method);
+    return {
+      'available': method == 'observe',
+      'limitation': 'The browser document changed.',
+    };
+  }
+
+  @override
+  Future<void> close() async {}
+}
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  test('regions keep physical pixels, negative screen origins, limits and independent drawing histories', () async {
+    final frame = await display();
+    addTearDown(frame.image.dispose);
+    final session = RegionSelectionSession([frame]);
+    addTearDown(session.dispose);
+    expect(session.addRegion(const Rect.fromLTWH(10, 10, 30, 20)), isTrue);
+    expect(session.addRegion(const Rect.fromLTWH(10, 10, 30, 20)), isFalse);
+    final a = session.selected!;
+    expect(frame.screenRect(a.pixels), const Rect.fromLTWH(-45, 25, 15, 10));
+    expect(frame.sourceAt(a.pixels), source);
+    expect(session.addRegion(const Rect.fromLTWH(50, 10, 30, 20)), isTrue);
+    final b = session.selected!;
+    a.addStroke(
+      RegionStroke(
+        tool: RegionDrawingTool.pen,
+        color: Colors.red,
+        width: 4,
+        points: const [Offset(14, 15), Offset(35, 15)],
+      ),
+    );
+    b.addStroke(
+      RegionStroke(
+        tool: RegionDrawingTool.rectangle,
+        color: Colors.blue,
+        width: 2,
+        points: const [Offset(55, 12), Offset(75, 25)],
+      ),
+    );
+    a.undo();
+    expect(a.strokes, isEmpty);
+    expect(b.strokes.length, 1);
+    a.redo();
+    expect(a.strokes.length, 1);
+    final original =
+        'data:image/png;base64,${base64Encode(await a.render(annotated: false))}';
+    final annotated = 'data:image/png;base64,${base64Encode(await a.render())}';
+    expect(await sameCapturedPixels(original, annotated), isFalse);
+    expect(await sameCapturedPixels(original, original), isTrue);
+    expect(
+      a.addStroke(
+        RegionStroke(
+          tool: RegionDrawingTool.pen,
+          color: Colors.red,
+          width: double.nan,
+          points: const [Offset.zero],
+        ),
+      ),
+      isFalse,
+    );
+    for (var index = 0; index < 6; index++) {
+      expect(session.addRegion(Rect.fromLTWH(index * 10.0, 40, 8, 8)), isTrue);
+    }
+    expect(session.addRegion(const Rect.fromLTWH(70, 40, 8, 8)), isFalse);
+    session.finish(cancel: true);
+    expect(await session.result, isEmpty);
+  });
+
+  test('native context is retained only with unchanged pixels and window identity', () async {
+    final frame = await display();
+    addTearDown(frame.image.dispose);
+    final selected = SelectedRegion(frame, const Rect.fromLTWH(10, 10, 30, 20));
+    final image =
+        'data:image/png;base64,${base64Encode(await selected.render(annotated: false))}';
+    var calls = 0;
+    var window = Map<String, Object?>.of(source);
+    Future<Map<String, Object?>> observe(Rect bounds) async {
+      calls++;
+      expect(bounds, const Rect.fromLTWH(-45, 25, 15, 10));
+      return {
+        'stable': true,
+        'source': window,
+        'dataUrl': image,
+        'regionContext': {
+          'elements': [
+            {
+              'id': 'label',
+              'role': 'label',
+              'text': 'Observed label',
+              'bounds': {'x': 2, 'y': 2, 'width': 10, 'height': 10},
+            },
+          ],
+        },
+      };
+    }
+
+    final aligned = await enrichSelectedRegion(selected, observe);
+    expect(calls, 2);
+    expect(aligned.alignment?['status'], 'aligned');
+    expect(
+      imageAttachmentFromSelection(aligned, 'a').snapshot?['regionContext'],
+      isNotNull,
+    );
+    window['processStartToken'] = 'replacement-process';
+    final stale = await enrichSelectedRegion(selected, observe);
+    expect(stale.alignment?['status'], 'image-only');
+    expect(stale.snapshot?['regionContext'], isNull);
+    expect(stale.dataUrl, image);
+  });
+
+  test('drawings survive a changed source without attaching newer metadata', () async {
+    final frame = await display();
+    addTearDown(frame.image.dispose);
+    final selected = SelectedRegion(frame, const Rect.fromLTWH(10, 10, 30, 20));
+    final frozen =
+        'data:image/png;base64,${base64Encode(await selected.render(annotated: false))}';
+    selected.addStroke(
+      RegionStroke(
+        tool: RegionDrawingTool.arrow,
+        color: Colors.red,
+        width: 4,
+        points: const [Offset(12, 12), Offset(30, 25)],
+      ),
+    );
+    final expected =
+        'data:image/png;base64,${base64Encode(await selected.render())}';
+    final captured = await enrichSelectedRegion(
+      selected,
+      (_) async => {
+        'stable': true,
+        'source': source,
+        'dataUrl': expected,
+        'regionContext': {
+          'elements': [
+            {'text': 'Newer content'},
+          ],
+        },
+      },
+    );
+    expect(await sameCapturedPixels(captured.dataUrl, expected), isTrue);
+    expect(await sameCapturedPixels(captured.dataUrl, frozen), isFalse);
+    final attachment = imageAttachmentFromSelection(captured, 'drawn');
+    expect(attachment.snapshot?['regionContext'], isNull);
+    expect(
+      attachment.snapshot?['imageAnnotations'],
+      containsPair('strokeCount', 1),
+    );
+    expect(
+      attachment.snapshot?['region'],
+      containsPair('status', 'image-only'),
+    );
+  });
+
+  testWidgets(
+    'shared editor supports selection, drawing, undo, redo and attach',
+    (tester) async {
+      final frame = await tester.runAsync(display);
+      addTearDown(frame!.image.dispose);
+      final session = RegionSelectionSession([frame]);
+      addTearDown(session.dispose);
+      await tester.pumpWidget(
+        MaterialApp(home: RegionCaptureEditor(session: session)),
+      );
+      final canvas = find.byKey(const ValueKey('region-capture-canvas'));
+      final area = tester.getRect(canvas);
+      final start = area.center - const Offset(90, 50);
+      final gesture = await tester.startGesture(start);
+      await gesture.moveBy(const Offset(180, 100));
+      await gesture.up();
+      await tester.pump();
+      expect(session.regions.length, 1);
+      expect(find.text('A'), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyP);
+      await tester.pump();
+      expect(session.tool, RegionDrawingTool.pen);
+      final pen = await tester.startGesture(area.center - const Offset(20, 10));
+      await pen.moveBy(const Offset(35, 15));
+      await pen.up();
+      await tester.pump();
+      expect(session.selected!.strokes.length, 1);
+      await tester.tap(find.byTooltip('Undo'));
+      await tester.pump();
+      expect(session.selected!.strokes, isEmpty);
+      await tester.tap(find.byTooltip('Redo'));
+      await tester.pump();
+      expect(session.selected!.strokes.length, 1);
+      await tester.tap(find.text('Attach'));
+      await tester.pump();
+      expect(await session.result, hasLength(1));
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  test('failed DOM confirmation discards all semantic metadata and releases the host', () async {
+    final frame = await display();
+    addTearDown(frame.image.dispose);
+    final region = SelectedRegion(frame, const Rect.fromLTWH(10, 10, 30, 20));
+    final png =
+        'data:image/png;base64,${base64Encode(await region.render(annotated: false))}';
+    final browser = _ChangingBrowser();
+    final result = await enrichSelectedRegion(
+      region,
+      (_) async => {
+        'stable': true,
+        'source': source,
+        'dataUrl': png,
+        'browserViewport': source['bounds'],
+        'regionContext': {
+          'elements': [
+            {'text': 'Native fallback'},
+          ],
+        },
+      },
+      browser: browser,
+    );
+    expect(result.alignment?['status'], 'image-only');
+    expect(result.snapshot?['regionContext'], isNull);
+    expect(result.snapshot?['dom'], isNull);
+    expect(result.dataUrl, png);
+    expect(browser.methods, ['observe', 'confirm', 'release']);
+  });
+}

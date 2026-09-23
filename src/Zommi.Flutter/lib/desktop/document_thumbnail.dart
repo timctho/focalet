@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'dart:collection';
-import 'dart:typed_data';
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:zommi_flutter/desktop/document_environment.dart';
 import 'package:zommi_flutter/desktop/document_server.dart';
+import 'package:zommi_flutter/desktop/linux_document_renderer.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 
 /// Renders a desktop-sized page once, then releases its browser. Chat scrolling
@@ -51,6 +52,19 @@ final class DocumentThumbnailRequest {
   }
 
   Future<Uint8List> _render() async {
+    if (defaultTargetPlatform == TargetPlatform.linux) {
+      final server = await DocumentServer.start(
+        content: artifact.html!,
+        fileUri: artifact.fileUri,
+        isMarkdown: artifact.kind == 'markdown',
+      );
+      try {
+        _checkCurrent();
+        return await LinuxDocumentRenderer.thumbnail(server.uri);
+      } finally {
+        await server.close();
+      }
+    }
     final environment = await documentEnvironment();
     _checkCurrent();
     final server = await DocumentServer.start(

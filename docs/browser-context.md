@@ -4,8 +4,8 @@ Press `Alt+A` or use **Select** beside the composer, then drag a rectangle.
 On Windows, releasing the mouse opens the drawing toolbar beside the selection.
 Use a pen, arrow, rectangle, ellipse or highlighter; choose a color and stroke
 width, and undo or redo marks. Press **Enter** or **Attach** when ready to add the
-image and available context to your message. Other platforms retain their
-platform selection flow.
+image and available context to your message. Ubuntu and macOS use the same
+selection and drawing tools in a full-window editor.
 A click alone does not select an application element. The same image-style
 selection works when an app exposes no accessibility elements.
 
@@ -14,12 +14,13 @@ Lettered outlines remain after Ctrl is released. Continue dragging, then use
 **Attach** or **Enter** to attach them in order, up to eight. **Escape** or
 **Cancel** discards the batch. Repeating an identical rectangle does not add an
 attachment. Selection painting does not wait for accessibility providers.
-Linux and macOS use their platform rectangle screenshot selectors.
+On Ubuntu and macOS, drag additional boxes directly; use **S** to switch back
+from drawing to selection. On macOS, choose a display from the editor menu.
 
-The Windows toolbar's **Add region** button or **S** starts another selection.
+The toolbar's **Add region** button or **S** starts another selection.
 Choose a drawing tool, then draw inside A or B; each region has its own undo/redo
 history. Click a region's letter to switch to it. **P**, **A**, **R**, **O** and
-**H** choose pen, arrow, rectangle, ellipse and highlighter. **Ctrl+Z** undoes;
+**H** choose pen, arrow, rectangle, ellipse and highlighter. **Ctrl+Z** (or **Cmd+Z** on macOS) undoes;
 **Ctrl+Y** or **Ctrl+Shift+Z** redoes; **Delete** removes the active region.
 **Escape** cancels the entire capture, including its marks.
 
@@ -32,15 +33,19 @@ pixels changed, the frozen annotated image is retained with **Image only**, its
 original observation time and an explanation. Newer application metadata is
 omitted. Drawing is bounded to 256 strokes per region and 4,096 points per stroke.
 
-The rectangle is the primary user reference. On Windows, Zommi enriches it with
-DOM or UI Automation observations when the source and image can be aligned.
+The rectangle is the primary user reference. Zommi enriches it with DOM or native accessibility when the source and image
+can be aligned: UI Automation on Windows, AT-SPI on Ubuntu X11, and AX on macOS.
+macOS requires Accessibility permission; browser DOM additionally requires a
+supported Chromium browser with an authorized CDP connection. Safari can supply
+AX context but is not a CDP provider.
 Elements that partially intersect the rectangle retain their labels, values,
 links and state, with an explicit intersection relation. Their metadata can
 extend beyond the selected pixels; it does not mean the whole element was
 selected. Existing text selections and focus in the application do not override
 the rectangle. Hidden/password nodes and covered elements are filtered where
-the provider allows it. Hit testing samples each intersection; it does not prove
-every pixel is unobscured.
+the provider allows it. Windows hit testing samples intersections; Ubuntu/macOS use native window
+occlusion and provider visibility. These checks do not prove every pixel is
+unobscured inside custom-drawn application surfaces.
 
 Canvas/custom-drawn content, an unconfirmed source window, or a changing document
 can produce **Image only** with an explanation. Windows image-only captures
@@ -91,10 +96,10 @@ captures and text attachments are interleaved. Sent attachments remain available
 when reopening a chat, including context recovered from runtime history; image
 availability depends on that runtime's retention.
 
-## Connecting a browser on Windows
+## Connecting a Chromium browser
 
 Zommi discovers an existing `DevToolsActivePort` file in the standard Chrome,
-Edge and Brave user-data directories. The browser must already offer remote
+Edge and Brave user-data directories (plus Chromium on Ubuntu/macOS). The browser must already offer remote
 debugging and permit the connection. Zommi does not restart the browser or
 change its profile. For a browser that exposes a different local debugging
 port, launch Zommi with `ZOMMI_BROWSER_CDP_ENDPOINT=http://127.0.0.1:9222`
@@ -124,16 +129,17 @@ In **App settings**, turn off **Full webpage details** to stop Zommi using a
 debugging connection from the next capture. This applies to Alt+A, Select content
 and image selection, and closes previously retained Zommi browser connections
 when the helper handles its next capture. Images, physical coordinates and
-Windows accessibility remain available; DOM text and image/product URLs may be
+native accessibility remain available; DOM text and image/product URLs may be
 missing. The preference persists and is on by default. It does not change
 connections made by the agent's separate browser tools.
 
-Without an available connection, Windows accessibility capture remains usable.
-The DOM implementation currently runs in the Windows native capture helper;
-Ubuntu region selection currently returns images only: browser DOM and AT-SPI
-accessibility enrichment are not implemented. UIA is a Windows API. macOS keeps
-its own platform capture provider. The CDP setting above does not enable a
-missing platform provider.
+Without an available connection, native accessibility remains usable. Ubuntu
+X11 and macOS use the same DOM extraction core as Windows, with native AT-SPI
+or AX browser viewport alignment. Their portable browser helper is bundled in
+the installer. If accessibility permission or a matching page viewport is
+unavailable, the capture remains an image with any reliable native context.
+Wayland portals do not supply the desktop origin needed for aligned context;
+the editor still supports image selection and drawing.
 
 ## Identity and geometry
 

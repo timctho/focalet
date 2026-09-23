@@ -304,9 +304,13 @@ class X11:
         return attributes
 
     def find_zommi_window(self) -> int | None:
-        for window in self.children(self.root):
+        pending = [(window, 0) for window in self.children(self.root)]
+        while pending:
+            window, depth = pending.pop()
             if self.title(window).startswith("Zommi"):
                 return window
+            if depth < 3:
+                pending.extend((child, depth + 1) for child in self.children(window))
         return None
 
     def is_descendant(self, window: int, ancestor: int) -> bool:
@@ -349,6 +353,7 @@ class X11:
         self.lib.XSync(self.display, False)
         self.xtest.XTestFakeKeyEvent(self.display, keycode, False, CURRENT_TIME)
         self.lib.XSync(self.display, False)
+        time.sleep(0.15)
 
     def drag_region(self, start: tuple[int, int], end: tuple[int, int]) -> None:
         self.xtest.XTestFakeMotionEvent(
@@ -368,6 +373,9 @@ class X11:
             self.display, 1, False, CURRENT_TIME
         )
         self.lib.XSync(self.display, False)
+        # Flutter dispatches pointer and keyboard input on separate channels.
+        # Let the completed stroke present before sending the next shortcut.
+        time.sleep(0.15)
 
     def click_point(self, point: tuple[int, int]) -> None:
         self.xtest.XTestFakeMotionEvent(
@@ -379,6 +387,7 @@ class X11:
         time.sleep(0.05)
         self.xtest.XTestFakeButtonEvent(self.display, 1, False, CURRENT_TIME)
         self.lib.XSync(self.display, False)
+        time.sleep(0.15)
 
 
 def wait_until(description: str, predicate, timeout: float = 20.0):
@@ -487,6 +496,7 @@ def run_case(
     environment = os.environ.copy()
     environment["GDK_BACKEND"] = "x11"
     environment["LIBGL_ALWAYS_SOFTWARE"] = "1"
+    environment["ZOMMI_RUNTIME_DISCOVERY_MODE"] = "configured-only"
     environment["ZOMMI_ACCEPTANCE_LOG"] = str(trace)
     environment["XDG_STATE_HOME"] = str(temporary / f"{name}-state")
     config = temporary / f"{name}-config"
@@ -525,17 +535,28 @@ def run_case(
             raise RuntimeError("The external context fixture did not receive X11 focus.")
         x11.send_shortcut(shift=shortcut_shift)
         if selection_action is not None:
-            wait_until(
-                "the Rust X11 region selector",
-                lambda: capture_helper_running(process.pid),
-            )
-            time.sleep(0.15)
+            ready = wait_until("the shared capture editor", lambda: event(trace, "capture.editor.ready"))
+            time.sleep(0.5)
+            ready = event(trace, "capture.editor.ready")
+            bounds = ready['bounds']
+            def point(x, y):
+                return (round(bounds['x'] + x * bounds['width'] / ready['imageWidth']),
+                        round(bounds['y'] + y * bounds['height'] / ready['imageHeight']))
             if selection_action == "cancel":
                 x11.send_key(0xFF1B)
             elif selection_action == "click":
-                x11.click_point((100, 100))
-            elif selection_action == "drag":
-                x11.drag_region((100, 100), (140, 130))
+                x11.click_point(point(100, 100))
+                x11.send_key(0xFF1B)
+            elif selection_action in ("drag", "multi"):
+                x11.drag_region(point(100, 100), point(140, 130))
+                x11.send_key(ord('p'))
+                x11.drag_region(point(105, 105), point(135, 125))
+                if selection_action == "multi":
+                    x11.send_key(ord('s'))
+                    x11.drag_region(point(180, 100), point(240, 150))
+                    x11.send_key(ord('a'))
+                    x11.drag_region(point(185, 105), point(235, 145))
+                x11.send_key(0xFF0D)
             else:
                 raise RuntimeError(f"Unknown selector action: {selection_action}")
         result = wait_until(expected_event, lambda: event(trace, expected_event))
@@ -610,10 +631,17 @@ def run_acceptance(package: Path) -> int:
                 raise RuntimeError(f"Alt+A did not attach one rectangle: {context}")
             image = context["items"][0]
             expected_bounds = {"x": 100, "y": 100, "width": 40, "height": 30}
-            if not image.get("hasImage") or image.get("bounds") != expected_bounds:
+            if not image.get("hasImage") or any(abs(image.get("bounds", {}).get(key, -1000) - value) > 2 for key, value in expected_bounds.items()):
                 raise RuntimeError(f"Alt+A did not preserve the selected image rectangle: {context}")
+            if image.get("annotationCount") != 1:
+                raise RuntimeError(f"The drawn stroke was not retained: {context}")
             if image.get("alignmentStatus") != "image-only":
                 raise RuntimeError(f"X11 rectangle claimed unavailable semantic alignment: {context}")
+
+            multiple = run_case(package, x11, fixture, temporary, "multiple",
+                shortcut_shift=False, selection_action="multi", expected_event="selection.content", expect_focused=True)
+            if multiple.get("count") != 2 or [item['annotationCount'] for item in multiple['items']] != [1, 1]:
+                raise RuntimeError(f"Multi-region drawing did not retain independent marks: {multiple}")
 
             clicked = run_case(
                 package,
@@ -655,6 +683,7 @@ def run_acceptance(package: Path) -> int:
                     {
                         "x11ContextShortcut": True,
                         "contextImageBounds": image["bounds"],
+                        "multiRegionDrawing": True,
                         "contextClickWithoutRectangleIgnored": True,
                         "pointContextTitle": pointed["windowTitle"],
                         "contentCancelRestoredFocusedTaskbar": bool(cancelled),

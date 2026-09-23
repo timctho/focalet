@@ -17,4 +17,6 @@ if [[ -z "$browser_executable" || ! -x "$browser_executable" ]]; then
   echo 'Install Chromium or set ZOMMI_TEST_CHROMIUM to its executable to run the browser interaction gate.' >&2
   exit 1
 fi
+dotnet build src/Zommi.BrowserCapture/Zommi.BrowserCapture.csproj --configuration Release
+export ZOMMI_TEST_PORTABLE_BROWSER_HOST="$PWD/src/Zommi.BrowserCapture/bin/Release/net8.0/zommi-browser-capture.dll"
 dotnet run --project tests/Zommi.Browser.Tests --configuration Release -- "$browser_executable" artifacts/browser-capture-acceptance

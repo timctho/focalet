@@ -230,6 +230,9 @@ def verify_package(
 
     entrypoint = _inside(root, str(manifest.get("entrypoint", "")), "Flutter entrypoint")
     core_host = _inside(root, str(manifest.get("coreHost", "")), "Rust core host")
+    browser_host = None
+    if manifest.get("components", {}).get("browserProvider") == "shared-dom":
+        browser_host = _inside(root, str(manifest.get("browserCaptureHost", "")), "Browser capture host")
     capture_host = None
     if manifest.get("platform") == "windows":
         capture_host = _inside(root, str(manifest.get("captureHost", "")), "Windows capture host")
@@ -262,6 +265,10 @@ def verify_package(
     file_count = _verify_checksums(root)
     if smoke_processes:
         _smoke_core(core_host)
+        if browser_host:
+            replies = _request_process(browser_host, [{"id": "probe", "method": "ping"}, {"id": "stop", "method": "shutdown"}])
+            if not replies or replies[0].get("result", {}).get("ready") is not True:
+                raise ReleaseValidationError("The packaged browser capture host did not become ready.")
         if capture_host:
             if manifest.get("platform") == "windows":
                 _smoke_windows_capture(capture_host)

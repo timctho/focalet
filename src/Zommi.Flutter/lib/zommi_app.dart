@@ -28,6 +28,8 @@ import 'package:zommi_flutter/widgets/transcript_view.dart';
 import 'package:zommi_flutter/widgets/frosted_surface.dart';
 import 'package:zommi_flutter/widgets/first_run_setup.dart';
 import 'package:zommi_flutter/widgets/screen_recording_permission_dialog.dart';
+import 'package:zommi_flutter/desktop/region_selection.dart';
+import 'package:zommi_flutter/widgets/region_capture_editor.dart';
 
 export 'package:zommi_flutter/theme/zommi_typography.dart';
 
@@ -187,7 +189,18 @@ class _ZommiAppState extends State<ZommiApp> {
             ),
           );
         }
-        return child!;
+        return ValueListenableBuilder<RegionSelectionSession?>(
+          valueListenable: activeRegionSelection,
+          child: child,
+          builder: (context, session, shell) => Stack(
+            fit: StackFit.expand,
+            children: [
+              ExcludeFocus(excluding: session != null, child: shell!),
+              if (session != null)
+                Positioned.fill(child: RegionCaptureEditor(session: session)),
+            ],
+          ),
+        );
       },
       debugShowCheckedModeBanner: false,
       title: 'Zommi',

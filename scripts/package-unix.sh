@@ -100,12 +100,19 @@ else
   flutter_output="$flutter_directory/build/macos/Build/Products/Release/Zommi.app"
 fi
 core_host="${CARGO_TARGET_DIR:-$repository_root/target}/release/zommi-core-host"
+browser_runtime="$target_platform-$release_architecture"
+if [[ "$target_platform" == macos ]]; then browser_runtime="osx-$release_architecture"; fi
+browser_output="$repository_root/artifacts/browser-capture-$browser_runtime"
+dotnet publish "$repository_root/src/Zommi.BrowserCapture/Zommi.BrowserCapture.csproj" \
+  --configuration Release --runtime "$browser_runtime" --self-contained true \
+  -p:PublishSingleFile=true -p:DebugType=None --output "$browser_output"
 assembler_arguments=(
   "$repository_root/scripts/assemble_release.py"
   --platform "$target_platform"
   --architecture "$release_architecture"
   --flutter-output "$flutter_output"
   --core-host "$core_host"
+  --browser-capture-host "$browser_output"
   --output-root "$repository_root/artifacts"
   --git-commit "$git_commit"
   --document "$repository_root/README.md"

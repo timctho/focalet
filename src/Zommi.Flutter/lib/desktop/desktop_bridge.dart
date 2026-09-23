@@ -2,6 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
+
+import 'package:flutter/foundation.dart' show listEquals, debugPrint;
 
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart'
@@ -18,10 +21,13 @@ import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/desktop/capture_permissions.dart';
 import 'package:zommi_flutter/desktop/capture_shortcut.dart';
 import 'package:zommi_flutter/desktop/response_notifications.dart';
+import 'package:zommi_flutter/desktop/region_selection.dart';
+import 'package:zommi_flutter/desktop/linux_document_renderer.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 
 part 'capture_provider.dart';
+part 'unix_capture_provider.dart';
 part 'surface_window.dart';
 part 'wayland_shortcuts.dart';
 
@@ -682,6 +688,16 @@ final class FlutterDesktopBridge
               'alignmentStatus': mapValue(
                 attachment.snapshot?['region'],
               )['status'],
+              'annotationCount':
+                  mapValue(
+                    attachment.snapshot?['imageAnnotations'],
+                  )['strokeCount'] ??
+                  0,
+              'elementCount':
+                  (mapValue(attachment.snapshot?['regionContext'])['elements']
+                          as List?)
+                      ?.length ??
+                  0,
             },
         ],
       });
@@ -1070,7 +1086,7 @@ final class FlutterDesktopBridge
       await file.writeAsBytes(bytes.buffer.asUint8List(), flush: true);
       _trayIconPath = file.path;
       await trayManager.setIcon(file.path, isTemplate: Platform.isMacOS);
-      await trayManager.setToolTip('Zommi agent chat');
+      if (!Platform.isLinux) await trayManager.setToolTip('Zommi agent chat');
       await trayManager.setContextMenu(
         Menu(
           items: [
@@ -1128,7 +1144,14 @@ final class FlutterDesktopBridge
   }
 
   @override
-  void onWindowClose() => unawaited(closeWindow());
+  void onWindowClose() {
+    final selection = activeRegionSelection.value;
+    if (selection != null) {
+      selection.finish(cancel: true);
+    } else {
+      unawaited(closeWindow());
+    }
+  }
 
   @override
   void onWindowFocus() {}
@@ -1140,7 +1163,7 @@ final class FlutterDesktopBridge
   void onWindowUnmaximize() => _reportWindowState(false);
 
   void _reportWindowState(bool maximized) {
-    if (_invocations.isClosed) return;
+    if (_invocations.isClosed || activeRegionSelection.value != null) return;
     _invocations.add(
       DesktopInvocation(
         kind: DesktopInvocationKind.windowState,

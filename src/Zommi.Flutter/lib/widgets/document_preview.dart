@@ -1,16 +1,19 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:zommi_flutter/desktop/document_environment.dart';
 import 'package:zommi_flutter/desktop/document_server.dart';
 import 'package:zommi_flutter/diagnostics/document_preview_probe.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
+import 'package:zommi_flutter/widgets/linux_document_surface.dart';
 
 /// A full browser surface inside the existing floating artifact panel.
 class DocumentPreview extends StatefulWidget {
-  const DocumentPreview({required this.artifact, super.key});
+  const DocumentPreview({required this.artifact, this.onDismiss, super.key});
   final ArtifactPreview artifact;
+  final VoidCallback? onDismiss;
   @override
   State<DocumentPreview> createState() => _DocumentPreviewState();
 }
@@ -45,7 +48,9 @@ class _DocumentPreviewState extends State<DocumentPreview> {
     });
     await previous?.close();
     try {
-      _environment = await documentEnvironment();
+      _environment = defaultTargetPlatform == TargetPlatform.linux
+          ? null
+          : await documentEnvironment();
       final server = await DocumentServer.start(
         content: widget.artifact.html!,
         fileUri: widget.artifact.fileUri,
@@ -108,7 +113,22 @@ class _DocumentPreviewState extends State<DocumentPreview> {
     return Stack(
       fit: StackFit.expand,
       children: [
-        if (server != null)
+        if (server != null && defaultTargetPlatform == TargetPlatform.linux)
+          LinuxDocumentSurface(
+            key: ValueKey(_attempt),
+            uri: server.uri,
+            onDismiss: widget.onDismiss,
+            onLoaded: (evaluate) {
+              if (!mounted || _server != server) return;
+              _timeout?.cancel();
+              setState(() => _ready = true);
+              unawaited(recordDocumentPreview(widget.artifact, evaluate));
+            },
+            onError: (message) {
+              if (_server == server) _fail(message);
+            },
+          ),
+        if (server != null && defaultTargetPlatform != TargetPlatform.linux)
           InAppWebView(
             key: ValueKey(_attempt),
             webViewEnvironment: _environment,

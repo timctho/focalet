@@ -38,7 +38,7 @@ Install the Ubuntu build dependencies:
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libwpewebkit-1.0-dev libwpebackend-fdo-1.0-dev libepoxy-dev \
+sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libepoxy-dev \
   libayatana-appindicator3-dev libx11-dev libsqlite3-dev python3 python3-venv
 flutter config --enable-linux-desktop
 flutter doctor -v
@@ -90,12 +90,16 @@ conversation; the automated checks below use fake agents instead.
    send a message. After signing in or changing providers, use **Refresh agents**
    and check the model list.
 2. Open another app. Press **Alt+A**, drag a region, and confirm the attachment
-   matches it. Repeat and press **Escape** to check cancellation. Ubuntu capture
-   currently supplies images. Zommi does not yet collect browser DOM or AT-SPI
-   accessibility data on Ubuntu. UI Automation (UIA) is Windows-specific;
-   AT-SPI is the Linux accessibility interface. Installing accessibility
-   packages or setting a CDP endpoint does not enable these missing providers.
-   Windows drawing and browser enrichment are not part of this test.
+   matches it. Add several regions, draw with pen/arrow/shape/highlighter, undo
+   and redo, then press **Enter** to attach the batch. Press **Escape** to cancel.
+   On X11, accessible apps supply AT-SPI text, roles, values, states and bounds.
+   Supported Chromium browsers can also supply DOM through an authorized CDP
+   connection (see [browser context](browser-context.md)). UIA is Windows-specific;
+   AT-SPI is the Ubuntu equivalent. Change the selected content while the editor
+   is open: the original image and drawings should remain, with **Image only**
+   instead of newer context. Wayland portal captures support cropping and drawing,
+   but do not provide the screen origin needed for aligned DOM/accessibility.
+
 3. Type an unsent draft, close with **X**, and reopen from the tray. Check that
    the chat and draft remain. Choose **Quit** to exit. Ubuntu's AppIndicator
    extension must be enabled to show the tray icon.
@@ -133,3 +137,12 @@ The script creates temporary Zommi configuration and state. Passing this check
 does not verify the real GNOME tray or Wayland portal prompts; use the desktop
 steps above for those. When reporting a problem, include the source revision,
 Ubuntu version, X11/Wayland session and the failing step.
+
+The native AT-SPI regression uses only a synthetic GTK window on a private X11
+and D-Bus session. Install `xvfb dbus-x11 at-spi2-core openbox`, then run:
+
+```bash
+cargo build --locked --bin zommi-x11-capture
+xvfb-run -a -s '-screen 0 1100x800x24' env GSETTINGS_BACKEND=memory \
+  dbus-run-session -- python3 scripts/accept-linux-context.py
+```

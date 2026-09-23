@@ -48,7 +48,7 @@ folders, passing that PATH to both the broker and its runtime children. Unusual
 locations can be added through Configure runtime.
 
 Zommi keeps authentication, models and history owned by the selected runtime.
-The welcome flow also checks Accessibility (application/title context) and
+The welcome flow also checks Accessibility (application context and AX element capture) and
 Screen Recording (images). If screenshot access is missing, Select and Option+A
 show an explanation before capture. Click **Open System Settings**, then turn on
 **Zommi** under **Privacy & Security > Screen & System Audio Recording** (called
@@ -96,9 +96,8 @@ removed; the output desktop screenshot remains in your local evidence folder.
 
 ## Interactive capture acceptance
 
-CI also drives the real native rectangle selector with CGEvents, checks the PNG
-matches a 120×80-point drag (allowing the native selector's inclusive edge
-pixel), and cancels a second selection with Escape. This
+The interactive probe drives the shared capture editor with CGEvents, verifies
+the PNG matches its region mapping, and cancels a second selection with Escape. This
 requires input permission for the driver as well as Zommi capture permissions.
 Run the same path with `--interactive` on an authorized test desktop, or manually
 verify these gestures:
@@ -106,13 +105,16 @@ verify these gestures:
 1. With TextEdit or Safari in front, press Option+A or click Select, then drag a
    rectangle. Continue dragging to add up to eight boxes, with no modifier key
    required. Press Enter or click Attach to add the batch in selection order.
-   Undo (or Delete) removes the last box; Escape or Cancel discards the whole
-   pending batch. Each box stays on the display where its drag starts; boxes
-   may be selected on different displays.
+   **Delete** removes the selected box; Escape or Cancel discards the batch.
+   Select a display from the menu to add regions from another monitor. Choose
+   pen, arrow, shape or highlighter; **Cmd+Z** undoes and **Cmd+Shift+Z** redoes
+   drawings independently for each region.
 2. Check each image preview against the selected pixels. The overlay freezes
    the displays before selection, and crops the original pixels without its
    dimming, borders, labels or toolbar. Screen coordinates and Retina image
-   dimensions are retained. Images do not claim element-level AX alignment.
+   dimensions are retained. Stable accessible apps include AX text, roles, states
+   and image-coordinate bounds. Change the source while selecting: the image and
+   drawings stay, and stale AX/DOM context must be discarded.
 3. Repeat and press Escape: cancellation must add no image.
 4. Deny Screen Recording and retry: Zommi should explain how to enable it.
    Grant it, restart if requested, and repeat selection successfully.

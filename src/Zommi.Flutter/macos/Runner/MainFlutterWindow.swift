@@ -44,6 +44,21 @@ class MainFlutterWindow: NSWindow {
       binaryMessenger: flutterViewController.engine.binaryMessenger
     )
     channel.setMethodCallHandler { [weak self] call, result in
+      if call.method == "captureDisplays" || call.method == "observeRegion" {
+        Task { @MainActor in
+          do {
+            if call.method == "captureDisplays" {
+              result(try await MacRegionCaptureBackend.captureDisplays())
+            } else {
+              let arguments = call.arguments as? [String: Any] ?? [:]
+              result(try await MacRegionCaptureBackend.observe(arguments["bounds"] as? [String: Any] ?? [:]))
+            }
+          } catch {
+            result(FlutterError(code: "capture-failed", message: error.localizedDescription, details: nil))
+          }
+        }
+        return
+      }
       if call.method == "selectRegions" {
         guard let self = self, self.regionSelector == nil else {
           result(FlutterError(code: "selection-in-progress", message: "A selection is already open", details: nil))
