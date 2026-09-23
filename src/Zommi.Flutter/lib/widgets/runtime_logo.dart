@@ -8,7 +8,15 @@ class RuntimeLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const brands = {'codex', 'hermes', 'pi', 'openclaw', 'opencode', 'claude'};
+    const brands = {
+      'codex',
+      'hermes',
+      'pi',
+      'openclaw',
+      'opencode',
+      'gemini',
+      'claude',
+    };
     return brands.contains(runtimeId)
         ? Image.asset(
             'assets/runtime_icons/$runtimeId.png',

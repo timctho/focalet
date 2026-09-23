@@ -8,7 +8,7 @@ commands action. A failed or unsupported discovery request does not prevent chat
 | Adapter | Catalog | Execution |
 | --- | --- | --- |
 | Codex app-server | Existing native controls plus `skills/list` | `/clear`, `/new`, `/goal`, and `/help` keep their existing mappings. `/skill:name` uses a typed Codex `skill` input with the discovered path. |
-| OpenCode / Hermes / OpenClaw ACP | `session/update:available_commands_update` | `session/prompt`, with the slash text preserved at the start. Later advertisements replace that session's catalog, including empty lists. |
+| OpenCode / Gemini CLI / Hermes / OpenClaw ACP | `session/update:available_commands_update` | `session/prompt`, with the slash text preserved at the start. Later advertisements replace that session's catalog, including empty lists. |
 | Pi RPC | `get_commands` | `prompt`, preserving command text. Extension commands that finish without agent events receive a completed turn after the runtime confirms it is idle. |
 | Hermes Gateway | `commands.catalog` | `slash.exec`, or `command.dispatch` for skills and quick commands; runtime-produced skill/prompt expansions go to `prompt.submit`. Plain command output is rendered without a model prompt. |
 | OpenClaw Gateway | `commands.list` for the session's agent and text scope | `chat.send`, preserving command text. |

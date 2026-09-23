@@ -122,6 +122,15 @@ const RUNTIME_CATALOG: &[CatalogEntry] = &[
         capability_hints: ACP_CAPABILITY_HINTS,
     },
     CatalogEntry {
+        executable: "gemini",
+        runtime_id: "gemini",
+        adapter_id: "gemini-acp",
+        display_name: "Gemini CLI",
+        protocol_name: "ACP",
+        priority: 26,
+        capability_hints: ACP_CAPABILITY_HINTS,
+    },
+    CatalogEntry {
         executable: "hermes",
         runtime_id: "hermes",
         adapter_id: "hermes-acp",
@@ -1173,6 +1182,7 @@ fn launch_args(adapter_id: &str) -> &'static [&'static str] {
     match adapter_id {
         "codex-app-server" => &["app-server"],
         "pi-rpc" => &["--mode", "rpc"],
+        "gemini-acp" => &["--acp"],
         "hermes-acp" | "openclaw-acp" | "opencode-acp" => &["acp"],
         "hermes-gateway" => &[
             "serve",
@@ -1329,6 +1339,53 @@ mod tests {
     }
 
     #[test]
+    fn gemini_discovery_launches_acp_on_native_and_wsl_hosts() {
+        for (platform, executable) in [
+            ("linux", "/opt/Gemini CLI/gemini"),
+            ("macos", "/opt/homebrew/bin/gemini"),
+            (
+                "windows",
+                r"C:\Users\Test User\AppData\Roaming\npm\gemini.cmd",
+            ),
+        ] {
+            let targets = discover_runtime_targets_with(
+                &HashMap::from([
+                    ("ZOMMI_GEMINI_COMMAND".into(), executable.into()),
+                    (
+                        "ZOMMI_RUNTIME_DISCOVERY_MODE".into(),
+                        "configured-only".into(),
+                    ),
+                ]),
+                platform,
+            );
+            assert_eq!(targets.len(), 1);
+            let target = &targets[0];
+            assert_eq!(target.adapter_id, "gemini-acp");
+            assert_eq!(target.display_name, "Gemini CLI");
+            assert_eq!(command_for_target(target).command, executable);
+            assert_eq!(command_for_target(target).args, ["--acp"]);
+            assert!(
+                runtime_discovery_settings(&targets, &[])["adapters"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|adapter| adapter["adapterId"] == "gemini-acp")
+            );
+        }
+        let targets = runtime_targets_from_wsl_probe(
+            "Ubuntu",
+            true,
+            b"__ZOMMI_RUNTIME_HOME__/home/u\n__ZOMMI_RUNTIME_PATH__gemini\t/home/u/bin/gemini\n",
+        );
+        assert_eq!(targets.len(), 1);
+        let command = command_for_target(&targets[0]);
+        assert_eq!(
+            &command.args[command.args.len() - 2..],
+            ["/home/u/bin/gemini", "--acp"]
+        );
+    }
+
+    #[test]
     fn native_windows_discovery_finds_user_installs_without_path_entries() {
         let root = std::env::temp_dir().join(format!("zommi-native-{}", uuid::Uuid::new_v4()));
         let npm = root.join("npm");
@@ -1398,7 +1455,9 @@ mod tests {
     #[test]
     fn shared_wsl_probe_restores_every_detected_runtime() {
         let script = wsl_runtime_probe_script();
-        for executable in ["codex", "pi", "opencode", "hermes", "openclaw", "claude"] {
+        for executable in [
+            "codex", "pi", "opencode", "gemini", "hermes", "openclaw", "claude",
+        ] {
             assert!(script.contains(&format!("'{executable}'")));
         }
         let targets = runtime_targets_from_wsl_probe(
@@ -1408,11 +1467,12 @@ mod tests {
               __ZOMMI_RUNTIME_PATH__codex\t/home/u/.local/bin/codex\n\
               __ZOMMI_RUNTIME_PATH__pi\t/home/u/.local/bin/pi\n\
               __ZOMMI_RUNTIME_PATH__opencode\t/home/u/.opencode/bin/opencode\n\
+              __ZOMMI_RUNTIME_PATH__gemini\t/home/u/bin/gemini\n\
               __ZOMMI_RUNTIME_PATH__hermes\t/home/u/.local/bin/hermes\n\
               __ZOMMI_RUNTIME_PATH__openclaw\t/home/u/.local/bin/openclaw\n\
               __ZOMMI_RUNTIME_PATH__claude\t/home/u/.local/bin/claude\n",
         );
-        assert_eq!(targets.len(), 7, "Hermes exposes ACP and Gateway targets");
+        assert_eq!(targets.len(), 8, "Hermes exposes ACP and Gateway targets");
         let adapters = targets
             .iter()
             .map(|target| target.adapter_id.as_str())
@@ -1421,6 +1481,7 @@ mod tests {
             "codex-app-server",
             "pi-rpc",
             "opencode-acp",
+            "gemini-acp",
             "hermes-acp",
             "hermes-gateway",
             "openclaw-acp",

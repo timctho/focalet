@@ -245,10 +245,16 @@ impl AcpAdapter {
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        if let Some(auth) = auth_methods.iter().find(|method| {
-            method.get("type").and_then(Value::as_str) != Some("terminal")
-                && method.get("id").and_then(Value::as_str).is_some()
-        }) {
+        // Gemini's session/new and session/load reuse its configured account.
+        // Calling authenticate with the first advertised method would switch
+        // API-key/Vertex users to Google OAuth and can clear their credentials.
+        let reuse_runtime_auth = self.inner.target.adapter_id == "gemini-acp";
+        if !reuse_runtime_auth
+            && let Some(auth) = auth_methods.iter().find(|method| {
+                method.get("type").and_then(Value::as_str) != Some("terminal")
+                    && method.get("id").and_then(Value::as_str).is_some()
+            })
+        {
             self.inner
                 .request(
                     "authenticate",
@@ -256,9 +262,10 @@ impl AcpAdapter {
                     REQUEST_TIMEOUT,
                 )
                 .await?;
-        } else if auth_methods
-            .iter()
-            .any(|method| method.get("type").and_then(Value::as_str) == Some("terminal"))
+        } else if !reuse_runtime_auth
+            && auth_methods
+                .iter()
+                .any(|method| method.get("type").and_then(Value::as_str) == Some("terminal"))
         {
             return Err(adapter_error(
                 "authentication-required",
@@ -1099,10 +1106,28 @@ impl Inner {
             }
         }
         let result = if let Some(error) = message.get("error") {
-            Err(adapter_error(
-                "runtime-request-failed",
-                format!("ACP request '{}' failed: {error}", pending.method),
-            ))
+            let authentication_required = error.get("code").and_then(Value::as_i64) == Some(-32000)
+                && (self.target.adapter_id == "gemini-acp"
+                    || error.get("message").and_then(Value::as_str)
+                        == Some("Authentication required"));
+            if authentication_required {
+                Err(adapter_error(
+                    "authentication-required",
+                    format!(
+                        "{} sign-in required. Complete sign-in in the runtime on the same host, then retry or Refresh agents. {}",
+                        self.target.display_name,
+                        error
+                            .get("message")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default(),
+                    ),
+                ))
+            } else {
+                Err(adapter_error(
+                    "runtime-request-failed",
+                    format!("ACP request '{}' failed: {error}", pending.method),
+                ))
+            }
         } else {
             Ok(message.get("result").cloned().unwrap_or_else(|| json!({})))
         };

@@ -6,7 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
 
 void main() {
-  for (final runtime in ['hermes', 'opencode']) {
+  for (final runtime in ['hermes', 'opencode', 'gemini']) {
     test('$runtime ACP runs end to end through the Rust adapter', () async {
       final fixture = File(
         '${Directory.current.path}/../../crates/zommi-core-host/tests/'
@@ -25,6 +25,7 @@ void main() {
             fixture.path,
           ]),
           if (runtime == 'opencode') 'ZOMMI_FAKE_ACP_CONFIG_OPTIONS': '1',
+          if (runtime == 'gemini') 'ZOMMI_FAKE_ACP_GEMINI': '1',
           'ZOMMI_CORE_STATE_PATH': '${temporary.path}/binding.json',
           'ZOMMI_FAKE_REQUEST_LOG': requestLog.path,
         },
@@ -62,13 +63,16 @@ void main() {
       expect(
         connection.capabilities,
         containsAll(<String>[
-          'session.list.v1',
+          if (runtime != 'gemini') 'session.list.v1',
           'session.resume.v1',
           'turn.stream.v1',
           'approval.resolve.v1',
           'input.image.v1',
         ]),
       );
+      if (runtime == 'gemini') {
+        expect(connection.capabilities, isNot(contains('session.list.v1')));
+      }
 
       expect(
         connection.models.map((model) => model['id']),
@@ -154,6 +158,11 @@ void main() {
         sessionId: connection.sessionId,
       );
       expect(jsonEncode(history), contains('ACP Rust reply'));
+      if (runtime == 'gemini') {
+        final current = await bridge.connectRuntime(runtimeTargetId: target.id);
+        expect(current.sessionMetadata['activeModel'], 'provider:model-b');
+        expect(current.models, hasLength(2));
+      }
 
       final interrupted = bridge.events.firstWhere(
         (event) =>
@@ -229,7 +238,7 @@ void main() {
               request['method'] == 'authenticate' &&
               (request['params'] as Map)['methodId'] == 'provider',
         ),
-        isTrue,
+        runtime != 'gemini',
       );
       final modelChange = requests.singleWhere(
         (request) =>
@@ -264,9 +273,14 @@ void main() {
     });
   }
 
-  for (final prepared in [false, true]) {
+  for (final (runtime, prepared) in [
+    ('opencode', false),
+    ('opencode', true),
+    ('gemini', false),
+    ('gemini', true),
+  ]) {
     test(
-      'OpenCode refresh picks up login models and preserves state (prepared=$prepared)',
+      '$runtime refresh picks up login models and preserves state (prepared=$prepared)',
       () async {
         final temporary = await Directory.systemTemp.createTemp(
           'zommi-acp-refresh-',
@@ -296,11 +310,14 @@ void main() {
         final bridge = ProcessCoreBridge(
           executablePath: _coreHostPath(),
           environment: {
-            'ZOMMI_OPENCODE_COMMAND': await _findPython(),
-            'ZOMMI_OPENCODE_ARGS_JSON': jsonEncode([fixture.path]),
+            'ZOMMI_${runtime.toUpperCase()}_COMMAND': await _findPython(),
+            'ZOMMI_${runtime.toUpperCase()}_ARGS_JSON': jsonEncode([
+              fixture.path,
+            ]),
             'ZOMMI_CORE_STATE_PATH': binding.path,
             'ZOMMI_FAKE_REQUEST_LOG': requestLog.path,
-            'ZOMMI_FAKE_ACP_CONFIG_OPTIONS': '1',
+            if (runtime == 'opencode') 'ZOMMI_FAKE_ACP_CONFIG_OPTIONS': '1',
+            if (runtime == 'gemini') 'ZOMMI_FAKE_ACP_GEMINI': '1',
             'ZOMMI_FAKE_ACP_MODEL_FILE': modelFile.path,
           },
         );
@@ -310,7 +327,7 @@ void main() {
         addTearDown(subscription.cancel);
         await bridge.initialize();
         final target = (await bridge.discoverRuntimeTargets()).targets
-            .singleWhere((t) => t.runtimeId == 'opencode');
+            .singleWhere((t) => t.runtimeId == runtime);
         if (prepared) {
           await bridge.prepareRuntime(runtimeTargetId: target.id);
           await writeModels(expanded: true);
@@ -405,6 +422,10 @@ void main() {
             .whereType<Map>()
             .toList();
         expect(requests.where((r) => r['method'] == 'session/new'), isEmpty);
+        if (runtime == 'gemini') {
+          expect(requests.where((r) => r['method'] == 'authenticate'), isEmpty);
+          expect(requests.where((r) => r['method'] == 'session/list'), isEmpty);
+        }
         expect(
           requests
               .where((r) => r['method'] == 'session/load')
@@ -418,6 +439,63 @@ void main() {
       },
     );
   }
+
+  test('Gemini missing credentials offers sign-in and can retry without switching auth', () async {
+    final temporary = await Directory.systemTemp.createTemp(
+      'zommi-gemini-auth-',
+    );
+    addTearDown(() => temporary.delete(recursive: true));
+    final authState = File('${temporary.path}/signed-in');
+    final binding = File('${temporary.path}/binding.json');
+    final requestLog = File('${temporary.path}/requests.jsonl');
+    final bridge = ProcessCoreBridge(
+      executablePath: _coreHostPath(),
+      environment: {
+        'ZOMMI_GEMINI_COMMAND': await _findPython(),
+        'ZOMMI_GEMINI_ARGS_JSON': jsonEncode([
+          File('../../crates/zommi-core-host/tests/fake_acp_runtime.py')
+              .absolute
+              .path,
+        ]),
+        'ZOMMI_CORE_STATE_PATH': binding.path,
+        'ZOMMI_FAKE_REQUEST_LOG': requestLog.path,
+        'ZOMMI_FAKE_ACP_GEMINI': '1',
+        'ZOMMI_FAKE_ACP_AUTH_STATE_PATH': authState.path,
+      },
+    );
+    addTearDown(bridge.close);
+    await bridge.initialize();
+    final target = (await bridge.discoverRuntimeTargets()).targets.singleWhere(
+      (t) => t.runtimeId == 'gemini',
+    );
+    await expectLater(
+      bridge.connectRuntime(runtimeTargetId: target.id, cwd: temporary.path),
+      throwsA(
+        isA<CoreProtocolException>()
+            .having((e) => e.code, 'code', 'authentication-required')
+            .having((e) => e.message, 'guidance', contains('same host')),
+      ),
+    );
+    expect(await binding.exists(), isFalse);
+    expect(
+      (await bridge.discoverRuntimeTargets()).targets.map((t) => t.id),
+      contains(target.id),
+    );
+    await authState.writeAsString('configured in runtime');
+    final connection = await bridge.connectRuntime(
+      runtimeTargetId: target.id,
+      cwd: temporary.path,
+    );
+    expect(connection.models, isNotEmpty);
+    expect(connection.sessionId, 'acp-session-new');
+    final requests = (await requestLog.readAsLines())
+        .map(jsonDecode)
+        .whereType<Map>();
+    expect(requests.where((r) => r['method'] == 'session/new'), hasLength(2));
+    for (final method in ['authenticate', 'session/list', 'session/prompt']) {
+      expect(requests.where((r) => r['method'] == method), isEmpty);
+    }
+  });
 
   test('OpenClaw ACP keeps authentication inside its runtime bridge', () async {
     final fixture = File(

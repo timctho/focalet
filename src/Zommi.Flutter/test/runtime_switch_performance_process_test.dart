@@ -10,6 +10,7 @@ void main() {
     'openclaw-gateway',
     'hermes-acp',
     'opencode-acp',
+    'gemini-acp',
     'pi-rpc',
   ]) {
     test('$adapter returns exact inline history without relisting known sessions', () async {
@@ -26,6 +27,8 @@ void main() {
           ? 'OPENCLAW'
           : adapter.startsWith('opencode')
           ? 'OPENCODE'
+          : adapter.startsWith('gemini')
+          ? 'GEMINI'
           : 'PI';
       final fixture = gateway
           ? 'fake_gateway_runtime.py'
@@ -71,6 +74,7 @@ void main() {
           'ZOMMI_RUNTIME_DISCOVERY_CACHE_PATH':
               '${temporary.path}/discovery.json',
           'ZOMMI_FAKE_REQUEST_LOG': log.path,
+          if (adapter == 'gemini-acp') 'ZOMMI_FAKE_ACP_GEMINI': '1',
         },
       );
       addTearDown(bridge.close);

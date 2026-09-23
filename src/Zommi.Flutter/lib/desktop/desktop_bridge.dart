@@ -980,31 +980,21 @@ final class FlutterDesktopBridge
       'pi-rpc' => const ['onboard'],
       'hermes-acp' => const ['acp', '--setup'],
       'opencode-acp' => const ['auth', 'login'],
+      // Gemini's interactive CLI owns sign-in; it has no login subcommand.
+      'gemini-acp' => const <String>[],
       'openclaw-acp' => const ['onboard'],
-      _ => const <String>[],
+      _ => null,
     };
-    if (target.executablePath.isEmpty || signInArgs.isEmpty) {
+    if (target.executablePath.isEmpty || signInArgs == null) {
       throw StateError(
         '${target.displayName} has no separate sign-in command.',
       );
     }
-    final host = target.executionHost;
     if (Platform.isWindows) {
-      final command = host['kind'] == 'wsl' ? 'wsl.exe' : target.executablePath;
-      final arguments = host['kind'] == 'wsl'
-          ? [
-              '-d',
-              host['name']?.toString() ?? '',
-              '-e',
-              target.executablePath,
-              ...signInArgs,
-            ]
-          : signInArgs;
       final process = await Process.start('wt.exe', [
         '-w',
         'new',
-        command,
-        ...arguments,
+        ...windowsRuntimeSignInCommand(target, signInArgs),
       ], mode: ProcessStartMode.detached);
       unawaited(process.exitCode);
       return;
@@ -1228,3 +1218,27 @@ String _nextAttachmentId() =>
     'capture-${DateTime.now().microsecondsSinceEpoch}-${++_attachmentSequence}';
 
 String _shellQuote(String value) => "'${value.replaceAll("'", "'\\''")}'";
+
+/// Windows Terminal needs a shell for npm .cmd launchers. WSL login shells
+/// also restore the Node PATH used by CLIs installed through tools such as nvm.
+List<String> windowsRuntimeSignInCommand(
+  RuntimeTarget target,
+  List<String> arguments,
+) {
+  final command = [target.executablePath, ...arguments];
+  if (target.executionHost['kind'] == 'wsl') {
+    return [
+      'wsl.exe',
+      '-d',
+      target.executionHost['name']?.toString() ?? '',
+      '-e',
+      'bash',
+      '-ilc',
+      'exec ${command.map(_shellQuote).join(' ')}',
+    ];
+  }
+  final script = command
+      .map((value) => "'${value.replaceAll("'", "''")}'")
+      .join(' ');
+  return ['powershell.exe', '-NoProfile', '-NoExit', '-Command', '& $script'];
+}

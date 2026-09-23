@@ -45,6 +45,7 @@ impl RuntimeAdapter {
             "codex-app-server"
                 | "hermes-acp"
                 | "opencode-acp"
+                | "gemini-acp"
                 | "openclaw-acp"
                 | "hermes-gateway"
                 | "openclaw-gateway"
@@ -105,6 +106,7 @@ impl RuntimeAdapter {
                 | "hermes-gateway"
                 | "hermes-acp"
                 | "opencode-acp"
+                | "gemini-acp"
                 | "openclaw-acp"
                 | "openclaw-gateway"
         ) {
@@ -138,7 +140,7 @@ impl RuntimeAdapter {
                 )
                 .await?,
             )),
-            "hermes-acp" | "openclaw-acp" | "opencode-acp" => Ok(Self::Acp(
+            "hermes-acp" | "openclaw-acp" | "opencode-acp" | "gemini-acp" => Ok(Self::Acp(
                 AcpAdapter::connect(
                     AcpConfig {
                         target,
