@@ -167,9 +167,12 @@ impl PiAdapter {
                 stderr_task: Mutex::new(None),
             }),
         };
-        adapter
-            .inner
-            .emit_status("Connecting to Pi RPC…", "connecting", None, None);
+        adapter.inner.emit_status(
+            &format!("Connecting to {}…", adapter.inner.target.display_name),
+            "connecting",
+            None,
+            None,
+        );
         let weak = Arc::downgrade(&adapter.inner);
         *adapter.inner.stdout_task.lock().await =
             Some(tokio::spawn(async move { read_stdout(weak, stdout).await }));
@@ -257,6 +260,19 @@ impl PiAdapter {
             }
         }
         let state = self.inner.state.lock().await;
+        if self.inner.target.runtime_id == "grok"
+            && (state.models.is_empty()
+                || state
+                    .runtime_state
+                    .pointer("/model/provider")
+                    .and_then(Value::as_str)
+                    != Some("xai"))
+        {
+            return Err(pi_error(
+                "authentication-required",
+                "Grok needs xAI configured in Pi. Run `pi --provider xai --models 'xai/*'`, use /login to add your xAI API key, then Refresh agents and retry. Zommi does not store the key.",
+            ));
+        }
         if state.runtime_state.get("model").is_none() || state.models.is_empty() {
             return Err(pi_error(
                 "authentication-required",
@@ -266,7 +282,11 @@ impl PiAdapter {
         let session_id = runtime_session_id(&state.runtime_state)?;
         drop(state);
         self.inner.emit_status(
-            &format!("Pi ready · {}", short_id(&session_id)),
+            &format!(
+                "{} ready · {}",
+                self.inner.target.display_name,
+                short_id(&session_id)
+            ),
             "ready",
             Some(&session_id),
             None,
@@ -902,6 +922,7 @@ impl PiAdapter {
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
+            .filter(|model| self.inner.target.runtime_id != "grok" || model["provider"] == "xai")
             .filter_map(model_for_ui)
             .collect::<Vec<_>>();
         let model_id = runtime_state.get("model").and_then(|model| {
@@ -979,7 +1000,28 @@ impl PiAdapter {
                 self.inner.state.lock().await.runtime_state["model"] = json!({
                     "provider": model.get("provider"), "id": model.get("rawModelId")
                 });
+            } else if self.inner.target.runtime_id == "grok" {
+                return Err(pi_error(
+                    "invalid-request",
+                    "Choose an available Grok model from the xAI model list.",
+                ));
             }
+        }
+        if self.inner.target.runtime_id == "grok"
+            && self
+                .inner
+                .state
+                .lock()
+                .await
+                .runtime_state
+                .pointer("/model/provider")
+                .and_then(Value::as_str)
+                != Some("xai")
+        {
+            return Err(pi_error(
+                "invalid-request",
+                "Choose an available Grok model before sending; this session is using a different provider.",
+            ));
         }
         if let Some(effort) = effort {
             let mut state = self.inner.state.lock().await;

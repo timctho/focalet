@@ -105,14 +105,16 @@ class _SessionSidebarState extends State<SessionSidebar> {
                           'Agents',
                           style: TextStyle(fontWeight: FontWeight.w700),
                         ),
-                        if (controller.sessionCatalogLoading) ...[
+                        if (controller.sessionCatalogLoading ||
+                            controller.sessionBusy ||
+                            controller.runtimeBusy) ...[
                           const SizedBox(width: 10),
                           const SizedBox.square(
                             dimension: 16,
                             child: RepaintBoundary(
                               child: CircularProgressIndicator(
                                 key: ValueKey('session-catalog-loading'),
-                                semanticsLabel: 'Loading saved chats',
+                                semanticsLabel: 'Loading agents and chats',
                                 strokeWidth: 2,
                               ),
                             ),
@@ -494,13 +496,7 @@ class _NewAgentMenu extends StatelessWidget {
           onPressed: busy
               ? null
               : () => menu.isOpen ? menu.close() : menu.open(),
-          icon: busy
-              ? const SizedBox.square(
-                  key: ValueKey('session-loading-indicator'),
-                  dimension: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.add_rounded, size: 20),
+          icon: const Icon(Icons.add_rounded, size: 20),
         ),
       );
     },

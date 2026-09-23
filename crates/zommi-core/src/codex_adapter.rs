@@ -250,6 +250,7 @@ struct AdapterState {
     pending_names: HashMap<String, String>,
     pending_previews: HashMap<String, String>,
     stderr: String,
+    startup_stdout: String,
     stopping: bool,
     exited: bool,
     exit_error: Option<String>,
@@ -1788,9 +1789,11 @@ impl Inner {
             inner: self,
             id: id.clone(),
         };
+        let mut written = false;
         let result = timeout(deadline, async {
             self.write_json(&json!({"method": method, "id": id, "params": params}))
                 .await?;
+            written = true;
             receiver.await.unwrap_or_else(|_| {
                 Err(CodexError::new(
                     "runtime-exited",
@@ -1807,6 +1810,37 @@ impl Inner {
                     "Codex app-server did not respond to '{method}' within {} seconds.",
                     deadline.as_secs_f64()
                 );
+                if method == "initialize" {
+                    // No turn has been submitted. Tell callers this is a
+                    // failed connection, not an uncertain agent operation.
+                    // Let the UI offer an explicit retry instead of spending
+                    // another three initialization deadlines on a saved chat.
+                    error.code = "runtime-initialize-timeout".into();
+                    let state = self.state.lock().await;
+                    let progress = if !written {
+                        "The launcher's input pipe did not accept the initialize request."
+                    } else if self.received_messages.load(Ordering::Relaxed) == 0 {
+                        "The launcher accepted the request, but no app-server JSON message arrived."
+                    } else {
+                        "The app-server sent JSON messages but never answered initialize."
+                    };
+                    error.message = sanitize_diagnostic(format!(
+                        "{} Host: {}. {} {} {} Retry starts a fresh connection and keeps your chats. If it repeats, run `codex app-server` in that host and check its startup errors, CLI version and configuration.",
+                        error.message,
+                        self.config.target.execution_host.display_name,
+                        progress,
+                        if state.stderr.trim().is_empty() {
+                            String::new()
+                        } else {
+                            format!("Startup stderr: {}", state.stderr.trim())
+                        },
+                        if state.startup_stdout.trim().is_empty() {
+                            String::new()
+                        } else {
+                            format!("Non-protocol stdout: {}", state.startup_stdout.trim())
+                        },
+                    ));
+                }
                 Err(error)
             }
         }
@@ -2192,12 +2226,19 @@ async fn read_stdout(inner: Weak<Inner>, stdout: tokio::process::ChildStdout) {
                         inner.received_messages.fetch_add(1, Ordering::Relaxed);
                         inner.handle_message(message).await;
                     }
-                    Err(_) => inner.emit_status(
-                        "Codex app-server emitted invalid JSON.",
-                        "degraded",
-                        None,
-                        None,
-                    ),
+                    Err(_) => {
+                        let mut state = inner.state.lock().await;
+                        if state.protocol_version == 0 {
+                            append_diagnostic(&mut state.startup_stdout, &line);
+                        }
+                        drop(state);
+                        inner.emit_status(
+                            "Codex app-server emitted invalid JSON.",
+                            "degraded",
+                            None,
+                            None,
+                        );
+                    }
                 }
             }
             Ok(None) | Err(_) => return,
@@ -2218,16 +2259,22 @@ async fn read_stderr(inner: Weak<Inner>, stderr: tokio::process::ChildStderr) {
                 };
                 let chunk = String::from_utf8_lossy(&buffer);
                 let mut state = inner.state.lock().await;
-                state.stderr.push_str(&chunk);
-                if state.stderr.len() > 4_000 {
-                    let mut start = state.stderr.len() - 4_000;
-                    while !state.stderr.is_char_boundary(start) {
-                        start += 1;
-                    }
-                    state.stderr.drain(..start);
-                }
+                append_diagnostic(&mut state.stderr, &chunk);
             }
         }
+    }
+}
+
+fn append_diagnostic(buffer: &mut String, chunk: &str) {
+    // Redact before truncation so a cut cannot remove a secret's key prefix.
+    buffer.push_str(&sanitize_diagnostic(chunk.to_owned()));
+    buffer.push('\n');
+    if buffer.len() > 4_000 {
+        let mut start = buffer.len() - 4_000;
+        while !buffer.is_char_boundary(start) {
+            start += 1;
+        }
+        buffer.drain(..start);
     }
 }
 

@@ -191,7 +191,7 @@ test('persistent WSL relay authenticates and frames runtime stdio', async () => 
     const proxy = await runRustProxy(endpointPath);
     assert.equal(proxy.code, 9);
     assert.equal(proxy.stdout, 'proxy-out:proxy-input-one\n');
-    assert.equal(proxy.stderr, 'proxy-err:proxy-input-two\n');
+    assert.equal(proxy.stderr, 'Zommi: preparing WSL transport.\nZommi: WSL transport ready; launching agent.\nproxy-err:proxy-input-two\n');
   } finally {
     relay.kill('SIGTERM');
     await Promise.race([
@@ -328,7 +328,7 @@ test('overlapping relays leave foreign requests for their authenticated owner', 
       for (const result of results) {
         assert.equal(result.code, 9);
         assert.equal(result.stdout, 'proxy-out:proxy-input-one\n');
-        assert.equal(result.stderr, 'proxy-err:proxy-input-two\n');
+        assert.equal(result.stderr, 'Zommi: preparing WSL transport.\nZommi: WSL transport ready; launching agent.\nproxy-err:proxy-input-two\n');
       }
     }
   } finally {

@@ -978,6 +978,7 @@ final class FlutterDesktopBridge
     final signInArgs = switch (target.adapterId) {
       'codex-app-server' => const ['login'],
       'pi-rpc' => const ['onboard'],
+      'grok-pi-rpc' => const ['--provider', 'xai', '--models', 'xai/*'],
       'hermes-acp' => const ['acp', '--setup'],
       'opencode-acp' => const ['auth', 'login'],
       'openclaw-acp' => const ['onboard'],

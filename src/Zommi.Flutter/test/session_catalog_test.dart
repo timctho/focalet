@@ -77,6 +77,44 @@ void main() {
     },
   );
 
+  testWidgets('catalog and new chat share one header spinner', (tester) async {
+    final core = multiRuntimeCore();
+    await tester.pumpWidget(ZommiApp(core: core, desktop: FakeDesktopBridge()));
+    await tester.pumpAndSettle();
+    final controller = tester
+        .widget<SessionSidebar>(find.byType(SessionSidebar))
+        .controller;
+    final gate = Completer<void>();
+    core.catalogGates[hermes.id] = gate.future;
+    final refresh = controller.refreshSessionCatalog(force: true);
+    final createGate = Completer<void>();
+    core.createSessionGate = createGate.future;
+    final create = controller.createSession(runtimeTargetId: hermes.id);
+    await tester.pump();
+    expect(controller.sessionBusy, isTrue);
+    expect(controller.sessionCatalogLoading, isTrue);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('session-sidebar')),
+        matching: find.byType(CircularProgressIndicator),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('new-session')),
+        matching: find.byIcon(Icons.add_rounded),
+      ),
+      findsOneWidget,
+    );
+    createGate.complete();
+    await create;
+    gate.complete();
+    await refresh;
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('session-catalog-loading')), findsNothing);
+  });
+
   testWidgets(
     'sidebar opens with 20 summaries and adds 20 at each scroll to the bottom',
     (tester) async {

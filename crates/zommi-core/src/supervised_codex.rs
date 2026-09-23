@@ -385,6 +385,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn initialize_timeout_reports_redacted_startup_and_fresh_retry_works() {
+        let fixture = Fixture::new();
+        fixture.mark("stall-initialize", "1");
+        fixture.mark("startup-diagnostics", "1");
+        let mut config = fixture.config();
+        config.request_timeout = Duration::from_secs(1);
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let error = match CodexAdapter::connect(config, tx).await {
+            Ok(_) => panic!("fixture must time out"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code, "runtime-initialize-timeout");
+        assert!(error.retryable);
+        assert!(error.message.contains("within 1 seconds"));
+        assert!(error.message.contains("no app-server JSON message arrived"));
+        assert!(error.message.contains("configuration unavailable"));
+        assert!(error.message.contains("launcher waiting for setup"));
+        assert!(!error.message.contains("fixture-private"));
+        assert_eq!(fixture.count("thread/start"), 0);
+        fs::remove_file(fixture.0.join("stall-initialize")).unwrap();
+        let (runtime, _) = fixture.connect().await;
+        assert_eq!(fixture.count("thread/start"), 1);
+        assert_eq!(fixture.pids().len(), 2);
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
     async fn prepared_transport_activates_supervision_and_recovers_exact_chat() {
         let fixture = Fixture::new();
         let mut config = fixture.config();

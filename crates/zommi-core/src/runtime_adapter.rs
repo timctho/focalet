@@ -175,7 +175,7 @@ impl RuntimeAdapter {
                 )
                 .await?,
             )),
-            "pi-rpc" => Ok(Self::Pi(
+            "pi-rpc" | "grok-pi-rpc" => Ok(Self::Pi(
                 PiAdapter::connect(
                     PiConfig {
                         target,
