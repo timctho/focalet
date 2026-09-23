@@ -22,6 +22,12 @@ public sealed record BrowserDocumentStamp
     public required string Title { get; init; }
     public required string Url { get; init; }
     public bool Visible { get; init; }
+
+    // A page-wide mutation counter includes unrelated clocks, ads and live
+    // messages. Region captures compare their own content separately while
+    // retaining every document, visibility and viewport identity check.
+    public bool SameViewportAndDocument(BrowserDocumentStamp other) =>
+        this with { Revision = other.Revision } == other;
 }
 
 public sealed record BrowserDomObservation : DomObservationData
@@ -32,6 +38,11 @@ public sealed record BrowserDomObservation : DomObservationData
         Mode = Mode, SelectedText = SelectedText, Elements = Elements,
         Nearby = Nearby, Truncated = Truncated, Limitation = Limitation,
     };
+
+    public bool SameRegionContent(BrowserDomObservation other) =>
+        Mode == "region" && other.Mode == "region" &&
+        Stamp.SameViewportAndDocument(other.Stamp) &&
+        JsonSerializer.Serialize(Context) == JsonSerializer.Serialize(other.Context);
 }
 
 public record DomObservationData
@@ -169,7 +180,22 @@ public sealed class BrowserDomSession : IDisposable
             ?? throw new InvalidOperationException("No browser observation was returned.");
         await ValidateAsync(cancellationToken).ConfigureAwait(false);
         var after = await StampAsync(cancellationToken).ConfigureAwait(false);
-        if (observation.Stamp != after) throw new InvalidOperationException("The document changed during capture. Capture it again.");
+        if (observation.Stamp != after)
+        {
+            if (mode != "region" || !observation.Stamp.SameViewportAndDocument(after))
+                throw new InvalidOperationException("The document changed during capture. Capture it again.");
+            // Re-read the bounded region atomically in the renderer. Ignore a
+            // global revision change only when the retained text, state, IDs,
+            // hierarchy, intersections and geometry still match exactly.
+            var confirmation = (await InvokeAsync(new { mode, x, y, rect }, cancellationToken).ConfigureAwait(false))
+                .Deserialize<BrowserDomObservation>(Json)
+                ?? throw new InvalidOperationException("No browser region confirmation was returned.");
+            await ValidateAsync(cancellationToken).ConfigureAwait(false);
+            var confirmedStamp = await StampAsync(cancellationToken).ConfigureAwait(false);
+            if (!observation.SameRegionContent(confirmation) || !confirmation.Stamp.SameViewportAndDocument(confirmedStamp))
+                throw new InvalidOperationException("The selected content changed during capture. Capture it again.");
+            return confirmation;
+        }
         return observation;
     }
 

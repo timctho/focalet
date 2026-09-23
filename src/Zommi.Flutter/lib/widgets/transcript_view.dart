@@ -8,6 +8,7 @@ import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/zommi_typography.dart';
 import 'package:zommi_flutter/widgets/content_views.dart';
+import 'package:zommi_flutter/widgets/document_thumbnail.dart';
 import 'package:zommi_flutter/widgets/inline_attachment_composer.dart';
 import 'package:zommi_flutter/widgets/message_actions.dart';
 import 'package:zommi_flutter/widgets/thinking_flow_background.dart';
@@ -1773,6 +1774,7 @@ class ArtifactCard extends StatefulWidget {
 class _ArtifactCardState extends State<ArtifactCard> {
   ArtifactPreview? _loaded;
   Object? _error;
+  int _loadGeneration = 0;
 
   @override
   void initState() {
@@ -1780,15 +1782,36 @@ class _ArtifactCardState extends State<ArtifactCard> {
     unawaited(_load());
   }
 
+  @override
+  void didUpdateWidget(ArtifactCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final previous = oldWidget.artifact;
+    final current = widget.artifact;
+    if (previous.id != current.id ||
+        previous.path != current.path ||
+        previous.html != current.html ||
+        previous.dataUrl != current.dataUrl ||
+        previous.cwd != current.cwd) {
+      _loaded = null;
+      _error = null;
+      unawaited(_load());
+    }
+  }
+
   Future<void> _load() async {
+    final generation = ++_loadGeneration;
     try {
       final value = await widget.controller.artifactLoader.load(
         widget.artifact,
         target: widget.controller.activeRuntime,
       );
-      if (mounted) setState(() => _loaded = value);
+      if (mounted && generation == _loadGeneration) {
+        setState(() => _loaded = value);
+      }
     } on Object catch (error) {
-      if (mounted) setState(() => _error = error);
+      if (mounted && generation == _loadGeneration) {
+        setState(() => _error = error);
+      }
     }
   }
 
@@ -1808,7 +1831,11 @@ class _ArtifactCardState extends State<ArtifactCard> {
             child: Row(
               children: [
                 Text(
-                  artifact.kind == 'html' ? 'HTML' : 'Image',
+                  switch (artifact.kind) {
+                    'html' => 'HTML',
+                    'markdown' => 'Markdown',
+                    _ => 'Image',
+                  },
                   style: TextStyle(
                     color: Theme.of(context).colorScheme.primary,
                     fontSize: 10,
@@ -1827,18 +1854,20 @@ class _ArtifactCardState extends State<ArtifactCard> {
             ),
           ),
           SizedBox(
-            height: 150,
-            child: _error == null
-                ? ArtifactSurface(artifact: artifact, compact: true)
-                : Center(
-                    child: Text(
-                      'Preview unavailable · $_error',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
-                      ),
+            height: artifact.kind == 'image' ? 150 : 240,
+            child: _error != null
+                ? Center(child: Text('Preview unavailable · $_error'))
+                : (artifact.kind == 'html' || artifact.kind == 'markdown') &&
+                      artifact.html != null
+                ? GestureDetector(
+                    onTap: () =>
+                        unawaited(widget.controller.showArtifact(artifact)),
+                    child: DocumentThumbnail(
+                      key: ValueKey(artifact.id),
+                      artifact: artifact,
                     ),
-                  ),
+                  )
+                : ArtifactSurface(artifact: artifact, compact: true),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 7, 7, 7),

@@ -91,8 +91,11 @@ conversation; the automated checks below use fake agents instead.
    and check the model list.
 2. Open another app. Press **Alt+A**, drag a region, and confirm the attachment
    matches it. Repeat and press **Escape** to check cancellation. Ubuntu capture
-   currently supplies images; Windows drawing and browser enrichment are not
-   part of this test.
+   currently supplies images. Zommi does not yet collect browser DOM or AT-SPI
+   accessibility data on Ubuntu. UI Automation (UIA) is Windows-specific;
+   AT-SPI is the Linux accessibility interface. Installing accessibility
+   packages or setting a CDP endpoint does not enable these missing providers.
+   Windows drawing and browser enrichment are not part of this test.
 3. Type an unsent draft, close with **X**, and reopen from the tray. Check that
    the chat and draft remain. Choose **Quit** to exit. Ubuntu's AppIndicator
    extension must be enabled to show the tray icon.

@@ -91,7 +91,7 @@ captures and text attachments are interleaved. Sent attachments remain available
 when reopening a chat, including context recovered from runtime history; image
 availability depends on that runtime's retention.
 
-## Connecting a browser
+## Connecting a browser on Windows
 
 Zommi discovers an existing `DevToolsActivePort` file in the standard Chrome,
 Edge and Brave user-data directories. The browser must already offer remote
@@ -130,7 +130,10 @@ connections made by the agent's separate browser tools.
 
 Without an available connection, Windows accessibility capture remains usable.
 The DOM implementation currently runs in the Windows native capture helper;
-Linux and macOS keep their existing platform capture providers.
+Ubuntu region selection currently returns images only: browser DOM and AT-SPI
+accessibility enrichment are not implemented. UIA is a Windows API. macOS keeps
+its own platform capture provider. The CDP setting above does not enable a
+missing platform provider.
 
 ## Identity and geometry
 
@@ -146,9 +149,12 @@ rectangle when needed) supplies the physical viewport.
 Its dimensions must agree with the browser's CSS viewport. Unsupported or
 ambiguous geometry does not receive DOM coordinates. Image capture records the
 physical region, image size and CSS viewport mapping, including negative desktop
-coordinates. Viewport movement, document mutations, scroll changes and window
-changes invalidate alignment. On Windows, DOM text is read before copying the selected physical screen
-pixels, then checked again afterward along with window coverage. This avoids
+coordinates. Document replacement, viewport movement, scrolling, window changes
+and changes to the selected region invalidate alignment. Unrelated page updates
+(such as a counter outside the rectangle) are accepted only when repeated reads
+retain identical region text, state, hierarchy and geometry. On Windows, DOM
+text is read before copying the selected physical screen pixels, then checked
+again afterward along with window coverage. This avoids
 Chrome compositor screenshot commands and their visible surface changes. The
 PNG dimensions are retained in the image mapping. UIA fallback compares intersecting accessible elements and states
 on both sides of the image capture.

@@ -19,6 +19,8 @@ internal sealed class CountingBrowserProxy : IAsyncDisposable
     private int acceptedConnections;
     private readonly ConcurrentDictionary<string, int> methods = [];
     private readonly ConcurrentDictionary<int, int> delayedReplies = [];
+    private readonly ConcurrentDictionary<int, Func<Task>> interceptedReplies = [];
+    private Func<Task>? beforeRegionReply;
     private string? delayedMethod;
     private int delayMilliseconds;
     public bool RejectConnections { get; set; }
@@ -42,6 +44,8 @@ internal sealed class CountingBrowserProxy : IAsyncDisposable
         delayMilliseconds = milliseconds;
         delayedMethod = method;
     }
+
+    public void BeforeNextRegionReply(Func<Task> action) => beforeRegionReply = action;
 
     private async Task AcceptAsync()
     {
@@ -125,12 +129,19 @@ internal sealed class CountingBrowserProxy : IAsyncDisposable
             {
                 var method = methodValue.GetString()!;
                 methods.AddOrUpdate(method, 1, (_, count) => count + 1);
+                if (method == "Runtime.evaluate" && root.GetProperty("params").GetProperty("expression").GetString()!
+                    .Contains("\"mode\":\"region\"", StringComparison.Ordinal) &&
+                    Interlocked.Exchange(ref beforeRegionReply, null) is { } intercept)
+                    interceptedReplies[root.GetProperty("id").GetInt32()] = intercept;
                 var scheduled = Volatile.Read(ref delayedMethod);
                 if (scheduled == method && Interlocked.CompareExchange(ref delayedMethod, null, scheduled) == scheduled)
                     delayedReplies[root.GetProperty("id").GetInt32()] = delayMilliseconds;
             }
-            else if (!requests && root.TryGetProperty("id", out var id) && delayedReplies.TryRemove(id.GetInt32(), out var delay))
-                await Task.Delay(delay, stopped.Token);
+            else if (!requests && root.TryGetProperty("id", out var id))
+            {
+                if (interceptedReplies.TryRemove(id.GetInt32(), out var intercept)) await intercept();
+                if (delayedReplies.TryRemove(id.GetInt32(), out var delay)) await Task.Delay(delay, stopped.Token);
+            }
             await destination.SendAsync(message.ToArray().AsMemory(), received.MessageType, true, stopped.Token);
         }
     }
