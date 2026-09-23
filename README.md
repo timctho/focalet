@@ -14,13 +14,13 @@ available text, links and structure.
 Uses your existing agent account. [Installation guide](docs/install.md) ·
 [Build from source](CONTRIBUTING.md)
 
-## Connect your agent and choose a model
+## Connect your agent
 
-Choose an installed agent, sign in through its own flow if needed, then pick a
-model from the chat header. This quick setup demo shows all six agent options,
-Codex and OpenCode model selection, and the full app ready to use.
+Choose an installed agent, or use **Configure runtime → Add runtime** to add a
+CLI. Repeat for additional runtimes, connect, then choose a model from the chat
+header. Sign in through your agent's own flow if needed.
 
-[![Choose an agent and model, then see the full Zommi window](docs/demos/setup-preview.webp)](docs/demos/setup.mp4)
+[![Configure agent runtimes, connect, and see the full Zommi window](docs/demos/setup-preview.webp)](docs/demos/setup.mp4)
 
 | Agent | Support |
 | --- | --- |
