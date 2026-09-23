@@ -1822,7 +1822,11 @@ class _ArtifactCardState extends State<ArtifactCard> {
       key: ValueKey('artifact-${artifact.id}'),
       margin: const EdgeInsets.only(top: 10),
       clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(borderRadius: BorderRadius.circular(14)),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
