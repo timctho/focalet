@@ -124,14 +124,6 @@ final class ResponseNotifications {
       }),
       notificationDetails: NotificationDetails(
         windows: WindowsNotificationDetails(
-          images: [
-            if (_windowsIconUri case final icon?)
-              WindowsImage(
-                icon,
-                altText: 'Zommi',
-                placement: WindowsImagePlacement.appLogoOverride,
-              ),
-          ],
           audio: WindowsNotificationAudio.preset(
             sound: WindowsNotificationSound.defaultSound,
           ),
