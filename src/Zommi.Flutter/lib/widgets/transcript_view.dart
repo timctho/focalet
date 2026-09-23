@@ -1862,32 +1862,15 @@ class _ArtifactCardState extends State<ArtifactCard> {
                 Expanded(
                   child: Tooltip(
                     message: artifact.path ?? artifact.title,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          artifact.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            height: 1.3,
-                          ),
-                        ),
-                        if (artifact.path case final path?)
-                          Text(
-                            path,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: colors.onSurfaceVariant,
-                              fontSize: 11,
-                              height: 1.3,
-                            ),
-                          ),
-                      ],
+                    child: Text(
+                      artifact.path ?? artifact.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: colors.onSurfaceVariant,
+                        fontSize: 12,
+                        height: 1.3,
+                      ),
                     ),
                   ),
                 ),
