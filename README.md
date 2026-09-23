@@ -27,18 +27,9 @@ header. Sign in through your agent's own flow if needed.
 | **Codex** | Chats, images, saved sessions, models, approvals and native skills |
 | **OpenCode** | Chats, images, saved sessions, models, approvals and advertised commands through ACP |
 | **Pi** | Chats, images, models and runtime commands through RPC |
-| **Grok (via Pi)** | xAI models, chats, images and tools through Pi RPC; configure xAI in Pi |
 | **Hermes** | Chats and commands exposed by its ACP or Gateway profile |
 | **OpenClaw** | Chats and commands exposed by its ACP or local Gateway configuration |
 | **Claude CLI** | Text-only terminal compatibility; image attachments unsupported |
-
-**Model families:** GPT and Codex through Codex; Grok through Pi's xAI provider; GPT, Claude, Gemini and other
-provider models through OpenCode or Pi, plus OpenCode Zen's catalog through OpenCode.
-Hermes, OpenClaw and Claude CLI use their runtime's configured model.
-Availability depends on your account, providers and runtime version. After
-signing in or adding a provider, use **New agent → Refresh agents** to update
-the model list. [Agent setup](docs/install.md#2-choose-the-agent-you-already-have) ·
-[Runtime commands](docs/runtime-commands.md)
 
 ## See it in action
 

@@ -113,15 +113,6 @@ const RUNTIME_CATALOG: &[CatalogEntry] = &[
         capability_hints: PI_CAPABILITY_HINTS,
     },
     CatalogEntry {
-        executable: "pi",
-        runtime_id: "grok",
-        adapter_id: "grok-pi-rpc",
-        display_name: "Grok (via Pi)",
-        protocol_name: "Pi RPC · xAI",
-        priority: 21,
-        capability_hints: PI_CAPABILITY_HINTS,
-    },
-    CatalogEntry {
         executable: "opencode",
         runtime_id: "opencode",
         adapter_id: "opencode-acp",
@@ -645,7 +636,7 @@ fn discover_runtime_targets_with_status(
         if !runtime_supported_on_host(entry, &native_host) {
             continue;
         }
-        let override_name = format!("ZOMMI_{}_COMMAND", entry.runtime_id.to_ascii_uppercase());
+        let override_name = format!("ZOMMI_{}_COMMAND", entry.executable.to_ascii_uppercase());
         if let Some(configured) = environment
             .get(&override_name)
             .filter(|value| !value.trim().is_empty())
@@ -1182,7 +1173,6 @@ fn launch_args(adapter_id: &str) -> &'static [&'static str] {
     match adapter_id {
         "codex-app-server" => &["app-server"],
         "pi-rpc" => &["--mode", "rpc"],
-        "grok-pi-rpc" => &["--mode", "rpc", "--provider", "xai", "--models", "xai/*"],
         "hermes-acp" | "openclaw-acp" | "opencode-acp" => &["acp"],
         "hermes-gateway" => &[
             "serve",
@@ -1422,11 +1412,7 @@ mod tests {
               __ZOMMI_RUNTIME_PATH__openclaw\t/home/u/.local/bin/openclaw\n\
               __ZOMMI_RUNTIME_PATH__claude\t/home/u/.local/bin/claude\n",
         );
-        assert_eq!(
-            targets.len(),
-            8,
-            "Hermes exposes two transports; Pi also exposes Grok"
-        );
+        assert_eq!(targets.len(), 7, "Hermes exposes ACP and Gateway targets");
         let adapters = targets
             .iter()
             .map(|target| target.adapter_id.as_str())
@@ -1434,7 +1420,6 @@ mod tests {
         for adapter in [
             "codex-app-server",
             "pi-rpc",
-            "grok-pi-rpc",
             "opencode-acp",
             "hermes-acp",
             "hermes-gateway",
@@ -1448,48 +1433,6 @@ mod tests {
                 && target.execution_host.name.as_deref() == Some("Ubuntu")
                 && target.runtime_home.as_deref() == Some("/home/u")
         }));
-    }
-
-    #[test]
-    fn grok_launches_pi_with_xai_provider_on_native_and_wsl_hosts() {
-        let native = discover_runtime_targets_with(
-            &HashMap::from([
-                ("ZOMMI_GROK_COMMAND".into(), "/custom/pi".into()),
-                (
-                    "ZOMMI_RUNTIME_DISCOVERY_MODE".into(),
-                    "configured-only".into(),
-                ),
-            ]),
-            "linux",
-        );
-        assert_eq!(native.len(), 1);
-        assert_eq!(native[0].runtime_id, "grok");
-        let command = command_for_target(&native[0]);
-        assert_eq!(command.command, "/custom/pi");
-        assert_eq!(
-            command.args,
-            ["--mode", "rpc", "--provider", "xai", "--models", "xai/*"]
-        );
-        let targets = runtime_targets_from_wsl_probe(
-            "Ubuntu",
-            true,
-            b"__ZOMMI_RUNTIME_HOME__/home/u\n__ZOMMI_RUNTIME_PATH__pi\t/home/u/bin/pi\n",
-        );
-        assert_eq!(targets.len(), 2);
-        let grok = targets.iter().find(|t| t.runtime_id == "grok").unwrap();
-        let command = command_for_target(grok);
-        assert_eq!(
-            &command.args[command.args.len() - 7..],
-            [
-                "/home/u/bin/pi",
-                "--mode",
-                "rpc",
-                "--provider",
-                "xai",
-                "--models",
-                "xai/*"
-            ]
-        );
     }
 
     #[test]
