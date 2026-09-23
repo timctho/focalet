@@ -89,7 +89,11 @@ class _LinuxDocumentSurfaceState extends State<LinuxDocumentSurface>
 
   @override
   Widget build(BuildContext context) {
-    _scheduleBounds();
-    return SizedBox.expand(key: _boundsKey);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        _scheduleBounds();
+        return SizedBox.expand(key: _boundsKey);
+      },
+    );
   }
 }

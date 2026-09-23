@@ -46,11 +46,12 @@ void main() {
       var loaded = 0;
       var dismissed = 0;
       Future<Object?> Function(String)? evaluate;
-      Widget surface(double width) => MaterialApp(
-        home: Center(
-          child: SizedBox(
-            width: width,
-            height: 280,
+      final width = ValueNotifier<double>(400);
+      addTearDown(width.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ValueListenableBuilder<double>(
+            valueListenable: width,
             child: LinuxDocumentSurface(
               uri: Uri.parse('http://127.0.0.1:8000/token/deck.html#slide-12'),
               onLoaded: (value) {
@@ -60,10 +61,13 @@ void main() {
               onError: (error) => fail(error),
               onDismiss: () => dismissed++,
             ),
+            // Keep the surface widget unchanged while its parent's layout changes.
+            builder: (context, value, child) => Center(
+              child: SizedBox(width: value, height: 280, child: child),
+            ),
           ),
         ),
       );
-      await tester.pumpWidget(surface(400));
       await tester.pump();
       final open = calls.singleWhere((call) => call.method == 'open');
       final id = open.arguments['id'] as int;
@@ -73,7 +77,7 @@ void main() {
       await event(id, 'ready');
       expect(loaded, 1);
       expect(await evaluate!('document.readyState'), {'ready': true});
-      await tester.pumpWidget(surface(500));
+      width.value = 500;
       await tester.pump();
       expect(
         calls.lastWhere((call) => call.method == 'bounds').arguments['width'],

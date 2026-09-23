@@ -20,6 +20,7 @@ struct Page : std::enable_shared_from_this<Page> {
   guint timeout = 0;
   bool ready = false;
   bool closed = false;
+  GdkRectangle bounds = {0, 0, 1, 1};
   std::string prefix;
   Page(Documents* manager, int64_t number) : owner(manager), id(number) {}
   ~Page();
@@ -137,9 +138,10 @@ void SetBounds(Page* page, FlValue* args) {
   const double width = Number(args, "width"), height = Number(args, "height");
   if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(width) || !std::isfinite(height) ||
       width < 1 || height < 1 || width > 16384 || height > 16384) return;
-  gtk_widget_set_margin_start(page->view, std::max(0, static_cast<int>(std::round(x))));
-  gtk_widget_set_margin_top(page->view, std::max(0, static_cast<int>(std::round(y))));
-  gtk_widget_set_size_request(page->view, static_cast<int>(std::round(width)), static_cast<int>(std::round(height)));
+  page->bounds = {std::max(0, static_cast<int>(std::round(x))),
+                  std::max(0, static_cast<int>(std::round(y))),
+                  static_cast<int>(std::round(width)), static_cast<int>(std::round(height))};
+  gtk_widget_queue_resize(page->view);
 }
 PagePtr Open(Documents* owner, int64_t id, FlValue* args, FlMethodCall* thumbnail) {
   auto page = std::make_shared<Page>(owner, id);
@@ -164,8 +166,8 @@ PagePtr Open(Documents* owner, int64_t id, FlValue* args, FlMethodCall* thumbnai
     gtk_container_add(GTK_CONTAINER(page->offscreen), page->view);
     gtk_widget_show_all(page->offscreen);
   } else {
-    gtk_widget_set_halign(page->view, GTK_ALIGN_START);
-    gtk_widget_set_valign(page->view, GTK_ALIGN_START);
+    gtk_widget_set_halign(page->view, GTK_ALIGN_FILL);
+    gtk_widget_set_valign(page->view, GTK_ALIGN_FILL);
     SetBounds(page.get(), args);
     gtk_overlay_add_overlay(GTK_OVERLAY(owner->overlay), page->view);
     if (!owner->suspended) gtk_widget_show(page->view);
@@ -279,6 +281,19 @@ GtkWidget* zommi_document_container_new(FlView* view) {
   auto* documents = new Documents();
   documents->overlay = overlay;
   documents->flutter_view = view;
+  // WebKit can retain a larger natural size after the app was maximized.
+  // Allocate exactly the Flutter panel rectangle instead of treating it as
+  // only a minimum request that GTK is free to expand.
+  g_signal_connect(overlay, "get-child-position", G_CALLBACK(+[](GtkOverlay*, GtkWidget* child, GdkRectangle* bounds, gpointer data) -> gboolean {
+    auto* owner = static_cast<Documents*>(data);
+    for (const auto& entry : owner->pages) {
+      if (entry.second->view == child && !entry.second->offscreen) {
+        *bounds = entry.second->bounds;
+        return TRUE;
+      }
+    }
+    return FALSE;
+  }), documents);
   documents->context = webkit_web_context_new_ephemeral();
   g_signal_connect(documents->context, "download-started", G_CALLBACK(+[](WebKitWebContext*, WebKitDownload* download, gpointer) { webkit_download_cancel(download); }), nullptr);
   g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();

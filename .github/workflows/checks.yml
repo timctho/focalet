@@ -63,6 +63,9 @@ jobs:
       - name: Verify packaged Ubuntu selection and drawing
         run: |
           xvfb-run -a -s "-screen 0 1440x1000x24" env GSETTINGS_BACKEND=memory dbus-run-session -- bash -c 'openbox >/tmp/zommi-test-wm.log 2>&1 & python3 scripts/accept-linux-x11.py artifacts/zommi-linux-x64'
+      - name: Verify floating Ubuntu documents and capture recovery
+        run: |
+          xvfb-run -a -s "-screen 0 1440x1000x24" env GSETTINGS_BACKEND=memory dbus-run-session -- bash -c 'openbox >/tmp/zommi-test-wm.log 2>&1 & python3 scripts/accept-linux-documents.py artifacts/zommi-linux-x64'
       - name: Ensure checks did not rewrite committed files
         run: git diff --exit-code
 
