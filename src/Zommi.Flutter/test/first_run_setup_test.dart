@@ -145,6 +145,87 @@ void main() {
   );
 
   testWidgets(
+    'Add runtime detects once, returns to setup and selects each added CLI',
+    (tester) async {
+      final core = RichFakeCore()..discoveredTargets.clear();
+      final store = _Store();
+      await launch(tester, core, store, FakeDesktopBridge());
+      for (final path in ['/home/agent/bin/codex', '/home/agent/other/codex']) {
+        await press(tester, 'setup-configure');
+        await press(tester, 'runtime-setup-host-wsl:ubuntu');
+        final field = find.byKey(
+          const ValueKey('runtime-wsl-path-codex-app-server-wsl:ubuntu'),
+        );
+        await tester.ensureVisible(field);
+        await tester.enterText(field, path);
+        await tester.pump();
+        final gate = Completer<void>();
+        core.addOverrideGate = gate.future;
+        final before = core.configuredOverrides.length;
+        final add = find.byKey(const ValueKey('save-runtime-override'));
+        await tester.ensureVisible(add);
+        await tester.tap(add);
+        await tester.pump();
+        expect(find.text('Detecting…'), findsOneWidget);
+        expect(tester.widget<FilledButton>(add).onPressed, isNull);
+        expect(core.configuredOverrides.length, before);
+        gate.complete();
+        await tester.pumpAndSettle();
+        expect(core.configuredOverrides.length, before + 1);
+        expect(core.configuredOverrides.last['executablePath'], path);
+        expect(find.byKey(const ValueKey('runtime-setup-panel')), findsNothing);
+        expect(find.text('Welcome to Zommi'), findsOneWidget);
+        final choice = find.byKey(
+          ValueKey('setup-runtime-runtime-added-$before'),
+        );
+        final group = tester.widget<RadioGroup<String>>(
+          find.ancestor(of: choice, matching: find.byType(RadioGroup<String>)),
+        );
+        expect(group.groupValue, 'runtime-added-$before');
+        expect(core.connectCount, 0);
+        expect(store.saves, 0);
+      }
+      await press(tester, 'setup-continue');
+      expect(core.activeTargetId, core.discoveredTargets.last.id);
+      expect(store.value.runtimeSetupCompleted, isTrue);
+    },
+  );
+
+  testWidgets('failed runtime detection keeps the path and supports retry', (
+    tester,
+  ) async {
+    final core = RichFakeCore()
+      ..discoveredTargets.clear()
+      ..addOverrideFails = true;
+    final store = _Store();
+    await launch(
+      tester,
+      core,
+      store,
+      FakeDesktopBridge()..nextRuntimeExecutable = '/custom/codex',
+    );
+    await press(tester, 'setup-configure');
+    await press(tester, 'select-runtime-executable');
+    await press(tester, 'save-runtime-override');
+    expect(find.byKey(const ValueKey('runtime-setup-panel')), findsOneWidget);
+    expect(find.text('/custom/codex'), findsOneWidget);
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('runtime-setup-error')))
+          .data,
+      contains('CLI executable was not found.'),
+    );
+    expect(core.connectCount, 0);
+    core.addOverrideFails = false;
+    await press(tester, 'save-runtime-override');
+    expect(find.byKey(const ValueKey('runtime-setup-panel')), findsNothing);
+    expect(
+      find.byKey(const ValueKey('setup-runtime-runtime-added-1')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
     'authentication failure offers runtime sign-in and allows retry',
     (tester) async {
       final core = RichFakeCore()..connectErrorCode = 'authentication-required';

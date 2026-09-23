@@ -252,7 +252,7 @@ impl HostState {
                     .map_err(|error| HostError::new("invalid-configuration", error.to_string()))?;
                     configured.executable_path = Some(resolved);
                 }
-                target_from_override(&configured, env::consts::OS)
+                let added_target = target_from_override(&configured, env::consts::OS)
                     .map_err(|message| HostError::new("invalid-configuration", message))?;
                 self.overrides
                     .retain(|existing| existing.id != configured.id);
@@ -261,7 +261,9 @@ impl HostState {
                     .save(&self.overrides)
                     .map_err(|error| HostError::new("persistence-failed", error.to_string()))?;
                 self.refresh_runtime_targets(true).await?;
-                Ok(self.discovery_value(payload))
+                let mut discovery = self.discovery_value(payload);
+                discovery["selectedTargetId"] = json!(added_target.id);
+                Ok(discovery)
             }
             "runtime.removeOverride" => {
                 let override_id = required_string(payload, "overrideId")?;

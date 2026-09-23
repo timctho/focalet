@@ -55,7 +55,10 @@ class _FirstRunSetupState extends State<FirstRunSetup> {
   Widget build(BuildContext context) {
     final controller = widget.controller;
     if (controller.runtimeSetupPanelOpen) {
-      return RuntimeSetupPanel(controller: controller);
+      return RuntimeSetupPanel(
+        controller: controller,
+        onAdded: (targetId) => setState(() => _selectedTarget = targetId),
+      );
     }
     final targets = controller.visibleRuntimeTargets;
     final selected = targets.any((target) => target.id == _selectedTarget)
