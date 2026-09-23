@@ -77,6 +77,35 @@ class RecoveryCore extends RichFakeCore {
 }
 
 void main() {
+  testWidgets(
+    'initialize timeout keeps diagnostics visible without repeating a 30 second stall',
+    (tester) async {
+      final core = RecoveryCore()..historyCount = 0;
+      final controller = ZommiController(
+        core: core,
+        desktop: FakeDesktopBridge(),
+        catalogStartupDelay: const Duration(days: 1),
+      );
+      await controller.initialize();
+      controller.updateComposerValue(
+        const TextEditingValue(text: 'keep my draft'),
+      );
+      core.nextOpenError = const CoreProtocolException(
+        'runtime-initialize-timeout',
+        'Startup stderr: configuration unavailable',
+      );
+      await controller.switchSession('session-2');
+      await tester.pump(const Duration(seconds: 35));
+      expect(core.openedSessions, hasLength(1));
+      expect(controller.status, contains('configuration unavailable'));
+      expect(controller.sessionBusy, isFalse);
+      expect(controller.composerValue.text, 'keep my draft');
+      await controller.switchSession('session-2');
+      expect(controller.activeSessionId, 'session-2');
+      await tester.runAsync(controller.close);
+    },
+  );
+
   testWidgets('a pre-submission recovery error restores the visible composer', (
     tester,
   ) async {

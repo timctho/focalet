@@ -113,6 +113,15 @@ const RUNTIME_CATALOG: &[CatalogEntry] = &[
         capability_hints: PI_CAPABILITY_HINTS,
     },
     CatalogEntry {
+        executable: "pi",
+        runtime_id: "grok",
+        adapter_id: "grok-pi-rpc",
+        display_name: "Grok (via Pi)",
+        protocol_name: "Pi RPC · xAI",
+        priority: 21,
+        capability_hints: PI_CAPABILITY_HINTS,
+    },
+    CatalogEntry {
         executable: "opencode",
         runtime_id: "opencode",
         adapter_id: "opencode-acp",
@@ -581,7 +590,9 @@ pub fn runtime_discovery_settings(
             hosts.push(target.execution_host.clone());
         }
     }
-    if hosts.is_empty() {
+    // Manual setup must also work before any native CLI has been detected.
+    // WSL-only discovery must not hide the Windows host from the picker.
+    if seen_hosts.insert(format!("native:{}", env::consts::OS)) {
         hosts.push(ExecutionHost {
             id: format!("native:{}", env::consts::OS),
             kind: "native".into(),
@@ -634,7 +645,7 @@ fn discover_runtime_targets_with_status(
         if !runtime_supported_on_host(entry, &native_host) {
             continue;
         }
-        let override_name = format!("ZOMMI_{}_COMMAND", entry.executable.to_ascii_uppercase());
+        let override_name = format!("ZOMMI_{}_COMMAND", entry.runtime_id.to_ascii_uppercase());
         if let Some(configured) = environment
             .get(&override_name)
             .filter(|value| !value.trim().is_empty())
@@ -831,31 +842,9 @@ pub fn command_for_target(target: &RuntimeTarget) -> RuntimeCommand {
         };
     }
 
-    if target.execution_host.platform == "windows"
-        && matches!(
-            Path::new(&target.executable_path)
-                .extension()
-                .and_then(|extension| extension.to_str())
-                .map(str::to_ascii_lowercase)
-                .as_deref(),
-            Some("cmd" | "bat")
-        )
-    {
-        let mut args = vec![
-            "/d".into(),
-            "/v:off".into(),
-            "/s".into(),
-            "/c".into(),
-            target.executable_path.clone(),
-        ];
-        args.extend(launch_args.iter().map(|value| (*value).into()));
-        return RuntimeCommand {
-            command: "cmd.exe".into(),
-            args,
-            working_directory: target.runtime_home.clone(),
-        };
-    }
-
+    // Rust's Windows process API handles .cmd/.bat launchers and quoting.
+    // An explicit cmd.exe /c wrapper bypasses that escaping for paths with
+    // spaces and shell metacharacters.
     RuntimeCommand {
         command: target.executable_path.clone(),
         args: launch_args.iter().map(|value| (*value).into()).collect(),
@@ -1040,21 +1029,26 @@ fn resolve_native_command(
         .map(PathBuf::from)
         .collect::<Vec<_>>();
     if platform == "windows" {
-        for candidate in [
+        let get = |name: &str| {
             environment
-                .get("APPDATA")
-                .map(|path| format!("{path}\\npm")),
-            environment
-                .get("LOCALAPPDATA")
-                .map(|path| format!("{path}\\Microsoft\\WinGet\\Links")),
-            environment
-                .get("USERPROFILE")
-                .map(|path| format!("{path}\\.local\\bin")),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            directories.push(PathBuf::from(candidate));
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case(name))
+                .map(|(_, value)| PathBuf::from(value))
+        };
+        for (variable, suffix) in [
+            ("APPDATA", "npm"),
+            ("LOCALAPPDATA", "Microsoft/WinGet/Links"),
+            ("LOCALAPPDATA", "Programs/nodejs"),
+            ("USERPROFILE", ".local/bin"),
+            ("USERPROFILE", ".bun/bin"),
+            ("USERPROFILE", ".opencode/bin"),
+            ("USERPROFILE", "scoop/shims"),
+            ("ProgramFiles", "nodejs"),
+            ("NVM_SYMLINK", ""),
+        ] {
+            if let Some(root) = get(variable) {
+                directories.push(root.join(suffix));
+            }
         }
     }
     let extensions = if platform == "windows" {
@@ -1188,6 +1182,7 @@ fn launch_args(adapter_id: &str) -> &'static [&'static str] {
     match adapter_id {
         "codex-app-server" => &["app-server"],
         "pi-rpc" => &["--mode", "rpc"],
+        "grok-pi-rpc" => &["--mode", "rpc", "--provider", "xai", "--models", "xai/*"],
         "hermes-acp" | "openclaw-acp" | "opencode-acp" => &["acp"],
         "hermes-gateway" => &[
             "serve",
@@ -1344,6 +1339,73 @@ mod tests {
     }
 
     #[test]
+    fn native_windows_discovery_finds_user_installs_without_path_entries() {
+        let root = std::env::temp_dir().join(format!("zommi-native-{}", uuid::Uuid::new_v4()));
+        let npm = root.join("npm");
+        fs::create_dir_all(&npm).unwrap();
+        fs::write(npm.join("codex.cmd"), "fixture").unwrap();
+        let environment = HashMap::from([
+            ("Path".into(), String::new()),
+            ("AppData".into(), root.to_string_lossy().into_owned()),
+        ]);
+        let targets = super::discover_runtime_targets_with_status(&environment, "windows", false).0;
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].execution_host.kind, "native");
+        assert_eq!(targets[0].execution_host.platform, "windows");
+        assert_eq!(
+            command_for_target(&targets[0]).command,
+            npm.join("codex.cmd").to_string_lossy()
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn native_windows_batch_launcher_preserves_paths_and_arguments() {
+        let root =
+            std::env::temp_dir().join(format!("zommi space & shim {}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let shim = root.join("codex.cmd");
+        fs::write(&shim, "@echo off\r\necho %1\r\n").unwrap();
+        let targets = super::discover_runtime_targets_with_status(
+            &HashMap::from([("Path".into(), root.to_string_lossy().into_owned())]),
+            "windows",
+            false,
+        )
+        .0;
+        let launch = command_for_target(&targets[0]);
+        let result = std::process::Command::new(launch.command)
+            .args(launch.args)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&result.stdout).trim(), "app-server");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn wsl_only_discovery_keeps_native_manual_setup_available() {
+        let targets = runtime_targets_from_wsl_probe(
+            "Ubuntu",
+            true,
+            b"__ZOMMI_RUNTIME_HOME__/home/u\n__ZOMMI_RUNTIME_PATH__codex\t/home/u/bin/codex\n",
+        );
+        let settings = runtime_discovery_settings(&targets, &[]);
+        let hosts = settings["hosts"].as_array().unwrap();
+        assert_eq!(hosts.len(), 2);
+        assert!(hosts.iter().any(|host| host["kind"] == "wsl"));
+        assert!(
+            hosts
+                .iter()
+                .any(|host| host["kind"] == "native" && host["platform"] == std::env::consts::OS)
+        );
+    }
+
+    #[test]
     fn shared_wsl_probe_restores_every_detected_runtime() {
         let script = wsl_runtime_probe_script();
         for executable in ["codex", "pi", "opencode", "hermes", "openclaw", "claude"] {
@@ -1360,7 +1422,11 @@ mod tests {
               __ZOMMI_RUNTIME_PATH__openclaw\t/home/u/.local/bin/openclaw\n\
               __ZOMMI_RUNTIME_PATH__claude\t/home/u/.local/bin/claude\n",
         );
-        assert_eq!(targets.len(), 7, "Hermes exposes ACP and Gateway targets");
+        assert_eq!(
+            targets.len(),
+            8,
+            "Hermes exposes two transports; Pi also exposes Grok"
+        );
         let adapters = targets
             .iter()
             .map(|target| target.adapter_id.as_str())
@@ -1368,6 +1434,7 @@ mod tests {
         for adapter in [
             "codex-app-server",
             "pi-rpc",
+            "grok-pi-rpc",
             "opencode-acp",
             "hermes-acp",
             "hermes-gateway",
@@ -1381,6 +1448,48 @@ mod tests {
                 && target.execution_host.name.as_deref() == Some("Ubuntu")
                 && target.runtime_home.as_deref() == Some("/home/u")
         }));
+    }
+
+    #[test]
+    fn grok_launches_pi_with_xai_provider_on_native_and_wsl_hosts() {
+        let native = discover_runtime_targets_with(
+            &HashMap::from([
+                ("ZOMMI_GROK_COMMAND".into(), "/custom/pi".into()),
+                (
+                    "ZOMMI_RUNTIME_DISCOVERY_MODE".into(),
+                    "configured-only".into(),
+                ),
+            ]),
+            "linux",
+        );
+        assert_eq!(native.len(), 1);
+        assert_eq!(native[0].runtime_id, "grok");
+        let command = command_for_target(&native[0]);
+        assert_eq!(command.command, "/custom/pi");
+        assert_eq!(
+            command.args,
+            ["--mode", "rpc", "--provider", "xai", "--models", "xai/*"]
+        );
+        let targets = runtime_targets_from_wsl_probe(
+            "Ubuntu",
+            true,
+            b"__ZOMMI_RUNTIME_HOME__/home/u\n__ZOMMI_RUNTIME_PATH__pi\t/home/u/bin/pi\n",
+        );
+        assert_eq!(targets.len(), 2);
+        let grok = targets.iter().find(|t| t.runtime_id == "grok").unwrap();
+        let command = command_for_target(grok);
+        assert_eq!(
+            &command.args[command.args.len() - 7..],
+            [
+                "/home/u/bin/pi",
+                "--mode",
+                "rpc",
+                "--provider",
+                "xai",
+                "--models",
+                "xai/*"
+            ]
+        );
     }
 
     #[test]

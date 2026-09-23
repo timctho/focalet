@@ -1004,7 +1004,7 @@ final class ZommiController extends ChangeNotifier {
       }
     }
     _setStatus(
-      '${_runtimeTarget(targetId)?.displayName ?? 'Agent'} sign-in required',
+      '${_runtimeTarget(targetId)?.displayName ?? 'Agent'} sign-in required · ${error is CoreProtocolException ? error.message : message}',
       warning: true,
     );
     return true;

@@ -121,6 +121,9 @@ for line in sys.stdin:
 
     if method == "initialize":
         if control and (control / "stall-initialize").exists():
+            if (control / "startup-diagnostics").exists():
+                print("launcher waiting for setup API_KEY=fixture-private-startup", flush=True)
+                print("configuration unavailable token=fixture-private-stderr", file=sys.stderr, flush=True)
             continue
         result = {"userAgent": "codex-cli/9.8.7 (fixture)"}
         if os.environ.get("ZOMMI_FAKE_REPORT_CODEX_HOME") == "1":

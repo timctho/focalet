@@ -105,7 +105,9 @@ pub fn wrap_wsl_command(
 pub fn run_proxy(arguments: &[String]) -> io::Result<i32> {
     let invocation = ProxyInvocation::parse(arguments)?;
     let endpoint_path = endpoint_path(&invocation.distribution)?;
+    eprintln!("Zommi: preparing WSL transport.");
     let endpoint = ensure_relay(&invocation.distribution, &endpoint_path)?;
+    eprintln!("Zommi: WSL transport ready; launching agent.");
     if env::var("ZOMMI_WSL_RELAY_TRANSPORT").as_deref() == Ok("tcp") {
         proxy_runtime(endpoint, invocation)
     } else {

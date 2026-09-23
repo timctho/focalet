@@ -474,7 +474,7 @@ void main() {
       await tester.pump();
       expect(find.byKey(const ValueKey('runtime-panel')), findsNothing);
       expect(
-        find.byKey(const ValueKey('session-loading-indicator')),
+        find.byKey(const ValueKey('session-catalog-loading')),
         findsOneWidget,
       );
       expect(find.byKey(const ValueKey('loading-status')), findsNothing);

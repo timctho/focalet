@@ -62,7 +62,14 @@ Zommi uses the runtime's existing account, models, tools and permissions. It doe
 not merge histories across agents or move credentials into its settings. Native
 commands and session actions depend on the protocol your runtime exposes.
 Claude CLI uses limited terminal compatibility rather than full structured
-session support. See [runtime commands](runtime-commands.md).
+session support; on Windows it currently requires WSL. Codex, Pi, Grok via Pi
+and OpenCode can use native Windows installations. See [runtime commands](runtime-commands.md).
+
+For **Grok (via Pi)**, install Pi, run `pi --provider xai --models 'xai/*'`, and use `/login` to
+configure your xAI API key in Pi (or supply `XAI_API_KEY` to the runtime).
+Then choose **Grok (via Pi)** in Zommi. Its model picker shows the xAI models
+available to Pi; **Refresh agents** reloads that list. This uses Pi as the agent
+runtime, with credentials, tools and saved conversations kept in Pi.
 
 OpenCode connects through [`opencode acp`](https://opencode.ai/docs/acp/).
 Install a version with ACP support and run `opencode auth login` to connect your
@@ -85,6 +92,10 @@ Choose **Add runtime** to detect and add that CLI. On success, Advanced closes
 and setup selects the new runtime. To add another CLI, open **Configure runtime**
 again and repeat. If detection fails, the path stays in place so you can correct
 it and retry.
+
+For a native Windows CLI, choose **Windows** and browse to its `.exe` or npm
+`.cmd` launcher. The Windows host remains available even if only WSL agents
+were detected. Discovery also checks common npm, Bun, Scoop and WinGet locations.
 
 For a WSL agent, choose that distribution and enter its **Linux** path, such as
 `~/.local/bin/codex` or `/home/you/.local/bin/codex`. The tilde is resolved inside
@@ -124,6 +135,7 @@ Zommi does not restart or reconfigure your browser.
 | No agents found | Verify the CLI works in the same Windows/WSL/Mac environment; scan again or configure its executable |
 | Agent needs authentication | Sign in through that agent, then retry in Zommi |
 | Connecting or creating a chat times out | Use **Cancel** to keep navigating, then **Retry**. If it still fails, use **Restart agent connections**; confirm that the CLI works in the selected host |
+| Codex times out during `initialize` | Read the host and startup diagnostic in the error. Run `codex app-server` in that same host to check for startup/configuration errors; update the CLI if needed, then Retry. A WSL launch failure and a silent app-server are different failures |
 | An agent disconnects during a reply | Zommi keeps the chat and draft and attempts to reconnect. The unfinished request is not resent, and queued messages stay paused until you resume them |
 | Alt+A does nothing | Try **Select**; check the configured shortcut and OS permissions |
 | Capture says **Image only** | The source did not expose reliable text/structure; the selected image is still attached |
