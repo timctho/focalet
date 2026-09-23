@@ -47,6 +47,17 @@ ConversationTurn _mapTurn(
   result.blocks
     ..clear()
     ..addAll(normalized);
+  // Codex history timestamps the turn, but its agentMessage items have no
+  // timestamp. Use the native completion time for the final response only;
+  // earlier messages must not acquire the time of a later reply.
+  final finalResponse = result.blocks
+      .where((block) => block.kind == TranscriptKind.assistant)
+      .lastOrNull;
+  if (finalResponse != null && finalResponse.completed) {
+    finalResponse.createdAt ??= messageTimestamp({
+      'timestamp': turn['completedAt'] ?? turn['completed_at'],
+    });
+  }
   return result;
 }
 
