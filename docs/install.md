@@ -81,6 +81,11 @@ menu. Select the correct host and provide the executable's path. Use the path
 returned by `command -v codex` / `command -v pi` on Unix, or
 `Get-Command codex` / `Get-Command pi` in Windows PowerShell.
 
+Choose **Add runtime** to detect and add that CLI. On success, Advanced closes
+and setup selects the new runtime. To add another CLI, open **Configure runtime**
+again and repeat. If detection fails, the path stays in place so you can correct
+it and retry.
+
 For a WSL agent, choose that distribution and enter its **Linux** path, such as
 `~/.local/bin/codex` or `/home/you/.local/bin/codex`. The tilde is resolved inside
 the selected distribution. A Windows `C:\...` path is not a WSL executable.

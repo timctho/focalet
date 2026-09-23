@@ -4,9 +4,9 @@
   "recordings": [
     {
       "name": "setup",
-      "buildCommit": "970179351f34e7e2373709a58f01477767a4f19b",
+      "buildCommit": "f7201cadda5d128c162a2e9bf2409d1cf2eab799",
       "platform": "windows",
-      "display": "windows-desktop",
+      "display": "windows-app",
       "runtime": "Codex, OpenCode",
       "response": "setup-only",
       "syntheticSource": true,
@@ -14,29 +14,29 @@
       "audio": false,
       "review": {
         "ocrStatus": "no-matches",
-        "exportedFramesScanned": 418,
+        "exportedFramesScanned": 656,
         "visualReview": true
       },
       "assets": [
         {
           "file": "setup.mp4",
-          "bytes": 250635,
-          "sha256": "16229326d14ef507d0f1a2f14e89d6d413cb66dc85b78ec52e0d868db477e3ea"
+          "bytes": 477903,
+          "sha256": "40b2dca6440ad4b18b29859aee50fdd5857ad00be248535b1e3ffd843927be6a"
         },
         {
           "file": "setup.gif",
-          "bytes": 537325,
-          "sha256": "892c0a75f7f1f2ef931a02ba8ea4fbf3385f411104f23ab3252133e3b8fdb7d2"
+          "bytes": 1057575,
+          "sha256": "d955bdd5ec7471c8f8aaf657f0c71d62985750dfb974a2c1f3b2170d461b6f75"
         },
         {
           "file": "setup-poster.webp",
-          "bytes": 38142,
-          "sha256": "54308d1de288fbb07afdc972cab07f33a031918eeccf66501a3c922b637f91fd"
+          "bytes": 22208,
+          "sha256": "05584da228f54cf4d1238bfb87431891c0075d4dcd94210ce2f67debfc8df8e9"
         },
         {
           "file": "setup-preview.webp",
-          "bytes": 286754,
-          "sha256": "abbf82a4f76d455d73bfc9f9a2ef89b168884e48e64c2c757135258152c8e4a9"
+          "bytes": 246372,
+          "sha256": "efed54441f37121f023c3457123a160f05370964a259abd1c3efbdc31cc87fd4"
         }
       ]
     },
