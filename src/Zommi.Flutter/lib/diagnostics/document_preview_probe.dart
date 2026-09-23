@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/widgets.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 
@@ -16,10 +15,9 @@ void scheduleDocumentPreviewProbe(ZommiController controller) {
     return;
   }
   _probeController = controller;
-  WidgetsBinding.instance.addPostFrameCallback((_) async {
-    await Future<void>.delayed(const Duration(seconds: 2));
-    await controller.openExternalLink(path);
-  });
+  // Startup restores the selected chat and dismisses its previous overlays.
+  // The caller waits for that restore before opening the acceptance document.
+  unawaited(controller.openExternalLink(path));
 }
 
 Future<void> recordDocumentPreview(

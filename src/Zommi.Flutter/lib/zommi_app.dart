@@ -315,8 +315,11 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
     _composerFocus.onKeyEvent = _handleComposerKey;
     _composerFocus.addListener(_onComposerFocusChanged);
     _controller.addListener(_onControllerChanged);
-    unawaited(_controller.initialize());
-    scheduleDocumentPreviewProbe(_controller);
+    unawaited(
+      _controller.initialize().then((_) {
+        if (mounted) scheduleDocumentPreviewProbe(_controller);
+      }),
+    );
   }
 
   Future<bool> _prepareImageCapture() async {
