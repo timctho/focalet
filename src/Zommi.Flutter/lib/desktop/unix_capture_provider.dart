@@ -404,8 +404,9 @@ Future<ImageSelection> enrichSelectedRegion(
       }
     }
     content ??= _nullableMap(after['regionContext']);
-    if (!browserFailed && dom == null)
+    if (!browserFailed && dom == null) {
       reason ??= after['limitation']?.toString();
+    }
   } on Object catch (error) {
     content = null;
     dom = null;

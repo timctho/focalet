@@ -35,7 +35,9 @@ internal static class PortableBrowserHost
                 var source = new { nativeWindowId = "fixture-window", processId = pid, windowTitle = "Zommi DOM capture acceptance - Browser" };
                 return new
                 {
-                    source, windows = ambiguous ? new[] { source, source with { nativeWindowId = "another-window" } } : new[] { source },
+                    source, windows = ambiguous
+                        ? new object[] { source, source with { nativeWindowId = "another-window" } }
+                        : new object[] { new { nativeWindowId = "decorations", processId = (int?)null, windowTitle = "Window manager" }, source },
                     viewport = new CaptureRectangle(100, 200, width * 2, height * 2 + (distorted ? 120 : 0)),
                     bounds = new CaptureRectangle(100 + rect.X * 2, 200 + rect.Y * 2, rect.Width * 2, rect.Height * 2),
                     imageWidth = (int)Math.Round(rect.Width * 2), imageHeight = (int)Math.Round(rect.Height * 2),

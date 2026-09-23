@@ -13,6 +13,20 @@ import tempfile
 import time
 
 
+def current_editor(trace: Path) -> dict | None:
+    if not trace.exists():
+        return None
+    latest = None
+    for line in trace.read_text().splitlines():
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue  # The app may be appending its next diagnostic line.
+        if value.get('event') in ('capture.editor.ready', 'capture.editor.closed'):
+            latest = value
+    return latest if latest and latest['event'] == 'capture.editor.ready' else None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('package', type=Path)
@@ -63,17 +77,15 @@ def main() -> None:
                                 continue
                             attempts, last_sent = sent_gestures.get(mode, (0, 0))
                             trace = output / 'desktop-events.jsonl'
-                            frames = [json.loads(line) for line in trace.read_text().splitlines() if line.strip()] if trace.exists() else []
-                            editor = next((item for item in reversed(frames) if item.get('event') == 'capture.editor.ready'), None)
+                            editor = current_editor(trace)
                             selector = editor['session'] if editor else None
                             if mode == 'cancel' and selector == selected_session: continue
                             if selector is not None and attempts < 3 and time.monotonic() - last_sent >= 3:
                                 # Retry only while this app's exact overlay is open.
                                 time.sleep(0.7)
                                 trace = output / 'desktop-events.jsonl'
-                                frames = [json.loads(line) for line in trace.read_text().splitlines() if line.strip()] if trace.exists() else []
-                                editor = next((item for item in reversed(frames) if item.get('event') == 'capture.editor.ready'), None)
-                                if editor is None: continue
+                                editor = current_editor(trace)
+                                if editor is None or editor['session'] != selector: continue
                                 bounds = editor['bounds']
                                 coordinates = [bounds['x'] + bounds['width'] * .25, bounds['y'] + bounds['height'] * .25,
                                                bounds['x'] + bounds['width'] * .45, bounds['y'] + bounds['height'] * .45]

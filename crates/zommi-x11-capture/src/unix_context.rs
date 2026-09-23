@@ -101,36 +101,36 @@ fn capture_bytes(
     Ok(png)
 }
 
-fn client_window(connection: &RustConnection, window: Window, depth: usize) -> AppResult<Window> {
-    if depth >= 4
-        || property_u32(
-            connection,
-            window,
-            atom(connection, b"_NET_WM_PID")?,
-            AtomEnum::CARDINAL.into(),
-        )?
-        .is_some()
-    {
-        return Ok(window);
-    }
-    for child in connection
-        .query_tree(window)?
-        .reply()?
-        .children
-        .into_iter()
-        .take(32)
-    {
-        let found = client_window(connection, child, depth + 1)?;
-        if property_u32(
-            connection,
-            found,
-            atom(connection, b"_NET_WM_PID")?,
-            AtomEnum::CARDINAL.into(),
-        )?
-        .is_some()
-        {
-            return Ok(found);
+fn client_window(connection: &RustConnection, window: Window) -> AppResult<Window> {
+    let pid_atom = atom(connection, b"_NET_WM_PID")?;
+    let mut pending = vec![(window, 0)];
+    let mut visited = 0;
+    while let Some((candidate, depth)) = pending.pop() {
+        visited += 1;
+        if visited > 512 {
+            break;
         }
+        if property_u32(connection, candidate, pid_atom, AtomEnum::CARDINAL.into())?.is_some() {
+            return Ok(candidate);
+        }
+        if depth >= 8 {
+            continue;
+        }
+        // Reparenting window managers can add dozens of decoration children.
+        // Search topmost children first with a total budget, rather than cutting
+        // off before the real application window at the end of the child list.
+        let children = connection.query_tree(candidate)?.reply()?.children;
+        let available = 512_usize.saturating_sub(visited + pending.len());
+        pending.extend(
+            children
+                .into_iter()
+                .rev()
+                .take(available)
+                .map(|child| (child, depth + 1))
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev(),
+        );
     }
     Ok(window)
 }
@@ -159,7 +159,7 @@ fn windows(connection: &RustConnection, root: Window) -> AppResult<Vec<Value>> {
                 width: geometry.width.into(),
                 height: geometry.height.into(),
             };
-            let client = client_window(connection, window, 0)?;
+            let client = client_window(connection, window)?;
             let mut value = context_value(connection, client)?;
             let pid = value["processId"].as_u64();
             let started = pid

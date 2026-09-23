@@ -35,6 +35,16 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_handleKey);
+    final recorder = _recorder;
+    if (recorder != null) {
+      unawaited(
+        recorder
+            .record('capture.editor.closed', {
+              'session': identityHashCode(session).toString(),
+            })
+            .catchError((Object _) {}),
+      );
+    }
     _focus.dispose();
     super.dispose();
   }

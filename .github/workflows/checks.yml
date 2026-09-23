@@ -54,7 +54,10 @@ jobs:
       - name: Verify native Ubuntu accessibility and pixels
         run: |
           cargo build --locked --bin zommi-x11-capture
-          xvfb-run -a -s "-screen 0 1100x800x24" env GSETTINGS_BACKEND=memory dbus-run-session -- python3 scripts/accept-linux-context.py
+          xvfb-run -a -s "-screen 0 1100x800x24" env GSETTINGS_BACKEND=memory dbus-run-session -- bash -c 'openbox >/tmp/zommi-test-wm.log 2>&1 & python3 scripts/accept-linux-context.py'
+      - name: Verify native Ubuntu browser alignment
+        run: |
+          xvfb-run -a -s "-screen 0 1440x1000x24" env GSETTINGS_BACKEND=memory dbus-run-session -- bash -c 'openbox >/tmp/zommi-test-wm.log 2>&1 & python3 scripts/accept-linux-browser.py --browser /usr/bin/google-chrome'
       - name: Compile and verify the Linux desktop package
         run: bash scripts/package-unix.sh linux
       - name: Verify packaged Ubuntu selection and drawing
