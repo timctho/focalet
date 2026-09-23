@@ -135,6 +135,48 @@ void main() {
     expect(messageTimestamp({'timestamp': 'invalid'}), isNull);
   });
 
+  test('turn completion restores only the final historical response time', () {
+    final mapped = mapThreadHistory({
+      'thread': {
+        'turns': [
+          {
+            'id': 'native-turn',
+            'startedAt': 1789396320,
+            'completedAt': 1789396380,
+            'status': 'completed',
+            'items': [
+              {
+                'id': 'progress',
+                'type': 'agentMessage',
+                'phase': 'commentary',
+                'text': 'Checking',
+              },
+              {'id': 'earlier', 'type': 'agentMessage', 'text': 'First result'},
+              {'id': 'final', 'type': 'agentMessage', 'text': 'Finished'},
+            ],
+          },
+        ],
+      },
+    }).single;
+    expect(
+      mapped.createdAt,
+      DateTime.fromMillisecondsSinceEpoch(1789396320000, isUtc: true),
+    );
+    expect(mapped.blocks[0].createdAt, isNull);
+    expect(mapped.blocks[1].createdAt, isNull);
+    expect(
+      mapped.blocks.last.createdAt,
+      DateTime.fromMillisecondsSinceEpoch(1789396380000, isUtc: true),
+    );
+    final native = history();
+    (((native['thread'] as Map)['turns'] as List).first as Map)['completedAt'] =
+        1789396440;
+    expect(
+      mapThreadHistory(native).single.blocks.last.createdAt,
+      DateTime(2026, 9, 14, 14, 33),
+    );
+  });
+
   test('resend stops the active turn and preserves attachments, draft and send time', () async {
     final core = RichFakeCore()
       ..historyCount = 0

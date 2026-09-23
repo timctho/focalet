@@ -2302,48 +2302,52 @@ class ArtifactViewerDialog extends StatelessWidget {
       left: 24,
       right: 24,
       bottom: 24,
-      child: Material(
-        key: const ValueKey('artifact-viewer'),
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
-        elevation: 22,
-        borderRadius: BorderRadius.circular(20),
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(18, 9, 8, 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      artifact.title,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
+      child: TapRegion(
+        consumeOutsideTaps: true,
+        onTapOutside: (_) => controller.closeArtifact(),
+        child: Material(
+          key: const ValueKey('artifact-viewer'),
+          color: Theme.of(context).colorScheme.surfaceContainerLow,
+          elevation: 22,
+          borderRadius: BorderRadius.circular(20),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 9, 8, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        artifact.title,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
                     ),
-                  ),
-                  IconButton(
-                    autofocus: true,
-                    tooltip: 'Close artifact preview',
-                    onPressed: controller.closeArtifact,
-                    icon: const Icon(Icons.close_rounded),
-                  ),
-                ],
+                    IconButton(
+                      autofocus: true,
+                      tooltip: 'Close artifact preview',
+                      onPressed: controller.closeArtifact,
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const Divider(height: 1),
-            Expanded(
-              child:
-                  (artifact.kind == 'html' || artifact.kind == 'markdown') &&
-                      artifact.html != null
-                  ? DocumentPreview(
-                      key: ValueKey(artifact.id),
-                      artifact: artifact,
-                    )
-                  : SingleChildScrollView(
-                      padding: const EdgeInsets.all(18),
-                      child: ArtifactSurface(artifact: artifact),
-                    ),
-            ),
-          ],
+              const Divider(height: 1),
+              Expanded(
+                child:
+                    (artifact.kind == 'html' || artifact.kind == 'markdown') &&
+                        artifact.html != null
+                    ? DocumentPreview(
+                        key: ValueKey(artifact.id),
+                        artifact: artifact,
+                      )
+                    : SingleChildScrollView(
+                        padding: const EdgeInsets.all(18),
+                        child: ArtifactSurface(artifact: artifact),
+                      ),
+              ),
+            ],
+          ),
         ),
       ),
     );

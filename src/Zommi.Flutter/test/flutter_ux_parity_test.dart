@@ -1530,6 +1530,14 @@ void main() {
           tester.getBottomLeft(find.byKey(const ValueKey('model-summary'))).dy,
         ),
       );
+      await tester.tapAt(tester.getTopLeft(viewer) + const Offset(70, 20));
+      await tester.pump();
+      expect(viewer, findsOneWidget);
+      await tester.tapAt(tester.getTopLeft(viewer) + const Offset(-12, 30));
+      await tester.pump();
+      expect(viewer, findsNothing);
+      htmlPreviewButton.onPressed!();
+      await tester.pump();
       await tester.tap(find.byTooltip('Close artifact preview'));
       await tester.pump();
 
