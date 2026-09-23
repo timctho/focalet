@@ -1,4 +1,5 @@
 pub mod acp_adapter;
+pub mod antigravity_adapter;
 pub mod artifacts;
 pub mod broker_protocol;
 pub mod codex_adapter;

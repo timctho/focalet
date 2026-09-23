@@ -5,6 +5,7 @@ use serde_json::Value;
 use crate::{
     RuntimeCommand, RuntimeTarget,
     acp_adapter::{AcpAdapter, AcpConfig, AcpTurnRequest},
+    antigravity_adapter::AntigravityAdapter,
     codex_adapter::{CodexConfig, CodexError, CodexTurnRequest, EventSender, TurnReceipt},
     hermes_gateway_adapter::{HermesGatewayAdapter, HermesGatewayConfig, HermesGatewayTurnRequest},
     openclaw_gateway_adapter::{
@@ -32,6 +33,7 @@ pub struct AdapterTurnRequest<'a> {
 pub enum RuntimeAdapter {
     Codex(SupervisedCodex),
     Acp(AcpAdapter),
+    Antigravity(AntigravityAdapter),
     HermesGateway(HermesGatewayAdapter),
     OpenClawGateway(OpenClawGatewayAdapter),
     Pi(PiAdapter),
@@ -46,6 +48,7 @@ impl RuntimeAdapter {
                 | "hermes-acp"
                 | "opencode-acp"
                 | "gemini-acp"
+                | "antigravity-stream"
                 | "openclaw-acp"
                 | "hermes-gateway"
                 | "openclaw-gateway"
@@ -62,6 +65,9 @@ impl RuntimeAdapter {
         match self {
             Self::Codex(adapter) => adapter.activate(session_id, cwd).await?,
             Self::Acp(adapter) => adapter.activate(session_id.as_deref(), cwd).await?,
+            Self::Antigravity(adapter) => {
+                adapter.activate(session_id.as_deref(), cwd, None).await?
+            }
             Self::HermesGateway(adapter) => adapter.activate(session_id, cwd).await?,
             Self::OpenClawGateway(adapter) => adapter.activate(session_id).await?,
             _ => {
@@ -107,6 +113,7 @@ impl RuntimeAdapter {
                 | "hermes-acp"
                 | "opencode-acp"
                 | "gemini-acp"
+                | "antigravity-stream"
                 | "openclaw-acp"
                 | "openclaw-gateway"
         ) {
@@ -177,6 +184,17 @@ impl RuntimeAdapter {
                 )
                 .await?,
             )),
+            "antigravity-stream" => Ok(Self::Antigravity(
+                AntigravityAdapter::connect(
+                    target,
+                    command,
+                    cwd,
+                    preferred_session_id,
+                    event_tx,
+                    list_only,
+                )
+                .await?,
+            )),
             "pi-rpc" => Ok(Self::Pi(
                 PiAdapter::connect(
                     PiConfig {
@@ -213,6 +231,7 @@ impl RuntimeAdapter {
         match self {
             Self::Codex(adapter) => adapter.target_id(),
             Self::Acp(adapter) => adapter.target_id(),
+            Self::Antigravity(adapter) => adapter.target_id(),
             Self::HermesGateway(adapter) => adapter.target_id(),
             Self::OpenClawGateway(adapter) => adapter.target_id(),
             Self::Pi(adapter) => adapter.target_id(),
@@ -224,6 +243,7 @@ impl RuntimeAdapter {
         match self {
             Self::Codex(adapter) => adapter.is_running().await,
             Self::Acp(adapter) => adapter.is_running().await,
+            Self::Antigravity(adapter) => adapter.is_running().await,
             Self::HermesGateway(adapter) => adapter.is_running().await,
             Self::OpenClawGateway(adapter) => adapter.is_running().await,
             Self::Pi(adapter) => adapter.is_running().await,
@@ -235,6 +255,7 @@ impl RuntimeAdapter {
         match self {
             Self::Codex(adapter) => adapter.ready().await?.active_session_id().await,
             Self::Acp(adapter) => adapter.active_session_id().await,
+            Self::Antigravity(adapter) => adapter.active_session_id().await,
             Self::HermesGateway(adapter) => adapter.active_session_id().await,
             Self::OpenClawGateway(adapter) => adapter.active_session_id().await,
             Self::Pi(adapter) => adapter.active_session_id().await,
@@ -254,6 +275,7 @@ impl RuntimeAdapter {
                 })
             }
             Self::Acp(adapter) => adapter.connection_value().await,
+            Self::Antigravity(adapter) => adapter.connection_value().await,
             Self::HermesGateway(adapter) => adapter.connection_value().await,
             Self::OpenClawGateway(adapter) => adapter.connection_value().await,
             Self::Pi(adapter) => adapter.connection_value().await,
@@ -272,6 +294,7 @@ impl RuntimeAdapter {
                 return Ok(models);
             }
             Self::Pi(adapter) => adapter.refresh_models().await?,
+            Self::Antigravity(adapter) => adapter.refresh_models().await?,
             Self::HermesGateway(adapter) => adapter.reload_models().await?,
             Self::OpenClawGateway(adapter) => adapter.reload_models().await?,
             Self::Pty(_) => return Ok(None),
@@ -283,6 +306,7 @@ impl RuntimeAdapter {
         match self {
             Self::Codex(adapter) => adapter.ready().await?.list_sessions().await,
             Self::Acp(adapter) => adapter.list_sessions().await,
+            Self::Antigravity(adapter) => Ok(adapter.list_sessions().await),
             Self::HermesGateway(adapter) => adapter.list_sessions().await,
             Self::OpenClawGateway(adapter) => adapter.list_sessions().await,
             Self::Pi(adapter) => adapter.list_sessions().await,
@@ -319,6 +343,7 @@ impl RuntimeAdapter {
                 })
             }
             Self::Acp(adapter) => adapter.create_session(model).await,
+            Self::Antigravity(adapter) => adapter.create_session(model, cwd).await,
             Self::HermesGateway(adapter) => {
                 adapter.create_session(model, effort, cwd, profile).await
             }
@@ -417,6 +442,7 @@ impl RuntimeAdapter {
                     })
             }
             Self::Acp(adapter) => adapter.open_session(session_id).await,
+            Self::Antigravity(adapter) => adapter.open_session(session_id, cwd).await,
             Self::HermesGateway(adapter) => adapter.open_session(session_id, profile).await,
             Self::OpenClawGateway(adapter) => adapter.open_session(session_id).await,
             Self::Pi(adapter) => adapter.open_session(session_id, cwd).await,
@@ -454,6 +480,7 @@ impl RuntimeAdapter {
                     .configure_session(session_id, cwd, profile, model, effort)
                     .await
             }
+            Self::Antigravity(adapter) => adapter.configure_session(session_id, cwd, model).await,
             _ => Err(CodexError {
                 code: "capability-unavailable".into(),
                 message: "This runtime cannot change the workspace of a live session.".into(),
@@ -466,6 +493,13 @@ impl RuntimeAdapter {
         match self {
             Self::Codex(adapter) => adapter.ready().await?.read_session(session_id).await,
             Self::Acp(adapter) => adapter.read_session(session_id).await,
+            Self::Antigravity(_) => Err(CodexError {
+                code: "capability-unavailable".into(),
+                message:
+                    "Antigravity does not expose canonical history through its streaming interface."
+                        .into(),
+                retryable: false,
+            }),
             Self::HermesGateway(adapter) => adapter.read_session(session_id).await,
             Self::OpenClawGateway(adapter) => adapter.read_session(session_id).await,
             Self::Pi(adapter) => adapter.read_session(session_id).await,
@@ -527,6 +561,11 @@ impl RuntimeAdapter {
             Self::Pi(a) => a.list_commands(session_id, force).await?,
             Self::HermesGateway(a) => a.list_commands(session_id, force).await?,
             Self::OpenClawGateway(a) => a.list_commands(session_id, force).await?,
+            Self::Antigravity(_) => {
+                return Err(crate::command_catalog::error(
+                    "Antigravity does not advertise commands through its streaming interface.",
+                ));
+            }
             Self::Pty(_) => {
                 return Err(crate::command_catalog::error(
                     "Terminal compatibility does not expose command discovery.",
@@ -553,6 +592,7 @@ impl RuntimeAdapter {
             )?;
         }
         match self {
+            Self::Antigravity(adapter) => adapter.start_turn(request).await,
             Self::Codex(adapter) => {
                 adapter
                     .ready()
@@ -653,6 +693,7 @@ impl RuntimeAdapter {
                     .await
             }
             Self::Acp(adapter) => adapter.interrupt_turn(session_id, turn_id).await,
+            Self::Antigravity(adapter) => adapter.interrupt_turn(session_id, turn_id).await,
             Self::HermesGateway(adapter) => adapter.interrupt_turn(session_id, turn_id).await,
             Self::OpenClawGateway(adapter) => adapter.interrupt_turn(session_id, turn_id).await,
             Self::Pi(adapter) => adapter.interrupt_turn(session_id, turn_id).await,
@@ -725,6 +766,7 @@ impl RuntimeAdapter {
                 message: "This Codex target does not expose structured approvals.".into(),
                 retryable: false,
             }),
+            Self::Antigravity(_) => Err(CodexError { code: "capability-unavailable".into(), message: "Antigravity applies its configured headless tool policy; interactive approvals are unavailable.".into(), retryable: false }),
             Self::Pi(_) => Err(CodexError {
                 code: "capability-unavailable".into(),
                 message: "Pi does not expose structured approvals.".into(),
@@ -742,6 +784,7 @@ impl RuntimeAdapter {
         match self {
             Self::Codex(adapter) => adapter.shutdown().await,
             Self::Acp(adapter) => adapter.shutdown().await,
+            Self::Antigravity(adapter) => adapter.shutdown().await,
             Self::HermesGateway(adapter) => adapter.shutdown().await,
             Self::OpenClawGateway(adapter) => adapter.shutdown().await,
             Self::Pi(adapter) => adapter.shutdown().await,
