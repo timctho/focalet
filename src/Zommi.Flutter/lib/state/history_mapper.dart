@@ -338,7 +338,11 @@ List<ArtifactPreview> artifactsFromText(String value, {String? cwd}) {
       id: 'message:$path',
       kind: kind,
       title: title.isEmpty
-          ? (kind == 'html' ? 'HTML preview' : 'Generated image')
+          ? (kind == 'html'
+                ? 'HTML preview'
+                : kind == 'markdown'
+                ? 'Markdown preview'
+                : 'Generated image')
           : title,
       path: dataUrl == null ? path : null,
       dataUrl: dataUrl,
@@ -356,7 +360,7 @@ List<ArtifactPreview> artifactsFromText(String value, {String? cwd}) {
     addPath(match.group(3) ?? match.group(4) ?? '', match.group(2) ?? '');
   }
   final barePath = RegExp(
-    r'''(?:^|[\s("'`])((?:file:///[^\s"'<>]+|[a-z]:[\\/][^\s"'<>]+|/[^\s"'<>]+)\.(?:png|jpe?g|gif|webp|bmp|svg|html?))(?=$|[\s),.;])''',
+    r'''(?:^|[\s("'`])((?:file://[^\s"'<>]+|[a-z]:[\\/][^\s"'<>]+|/[^\s"'<>]+)\.(?:png|jpe?g|gif|webp|bmp|svg|html?|md|markdown)(?:[?#][^\s\"'<>)]*)?)(?=$|[\s),.;])''',
     caseSensitive: false,
   );
   for (final match in barePath.allMatches(value)) {
@@ -371,6 +375,7 @@ String? artifactKindFromPath(String value) {
     return 'image';
   }
   if (RegExp(r'\.html?$').hasMatch(clean)) return 'html';
+  if (RegExp(r'\.(md|markdown)$').hasMatch(clean)) return 'markdown';
   return null;
 }
 

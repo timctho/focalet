@@ -9,6 +9,7 @@ import 'package:zommi_flutter/desktop/artifact_loader.dart';
 import 'package:zommi_flutter/desktop/capture_permissions.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/diagnostics/scroll_performance.dart';
+import 'package:zommi_flutter/diagnostics/document_preview_probe.dart';
 import 'package:zommi_flutter/state/session_catalog_store.dart';
 import 'package:zommi_flutter/state/runtime_command_catalog.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
@@ -314,7 +315,11 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
     _composerFocus.onKeyEvent = _handleComposerKey;
     _composerFocus.addListener(_onComposerFocusChanged);
     _controller.addListener(_onControllerChanged);
-    unawaited(_controller.initialize());
+    unawaited(
+      _controller.initialize().then((_) {
+        if (mounted) scheduleDocumentPreviewProbe(_controller);
+      }),
+    );
   }
 
   Future<bool> _prepareImageCapture() async {

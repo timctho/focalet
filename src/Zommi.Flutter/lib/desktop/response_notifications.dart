@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:zommi_flutter/desktop/notification_icon.dart';
 
 /// Uses the OS notification sound so volume and Do Not Disturb remain native.
 final class ResponseNotifications {
@@ -22,21 +24,34 @@ final class ResponseNotifications {
   int _nextId = DateTime.now().millisecondsSinceEpoch % 0x7fffffff;
   bool _closed = false;
 
-  Uri? get _windowsIconUri => Platform.isWindows
-      ? File(Platform.resolvedExecutable).parent.uri
-            .resolve('data/flutter_assets/assets/branding/app-icon.png')
-      : null;
+  Uri? _windowsIconUri;
+  String _windowsApplicationId = 'Zommi.Desktop';
 
   Future<bool> initialize() => _initialization ??= _initialize();
 
   Future<bool> _initialize() async {
     try {
+      if (defaultTargetPlatform == TargetPlatform.windows) {
+        final source = File.fromUri(
+          File(Platform.resolvedExecutable).parent.uri
+              .resolve('data/flutter_assets/assets/branding/app-icon.png'),
+        );
+        final local = Platform.environment['LOCALAPPDATA'];
+        final cache = Directory(
+          '${local ?? Directory.systemTemp.path}/Zommi/notification-icons',
+        );
+        _windowsIconUri = await prepareNotificationIcon(source, cache);
+        _windowsApplicationId = await prepareNotificationIdentity(
+          _windowsIconUri!,
+          cache,
+        );
+      }
       final initialized =
           await _plugin.initialize(
             settings: InitializationSettings(
               windows: WindowsInitializationSettings(
                 appName: 'Zommi',
-                appUserModelId: 'Zommi.Desktop',
+                appUserModelId: _windowsApplicationId,
                 guid: 'f67d24b5-b13b-4b5e-aa39-88a40caec356',
                 iconPath: _windowsIconUri?.toFilePath(windows: true),
               ),

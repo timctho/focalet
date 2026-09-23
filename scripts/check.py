@@ -233,6 +233,7 @@ def check_windows():
             "sqlite_session_catalog",
             "session_catalog_cache",
             "response_notifications",
+            "document_preview",
             "runtime_environment",
             "capture_shortcut",
             "first_run_setup",

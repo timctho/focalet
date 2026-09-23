@@ -79,7 +79,7 @@ def ubuntu_installer(package: Path, output: Path, manifest: dict, tag: str | Non
             "Depends: libc6 (>= 2.39), libgcc-s1, libstdc++6 (>= 13.2), "
             "libgtk-3-0t64, libglib2.0-0t64, libayatana-appindicator3-1, "
             "libx11-6, libxext6, libxfixes3, libxrandr2, libxi6, libxtst6, "
-            "libegl1, libgl1, libepoxy0, libnotify4\n"
+            "libegl1, libgl1, libepoxy0, libnotify4, libwpewebkit-1.0-3, libwpebackend-fdo-1.0-1\n"
             "Recommends: gnome-shell-extension-appindicator\n"
             "Homepage: https://github.com/timctho/zommi\n"
             "Description: Desktop companion for your existing agent\n"
