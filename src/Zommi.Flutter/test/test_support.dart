@@ -155,6 +155,8 @@ class RichFakeCore
       'executablePath': '/opt/codex',
     },
   ];
+  Future<void>? addOverrideGate;
+  bool addOverrideFails = false;
 
   static const capabilities = [
     'session.list.v1',
@@ -308,10 +310,32 @@ class RichFakeCore
   Future<RuntimeDiscovery> addRuntimeOverride(
     Map<String, Object?> override,
   ) async {
-    configuredOverrides.add({...override, 'id': 'override-added'});
+    await addOverrideGate;
+    if (addOverrideFails) {
+      throw const CoreProtocolException(
+        'invalid-configuration',
+        'CLI executable was not found.',
+      );
+    }
+    final host = Map<String, Object?>.from(override['executionHost']! as Map);
+    final id = 'runtime-added-${configuredOverrides.length}';
+    configuredOverrides.add({...override, 'id': 'override-$id'});
+    discoveredTargets.add(
+      RuntimeTarget(
+        id: id,
+        runtimeId: 'codex',
+        adapterId: override['adapterId']! as String,
+        displayName: 'Codex',
+        protocolName: 'Codex app-server',
+        executablePath: override['executablePath']?.toString() ?? '',
+        executionHost: host,
+        source: 'configured-ui',
+        capabilityHints: capabilities,
+      ),
+    );
     return RuntimeDiscovery(
       targets: discoveredTargets,
-      selectedTargetId: activeTargetId,
+      selectedTargetId: id,
       settings: _settings(),
     );
   }

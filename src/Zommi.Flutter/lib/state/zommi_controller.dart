@@ -1036,21 +1036,21 @@ final class ZommiController extends ChangeNotifier {
     return normalizeRuntimeExecutablePath(selected, host);
   }
 
-  Future<void> saveRuntimeOverride({
+  Future<String?> saveRuntimeOverride({
     required String adapterId,
     required String locator,
     String? executionHostId,
   }) async {
-    if (core is! RuntimeConfigurationBridge) return;
+    if (core is! RuntimeConfigurationBridge) return null;
     final configuration = core as RuntimeConfigurationBridge;
-    if (runtimeOverrideBusy || locator.trim().isEmpty) return;
+    if (runtimeOverrideBusy || locator.trim().isEmpty) return null;
     final adapter = runtimeOverrideAdapters
         .cast<Map<String, Object?>?>()
         .firstWhere(
           (value) => value?['adapterId'] == adapterId,
           orElse: () => null,
         );
-    if (adapter == null) return;
+    if (adapter == null) return null;
     final acceptsEndpoint = adapter['acceptsEndpoint'] == true;
     final host = acceptsEndpoint
         ? <String, Object?>{
@@ -1066,7 +1066,7 @@ final class ZommiController extends ChangeNotifier {
           );
     if (host == null) {
       _setStatus('Choose an execution host for this override.', warning: true);
-      return;
+      return null;
     }
     runtimeOverrideBusy = true;
     _notify();
@@ -1079,9 +1079,21 @@ final class ZommiController extends ChangeNotifier {
         if (!acceptsEndpoint) 'executablePath': locator.trim(),
       });
       _replaceDiscovery(discovery);
-      _setStatus('Runtime override added');
+      final added = visibleRuntimeTargets
+          .where((target) => target.id == discovery.selectedTargetId)
+          .firstOrNull;
+      if (added == null || added.adapterId != adapterId) {
+        _setStatus(
+          'Could not detect the configured runtime. Check the CLI path and try again.',
+          warning: true,
+        );
+        return null;
+      }
+      _setStatus('${added.displayName} detected and added');
+      return added.id;
     } on Object catch (error) {
       _setStatus('Could not add runtime override · $error', warning: true);
+      return null;
     } finally {
       runtimeOverrideBusy = false;
       _notify();

@@ -558,9 +558,10 @@ class _SessionStatusIcon extends StatelessWidget {
 }
 
 class RuntimeSetupPanel extends StatefulWidget {
-  const RuntimeSetupPanel({required this.controller, super.key});
+  const RuntimeSetupPanel({required this.controller, this.onAdded, super.key});
 
   final ZommiController controller;
+  final ValueChanged<String>? onAdded;
 
   @override
   State<RuntimeSetupPanel> createState() => _RuntimeSetupPanelState();
@@ -570,6 +571,7 @@ class _RuntimeSetupPanelState extends State<RuntimeSetupPanel> {
   String _adapterId = '';
   String _hostId = '';
   String? _executablePath;
+  String? _error;
   final _wslPath = TextEditingController();
 
   @override
@@ -599,6 +601,7 @@ class _RuntimeSetupPanelState extends State<RuntimeSetupPanel> {
   @override
   Widget build(BuildContext context) {
     final adapters = widget.controller.configurableRuntimeAdapters;
+    final busy = widget.controller.runtimeOverrideBusy;
     final selectedAdapter = _adapter;
     final adapterId = selectedAdapter?['adapterId']?.toString() ?? '';
     final hosts = _hosts;
@@ -678,12 +681,16 @@ class _RuntimeSetupPanelState extends State<RuntimeSetupPanel> {
                         const _RuntimeSetupSectionLabel('Agent'),
                         RadioGroup<String>(
                           groupValue: adapterId,
-                          onChanged: (value) => setState(() {
-                            _adapterId = value ?? '';
-                            _hostId = '';
-                            _executablePath = null;
-                            _wslPath.clear();
-                          }),
+                          onChanged: (value) {
+                            if (busy) return;
+                            setState(() {
+                              _adapterId = value ?? '';
+                              _hostId = '';
+                              _executablePath = null;
+                              _wslPath.clear();
+                              _error = null;
+                            });
+                          },
                           child: Column(
                             key: const ValueKey('runtime-setup-adapter-list'),
                             children: [
@@ -708,11 +715,15 @@ class _RuntimeSetupPanelState extends State<RuntimeSetupPanel> {
                         const _RuntimeSetupSectionLabel('Run on'),
                         RadioGroup<String>(
                           groupValue: selectedHost,
-                          onChanged: (value) => setState(() {
-                            _hostId = value ?? '';
-                            _executablePath = null;
-                            _wslPath.clear();
-                          }),
+                          onChanged: (value) {
+                            if (busy) return;
+                            setState(() {
+                              _hostId = value ?? '';
+                              _executablePath = null;
+                              _wslPath.clear();
+                              _error = null;
+                            });
+                          },
                           child: Column(
                             key: const ValueKey('runtime-setup-host-list'),
                             children: [
@@ -739,6 +750,7 @@ class _RuntimeSetupPanelState extends State<RuntimeSetupPanel> {
                               'runtime-wsl-path-$adapterId-$selectedHost',
                             ),
                             controller: _wslPath,
+                            enabled: !busy,
                             style: const TextStyle(fontSize: 12),
                             autocorrect: false,
                             enableSuggestions: false,
@@ -796,7 +808,7 @@ class _RuntimeSetupPanelState extends State<RuntimeSetupPanel> {
                                   key: const ValueKey(
                                     'select-runtime-executable',
                                   ),
-                                  onPressed: selectedHost.isEmpty
+                                  onPressed: busy || selectedHost.isEmpty
                                       ? null
                                       : () async {
                                           final path = await widget.controller
@@ -815,6 +827,18 @@ class _RuntimeSetupPanelState extends State<RuntimeSetupPanel> {
                             ),
                           ),
                         const SizedBox(height: 10),
+                        if (_error case final error?)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Text(
+                              error,
+                              key: const ValueKey('runtime-setup-error'),
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.error,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
                         Align(
                           alignment: Alignment.centerRight,
                           child: FilledButton.tonal(
@@ -826,26 +850,40 @@ class _RuntimeSetupPanelState extends State<RuntimeSetupPanel> {
                                     selectedHost.isEmpty
                                 ? null
                                 : () async {
-                                    final previousCount = widget
-                                        .controller
-                                        .runtimeOverrides
-                                        .length;
-                                    await widget.controller.saveRuntimeOverride(
-                                      adapterId: adapterId,
-                                      locator: _executablePath!,
-                                      executionHostId: selectedHost,
-                                    );
-                                    if (mounted &&
-                                        widget
-                                                .controller
-                                                .runtimeOverrides
-                                                .length >
-                                            previousCount) {
-                                      setState(() => _executablePath = null);
-                                      _wslPath.clear();
+                                    setState(() => _error = null);
+                                    final added = await widget.controller
+                                        .saveRuntimeOverride(
+                                          adapterId: adapterId,
+                                          locator: _executablePath!,
+                                          executionHostId: selectedHost,
+                                        );
+                                    if (!mounted) return;
+                                    if (added != null) {
+                                      widget.onAdded?.call(added);
+                                      widget.controller.toggleRuntimeSetupPanel(
+                                        false,
+                                      );
+                                    } else {
+                                      setState(
+                                        () => _error = widget.controller.status,
+                                      );
                                     }
                                   },
-                            child: const Text('Add runtime'),
+                            child: busy
+                                ? const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      SizedBox.square(
+                                        dimension: 12,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      ),
+                                      SizedBox(width: 8),
+                                      Text('Detecting…'),
+                                    ],
+                                  )
+                                : const Text('Add runtime'),
                           ),
                         ),
                         if (widget.controller.runtimeOverrides.isNotEmpty) ...[

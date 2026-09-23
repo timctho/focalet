@@ -77,6 +77,44 @@ class Core:
 
 
 class RuntimeCommandsTests(unittest.TestCase):
+    def test_added_runtime_is_selected_without_replacing_the_saved_chat(self):
+        with tempfile.TemporaryDirectory(prefix="zommi-runtime-add-") as directory:
+            path = Path(directory)
+            env = {key: value for key, value in os.environ.items() if not key.startswith("ZOMMI_")}
+            env.update(
+                ZOMMI_RUNTIME_DISCOVERY_MODE="configured-only",
+                ZOMMI_CORE_STATE_PATH=str(path / "binding.json"),
+                ZOMMI_RUNTIME_OVERRIDES_PATH=str(path / "overrides.json"),
+                ZOMMI_RUNTIME_DISCOVERY_CACHE_PATH=str(path / "targets.json"),
+            )
+            core = Core(env)
+            try:
+                core.request("core.initialize")
+                platform = "windows" if os.name == "nt" else "macos" if sys.platform == "darwin" else "linux"
+                host = {
+                    "id": "native:" + platform,
+                    "kind": "native",
+                    "platform": platform,
+                    "displayName": "Local", "isDefault": True,
+                }
+                override = {"id": "", "adapterId": "codex-app-server",
+                            "executablePath": sys.executable, "executionHost": host}
+                first = core.request("runtime.addOverride", {"override": override})
+                first_id = first["selectedTargetId"]
+                saved = {"runtimeTargetId": first_id, "sessionId": "saved-chat", "cwd": directory}
+                (path / "binding.json").write_text(json.dumps(saved))
+                second = core.request("runtime.addOverride", {
+                    "override": dict(override, adapterId="opencode-acp")})
+                added = next(target for target in second["targets"]
+                             if target["id"] == second["selectedTargetId"])
+                self.assertEqual(added["adapterId"], "opencode-acp")
+                self.assertNotEqual(added["id"], first_id)
+                self.assertEqual(len(second["settings"]["overrides"]), 2)
+                self.assertEqual(json.loads((path / "binding.json").read_text()), saved)
+                self.assertEqual(core.request("runtime.discover")["selectedTargetId"], first_id)
+            finally:
+                core.close()
+
     def exercise(self, adapter, fixture, command, wire_method):
         with tempfile.TemporaryDirectory(prefix="zommi-runtime-commands-") as directory:
             path = Path(directory)

@@ -1153,8 +1153,6 @@ void main() {
         ),
         isTrue,
       );
-      await tester.tap(find.byKey(const ValueKey('close-runtime-setup')));
-      await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('runtime-setup-panel')), findsNothing);
     },
   );
@@ -1165,21 +1163,23 @@ void main() {
       final core = RichFakeCore()..historyCount = 0;
       final desktop = FakeDesktopBridge();
       await _pumpApp(tester, core: core, desktop: desktop);
-      await _openNewChatMenu(tester);
-      await tester.tap(find.byKey(const ValueKey('open-runtime-setup')));
-      await tester.pumpAndSettle();
-      final host = find.byKey(const ValueKey('runtime-setup-host-wsl:ubuntu'));
-      await tester.ensureVisible(host);
-      await tester.tap(host);
-      await tester.pumpAndSettle();
-      final field = find.byKey(
-        const ValueKey('runtime-wsl-path-codex-app-server-wsl:ubuntu'),
-      );
       for (final path in [
         '~/.hermes/bin/codex',
         '/.hermes/bin/codex',
         '/home/agent/My Tools/codex',
       ]) {
+        await _openNewChatMenu(tester);
+        await tester.tap(find.byKey(const ValueKey('open-runtime-setup')));
+        await tester.pumpAndSettle();
+        final host = find.byKey(
+          const ValueKey('runtime-setup-host-wsl:ubuntu'),
+        );
+        await tester.ensureVisible(host);
+        await tester.tap(host);
+        await tester.pumpAndSettle();
+        final field = find.byKey(
+          const ValueKey('runtime-wsl-path-codex-app-server-wsl:ubuntu'),
+        );
         await tester.ensureVisible(field);
         await tester.enterText(field, path);
         await tester.pump();
@@ -1192,7 +1192,7 @@ void main() {
           (core.configuredOverrides.last['executionHost'] as Map)['id'],
           'wsl:ubuntu',
         );
-        expect(tester.widget<TextFormField>(field).controller!.text, isEmpty);
+        expect(find.byKey(const ValueKey('runtime-setup-panel')), findsNothing);
       }
       expect(desktop.calls, isNot(contains('selectRuntimeExecutable')));
       expect(tester.takeException(), isNull);
