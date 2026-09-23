@@ -5,12 +5,13 @@
 - codex: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/openai.svg
 - pi: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/pi.svg
 - opencode: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/opencode.svg (monochrome mark)
+- antigravity: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/antigravity-color.svg
 - gemini: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/gemini-color.svg
 - openclaw: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/openclaw-color.svg
 - claude: https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/claude-color.svg
 - hermes: the official portrait app icon at https://raw.githubusercontent.com/NousResearch/hermes-agent/main/apps/desktop/assets/icon.png, also corroborated by the portrait favicon on https://hermes-agent.nousresearch.com/.
 
-Codex uses the original black OpenAI knot. Hermes uses the original black-and-white portrait app icon. Both preserve the source artwork and colors; only transparent padding and export resolution are normalized. Claude, OpenClaw and Gemini retain their upstream brand colors. Pi retains its upstream monochrome mark.
+Codex uses the original black OpenAI knot. Hermes uses the original black-and-white portrait app icon. Both preserve the source artwork and colors; only transparent padding and export resolution are normalized. Antigravity, Claude, OpenClaw and Gemini retain their upstream brand colors. Pi retains its upstream monochrome mark.
 
 Lobe Icons license:
 

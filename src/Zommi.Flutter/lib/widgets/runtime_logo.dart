@@ -15,6 +15,7 @@ class RuntimeLogo extends StatelessWidget {
       'openclaw',
       'opencode',
       'gemini',
+      'antigravity',
       'claude',
     };
     return brands.contains(runtimeId)

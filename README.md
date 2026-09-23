@@ -26,6 +26,7 @@ header. Sign in through your agent's own flow if needed.
 | --- | --- |
 | **Codex** | Chats, images, saved sessions, models, approvals and native skills |
 | **OpenCode** | Chats, images, saved sessions, models, approvals and advertised commands through ACP |
+| **Antigravity CLI** | Text and selected context, streaming replies, models and session resume |
 | **Gemini CLI** | Chats, images, models, approvals, session resume and advertised commands through ACP |
 | **Pi** | Chats, images, models and runtime commands through RPC |
 | **Hermes** | Chats and commands exposed by its ACP or Gateway profile |
