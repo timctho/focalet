@@ -37,14 +37,20 @@ if CommandLine.arguments.dropFirst().first == "inspect" {
   Thread.sleep(forTimeInterval: 0.1)
   CGEvent(keyboardEventSource: nil, virtualKey: 53, keyDown: false)!.post(tap: .cghidEventTap)
 } else {
-  mouse(.mouseMoved, 120, 140)
+  let args = CommandLine.arguments
+  let x1 = args.count > 2 ? Double(args[2])! : 120
+  let y1 = args.count > 3 ? Double(args[3])! : 140
+  let x2 = args.count > 4 ? Double(args[4])! : 240
+  let y2 = args.count > 5 ? Double(args[5])! : 220
+  mouse(.mouseMoved, x1, y1)
   Thread.sleep(forTimeInterval: 0.15)
-  mouse(.leftMouseDown, 120, 140)
+  mouse(.leftMouseDown, x1, y1)
   for step in 1...12 {
     Thread.sleep(forTimeInterval: 0.03)
-    mouse(.leftMouseDragged, 120 + Double(step) * 10, 140 + Double(step) * 80 / 12)
+    mouse(.leftMouseDragged, x1 + (x2-x1) * Double(step)/12, y1 + (y2-y1) * Double(step)/12)
   }
-  mouse(.leftMouseUp, 240, 220)
+  mouse(.leftMouseUp, x2, y2)
+  Thread.sleep(forTimeInterval: 0.15)
   // The app-owned picker retains boxes until the batch is confirmed.
   CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: true)!.post(tap: .cghidEventTap)
   CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: false)!.post(tap: .cghidEventTap)

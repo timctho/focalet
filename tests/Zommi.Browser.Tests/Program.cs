@@ -88,6 +88,9 @@ try
         passed.Add(name);
         Console.WriteLine("PASS " + name);
     }
+    if (Environment.GetEnvironmentVariable("ZOMMI_TEST_PORTABLE_BROWSER_HOST") is { Length: > 0 } portableHost)
+        await PortableBrowserHost.VerifyAsync(portableHost, endpoint, browser.Id, Evaluate, Bounds,
+            (condition, name) => Check(condition, name), token);
     // DOMRect values retain float noise at fractional display scales (for
     // example, 641.6000366 CSS px * 1.25 = 802.000046 device px). Keep the
     // one-pixel raster rounding allowance, with a subpixel numeric epsilon.

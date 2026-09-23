@@ -568,9 +568,13 @@ class ReleaseAssemblyTests(unittest.TestCase):
                 capture.mkdir()
                 capture_binary = capture / "Zommi.Capture.exe"
                 capture_binary.write_text("capture")
+                browser = inputs / "browser"
+                browser.mkdir()
+                (browser / "zommi-browser-capture").write_text("browser")
                 package, archive = assemble_release.assemble(SimpleNamespace(
                     platform=platform, architecture="x64", flutter_output=flutter,
                     core_host=core, capture_host=capture, linux_capture_host=capture_binary,
+                    browser_capture_host=browser,
                     output_root=inputs / "output", git_commit="license-contract-sha",
                     document=[], signing_status="unsigned", signing_mechanism="none",
                 ))
@@ -650,7 +654,11 @@ class ReleaseAssemblyTests(unittest.TestCase):
         document = self.root / "README.md"
         document.write_text("release", encoding="utf-8")
         output_root = self.root / "artifacts"
+        browser = self.root / "browser"
+        browser.mkdir()
+        (browser / "zommi-browser-capture").write_text("browser")
         arguments = SimpleNamespace(
+            browser_capture_host=browser,
             platform="macos",
             architecture="x64",
             flutter_output=flutter_app,
@@ -690,8 +698,10 @@ class ReleaseAssemblyTests(unittest.TestCase):
         self.assertIsNone(result["captureHost"])
         self.assertEqual(result["signing"], {"status": "ad-hoc", "mechanism": "codesign"})
         manifest = json.loads((package / "release-manifest.json").read_text())
-        self.assertEqual(manifest["components"]["captureProvider"], "platform-native")
+        self.assertEqual(manifest["components"]["captureProvider"], "screen-capture-ax")
         self.assertTrue((package / result["coreHost"]).stat().st_mode & 0o111)
+        self.assertEqual(manifest["components"]["browserProvider"], "shared-dom")
+        self.assertTrue((package / manifest["browserCaptureHost"]).is_file())
         self.assertEqual((package / "docs" / "README.md").read_text(), "release")
         sign.assert_called_once()
         self.assertEqual(sign.call_args.args[0].name, "Zommi.app")
@@ -747,6 +757,22 @@ class ReleaseAssemblyTests(unittest.TestCase):
             run.call_args_list[1].args[0],
             ["codesign", "--verify", "--deep", "--strict", str(application)],
         )
+
+    def test_macos_browser_host_is_signed_before_the_app_with_jit_permission(self) -> None:
+        application = self.root / "Zommi.app"
+        browser = application / "Contents/MacOS/browser-capture/zommi-browser-capture"
+        browser.parent.mkdir(parents=True)
+        browser.write_bytes(b"native-host")
+        library = browser.parent / "libcoreclr.dylib"
+        library.write_bytes(b"runtime-library")
+        with mock.patch.object(assemble_release.subprocess, "run") as run:
+            assemble_release._sign_macos(application, None)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(commands[0][-1], str(library))
+        self.assertEqual(commands[1][-1], str(browser))
+        self.assertIn("--entitlements", commands[1])
+        self.assertNotIn("--entitlements", commands[2])
+        self.assertEqual(commands[2][-1], str(application))
 
     def test_macos_development_certificate_is_not_reported_as_distribution(self) -> None:
         with mock.patch.object(assemble_release.subprocess, "run") as run:

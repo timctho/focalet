@@ -1,5 +1,6 @@
 import Cocoa
 import ScreenCaptureKit
+import ApplicationServices
 
 struct MacSelectedRegion: Equatable {
   let displayIndex: Int
@@ -34,7 +35,7 @@ struct MacRegionSelectionState {
   }
 }
 
-private struct MacScreenSnapshot {
+struct MacScreenSnapshot {
   let screen: NSScreen
   let image: CGImage
 }
@@ -75,7 +76,7 @@ final class MacRegionSelector {
     }
   }
 
-  private static func captureScreens() async throws -> [MacScreenSnapshot] {
+  static func captureScreens() async throws -> [MacScreenSnapshot] {
     guard CGPreflightScreenCaptureAccess(), !NSScreen.screens.isEmpty else {
       throw MacRegionSelectionError.captureUnavailable
     }
@@ -351,5 +352,205 @@ private final class MacRegionOverlayView: NSView {
     let border = NSBezierPath(rect: rect)
     border.lineWidth = 2
     border.stroke()
+  }
+}
+
+/// Native screen and AX observations for the shared multi-region drawing editor.
+/// No input is sent to the observed application, and password subtrees are omitted.
+@MainActor
+enum MacRegionCaptureBackend {
+  static func rect(_ value: [String: Any]) -> CGRect {
+    func number(_ key: String) -> CGFloat { CGFloat((value[key] as? NSNumber)?.doubleValue ?? 0) }
+    return CGRect(x: number("x"), y: number("y"), width: number("width"), height: number("height"))
+  }
+  static func json(_ value: CGRect) -> [String: Any] {
+    ["x": value.minX, "y": value.minY, "width": value.width, "height": value.height]
+  }
+  private static func screenBounds(_ screen: NSScreen) -> CGRect {
+    let top = NSScreen.screens.first?.frame.maxY ?? screen.frame.maxY
+    return CGRect(x: screen.frame.minX, y: top - screen.frame.maxY,
+                  width: screen.frame.width, height: screen.frame.height)
+  }
+  private static func windows() -> [[String: Any]] {
+    let entries = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+    return entries.compactMap { entry in
+      guard let pid = entry[kCGWindowOwnerPID as String] as? Int32,
+            pid != ProcessInfo.processInfo.processIdentifier,
+            let id = entry[kCGWindowNumber as String] as? Int,
+            let dictionary = entry[kCGWindowBounds as String] as? [String: Any],
+            let bounds = CGRect(dictionaryRepresentation: dictionary as CFDictionary),
+            bounds.width > 0, bounds.height > 0,
+            (entry[kCGWindowAlpha as String] as? Double ?? 1) > 0 else { return nil }
+      let app = NSRunningApplication(processIdentifier: pid)
+      var source: [String: Any] = [
+        "nativeWindowId": String(id), "processId": pid, "platform": "macos", "provider": "macos-ax",
+        "hostName": Host.current().localizedName ?? "Mac", "bounds": json(bounds), "windowBounds": json(bounds),
+        "application": app?.localizedName ?? entry[kCGWindowOwnerName as String] as? String ?? "Application",
+        "processName": app?.bundleIdentifier ?? "application",
+        "windowTitle": entry[kCGWindowName as String] as? String ?? "",
+      ]
+      if let date = app?.launchDate { source["processStartToken"] = String(date.timeIntervalSince1970) }
+      return source
+    }
+  }
+  private static func sourceAt(_ windows: [[String: Any]], _ region: CGRect) -> [String: Any]? {
+    for window in windows {
+      let bounds = rect(window["bounds"] as? [String: Any] ?? [:])
+      if !bounds.intersects(region) { continue }
+      return bounds.contains(region) ? window : nil
+    }
+    return nil
+  }
+  private static func equal(_ a: Any, _ b: Any) -> Bool {
+    guard let left = try? JSONSerialization.data(withJSONObject: a, options: [.sortedKeys, .fragmentsAllowed]),
+          let right = try? JSONSerialization.data(withJSONObject: b, options: [.sortedKeys, .fragmentsAllowed]) else { return false }
+    return left == right
+  }
+  private static func dataURL(_ image: CGImage) throws -> String {
+    guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
+      throw MacRegionSelectionError.captureUnavailable
+    }
+    return "data:image/png;base64,\(png.base64EncodedString())"
+  }
+  static func captureDisplays() async throws -> [String: Any] {
+    let before = windows()
+    let screens = try await MacRegionSelector.captureScreens()
+    let after = windows()
+    return ["frames": try screens.enumerated().map { index, snapshot -> [String: Any] in
+      ["dataUrl": try dataURL(snapshot.image), "bounds": json(screenBounds(snapshot.screen)),
+       "windows": equal(before, after) ? before : [], "label": "Display \(index + 1)",
+       "coordinateSpace": "screen-points"]
+    }]
+  }
+  static func observe(_ value: [String: Any]) async throws -> [String: Any] {
+    let region = rect(value)
+    guard region.width > 0, region.height > 0,
+          [region.minX, region.minY, region.width, region.height].allSatisfy({ $0.isFinite }) else {
+      throw MacRegionSelectionError.captureUnavailable
+    }
+    let beforeWindows = windows()
+    let source = sourceAt(beforeWindows, region)
+    let screens = try await MacRegionSelector.captureScreens()
+    guard let screen = screens.first(where: { screenBounds($0.screen).contains(region) }) else {
+      throw MacRegionSelectionError.captureUnavailable
+    }
+    let desktop = screenBounds(screen.screen)
+    let local = region.offsetBy(dx: -desktop.minX, dy: -desktop.minY)
+    let pixels = MacRegionSelectionState.pixelRect(local, screenSize: desktop.size,
+      imageSize: CGSize(width: screen.image.width, height: screen.image.height))
+    guard let crop = screen.image.cropping(to: pixels) else { throw MacRegionSelectionError.captureUnavailable }
+    let scaleX = CGFloat(crop.width) / region.width
+    let scaleY = CGFloat(crop.height) / region.height
+    let before = source.map { accessibility($0, region, scaleX, scaleY) } ?? ["limitation": "The region has no single unobscured source window."]
+    // Read pixels again between the two AX observations. The caller compares
+    // them with the original frozen crop before retaining any metadata.
+    let currentScreens = try await MacRegionSelector.captureScreens()
+    guard let current = currentScreens.first(where: { screenBounds($0.screen) == desktop }),
+          let currentCrop = current.image.cropping(to: pixels) else { throw MacRegionSelectionError.captureUnavailable }
+    let after = source.map { accessibility($0, region, scaleX, scaleY) } ?? before
+    let afterWindows = windows()
+    let stable = equal(source ?? [:], sourceAt(afterWindows, region) ?? [:]) && equal(before, after)
+    var result: [String: Any] = ["dataUrl": try dataURL(currentCrop), "bounds": json(region),
+      "windows": afterWindows, "stable": stable,
+      "limitation": stable ? before["limitation"] ?? "" : "The source or accessible content changed during capture."]
+    result["source"] = source
+    if stable {
+      result["regionContext"] = before["regionContext"]
+      result["browserViewport"] = before["browserViewport"]
+    }
+    return result
+  }
+
+  private static func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+    var value: CFTypeRef?
+    return AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success ? value : nil
+  }
+  private static func elementBounds(_ element: AXUIElement) -> CGRect? {
+    guard let p = attribute(element, kAXPositionAttribute), CFGetTypeID(p) == AXValueGetTypeID(),
+          let s = attribute(element, kAXSizeAttribute), CFGetTypeID(s) == AXValueGetTypeID() else { return nil }
+    var point = CGPoint.zero; var size = CGSize.zero
+    guard AXValueGetValue(p as! AXValue, .cgPoint, &point), AXValueGetValue(s as! AXValue, .cgSize, &size),
+          point.x.isFinite, point.y.isFinite, size.width.isFinite, size.height.isFinite else { return nil }
+    return CGRect(origin: point, size: size)
+  }
+  private static func accessibility(_ source: [String: Any], _ region: CGRect, _ scaleX: CGFloat, _ scaleY: CGFloat) -> [String: Any] {
+    guard AXIsProcessTrusted(), let pid = source["processId"] as? Int32 else {
+      return ["limitation": "Accessibility is unavailable. Enable Zommi in System Settings → Privacy & Security → Accessibility, then retry."]
+    }
+    let started = ProcessInfo.processInfo.systemUptime
+    let application = AXUIElementCreateApplication(pid)
+    AXUIElementSetMessagingTimeout(application, 0.04)
+    let native = rect(source["bounds"] as? [String: Any] ?? [:])
+    let candidates = (attribute(application, kAXWindowsAttribute) as? [AXUIElement] ?? []).filter { window in
+      guard let bounds = elementBounds(window) else { return false }
+      return abs(bounds.minX-native.minX) < 3 && abs(bounds.minY-native.minY) < 3 &&
+        abs(bounds.width-native.width) < 3 && abs(bounds.height-native.height) < 3
+    }
+    guard candidates.count == 1 else { return ["limitation": "The accessibility window could not be aligned with this image."] }
+    var stack: [(AXUIElement, String?, Int)] = [(candidates[0], nil, 0)]
+    var seen = Set<CFHashCode>()
+    var elements: [[String: Any]] = []
+    var viewport: CGRect?
+    var remaining = 24000
+    var truncated = false
+    func bounded(_ value: String) -> String {
+      let result = String(value.prefix(min(4000, remaining)))
+      if result.count < value.count { truncated = true }
+      remaining -= result.count
+      return result
+    }
+    func map(_ bounds: CGRect) -> [String: Any] {
+      json(CGRect(x: (bounds.minX-region.minX)*scaleX, y: (bounds.minY-region.minY)*scaleY,
+                  width: bounds.width*scaleX, height: bounds.height*scaleY))
+    }
+    while let (element, parent, depth) = stack.popLast() {
+      if seen.count >= 800 || elements.count >= 128 || remaining <= 0 || ProcessInfo.processInfo.systemUptime-started > 0.7 { truncated = true; break }
+      if depth > 40 || !seen.insert(CFHash(element)).inserted { continue }
+      AXUIElementSetMessagingTimeout(element, 0.04)
+      let role = attribute(element, kAXRoleAttribute) as? String ?? ""
+      let subrole = attribute(element, kAXSubroleAttribute) as? String ?? ""
+      if subrole == "AXSecureTextField" || role == "AXSecureTextField" || (attribute(element, "AXProtectedContent") as? Bool) == true ||
+          (attribute(element, "AXHidden") as? Bool) == true { continue }
+      var retainedParent = parent
+      if let bounds = elementBounds(element), bounds.width > 0, bounds.height > 0 {
+        if role == "AXWebArea" && bounds.contains(region) { viewport = bounds }
+        if bounds.intersects(region) {
+          let id = "ax-\(elements.count)"
+          let name = bounded(attribute(element, kAXTitleAttribute) as? String ?? attribute(element, "AXLabel") as? String ?? "")
+          let description = bounded(attribute(element, kAXDescriptionAttribute) as? String ?? "")
+          let rawValue = attribute(element, kAXValueAttribute)
+          let text = bounded(rawValue as? String ?? (rawValue as? NSNumber)?.stringValue ?? "")
+          var state: [String: Any] = [:]
+          for (key, nativeKey) in [("enabled", kAXEnabledAttribute), ("focused", kAXFocusedAttribute), ("selected", kAXSelectedAttribute)] {
+            if let value = attribute(element, nativeKey) as? Bool { state[key] = value }
+          }
+          var writable = DarwinBoolean(false)
+          if AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &writable) == .success {
+            state["editable"] = writable.boolValue && ["AXTextField", "AXTextArea", "AXComboBox"].contains(role)
+          }
+          if let expanded = attribute(element, "AXExpanded") as? Bool { state["expanded"] = expanded ? "expanded" : "collapsed" }
+          if ["AXCheckBox", "AXRadioButton"].contains(role), let value = rawValue as? NSNumber {
+            state["toggle"] = value.intValue == 2 ? "mixed" : value.boolValue ? "on" : "off"
+          }
+          var item: [String: Any] = ["id": id, "provider": "macos-ax", "role": role, "name": name,
+            "text": text, "value": text, "description": description, "state": state, "bounds": map(bounds),
+            "visibleBounds": map(bounds.intersection(region)), "relation": region.contains(bounds) ? "inside" : "intersects"]
+          item["parentId"] = parent
+          if let identifier = attribute(element, "AXIdentifier") as? String, !identifier.isEmpty, identifier.count <= 256 {
+            item["nativeIds"] = ["identifier": identifier]
+          }
+          if let url = attribute(element, kAXURLAttribute) as? URL { item["href"] = bounded(url.absoluteString) }
+          elements.append(item)
+          retainedParent = id
+        }
+      }
+      let children = attribute(element, "AXVisibleChildren") as? [AXUIElement] ?? attribute(element, kAXChildrenAttribute) as? [AXUIElement] ?? []
+      if children.count > 800 { truncated = true }
+      for child in children.prefix(800).reversed() { stack.append((child, retainedParent, depth+1)) }
+    }
+    var result: [String: Any] = ["regionContext": ["version": 1, "selectionKind": "bbox", "coordinateSpace": "image-pixels", "elements": elements, "truncated": truncated],
+      "limitation": "Captured macOS Accessibility. Intersecting elements may expose labels beyond the crop; the image is the selected content."]
+    if let viewport = viewport { result["browserViewport"] = json(viewport) }
+    return result
   }
 }

@@ -81,6 +81,17 @@ def _write_checksums(root: Path) -> None:
 def _sign_macos(application: Path, identity: str | None) -> dict[str, str]:
     selected = identity or "-"
     identity_signed = selected != "-"
+    browser_directory = application / "Contents/MacOS/browser-capture"
+    browser = browser_directory / "zommi-browser-capture"
+    if browser.is_file():
+        # Sign the .NET libraries before their host. Only that host needs JIT;
+        # do not grant executable-memory entitlements to the Flutter app.
+        options = ["--options", "runtime", "--timestamp"] if identity_signed else []
+        for library in sorted(browser_directory.rglob("*.dylib")):
+            subprocess.run(["codesign", "--force", "--sign", selected, *options, str(library)], check=True)
+        subprocess.run(["codesign", "--force", "--sign", selected, *options,
+                        "--entitlements", str(REPOSITORY / "scripts/macos-browser-entitlements.plist"),
+                        str(browser)], check=True)
     command = ["codesign", "--force", "--deep", "--sign", selected]
     if identity_signed:
         command.append("--preserve-metadata=entitlements")
@@ -131,6 +142,7 @@ def _write_manifest(
     core_host: str,
     capture_host: str | None,
     signing: dict[str, str],
+    browser_capture_host: str | None = None,
 ) -> None:
     identity = read_version(REPOSITORY / "src/Zommi.Flutter/pubspec.yaml")
     manifest = {
@@ -147,7 +159,8 @@ def _write_manifest(
         "components": {
             "desktopUi": "flutter",
             "runtimeCore": "rust",
-            "captureProvider": "dotnet-uia" if capture_host else "platform-native",
+            "captureProvider": {"windows": "dotnet-uia", "linux": "x11-atspi", "macos": "screen-capture-ax"}[target_platform],
+            **({"browserProvider": "shared-dom"} if browser_capture_host else {}),
             **(
                 {"wslTransport": "persistent-authenticated-relay", "windowsReset": "owned-profile-reset"}
                 if target_platform == "windows"
@@ -158,6 +171,8 @@ def _write_manifest(
     }
     if capture_host:
         manifest["captureHost"] = capture_host
+    if browser_capture_host:
+        manifest["browserCaptureHost"] = browser_capture_host
     if target_platform == "windows":
         icon = root / "data/flutter_assets/windows/runner/resources/app_icon.ico"
         if icon.is_file():
@@ -280,6 +295,11 @@ def assemble(args: argparse.Namespace) -> tuple[Path, Path]:
             "mechanism": args.signing_mechanism,
         }
         capture_relative: str | None = None
+        browser_relative: str | None = None
+        if args.platform != "windows":
+            browser_source = getattr(args, "browser_capture_host", None)
+            if browser_source is None or not (browser_source / "zommi-browser-capture").is_file():
+                raise ValueError("Unix releases require --browser-capture-host with a published native helper.")
         if args.platform == "macos":
             application = pending / "Zommi.app"
             shutil.copytree(args.flutter_output, application, symlinks=True)
@@ -288,6 +308,9 @@ def assemble(args: argparse.Namespace) -> tuple[Path, Path]:
             core_destination = pending / core_relative
             shutil.copy2(args.core_host, core_destination)
             core_destination.chmod(core_destination.stat().st_mode | 0o111)
+            browser_relative = "Zommi.app/Contents/MacOS/browser-capture/zommi-browser-capture"
+            shutil.copytree(browser_source, (pending / browser_relative).parent)
+            (pending / browser_relative).chmod(0o755)
             # Keep notices with the installed app and include them in its signature.
             _copy_licenses(application / "Contents/Resources")
             signing = _sign_macos(application, args.macos_signing_identity)
@@ -306,6 +329,9 @@ def assemble(args: argparse.Namespace) -> tuple[Path, Path]:
                     shutil.copy2(Path(__file__).parent / name, support / name)
             else:
                 entrypoint = "zommi"
+                browser_relative = "browser-capture/zommi-browser-capture"
+                shutil.copytree(browser_source, (pending / browser_relative).parent)
+                (pending / browser_relative).chmod(0o755)
                 core_relative = "zommi-core-host"
                 capture_relative = "zommi-x11-capture"
                 if args.linux_capture_host is None:
@@ -347,6 +373,7 @@ def assemble(args: argparse.Namespace) -> tuple[Path, Path]:
             entrypoint=entrypoint,
             core_host=core_relative,
             capture_host=capture_relative,
+            browser_capture_host=browser_relative,
             signing=signing,
         )
         _write_checksums(pending)
@@ -365,6 +392,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--flutter-output", type=Path, required=True)
     parser.add_argument("--core-host", type=Path, required=True)
     parser.add_argument("--linux-capture-host", type=Path)
+    parser.add_argument("--browser-capture-host", type=Path)
     parser.add_argument("--capture-host", type=Path)
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--git-commit", required=True)

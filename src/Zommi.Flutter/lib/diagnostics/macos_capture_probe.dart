@@ -2,12 +2,11 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
-import 'package:screen_capturer/screen_capturer.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:zommi_flutter/desktop/capture_permissions.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 
-/// Opt-in packaged acceptance. Never requests permissions or opens a selector.
+/// Opt-in packaged acceptance. Only interactive mode opens the capture editor.
 /// A permission-limited result is deliberately distinct from capture success.
 Future<void> runMacCaptureProbe() async {
   final path = Platform.environment['ZOMMI_MACOS_CAPTURE_PROBE']?.trim();
@@ -54,40 +53,33 @@ Future<void> runMacCaptureProbe() async {
       stdout.writeln('macOS probe: capturing pixels');
       report['pixels'] = {'status': 'permission-required'};
       if (status.screenRecording) {
-        final imageFile = File('${output.path}.png');
+        final backend = NativeUnixRegionBackend();
         try {
-          final capture = await screenCapturer.capture(
-            mode: CaptureMode.screen,
-            imagePath: imageFile.path,
-            copyToClipboard: false,
-            silent: true,
-          );
-          final bytes = capture?.imageBytes;
-          if (bytes == null || bytes.isEmpty) {
-            throw StateError('The native capture plugin returned no pixels.');
-          }
-          final codec = await ui.instantiateImageCodec(bytes);
+          final displays = await backend.captureDisplays();
           try {
-            final frame = await codec.getNextFrame();
+            if (displays.isEmpty) {
+              throw StateError('No display pixels were returned.');
+            }
             report['pixels'] = {
               'status': 'captured',
-              'width': frame.image.width,
-              'height': frame.image.height,
-              'bytes': bytes.length,
+              'width': displays.first.image.width,
+              'height': displays.first.image.height,
+              'displayCount': displays.length,
             };
-            frame.image.dispose();
           } finally {
-            codec.dispose();
+            for (final display in displays) {
+              display.image.dispose();
+            }
           }
         } on Object catch (error) {
           report['pixels'] = {'status': 'failed', 'error': '$error'};
         } finally {
-          if (await imageFile.exists()) await imageFile.delete();
+          await backend.close();
         }
       }
       if (Platform.environment['ZOMMI_MACOS_INTERACTIVE_PROBE'] == '1' &&
           status.screenRecording) {
-        final provider = PortableCaptureProvider();
+        final provider = UnixCaptureProvider();
         stdout.writeln('macOS probe: select region');
         final selected = await provider.selectContext().timeout(
           const Duration(seconds: 25),
@@ -108,19 +100,24 @@ Future<void> runMacCaptureProbe() async {
           'application': image.snapshot?['application'],
           'windowTitle': image.snapshot?['windowTitle'],
         };
-        // The macOS selector may include the final edge pixel of the drag.
-        final expectedWidth = (120 * scale).round();
-        final expectedHeight = (80 * scale).round();
+        final mapping = image.alignment?['mapping'] as Map?;
+        final expected = mapping?['imageBounds'] as Map?;
         final sizeMatches =
-            frame.image.width >= expectedWidth &&
-            frame.image.width <= expectedWidth + 1 &&
-            frame.image.height >= expectedHeight &&
-            frame.image.height <= expectedHeight + 1;
+            expected?['width'] == frame.image.width &&
+            expected?['height'] == frame.image.height &&
+            frame.image.width > 0 &&
+            frame.image.height > 0;
+        report['interactiveRegionSelection'] = {
+          ...(report['interactiveRegionSelection']! as Map<String, Object?>),
+          'bounds': image.bounds,
+          'alignment': image.alignment,
+          'annotations': image.snapshot?['imageAnnotations'],
+        };
         frame.image.dispose();
         codec.dispose();
         if (!sizeMatches) {
           throw StateError(
-            'The selected PNG does not match the dragged rectangle.',
+            'The selected PNG does not match its region mapping.',
           );
         }
         stdout.writeln('macOS probe: cancel region');
@@ -131,6 +128,7 @@ Future<void> runMacCaptureProbe() async {
           throw StateError('Cancellation produced an attachment.');
         }
         report['interactiveRegionCancellation'] = 'passed';
+        await provider.close();
       }
       final context = report['context']! as Map;
       final pixels = report['pixels']! as Map;

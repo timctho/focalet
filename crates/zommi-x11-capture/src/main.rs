@@ -26,6 +26,8 @@ use x11rb::rust_connection::RustConnection;
 
 type AppResult<T> = Result<T, Box<dyn Error>>;
 
+mod unix_context;
+
 const BUTTON_LEFT: u8 = 1;
 const PORTAL_APP_ID: &str = "com.zommi.desktop";
 const KEYBOARD_GRAB_ATTEMPTS: usize = 50;
@@ -52,6 +54,12 @@ async fn run() -> AppResult<()> {
                 "ok": true,
                 "providers": ["x11", "wayland-portal"],
             }))
+        }
+        Some("snapshot") if arguments.next().is_none() => unix_context::snapshot().await,
+        Some("observe") => {
+            let bounds = arguments.next().ok_or("observe requires a region JSON object")?;
+            if arguments.next().is_some() { return Err("unexpected observe argument".into()); }
+            unix_context::observe(serde_json::from_str(&bounds.to_string_lossy())?).await
         }
         Some("context") if arguments.next().is_none() => capture_context(),
         Some("point-context") if arguments.next().is_none() => select_point_context(),
@@ -286,7 +294,7 @@ fn context_value(connection: &RustConnection, window: Window) -> AppResult<Value
         "windowTitle": title,
         "windowId": window,
         "processId": process_id,
-        "limitation": "X11 exposes active-window metadata only. Zommi does not yet collect browser DOM or AT-SPI accessibility data on Ubuntu.",
+        "limitation": "This quick lookup contains window metadata. Use Select for region images, AT-SPI and supported browser DOM.",
     }))
 }
 

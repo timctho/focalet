@@ -114,6 +114,11 @@ jobs:
           # The persistent runner already holds this pinned SDK and pub cache.
           cache: false
 
+      - name: Set up .NET browser capture build
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 8.0.x
+
       - name: Build and verify Linux release
         env:
           ZOMMI_LINUX_STARTUP_SMOKE: '1'
@@ -123,7 +128,8 @@ jobs:
       - name: Accept Linux X11 shortcuts and capture UX
         run: >-
           xvfb-run -a -s "-screen 0 1280x960x24 +extension GLX +render -noreset"
-          python3 scripts/accept-linux-x11.py artifacts/zommi-linux-x64
+          env GSETTINGS_BACKEND=memory dbus-run-session -- bash -c
+          'openbox >/tmp/zommi-test-wm.log 2>&1 & python3 scripts/accept-linux-x11.py artifacts/zommi-linux-x64'
 
       - name: Show release identity and signing state
         run: |
@@ -469,6 +475,11 @@ jobs:
           channel: stable
           flutter-version: 3.47.2
           cache: true
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: 8.0.x
 
       - name: Build and verify macOS release
         id: package

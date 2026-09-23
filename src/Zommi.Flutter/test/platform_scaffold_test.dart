@@ -364,9 +364,9 @@ void main() {
     final linuxPackager = File(
       '${repository.path}/scripts/package-linux-self-hosted.sh',
     ).readAsStringSync();
-    expect(linuxPackager, contains('Ubuntu 20.04 only'));
-    expect(linuxPackager, contains('PKG_CONFIG_SYSROOT_DIR'));
-    expect(linuxPackager, contains('ZOMMI_LINUX_RUNTIME_LIBRARY_DIRS'));
+    expect(linuxPackager, contains('Ubuntu 24.04'));
+    expect(linuxPackager, contains('webkit2gtk-4.1'));
+    expect(linuxPackager, isNot(contains('PKG_CONFIG_SYSROOT_DIR')));
 
     final unixPackager = File('${repository.path}/scripts/package-unix.sh')
         .readAsStringSync();

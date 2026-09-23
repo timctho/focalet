@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
 
+import 'package:zommi_flutter/desktop/document_thumbnail.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 
@@ -41,12 +43,30 @@ Future<void> recordDocumentPreview(
         copyButtons:document.querySelectorAll('pre button').length,
         viewport:{width:innerWidth,height:innerHeight}};
     })()''');
+    Map<String, Object?>? thumbnail;
+    if (Platform.environment['ZOMMI_DOCUMENT_THUMBNAIL_PROBE'] == '1') {
+      final bytes = await DocumentThumbnailRequest(artifact).render();
+      final codec = await ui.instantiateImageCodec(bytes);
+      try {
+        final frame = await codec.getNextFrame();
+        thumbnail = {
+          'width': frame.image.width,
+          'height': frame.image.height,
+          'bytes': bytes.length,
+        };
+        frame.image.dispose();
+        await File('$output.thumbnail.png').writeAsBytes(bytes);
+      } finally {
+        codec.dispose();
+      }
+    }
     await File(output).writeAsString(
       jsonEncode({
         'status': 'opened',
         'executable': Platform.resolvedExecutable,
         'renderer': 'floating-panel',
         'document': document is String ? jsonDecode(document) : document,
+        'thumbnail': ?thumbnail,
       }),
     );
     if (Platform.environment['ZOMMI_DOCUMENT_PREVIEW_NOTIFY'] == '1') {

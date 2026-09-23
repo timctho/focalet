@@ -79,7 +79,7 @@ Press **Alt+A**, select a region, review the attachment and ask your question.
 On Windows, use the drawing toolbar to annotate or add more regions, then press
 **Attach**. Multiple attachments keep their **A**, **B**, **C** references.
 
-On Windows, attachments can include source identity, text, links, element
+On Windows, Ubuntu X11 and macOS, attachments can include source identity, text, links, element
 structure and coordinates through accessibility and an optional authorized
 browser connection. When reliable alignment is unavailable, Zommi attaches
 **Image only** with an explanation.
@@ -93,9 +93,9 @@ policies apply. [Capture controls and limitations](docs/browser-context.md)
 | Platform | Availability | Capture support |
 | --- | --- | --- |
 | **Windows 10/11 · x64** | Preview installer | Multiple regions, drawing, accessibility and optional browser context |
-| **macOS 12+ · Apple Silicon / Intel** | `.dmg` when listed in a release | Native region images and screen geometry |
-| **Ubuntu 24.04 LTS · x64 · X11** | `.deb` when listed in a release; [install and test](docs/ubuntu-testing.md) | Region images; DOM and AT-SPI are not yet implemented |
-| **Ubuntu 24.04 LTS · x64 · Wayland** | Experimental; requires compatible desktop portals | Portal screenshots; global shortcuts depend on the desktop |
+| **macOS 12+ · Apple Silicon / Intel** | `.dmg` when listed in a release | Multiple regions, drawing, native Accessibility and optional browser context |
+| **Ubuntu 24.04 LTS · x64 · X11** | `.deb` when listed in a release; [install and test](docs/ubuntu-testing.md) | Multiple regions, drawing, AT-SPI and optional browser context |
+| **Ubuntu 24.04 LTS · x64 · Wayland** | Experimental; requires compatible desktop portals | Portal images and drawing; no aligned DOM/accessibility; shortcuts depend on the desktop |
 
 Linux support is limited to Ubuntu. Start with **Ubuntu on Xorg** for desktop testing.
 

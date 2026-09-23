@@ -35,6 +35,8 @@ dev_dependencies:
   flutter_lints: ^6.0.0
 
 dependency_overrides:
+  flutter_inappwebview_linux:
+    path: linux/webview_adapter
   hotkey_manager_linux:
     path: ../../third_party/hotkey_manager_linux
 

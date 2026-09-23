@@ -2340,6 +2340,7 @@ class ArtifactViewerDialog extends StatelessWidget {
                     ? DocumentPreview(
                         key: ValueKey(artifact.id),
                         artifact: artifact,
+                        onDismiss: controller.closeArtifact,
                       )
                     : SingleChildScrollView(
                         padding: const EdgeInsets.all(18),
