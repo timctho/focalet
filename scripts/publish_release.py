@@ -81,6 +81,27 @@ def gh(*arguments: str) -> str:
     return subprocess.check_output(["gh", *arguments], text=True).strip()
 
 
+def validate_release_order(tag: str, existing_tags: list[str]) -> None:
+    """Avoid GitHub's alphabetical prerelease ordering within a release day."""
+    pattern = r"v(\d+)\.(\d+)\.(\d+)(?:-([A-Za-z0-9][A-Za-z0-9.-]*))?"
+    current = re.fullmatch(pattern, tag)
+    if current is None:
+        raise ValueError("Expected a version tag.")
+    version = tuple(int(current[i]) for i in (1, 2, 3))
+    for existing_tag in existing_tags:
+        existing = re.fullmatch(pattern, existing_tag)
+        if existing is None or existing_tag == tag:
+            continue
+        previous = tuple(int(existing[i]) for i in (1, 2, 3))
+        if previous > version or (previous == version and current[4] is not None and
+                                   (existing[4] is None or existing[4] >= current[4])):
+            raise ValueError(
+                f"GitHub can sort {tag} below {existing_tag}. Increase the numeric patch "
+                "version in pubspec.yaml and restart the preview counter at 1; "
+                "published tags must stay unchanged."
+            )
+
+
 def verify_destination(repository: str, commit: str, tag: str) -> None:
     # Releases inherit repository visibility. Never change it during publication.
     source = json.loads(gh("api", f"repos/{repository}/commits/{commit}"))
@@ -92,6 +113,7 @@ def verify_destination(repository: str, commit: str, tag: str) -> None:
         for existing in page:
             if existing["name"] == tag and existing["commit"]["sha"] != commit:
                 raise ValueError("The existing release tag points to a different source revision.")
+    validate_release_order(tag, [existing["name"] for page in tags for existing in page])
 
 
 def main() -> int:

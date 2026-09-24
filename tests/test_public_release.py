@@ -122,6 +122,32 @@ class PublicReleaseTests(unittest.TestCase):
         self.assertEqual(gh.call_args_list[0].args,
                          ("api", f"repos/timctho/zommi/commits/{self.commit}"))
 
+    def test_preview_digit_boundary_requires_a_patch_bump(self):
+        existing = ["v0.1.0-preview.8", "v0.1.0-preview.9", "v0.1.0-preview.11"]
+        with self.assertRaisesRegex(ValueError, "Increase the numeric patch"):
+            publish.validate_release_order("v0.1.0-preview.12", existing)
+        publish.validate_release_order("v0.1.1-preview.1", existing)
+        publish.validate_release_order("v0.1.0", existing)
+
+    def test_release_order_handles_resumed_tags_stable_versions_and_unrelated_tags(self):
+        publish.validate_release_order("v0.1.1-preview.1", [
+            "v0.1.1-preview.1", "macos-test-abcdef-x64", "v0.1.0",
+        ])
+        publish.validate_release_order("v0.1.10-preview.1", ["v0.1.9-preview.9"])
+        publish.validate_release_order("v0.1.1-preview.2", ["v0.1.1-preview.1"])
+        for tag, existing in (("v0.1.1-preview.1", "v0.1.1"),
+                              ("v0.1.1", "v0.1.2-preview.1")):
+            with self.subTest(tag=tag), self.assertRaisesRegex(ValueError, "GitHub can sort"):
+                publish.validate_release_order(tag, [existing])
+
+    def test_destination_checks_order_before_publication(self):
+        with patch.object(publish, "gh", side_effect=[
+            json.dumps({"sha": self.commit}),
+            json.dumps([[{"name": "v0.1.0-preview.9", "commit": {"sha": self.commit}}]]),
+        ]):
+            with self.assertRaisesRegex(ValueError, "GitHub can sort"):
+                publish.verify_destination("timctho/zommi", self.commit, "v0.1.0-preview.10")
+
     def test_release_cannot_use_a_tag_or_source_for_different_binaries(self):
         with patch.object(publish, "gh", return_value=json.dumps({"sha": "b" * 40})):
             with self.assertRaisesRegex(ValueError, "exact installer source"):
