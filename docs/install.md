@@ -68,7 +68,25 @@ sign in there, and return to Zommi:
 [Hermes](https://github.com/NousResearch/hermes-agent), or
 [OpenClaw](https://github.com/openclaw/openclaw).
 
-Zommi uses the runtime's existing account, models, tools and permissions. It does
+First launch and **App settings → Full access (YOLO)** control permissions for
+newly started runtimes. The default is off: Zommi uses the agent's own policy
+and displays approval requests with **Allow once**, **Deny**, and session scope
+when supported. Requests include the source chat and queue across chats.
+Unanswered local CLI approvals expire after five minutes and are denied.
+
+Full access lets agents change files and run commands without asking. Codex
+uses `approvalPolicy: never` with `danger-full-access`; Claude Code uses
+`bypassPermissions`; Gemini uses `--approval-mode yolo`; OpenCode gets an
+allow-all permission override; Hermes gets its YOLO launch setting. ACP runtimes
+also receive automatic grants for requested tools, preferring a one-time grant. Pi already runs its built-in tools without
+approval. Remote gateways retain their server policy and approval flow.
+Runtime or administrator restrictions can still reject an operation.
+
+The setting is saved in Zommi, without rewriting CLI configuration. Prepared
+runtimes pick it up before use. For agents already running, **Quit** Zommi and
+reopen it to apply the change; closing the window only hides it to the tray.
+
+Zommi uses the runtime's existing account, models and tools. It does
 not merge histories across agents or move credentials into its settings. Native
 commands and session actions depend on the protocol your runtime exposes.
 Codex, Pi, OpenCode, Gemini CLI and Claude Code can use native Windows

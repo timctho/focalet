@@ -172,6 +172,7 @@ mod tests {
                 .map(str::to_owned),
             );
             let mut command = RuntimeCommand {
+                full_access: false,
                 command: "launcher".into(),
                 args,
                 working_directory: None,
@@ -196,6 +197,7 @@ mod tests {
     #[test]
     fn rejects_unrecognized_wsl_launchers_and_relative_homes() {
         let mut command = RuntimeCommand {
+            full_access: false,
             command: "wsl.exe".into(),
             args: vec!["codex".into()],
             working_directory: None,

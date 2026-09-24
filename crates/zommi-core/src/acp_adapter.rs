@@ -28,7 +28,7 @@ use crate::{
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const PROMPT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
-const APPROVAL_TIMEOUT: Duration = Duration::from_secs(60);
+const APPROVAL_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Debug, Clone)]
 pub struct AcpConfig {
@@ -118,6 +118,15 @@ impl AcpAdapter {
     ) -> Result<Self, CodexError> {
         let mut command = Command::new(&config.command.command);
         config.target.apply_launch_environment(&mut command);
+        if config.target.execution_host.kind != "wsl" {
+            command.envs(
+                config
+                    .command
+                    .permission_environment(&config.target.adapter_id)
+                    .iter()
+                    .copied(),
+            );
+        }
         command
             .args(&config.command.args)
             .stdin(Stdio::piped())
@@ -705,6 +714,9 @@ impl AcpAdapter {
             }
             drop(state);
             if still_active {
+                inner
+                    .cancel_approvals(Some(&session_id), "turn-ended")
+                    .await;
                 inner.emit(
                     "turn.completed",
                     Some(&session_id),
@@ -763,37 +775,33 @@ impl AcpAdapter {
         approval_id: &str,
         option_id: Option<&str>,
     ) -> Result<Value, CodexError> {
-        let pending = self
-            .inner
-            .state
-            .lock()
-            .await
-            .approvals
-            .remove(approval_id)
-            .ok_or_else(|| {
-                adapter_error(
-                    "invalid-request",
-                    format!("Unknown ACP approval '{approval_id}'."),
-                )
-            })?;
+        let mut state = self.inner.state.lock().await;
+        let pending = state.approvals.get(approval_id).ok_or_else(|| {
+            adapter_error(
+                "approval-expired",
+                "This permission request has expired or was already answered.",
+            )
+        })?;
         if pending.session_id != session_id {
-            self.inner
-                .state
-                .lock()
-                .await
-                .approvals
-                .insert(approval_id.into(), pending);
             return Err(adapter_error(
                 "identity-mismatch",
                 "The approval does not belong to the requested ACP session.",
             ));
         }
-        let selected = option_id.filter(|option_id| {
-            pending
+        if option_id.is_some_and(|id| {
+            !pending
                 .options
                 .iter()
-                .any(|option| option.get("optionId").and_then(Value::as_str) == Some(*option_id))
-        });
+                .any(|option| option.get("optionId").and_then(Value::as_str) == Some(id))
+        }) {
+            return Err(adapter_error(
+                "invalid-request",
+                "Unknown ACP approval option.",
+            ));
+        }
+        let pending = state.approvals.remove(approval_id).unwrap();
+        drop(state);
+        let selected = option_id;
         let outcome = selected.map_or_else(
             || json!({"outcome": "cancelled"}),
             |option_id| json!({"outcome": "selected", "optionId": option_id}),
@@ -804,6 +812,13 @@ impl AcpAdapter {
                 "result": {"outcome": outcome}
             }))
             .await?;
+        self.inner.emit(
+            "approval.resolved",
+            Some(session_id),
+            None,
+            None,
+            json!({"approvalId":approval_id,"reason":"answered"}),
+        );
         Ok(json!({
             "resolved": true,
             "approvalId": approval_id,
@@ -812,6 +827,7 @@ impl AcpAdapter {
     }
 
     pub async fn shutdown(&self) {
+        self.inner.cancel_approvals(None, "disconnected").await;
         self.inner.state.lock().await.stopping = true;
         for task in [
             self.inner.wait_task.lock().await.take(),
@@ -1171,6 +1187,34 @@ impl Inner {
         let _ = pending.completion.send(result);
     }
 
+    async fn cancel_approvals(&self, session: Option<&str>, reason: &str) {
+        let mut state = self.state.lock().await;
+        let ids: Vec<String> = state
+            .approvals
+            .iter()
+            .filter(|(_, value)| session.is_none_or(|id| value.session_id == id))
+            .map(|(id, _)| id.clone())
+            .collect();
+        let pending: Vec<_> = ids
+            .into_iter()
+            .map(|id| {
+                let value = state.approvals.remove(&id).unwrap();
+                (id, value)
+            })
+            .collect();
+        drop(state);
+        for (id, value) in pending {
+            let _ = self.write_json(&json!({"jsonrpc":"2.0", "id":value.rpc_id,"result":{"outcome":{"outcome":"cancelled"}}})).await;
+            self.emit(
+                "approval.resolved",
+                Some(&value.session_id),
+                None,
+                None,
+                json!({"approvalId":id,"reason":reason}),
+            );
+        }
+    }
+
     async fn handle_incoming_request(self: &Arc<Self>, method: &str, message: &Value) {
         if method != "session/request_permission" {
             self.emit(
@@ -1195,6 +1239,22 @@ impl Inner {
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
+        if self.command.full_access {
+            let selected = ["allow_once", "allow_always"].iter().find_map(|kind| {
+                options
+                    .iter()
+                    .find(|option| option.get("kind").and_then(Value::as_str) == Some(*kind))
+                    .and_then(|option| option.get("optionId"))
+                    .cloned()
+            });
+            if let Some(option_id) = selected {
+                let _ = self
+                    .write_json(&json!({"jsonrpc":"2.0", "id": message.get("id"),
+                    "result":{"outcome":{"outcome":"selected", "optionId": option_id}}}))
+                    .await;
+                return;
+            }
+        }
         self.state.lock().await.approvals.insert(
             approval_id.clone(),
             PendingApproval {
@@ -1207,10 +1267,17 @@ impl Inner {
                 options: options.clone(),
             },
         );
+        let turn_id = self
+            .state
+            .lock()
+            .await
+            .active_turns
+            .get(params["sessionId"].as_str().unwrap_or_default())
+            .cloned();
         self.emit(
             "approval.requested",
             params.get("sessionId").and_then(Value::as_str),
-            None,
+            turn_id.as_deref(),
             None,
             json!({
                 "approvalId": approval_id,
@@ -1232,6 +1299,13 @@ impl Inner {
                         "result": {"outcome": {"outcome": "cancelled"}}
                     }))
                     .await;
+                inner.emit(
+                    "approval.resolved",
+                    Some(&pending.session_id),
+                    None,
+                    None,
+                    json!({"approvalId":approval_id,"reason":"expired"}),
+                );
             }
         });
     }
@@ -1393,6 +1467,7 @@ impl Inner {
     }
 
     async fn handle_exit(&self, status: std::io::Result<std::process::ExitStatus>) {
+        self.cancel_approvals(None, "disconnected").await;
         let mut state = self.state.lock().await;
         state.exited = true;
         if state.stopping {

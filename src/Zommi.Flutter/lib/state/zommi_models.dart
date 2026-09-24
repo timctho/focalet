@@ -484,6 +484,7 @@ final class ConversationTurn {
 final class PendingApproval {
   const PendingApproval({
     required this.id,
+    this.turnId,
     required this.runtimeTargetId,
     required this.sessionId,
     required this.title,
@@ -494,12 +495,14 @@ final class PendingApproval {
   factory PendingApproval.fromEvent(
     String runtimeTargetId,
     String sessionId,
-    Map<String, Object?> payload,
-  ) {
+    Map<String, Object?> payload, {
+    String? turnId,
+  }) {
     final toolCall = mapValue(payload['toolCall']);
     final raw = toolCall['rawInput'];
     return PendingApproval(
       id: payload['approvalId']?.toString() ?? '',
+      turnId: turnId,
       runtimeTargetId: runtimeTargetId,
       sessionId: sessionId,
       title: toolCall['title']?.toString() ?? 'Agent requests permission',
@@ -515,6 +518,7 @@ final class PendingApproval {
   }
 
   final String id;
+  final String? turnId;
   final String runtimeTargetId;
   final String sessionId;
   final String title;

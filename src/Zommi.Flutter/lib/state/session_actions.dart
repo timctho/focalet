@@ -185,7 +185,14 @@ extension SessionActions on ZommiController {
       _composerAttachmentOrder = null;
       previewAttachment = null;
       previewArtifact = null;
-      approval = null;
+      _approvals.removeWhere(
+        (request) =>
+            ZommiController._sessionKey(
+              request.runtimeTargetId,
+              request.sessionId,
+            ) ==
+            key,
+      );
       question = null;
       commandOutput = null;
       goalPanelOpen = false;

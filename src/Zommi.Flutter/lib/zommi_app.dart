@@ -71,10 +71,13 @@ class _ZommiAppState extends State<ZommiApp> {
   @override
   void initState() {
     super.initState();
-    _configureBrowserCapture(_preferences);
+    _configureServices(_preferences);
   }
 
-  void _configureBrowserCapture(AppPreferences preferences) {
+  void _configureServices(AppPreferences preferences) {
+    if (widget.core case final RuntimePermissionBridge settings) {
+      settings.fullAccessRuntimes = preferences.fullAccessRuntimes;
+    }
     final desktop = widget.desktop;
     if (desktop case final BrowserCaptureSettings settings) {
       settings.setBrowserPageDetails(preferences.browserPageDetails);
@@ -84,7 +87,7 @@ class _ZommiAppState extends State<ZommiApp> {
   void _updatePreferences(AppPreferences preferences) {
     if (_preferences == preferences) return;
     setState(() => _preferences = preferences);
-    _configureBrowserCapture(preferences);
+    _configureServices(preferences);
     unawaited(widget.preferencesStore.save(preferences).catchError((_) {}));
   }
 
@@ -197,7 +200,7 @@ class _ZommiAppState extends State<ZommiApp> {
             children: [
               ExcludeFocus(excluding: session != null, child: shell!),
               if (session != null)
-                Positioned.fill(child: RegionCaptureEditor(session: session)),
+                Positioned.fill(child: RegionCaptureOverlay(session: session)),
             ],
           ),
         );
@@ -1006,6 +1009,8 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                         child: FocusScope(
                           autofocus: true,
                           child: FirstRunSetup(
+                            preferences: widget.preferences,
+                            onPreferencesChanged: widget.onPreferencesChanged,
                             controller: _controller,
                             onCompleted: () async {
                               await widget.onRuntimeSetupCompleted?.call();

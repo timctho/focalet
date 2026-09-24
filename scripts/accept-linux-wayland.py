@@ -817,7 +817,47 @@ def ui_acceptance(session, package, fixture_app):
         else:
             x, y = origin["x"] + 36, origin["y"] + 70
             session.drag(point(x, y), point(x + 340, y + 240))
-            session.key(ord("p"))
+            # Hover every drawing/color/action control in the packaged app.
+            # A tooltip failure formerly replaced the entire editor with white.
+            from PIL import Image, ImageChops
+
+            controls = canvas["controls"]
+            def control_point(name):
+                rect = controls[name]
+                return round(window["x"] + rect["x"] + rect["width"] / 2), round(window["y"] + rect["y"] + rect["height"] / 2)
+
+            time.sleep(0.2)
+            baseline = session.evidence / f"editor-before-hover-{index}.png"
+            session.driver("Snapshot", baseline)
+            crop = (round(window["x"] + bounds["x"]), round(window["y"] + bounds["y"]),
+                    round(window["x"] + bounds["x"] + bounds["width"]),
+                    round(window["y"] + bounds["y"] + bounds["height"] * 0.6))
+            with Image.open(baseline) as image:
+                expected = image.convert("RGB").crop(crop)
+            for tool_index, name in enumerate(controls):
+                session.driver("Motion", *control_point(name))
+                time.sleep(0.25)
+                hovered = session.evidence / f"editor-hover-{index}-{tool_index}.png"
+                session.driver("Snapshot", hovered)
+                with Image.open(hovered) as image:
+                    difference = ImageChops.difference(expected, image.convert("RGB").crop(crop)).convert("L")
+                    changed = sum(count for value, count in enumerate(difference.histogram()) if value > 8)
+                    assert changed < expected.width * expected.height * 0.01, f"Canvas changed while hovering {name}"
+                assert app.poll() is None, name
+            def click_control(name):
+                session.driver("Motion", *control_point(name))
+                time.sleep(0.1)
+                session.driver("Button", "true")
+                time.sleep(0.1)
+                session.driver("Button", "false")
+                time.sleep(0.3)
+
+            click_control("Stroke width")
+            session.driver("Snapshot", session.evidence / f"editor-menu-{index}.png")
+            session.key(0xFF1B)  # Dismiss only the menu, preserving the editor.
+            time.sleep(0.3)
+            assert len(events(trace, "selection.content")) == selections
+            click_control("Pen (P)")
             session.drag(point(x + 15, y + 15), point(x + 160, y + 100))
             session.driver("Snapshot", session.evidence / "editor-drawn.png")
             session.driver("Motion", 1200, 740)

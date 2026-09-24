@@ -98,6 +98,9 @@ if control:
     threading.Thread(target=crash_when_requested, daemon=True).start()
 
 
+pending_approvals = {}
+log({"launchArgs": sys.argv[1:]})
+
 for line in sys.stdin:
     try:
         request = json.loads(line)
@@ -106,6 +109,11 @@ for line in sys.stdin:
     log(request)
     request_id = request.get("id")
     method = request.get("method")
+    if method is None and request_id in pending_approvals:
+        session, approval_turn = pending_approvals.pop(request_id)
+        if not any(value == (session, approval_turn) for value in pending_approvals.values()):
+            send({"method":"turn/completed", "params":{"threadId":session, "turn":{"id":approval_turn,"status":"completed"}}})
+        continue
     if control and (control / "stall-catalogs").exists() and method in ("model/list", "thread/list"):
         continue
     if request_id is None:
@@ -256,6 +264,9 @@ for line in sys.stdin:
             send({"method": "item/completed", "params": {"threadId": goal_thread, "turnId": turn_id, "item": {"id": "goal-answer", "type": "agentMessage", "phase": "final", "text": "Working on the goal"}}})
         continue
     elif method == "turn/start":
+        if "request-approval:" in json.dumps(request["params"]):
+            turn_sequence += 1
+            turn_id = f"approval-turn-{turn_sequence}"
         if rewind_history:
             turn_sequence += 1
             turn_id = f"edited-turn-{turn_sequence}"
@@ -281,6 +292,19 @@ for line in sys.stdin:
                 },
             }
         )
+        text = json.dumps(request["params"])
+        if "request-approval:" in text:
+            session = request["params"]["threadId"]
+            kind = text.split("request-approval:", 1)[1].split('"', 1)[0].split()[0]
+            method_name = {"command":"item/commandExecution/requestApproval", "files":"item/fileChange/requestApproval", "permissions":"item/permissions/requestApproval", "legacy-command":"execCommandApproval", "legacy-files":"applyPatchApproval"}.get(kind, "item/commandExecution/requestApproval")
+            send({"method":"item/started", "params":{"threadId":session,"turnId":turn_id,"item":{"id":"approval-item","type":"fileChange","changes":[{"path":"example.txt","diff":"+ fixture change"}]}}})
+            for rpc_id in ([77, "77"] if kind == "multiple" else [77]):
+                pending_approvals[rpc_id] = (session, turn_id)
+                send({"id":rpc_id, "method":method_name, "params":{"threadId":session,"conversationId":session,"turnId":turn_id,"itemId":"approval-item","callId":"approval-item","command":"echo fixture", "cwd":"/tmp", "reason":"fixture permission", "permissions":{"network":{"enabled":True}},"fileChanges":{"example.txt":{"type":"add","content":"test"}}}})
+                if kind == "resolved":
+                    send({"method":"serverRequest/resolved","params":{"threadId":session,"requestId":rpc_id}})
+                    pending_approvals.pop(rpc_id)
+            continue
         if "exit-runtime" in json.dumps(request["params"]):
             sys.stderr.write(
                 "token=fixture-private <zommi_invocation_context>captured private context</zommi_invocation_context>\n"

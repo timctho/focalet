@@ -7,6 +7,23 @@ import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/desktop/region_selection.dart';
 
 /// Shared selection and drawing controls for native Ubuntu/macOS screen frames.
+/// Capture is mounted above the shell navigator. Its menus and tooltips need
+/// their own navigator/overlay so opening one cannot replace the canvas.
+class RegionCaptureOverlay extends StatelessWidget {
+  const RegionCaptureOverlay({required this.session, super.key});
+  final RegionSelectionSession session;
+
+  @override
+  Widget build(BuildContext context) => HeroControllerScope.none(
+    child: Navigator(
+      key: ObjectKey(session),
+      onGenerateRoute: (_) => MaterialPageRoute<void>(
+        builder: (_) => RegionCaptureEditor(session: session),
+      ),
+    ),
+  );
+}
+
 class RegionCaptureEditor extends StatefulWidget {
   const RegionCaptureEditor({required this.session, super.key});
   final RegionSelectionSession session;
@@ -16,6 +33,11 @@ class RegionCaptureEditor extends StatefulWidget {
 
 class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
   final _focus = FocusNode();
+  final _strokeMenu = MenuController();
+  final _controls = <String, GlobalKey>{};
+  GlobalKey _control(String name) => _controls.putIfAbsent(name, GlobalKey.new);
+  LogicalKeyboardKey? _closingKey;
+  LogicalKeyboardKey? _dismissedMenuKey;
   Offset? _start;
   Offset? _end;
   List<Offset> _points = [];
@@ -29,8 +51,36 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
     HardwareKeyboard.instance.addHandler(_handleKey);
   }
 
-  bool _handleKey(KeyEvent event) =>
-      _key(_focus, event) == KeyEventResult.handled;
+  bool _handleKey(KeyEvent event) {
+    final key = event.logicalKey;
+    if (_dismissedMenuKey == key) {
+      if (event is KeyUpEvent) _dismissedMenuKey = null;
+      return true;
+    }
+    if (_strokeMenu.isOpen) {
+      _closingKey = null;
+      if (event is KeyDownEvent && key == LogicalKeyboardKey.escape) {
+        _dismissedMenuKey = key;
+        _strokeMenu.close();
+        return true;
+      }
+      return false;
+    }
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) {
+      _closingKey = null;
+      // This navigator belongs only to capture. Dismiss its popup directly;
+      // desktop key routing can otherwise leave the invisible modal barrier
+      // consuming the next tool click after Escape.
+      if (event is KeyDownEvent && key == LogicalKeyboardKey.escape) {
+        _dismissedMenuKey = key;
+        navigator.pop();
+        return true;
+      }
+      return false;
+    }
+    return _key(_focus, event) == KeyEventResult.handled;
+  }
 
   @override
   void dispose() {
@@ -130,7 +180,12 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
       // Wait for key-up before hiding the Wayland surface. Otherwise the
       // release goes to the source window and Flutter retains a pressed Enter,
       // turning the next selection's Enter into an ignored repeat event.
+      if (event is KeyDownEvent) _closingKey = key;
       if (event is KeyUpEvent) {
+        // A menu may consume key-down and disappear before key-up arrives.
+        // Only finish for a key press that began in this capture route.
+        if (_closingKey != key) return KeyEventResult.ignored;
+        _closingKey = null;
         session.finish(cancel: key == LogicalKeyboardKey.escape);
       }
       return KeyEventResult.handled;
@@ -320,6 +375,7 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
                       ),
                     ])
                       IconButton.filledTonal(
+                        key: _control(label),
                         isSelected: session.tool == tool,
                         tooltip: label,
                         onPressed:
@@ -340,6 +396,7 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
                       Colors.black,
                     ])
                       IconButton(
+                        key: _control('color-${color.toARGB32()}'),
                         tooltip:
                             'Drawing color ${color.toARGB32().toRadixString(16)}',
                         onPressed: () =>
@@ -353,22 +410,49 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
                           color: color,
                         ),
                       ),
-                    DropdownButton<double>(
-                      value: session.strokeWidth,
-                      items: [
+                    MenuAnchor(
+                      key: _control('Stroke width'),
+                      controller: _strokeMenu,
+                      consumeOutsideTap: false,
+                      onClose: () {
+                        // A menu shortcut must not turn into Attach/Cancel
+                        // when its key-up returns to the capture surface.
+                        for (final key in [
+                          LogicalKeyboardKey.escape,
+                          LogicalKeyboardKey.enter,
+                          LogicalKeyboardKey.numpadEnter,
+                        ]) {
+                          if (HardwareKeyboard.instance.logicalKeysPressed
+                              .contains(key)) {
+                            _dismissedMenuKey = key;
+                            _closingKey = null;
+                          }
+                        }
+                      },
+                      menuChildren: [
                         for (final width in [2.0, 4.0, 8.0, 16.0])
-                          DropdownMenuItem(
-                            value: width,
+                          MenuItemButton(
+                            onPressed: () => session.change(
+                              () => session.strokeWidth = width,
+                            ),
                             child: Text('${width.toInt()} px'),
                           ),
                       ],
-                      onChanged: (value) {
-                        if (value != null) {
-                          session.change(() => session.strokeWidth = value);
-                        }
-                      },
+                      builder: (context, menu, child) => TextButton(
+                        key: const ValueKey('stroke-width-menu'),
+                        onPressed: () =>
+                            menu.isOpen ? menu.close() : menu.open(),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('${session.strokeWidth.toInt()} px'),
+                            const Icon(Icons.arrow_drop_down, size: 18),
+                          ],
+                        ),
+                      ),
                     ),
                     IconButton(
+                      key: _control('Undo'),
                       tooltip: 'Undo',
                       onPressed: session.selected?.canUndo == true
                           ? () => session.change(() => session.selected!.undo())
@@ -376,6 +460,7 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
                       icon: const Icon(Icons.undo),
                     ),
                     IconButton(
+                      key: _control('Redo'),
                       tooltip: 'Redo',
                       onPressed: session.selected?.canRedo == true
                           ? () => session.change(() => session.selected!.redo())
@@ -383,6 +468,7 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
                       icon: const Icon(Icons.redo),
                     ),
                     IconButton(
+                      key: _control('Delete region'),
                       tooltip: 'Delete region',
                       onPressed: session.selected == null
                           ? null
@@ -408,6 +494,14 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
         'session': identityHashCode(session).toString(),
         'bounds': regionRectJson((local + position) & _imageBounds.size),
         'localBounds': regionRectJson(local & _imageBounds.size),
+        'controls': {
+          for (final entry in _controls.entries)
+            if (entry.value.currentContext?.findRenderObject()
+                case final RenderBox control)
+              entry.key: regionRectJson(
+                control.localToGlobal(Offset.zero) & control.size,
+              ),
+        },
         'imageWidth': session.display.image.width,
         'imageHeight': session.display.image.height,
       });

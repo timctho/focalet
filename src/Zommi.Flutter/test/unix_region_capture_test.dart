@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:ui' as ui;
 
+import 'package:flutter/gestures.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -322,6 +324,81 @@ void main() {
       attachment.snapshot?['region'],
       containsPair('status', 'image-only'),
     );
+  });
+
+  testWidgets('capture above the shell supports tool hover and stroke menu', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final frame = (await tester.runAsync(display))!;
+    addTearDown(frame.image.dispose);
+    final session = RegionSelectionSession([frame]);
+    addTearDown(session.dispose);
+    var finished = false;
+    session.result.then((_) => finished = true);
+    session.addRegion(const Rect.fromLTWH(10, 10, 30, 20));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: const SizedBox(),
+        builder: (context, child) => Stack(
+          children: [
+            child!,
+            Positioned.fill(child: RegionCaptureOverlay(session: session)),
+          ],
+        ),
+      ),
+    );
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    for (final label in [
+      'Pen (P)',
+      'Arrow (A)',
+      'Rectangle (R)',
+      'Ellipse (O)',
+      'Highlighter (H)',
+      'Delete region',
+    ]) {
+      await mouse.moveTo(tester.getCenter(find.byTooltip(label)));
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(tester.takeException(), isNull);
+      expect(
+        find.byKey(const ValueKey('region-capture-canvas')),
+        findsOneWidget,
+      );
+      await mouse.moveTo(Offset.zero);
+      await tester.pumpAndSettle();
+    }
+    await tester.tap(find.byKey(const ValueKey('stroke-width-menu')));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.widgetWithText(MenuItemButton, '16 px'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('region-capture-canvas')), findsOneWidget);
+    expect(find.widgetWithText(MenuItemButton, '16 px'), findsNothing);
+    expect(session.regions, hasLength(1));
+    expect(
+      finished,
+      isFalse,
+      reason: "Escape in the menu must not finish capture",
+    );
+    await tester.tap(find.byKey(const ValueKey('stroke-width-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('16 px').last);
+    await tester.pumpAndSettle();
+    expect(session.strokeWidth, 16);
+    await mouse.moveTo(tester.getCenter(find.byTooltip('Pen (P)')));
+    await tester.pump(const Duration(seconds: 1));
+    await mouse.down(tester.getCenter(find.byTooltip('Pen (P)')));
+    await mouse.up();
+    await tester.pumpAndSettle();
+    expect(session.tool, RegionDrawingTool.pen);
+    await mouse.removePointer();
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets(
