@@ -15,7 +15,7 @@ Clone the repository and install:
 - Chromium, Chrome or Edge for browser capture tests. Set `ZOMMI_TEST_CHROMIUM`
   to the executable if it is not on `PATH`.
 - Ubuntu 24.04 LTS x64 (the supported Linux target): SQLite, GTK and Chromium's runtime dependencies:
-  `sudo apt-get install libsqlite3-dev libgtk-3-0t64 libwebkit2gtk-4.1-dev libepoxy-dev libasound2t64 ffmpeg`.
+  `sudo apt-get install binutils libsqlite3-dev libgtk-3-0t64 libwebkit2gtk-4.1-dev libepoxy-dev libasound2t64 ffmpeg`.
 - Windows: Visual Studio 2022 or later C++ tools for Rust and native builds;
   ATL and the [NuGet CLI](https://www.nuget.org/downloads) on `PATH` are also
   needed for Flutter packaging. Use PowerShell 7 for native checks.

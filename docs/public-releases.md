@@ -92,7 +92,10 @@ the final publication job. It needs no personal access token or self-hosted
 runner; `GITHUB_TOKEN` publishes into this repository.
 
 Ubuntu produces `Zommi-Ubuntu-amd64.deb`, Windows produces `Zommi-Setup-x64.exe`,
-and Mac produces architecture-specific DMGs. Installers are unsigned by this
+and Mac produces architecture-specific DMGs. Ubuntu builds require 24.04 and
+validate bundled ELF runtime requirements against the
+[package compatibility baseline](ubuntu-testing.md#package-compatibility) before
+creating an installer. Installers are unsigned by this
 workflow; Mac apps use ad-hoc signing and DMGs are not notarized. Ubuntu runs an
 installed-package X11 check in a virtual display and removes the package;
 Windows runs packaged non-visual capture checks; Mac verifies selection geometry

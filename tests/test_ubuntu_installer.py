@@ -53,7 +53,8 @@ class UbuntuInstallerTests(unittest.TestCase):
         self.assertIn("Exec=/usr/bin/zommi\n", entry)
         self.assertIn("Icon=zommi\n", entry)
         fields = subprocess.check_output(["dpkg-deb", "-f", str(asset)], text=True)
-        for value in ("Architecture: amd64", "Version: 0.1.0~preview.8", "libc6 (>= 2.39)", "libgtk-3-0t64"):
+        for value in ("Architecture: amd64", "Version: 0.1.0~preview.8", "libc6 (>= 2.39)",
+                      "libstdc++6 (>= 13.2)", "libgtk-3-0t64", "Ubuntu 24.04 LTS x64"):
             self.assertIn(value, fields)
 
     def test_dpkg_install_upgrade_and_remove_preserve_user_files(self):
