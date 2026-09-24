@@ -4,6 +4,7 @@ pub mod broker_protocol;
 pub mod claude_adapter;
 pub mod codex_adapter;
 mod codex_home;
+mod codex_permissions;
 pub mod command_catalog;
 pub mod context_handoff;
 pub mod hermes_gateway_adapter;

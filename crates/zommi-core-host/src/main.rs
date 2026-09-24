@@ -335,6 +335,7 @@ impl HostState {
                         payload.get("effort").and_then(Value::as_str),
                         payload.get("cwd").and_then(Value::as_str),
                         payload.get("profile").and_then(Value::as_str),
+                        payload.get("fullAccess").and_then(Value::as_bool) == Some(true),
                     )
                     .await?;
                 self.prepared.remove(adapter.target_id());
@@ -728,6 +729,10 @@ impl HostState {
     }
 
     async fn discard_prepared_permissions(&mut self, target_id: &str, payload: &Value) {
+        // Codex applies the current preference when starting each thread.
+        if matches!(self.adapters.get(target_id), Some(RuntimeAdapter::Codex(_))) {
+            return;
+        }
         let full_access = payload
             .get("fullAccess")
             .and_then(Value::as_bool)
@@ -854,7 +859,11 @@ impl HostState {
                 }
                 let connection = if self.prepared.contains(&target.id) {
                     let activation = adapter
-                        .activate(preferred_session_id.clone(), cwd.to_str())
+                        .activate(
+                            preferred_session_id.clone(),
+                            cwd.to_str(),
+                            payload.get("fullAccess").and_then(Value::as_bool) == Some(true),
+                        )
                         .await;
                     if activation.is_err() {
                         self.adapters.remove(&target.id);

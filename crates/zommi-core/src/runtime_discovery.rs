@@ -222,12 +222,10 @@ impl RuntimeCommand {
         let adapter = target.adapter_id.as_str();
         self.full_access = true;
         let flags: &[&str] = match adapter {
-            "codex-app-server" => &[
-                "-c",
-                "approval_policy=\"never\"",
-                "-c",
-                "sandbox_mode=\"danger-full-access\"",
-            ],
+            // Codex shares one app-server between chats. Its native thread
+            // APIs apply permissions per chat; process flags would also
+            // escalate chats created after Full access is turned off.
+            "codex-app-server" => &[],
             "claude-stream-json" => &["--permission-mode", "bypassPermissions"],
             "gemini-acp" => &["--approval-mode", "yolo"],
             // ACP clients grant individual permission requests in full-access

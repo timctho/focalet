@@ -17,6 +17,7 @@ class RuntimePermissionTests(unittest.TestCase):
         env.update(ZOMMI_RUNTIME_DISCOVERY_MODE='configured-only',
                    ZOMMI_CODEX_COMMAND=sys.executable,
                    ZOMMI_CODEX_ARGS_JSON=json.dumps([str(FIXTURES / 'fake_codex_app_server.py')]),
+                   ZOMMI_FAKE_UNIQUE_THREADS='1',
                    ZOMMI_FAKE_REQUEST_LOG=str(self.path / 'wire.jsonl'),
                    ZOMMI_CORE_STATE_PATH=str(self.path / 'binding.json'),
                    ZOMMI_RUNTIME_OVERRIDES_PATH=str(self.path / 'overrides.json'),
@@ -94,14 +95,12 @@ class RuntimePermissionTests(unittest.TestCase):
                 self.core.request('turn.interrupt', dict(self.identity, turnId=self.receipt['turnId']))
                 self.core.completed(self.receipt['clientOperationId'])
 
-    def test_full_access_replaces_prepared_process_and_survives_new_session(self):
+    def test_full_access_applies_when_activating_a_prepared_runtime(self):
         self.core.request('runtime.prepare', dict(self.identity, fullAccess=False))
         self.connect(fullAccess=True)
         starts = [v for v in self.wire() if 'launchArgs' in v]
-        self.assertEqual(len(starts), 2)
+        self.assertEqual(len(starts), 1)
         self.assertNotIn('approval_policy="never"', starts[0]['launchArgs'])
-        self.assertIn('approval_policy="never"', starts[1]['launchArgs'])
-        self.core.request('session.create', dict(self.identity, fullAccess=True))
         starts = [v for v in self.wire() if v.get('method')=='thread/start']
         self.assertTrue(all(v['params']['approvalPolicy']=='never' and v['params']['sandbox']=='danger-full-access' for v in starts))
         self.core.request('session.goal', dict(self.identity, action='set', objective='fixture goal', model='fixture-model'))
@@ -109,9 +108,85 @@ class RuntimePermissionTests(unittest.TestCase):
         self.assertEqual(settings['approvalPolicy'], 'never')
         self.assertEqual(settings['sandboxPolicy'], {'type':'dangerFullAccess'})
         self.assertNotIn('sandbox', settings)
-        # Changing the preference must not escalate or downgrade a running agent.
-        self.core.request('session.create', dict(self.identity, fullAccess=False))
-        self.assertEqual(len([v for v in self.wire() if 'launchArgs' in v]), 2)
+
+    def test_new_chats_use_current_permissions_without_changing_existing_chats(self):
+        self.connect(fullAccess=False)
+        self.assert_chat_permissions(False)
+        default_chat = dict(self.identity)
+        # Keep work in flight while creating chats with both permission modes.
+        receipt = self.core.request('turn.start', dict(self.identity, message='hold-for-interrupt', clientOperationId='held-default'))
+        full = self.core.request('session.create', dict(self.identity, fullAccess=True))
+        start = [v for v in self.wire() if v.get('method') == 'thread/start'][-1]['params']
+        self.assertEqual(start['approvalPolicy'], 'never')
+        self.assertEqual(start['sandbox'], 'danger-full-access')
+        self.identity['sessionId'] = full['sessionId']
+        self.assert_chat_permissions(True)
+        full_chat = dict(self.identity)
+        default = self.core.request('session.create', dict(self.identity, fullAccess=False))
+        start = [v for v in self.wire() if v.get('method') == 'thread/start'][-1]['params']
+        self.assertNotIn('approvalPolicy', start)
+        self.assertNotIn('sandbox', start)
+        self.identity['sessionId'] = default['sessionId']
+        self.assert_chat_permissions(False)
+        self.core.request('turn.interrupt', dict(default_chat, turnId=receipt['turnId']))
+        self.core.completed(receipt['clientOperationId'])
+        for identity, full_access in [(full_chat, True), (default_chat, False)]:
+            self.identity = identity
+            self.core.request('session.open', self.identity)
+            self.assert_chat_permissions(full_access)
+            fork = self.core.request('session.fork', self.identity)
+            self.identity = dict(identity, sessionId=fork['sessionId'])
+            self.assert_chat_permissions(full_access)
+        self.assertEqual(len([v for v in self.wire() if 'launchArgs' in v]), 1)
+
+    def test_disabling_full_access_after_first_connect_restores_runtime_defaults(self):
+        self.connect(fullAccess=True)
+        self.assert_chat_permissions(True)
+        connection = self.core.request('session.create', dict(self.identity, fullAccess=False))
+        self.identity['sessionId'] = connection['sessionId']
+        self.assert_chat_permissions(False)
+        launch = next(v for v in self.wire() if 'launchArgs' in v)
+        self.assertNotIn('approval_policy="never"', launch['launchArgs'])
+        self.assertNotIn('sandbox_mode="danger-full-access"', launch['launchArgs'])
+
+    def test_permissions_survive_app_restart_and_do_not_escalate_saved_chats(self):
+        self.connect(fullAccess=True)
+        self.assert_chat_permissions(True)
+        full_chat = dict(self.identity)
+        connection = self.core.request('session.create', dict(self.identity, fullAccess=False))
+        self.identity['sessionId'] = connection['sessionId']
+        self.assert_chat_permissions(False)
+        default_id = self.identity['sessionId']
+        self.core.close()
+        self.core = Core(self.env)
+        self.addCleanup(self.core.close)
+        self.core.request('core.initialize')
+        # The toggle governs new chats; reconnecting a saved default chat with
+        # Full access enabled must leave that chat's policy alone.
+        self.connect(fullAccess=True)
+        self.assertEqual(self.identity['sessionId'], default_id)
+        self.assert_chat_permissions(False)
+        self.identity = full_chat
+        self.core.request('session.open', self.identity)
+        self.assert_chat_permissions(True)
+        fork = self.core.request('session.fork', self.identity)
+        self.identity['sessionId'] = fork['sessionId']
+        self.assert_chat_permissions(True)
+
+    def assert_chat_permissions(self, full_access):
+        receipt = self.core.request('turn.start', dict(self.identity, message='fixture permission check', clientOperationId='policy:' + str(self.core.sequence)))
+        self.core.completed(receipt['clientOperationId'])
+        self.core.request('session.goal', dict(self.identity, action='set', objective='fixture goal', model='fixture-model'))
+        relevant = [v for v in self.wire() if v.get('method') in ('turn/start', 'thread/settings/update') and v['params'].get('threadId') == self.identity['sessionId']][-2:]
+        self.assertEqual(len(relevant), 2)
+        for request in relevant:
+            params = request['params']
+            if full_access:
+                self.assertEqual(params.get('approvalPolicy'), 'never')
+                self.assertEqual(params.get('sandboxPolicy'), {'type':'dangerFullAccess'})
+            else:
+                self.assertNotIn('approvalPolicy', params)
+                self.assertNotIn('sandboxPolicy', params)
 
     def test_acp_full_access_grants_the_runtime_offered_once_option(self):
         self.core.close()

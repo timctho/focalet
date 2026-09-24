@@ -84,8 +84,12 @@ impl SupervisedCodex {
         &self,
         session_id: Option<String>,
         cwd: Option<&str>,
+        full_access: bool,
     ) -> Result<(), CodexError> {
-        self.ready().await?.activate(session_id, cwd).await?;
+        self.ready()
+            .await?
+            .activate(session_id, cwd, full_access)
+            .await?;
         self.ensure_monitor().await;
         Ok(())
     }
@@ -423,7 +427,7 @@ mod tests {
         assert_eq!(fixture.count("thread/start"), 0);
         assert!(runtime.inner.task.lock().await.is_none());
         runtime
-            .activate(Some("saved-chat".into()), None)
+            .activate(Some("saved-chat".into()), None, false)
             .await
             .unwrap();
         assert_eq!(fixture.pids().len(), 1);
@@ -591,6 +595,79 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn recovery_keeps_each_chats_permissions_after_the_preference_changes() {
+        for full_access in [false, true] {
+            for submitted in [false, true] {
+                let fixture = Fixture::new();
+                let mut config = fixture.config();
+                config.list_only = true;
+                config.command.full_access = !full_access;
+                let (tx, _events) = mpsc::unbounded_channel();
+                let adapter = CodexAdapter::connect(config, tx).await.unwrap();
+                let connection = adapter
+                    .create_session(None, None, None, full_access)
+                    .await
+                    .unwrap();
+                if submitted {
+                    adapter
+                        .goal_command(
+                            &connection.session_id,
+                            &json!({"action":"set", "objective":"fixture goal"}),
+                        )
+                        .await
+                        .unwrap();
+                }
+                let recovered = adapter.restart().await.unwrap();
+                let requests = fixture.requests();
+                let method = if submitted {
+                    "thread/resume"
+                } else {
+                    "thread/start"
+                };
+                let restored = requests
+                    .iter()
+                    .rev()
+                    .find(|r| r["method"] == method)
+                    .unwrap();
+                assert_eq!(
+                    restored["params"].get("approvalPolicy"),
+                    full_access.then_some(&json!("never"))
+                );
+                assert_eq!(
+                    restored["params"].get("sandbox"),
+                    full_access.then_some(&json!("danger-full-access"))
+                );
+                let session_id = recovered.active_session_id().await.unwrap();
+                recovered
+                    .start_turn(CodexTurnRequest {
+                        session_id: &session_id,
+                        message: "hold-for-interrupt",
+                        slash_command: false,
+                        snapshots: &[],
+                        images: &[],
+                        client_operation_id: "permissions:recovered",
+                        model: None,
+                        effort: None,
+                        cwd: None,
+                    })
+                    .await
+                    .unwrap();
+                let requests = fixture.requests();
+                let turn = requests
+                    .iter()
+                    .rev()
+                    .find(|r| r["method"] == "turn/start")
+                    .unwrap();
+                assert_eq!(
+                    turn["params"].get("sandboxPolicy"),
+                    full_access.then_some(&json!({"type":"dangerFullAccess"}))
+                );
+                recovered.shutdown().await;
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn empty_chats_switch_without_unsupported_history_then_read_the_first_turn() {
         let fixture = Fixture::new();
         fixture.mark("unique-threads", "1");
@@ -603,7 +680,7 @@ mod tests {
             json!([])
         );
         let second = adapter
-            .create_session(Some("second-model"), None, None)
+            .create_session(Some("second-model"), None, None, false)
             .await
             .unwrap()
             .session_id;

@@ -56,6 +56,10 @@ impl SessionBindingStore {
         self.path.with_file_name("codex-homes")
     }
 
+    pub(crate) fn codex_permissions_directory(&self) -> PathBuf {
+        self.path.with_file_name("codex-permissions")
+    }
+
     pub(crate) fn session_locators_directory(&self) -> PathBuf {
         self.path.with_file_name("session-locators")
     }

@@ -34,6 +34,7 @@ async def verify(args):
         threading.Thread(target=server.serve_forever, daemon=True).start()
         (root / "config.toml").write_text(
             'model = "gpt-5.4"\nmodel_provider = "local_fixture"\n'
+            'approval_policy = "on-request"\nsandbox_mode = "workspace-write"\n'
             '[model_providers.local_fixture]\nname = "Local fixture"\n'
             f'base_url = "http://127.0.0.1:{server.server_port}/v1"\n'
             'wire_api = "responses"\nrequires_openai_auth = false\n'
@@ -166,6 +167,44 @@ async def verify(args):
                 result["rewind"] = {"middleTurnRemovedSuffix": True, "firstTurnRemovedAllHistory": True,
                                     "providerInputExcludedRemovedMessages": True, "reopenedHistoryStayedRewound": True,
                                     "runtimeRestartPreservedRewind": True}
+            if args.verify_permissions:
+                permission_chats = []
+
+                async def check_permissions(identity, full_access):
+                    settings = (await request("session.status", identity))["settings"]
+                    expected_approval = "never" if full_access else "on-request"
+                    expected_sandbox = "dangerFullAccess" if full_access else "workspaceWrite"
+                    assert settings["approvalPolicy"] == expected_approval, settings
+                    assert settings["sandbox"]["type"] == expected_sandbox, settings
+
+                # One warmed app-server, alternating permissions in both directions.
+                for index, full_access in enumerate([True, False, True]):
+                    connection = await request("session.create", {**payload, "fullAccess": full_access})
+                    identity = {**payload, "sessionId": connection["sessionId"]}
+                    permission_chats.append((identity, full_access))
+                    await check_permissions(identity, full_access)
+                    operation = f"permissions:{index}"
+                    await request("turn.start", {**identity, "message": "Reply READY", "clientOperationId": operation})
+                    while not any(e["name"] == "turn.completed" and e.get("clientOperationId") == operation for e in events):
+                        await receive()
+                    completed = next(e for e in events if e["name"] == "turn.completed" and e.get("clientOperationId") == operation)
+                    assert completed["payload"]["status"] == "completed", completed
+                for identity, full_access in permission_chats:
+                    await request("session.open", identity)
+                    await check_permissions(identity, full_access)
+                assert not any(e["name"] == "runtime.recovered" for e in events)
+                # Reopening the app must restore each chat's complete policy.
+                await request("core.shutdown")
+                await asyncio.wait_for(process.wait(), 10)
+                process = await launch_core()
+                await request("core.initialize")
+                await request("runtime.discover")
+                await request("runtime.connect", {**payload, "fullAccess": False})
+                for identity, full_access in permission_chats:
+                    await request("session.open", identity)
+                    await check_permissions(identity, full_access)
+                result["permissions"] = {"newChats": ["full", "default", "full"],
+                                         "selectionPreservedPolicy": True, "restartPreservedPolicy": True}
             print(json.dumps(result, indent=2))
             await request("core.shutdown")
             await asyncio.wait_for(process.wait(), 10)
@@ -183,6 +222,7 @@ if __name__ == "__main__":
     parser.add_argument("--codex", default=shutil.which("codex"))
     parser.add_argument("--switches", type=int, default=40)
     parser.add_argument("--verify-rewind", action="store_true")
+    parser.add_argument("--verify-permissions", action="store_true")
     args = parser.parse_args()
     if not args.codex or args.switches < 1:
         parser.error("an installed Codex executable and positive switch count are required")

@@ -1010,12 +1010,11 @@ mod tests {
         direct.enable_full_access(&target).unwrap();
         let wrapped = wrap_wsl_command(&target, direct).expect("wrap relay command");
         assert!(wrapped.full_access);
-        assert!(wrapped.args.ends_with(&[
-            "-c".into(),
-            "approval_policy=\"never\"".into(),
-            "-c".into(),
-            "sandbox_mode=\"danger-full-access\"".into()
-        ]));
+        assert!(
+            wrapped
+                .args
+                .ends_with(&["/home/u/bin/codex".into(), "app-server".into()])
+        );
         assert!(wrapped.command.ends_with(std::env::consts::EXE_SUFFIX));
         assert_eq!(wrapped.args[0], "--wsl-proxy");
         assert_eq!(wrapped.args[2], "Ubuntu");
