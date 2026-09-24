@@ -195,9 +195,20 @@ impl ClaudeAdapter {
         model: Option<&str>,
         cwd: Option<&str>,
     ) -> Result<Value, CodexError> {
+        let previous = self.inner.state.lock().await.active.clone();
         self.activate(None, cwd).await?;
         let stream = self.stream(&self.active_session_id().await?).await?;
-        stream.set_model(model).await?;
+        if let Err(error) = stream.set_model(model).await {
+            let mut state = self.inner.state.lock().await;
+            state.active = previous;
+            state.sessions.remove(&stream.id);
+            drop(state);
+            stream.events_enabled.store(false, Ordering::Release);
+            stream
+                .stop("runtime-stopped", "New conversation was not selected.")
+                .await;
+            return Err(error);
+        }
         self.connection_value().await
     }
     pub async fn open_session(&self, id: &str, cwd: Option<&str>) -> Result<Value, CodexError> {

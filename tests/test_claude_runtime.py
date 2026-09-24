@@ -144,6 +144,15 @@ class ClaudeRuntimeTests(unittest.TestCase):
         self.core.request('turn.interrupt', dict(first, turnId=receipt['turnId']))
         self.assertEqual(self.core.completed(op)['sessionId'], first['sessionId'])
 
+    def test_rejected_new_chat_model_preserves_the_previous_binding_and_chat(self):
+        self.connect()
+        saved = (self.path / 'binding.json').read_bytes()
+        result = self.core.request('session.create', {'runtimeTargetId': self.target['id'], 'cwd':str(self.path), 'model':'unavailable-model'}, ok=False)
+        self.assertEqual(result['error']['code'], 'invalid-request')
+        self.assertEqual((self.path / 'binding.json').read_bytes(), saved)
+        op, _ = self.turn('still in the original conversation')
+        self.assertEqual(self.core.completed(op)['sessionId'], self.identity['sessionId'])
+
 
 if __name__ == '__main__':
     unittest.main()
