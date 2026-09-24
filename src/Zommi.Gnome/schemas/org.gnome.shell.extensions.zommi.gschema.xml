@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.zommi" path="/org/gnome/shell/extensions/zommi/">
+    <key name="select-content" type="as">
+      <default>['&lt;Alt&gt;a']</default>
+      <summary>Select content for Zommi</summary>
+    </key>
+  </schema>
+</schemalist>

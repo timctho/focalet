@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:zommi_flutter/desktop/capture_permissions.dart';
+import 'package:zommi_flutter/desktop/gnome_integration.dart';
+import 'package:zommi_flutter/widgets/gnome_integration_setup.dart';
 import 'package:zommi_flutter/desktop/capture_shortcut.dart';
 import 'package:zommi_flutter/widgets/capture_shortcut_setting.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
@@ -1212,6 +1214,9 @@ class AppSettingsPanel extends StatelessWidget {
             if (controller.desktop case final CapturePermissionBridge bridge
                 when bridge.supportsCapturePermissions)
               CapturePermissionSetup(bridge: bridge),
+            if (controller.desktop case final GnomeDesktopSettings bridge
+                when bridge.supportsGnomeIntegration)
+              GnomeIntegrationSetup(bridge: bridge),
             if (controller.desktop case final CaptureShortcutSettings settings)
               CaptureShortcutSetting(
                 settings: settings,

@@ -94,7 +94,7 @@ if [[ "$target_platform" == linux ]]; then
   cargo build \
     --manifest-path "$repository_root/Cargo.toml" \
     --release \
-    --bin zommi-x11-capture
+    --bin zommi-linux-capture
 fi
 
 if [[ "$target_platform" == linux ]]; then
@@ -133,7 +133,7 @@ elif [[ "$target_platform" == linux ]]; then
   assembler_arguments+=(--signing-status checksum-only --signing-mechanism sha256)
   assembler_arguments+=(
     --linux-capture-host
-    "${CARGO_TARGET_DIR:-$repository_root/target}/release/zommi-x11-capture"
+    "${CARGO_TARGET_DIR:-$repository_root/target}/release/zommi-linux-capture"
   )
 fi
 python3 "${assembler_arguments[@]}"

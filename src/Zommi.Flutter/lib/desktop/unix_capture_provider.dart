@@ -3,15 +3,20 @@ part of 'desktop_bridge.dart';
 /// A shared editor with native pixels/accessibility and the Windows DOM core.
 final class UnixCaptureProvider
     implements CaptureProvider, BrowserCaptureSettings {
-  UnixCaptureProvider({UnixRegionBackend? backend, NativeCaptureClient? browser})
-    : _backend = backend ?? NativeUnixRegionBackend(),
-      _browser =
-          browser ??
-          ProcessNativeCaptureClient(
-            Platform.environment['ZOMMI_BROWSER_CAPTURE_HOST'] ??
-                '${File(Platform.resolvedExecutable).parent.path}/browser-capture/zommi-browser-capture',
-          );
+  UnixCaptureProvider({
+    UnixRegionBackend? backend,
+    NativeCaptureClient? browser,
+    Future<List<SelectedRegion>> Function(List<CapturedDisplay>)? editor,
+  }) : _backend = backend ?? NativeUnixRegionBackend(),
+       _editor = editor ?? showRegionSelectionEditor,
+       _browser =
+           browser ??
+           ProcessNativeCaptureClient(
+             Platform.environment['ZOMMI_BROWSER_CAPTURE_HOST'] ??
+                 '${File(Platform.resolvedExecutable).parent.path}/browser-capture/zommi-browser-capture',
+           );
   final UnixRegionBackend _backend;
+  final Future<List<SelectedRegion>> Function(List<CapturedDisplay>) _editor;
   final NativeCaptureClient _browser;
   bool _browserPageDetails = true;
   bool _closed = false;
@@ -32,15 +37,21 @@ final class UnixCaptureProvider
     void Function()? onReady,
   }) async => Platform.isMacOS
       ? PortableCaptureProvider().capture(point: point, onReady: onReady)
-      : LinuxCaptureProvider().capture(point: point, onReady: onReady);
+      : portableCaptureResult(
+          application: 'Ubuntu desktop',
+          windowTitle: '',
+          url: '',
+          limitation: 'Use Select to capture a region with its app context.',
+        );
 
   @override
   Future<List<CaptureResult>> selectContext() async {
     if (_closed) return const [];
-    final displays = await _backend.captureDisplays();
-    if (displays.isEmpty) return const [];
+    final displays = <CapturedDisplay>[];
     try {
-      final selected = await showRegionSelectionEditor(displays);
+      displays.addAll(await _backend.captureDisplays());
+      if (displays.isEmpty) return const [];
+      final selected = await _editor(displays);
       final results = <CaptureResult>[];
       for (final region in selected) {
         if (_closed) break;
@@ -56,8 +67,14 @@ final class UnixCaptureProvider
       }
       return results;
     } finally {
-      for (final display in displays) {
-        display.image.dispose();
+      try {
+        if (_backend case final UnixCaptureSession session) {
+          await session.release();
+        }
+      } finally {
+        for (final display in displays) {
+          display.image.dispose();
+        }
       }
     }
   }
@@ -97,6 +114,7 @@ Future<List<SelectedRegion>> showRegionSelectionEditor(
     await windowManager.setAlwaysOnTop(true);
     await windowManager.show();
     await windowManager.focus();
+    if (Platform.isLinux) await presentGnomeWindow();
     return await session.result.timeout(
       const Duration(minutes: 5),
       onTimeout: () {
@@ -138,34 +156,20 @@ abstract interface class UnixRegionBackend {
   Future<void> close();
 }
 
-final class NativeUnixRegionBackend implements UnixRegionBackend {
-  final Set<Process> _processes = {};
-  Future<Map<String, Object?>> _linux(List<String> arguments) async {
-    final process = await Process.start(
-      resolveLinuxCaptureExecutable(),
-      arguments,
-    );
-    _processes.add(process);
-    final stdout = process.stdout.transform(utf8.decoder).join();
-    final stderr = process.stderr.transform(utf8.decoder).join();
-    try {
-      final code = await process.exitCode.timeout(
-        const Duration(seconds: 15),
-        onTimeout: () {
-          process.kill();
-          throw TimeoutException(
-            'The Ubuntu capture provider timed out. Try Select again.',
+abstract interface class UnixCaptureSession {
+  Future<void> release();
+}
+
+final class NativeUnixRegionBackend
+    implements UnixRegionBackend, UnixCaptureSession {
+  NativeUnixRegionBackend({NativeCaptureClient? linuxClient})
+    : _linuxClient =
+          linuxClient ??
+          ProcessNativeCaptureClient(
+            resolveLinuxCaptureExecutable(),
+            captureTimeout: const Duration(seconds: 20),
           );
-        },
-      );
-      final error = await stderr;
-      if (code != 0) throw StateError('Ubuntu capture failed: $error');
-      return _nullableMap(jsonDecode(await stdout)) ??
-          (throw const FormatException('Invalid native capture response'));
-    } finally {
-      _processes.remove(process);
-    }
-  }
+  final NativeCaptureClient _linuxClient;
 
   @override
   Future<List<CapturedDisplay>> captureDisplays() async {
@@ -182,26 +186,8 @@ final class NativeUnixRegionBackend implements UnixRegionBackend {
             'captureDisplays',
           ) ??
           const {};
-    } else if (shouldUseWaylandPortals(Platform.environment)) {
-      // A portal crop has no reliable desktop origin. It still gets the full
-      // editor; screen-aligned DOM/accessibility must not be fabricated.
-      final image = await LinuxCaptureProvider(useWaylandPortals: true)
-          .selectImage();
-      if (image == null) return const [];
-      final dimensions = _pngSize(image.dataUrl)!;
-      response = {
-        'frames': [
-          {
-            'dataUrl': image.dataUrl,
-            'bounds': {'x': 0, 'y': 0, ...dimensions},
-            'windows': const [],
-            'label': 'Portal capture',
-            'screenCoordinatesKnown': false,
-          },
-        ],
-      };
     } else {
-      response = await _linux(const ['snapshot']);
+      response = await _linuxClient.request('selectContent');
     }
     final displays = <CapturedDisplay>[];
     try {
@@ -251,13 +237,22 @@ final class NativeUnixRegionBackend implements UnixRegionBackend {
               {'bounds': regionRectJson(bounds)},
             ) ??
             const {}
-      : _linux(['observe', jsonEncode(regionRectJson(bounds))]);
+      : _linuxClient.request(
+          'observe',
+          parameters: {'bounds': regionRectJson(bounds)},
+        );
   @override
-  Future<void> close() async {
-    for (final process in _processes.toList()) {
-      process.kill();
+  Future<void> release() async {
+    if (Platform.isMacOS) return;
+    try {
+      await _linuxClient.request('release');
+    } on Object {
+      await _linuxClient.close();
     }
   }
+
+  @override
+  Future<void> close() => _linuxClient.close();
 }
 
 Future<bool> sameCapturedPixels(String original, String current) async {
@@ -430,7 +425,9 @@ Future<ImageSelection> enrichSelectedRegion(
     if (display.screenCoordinatesKnown) 'screenBounds': regionRectJson(bounds),
     if (display.screenCoordinatesKnown)
       'mapping': {
-        'coordinateSpace': Platform.isMacOS ? 'screen-points' : 'screen-pixels',
+        'coordinateSpace': Platform.isMacOS
+            ? 'screen-points'
+            : 'screen-logical',
         'screenBounds': regionRectJson(bounds),
         'imageBounds': {
           'x': 0,

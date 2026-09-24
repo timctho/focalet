@@ -2,7 +2,7 @@
 members = [
     "crates/zommi-core",
     "crates/zommi-core-host",
-    "crates/zommi-x11-capture",
+    "crates/zommi-linux-capture",
 ]
 resolver = "3"
 
@@ -14,7 +14,7 @@ license = "Apache-2.0"
 repository = "https://github.com/timctho/zommi"
 
 [workspace.dependencies]
-ashpd = { version = "0.13.13", default-features = false, features = ["global_shortcuts", "screenshot", "tokio"] }
+ashpd = { version = "0.13.13", default-features = false, features = ["screencast", "tokio"] }
 base64 = "0.22.1"
 ed25519-dalek = { version = "2.2.0", features = ["rand_core"] }
 futures-util = "0.3.31"
@@ -30,4 +30,3 @@ tokio-tungstenite = { version = "0.28.0", features = ["rustls-tls-native-roots"]
 url = "2.5.7"
 uuid = { version = "1.20.0", features = ["v4"] }
 wait-timeout = "0.2.1"
-x11rb = { version = "0.13.2", default-features = false, features = ["image"] }

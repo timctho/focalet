@@ -182,7 +182,7 @@ def _smoke_linux_capture(capture_host: Path) -> None:
     if (
         not isinstance(value, dict)
         or value.get("ok") is not True
-        or value.get("providers") != ["x11", "wayland-portal"]
+        or value.get("providers") != ["gnome-wayland", "atspi", "screencast"]
     ):
         raise ReleaseValidationError("Linux capture smoke did not succeed.")
 
@@ -243,6 +243,8 @@ def verify_package(
         if manifest.get("architecture") == "x64":
             _inside(root, "vcruntime140_1.dll", "Bundled Windows runtime library")
     if manifest.get("platform") == "linux":
+        for relative in ("metadata.json", "extension.js", "schemas/gschemas.compiled"):
+            _inside(root, "gnome-extension/zommi@zommi/" + relative, "GNOME integration")
         _inside(root, "zommi-bin", "Packaged Linux Flutter binary")
         capture_host = _inside(
             root,

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -216,8 +215,9 @@ void main() {
         });
         final client = _FakeNativeCaptureClient(onRequest: (_) async => {});
         final bridge = FlutterDesktopBridge(
+          presentGnome: () async {},
           useNativeSurface: true,
-          useWaylandPortals: false,
+          useGnomeIntegration: false,
           captureProvider: WindowsCaptureProvider(
             captureClient: client,
             selectorClient: client,
@@ -792,6 +792,7 @@ void main() {
             onRequest: (_) async => {'cancelled': true},
           );
           final bridge = FlutterDesktopBridge(
+            presentGnome: () async {},
             captureProvider: WindowsCaptureProvider(
               captureClient: capture,
               selectorClient: selector,
@@ -851,6 +852,7 @@ void main() {
           ),
         );
         final bridge = FlutterDesktopBridge(
+          presentGnome: () async {},
           captureProvider: WindowsCaptureProvider(
             captureClient: _FakeNativeCaptureClient(onRequest: (_) async => {}),
             selectorClient: _FakeNativeCaptureClient(
@@ -879,6 +881,7 @@ void main() {
         onRequest: (_) async => {},
       );
       final bridge = FlutterDesktopBridge(
+        presentGnome: () async {},
         captureProvider: WindowsCaptureProvider(
           captureClient: captureClient,
           selectorClient: captureClient,
@@ -934,6 +937,7 @@ void main() {
         },
       );
       final bridge = FlutterDesktopBridge(
+        presentGnome: () async {},
         captureProvider: WindowsCaptureProvider(
           captureClient: captureClient,
           selectorClient: selectorClient,
@@ -1227,148 +1231,12 @@ void main() {
   );
 
   test(
-    'Linux capture uses the adjacent Rust helper for metadata and pixels',
+    'GNOME integration only activates the content selection shortcut',
     () async {
-      final calls = <List<String>>[];
-      final provider = LinuxCaptureProvider(
-        executablePath: '/opt/zommi/zommi-x11-capture',
-        runCommand: (executable, arguments, timeout) async {
-          expect(executable, '/opt/zommi/zommi-x11-capture');
-          calls.add(arguments);
-          if (arguments.first == 'context' ||
-              arguments.first == 'point-context') {
-            return ProcessResult(
-              10,
-              0,
-              jsonEncode({
-                'application': 'fixture-app',
-                'processName': 'fixture-process',
-                'windowTitle': 'Fixture window',
-                'limitation': 'X11 metadata only',
-              }),
-              '',
-            );
-          }
-          final output = File(arguments.last);
-          await output.writeAsBytes([1, 2, 3]);
-          return ProcessResult(
-            11,
-            0,
-            jsonEncode({
-              'cancelled': false,
-              'bounds': {'x': 20, 'y': 30, 'width': 40, 'height': 50},
-            }),
-            '',
-          );
-        },
-      );
-
-      final context = await provider.capture();
-      expect(context.snapshot?['application'], 'fixture-app');
-      expect(context.snapshot?['processName'], 'fixture-process');
-      expect(context.snapshot?['windowTitle'], 'Fixture window');
-
-      final selectedContext = await provider.selectContext();
-      expect(
-        selectedContext.single.image?.dataUrl,
-        'data:image/png;base64,AQID',
-      );
-      expect(selectedContext.single.snapshot, isNull);
-
-      final image = await provider.selectImage();
-      expect(image?.dataUrl, 'data:image/png;base64,AQID');
-      expect(image?.bounds?['width'], 40);
-      expect(calls, [
-        ['context'],
-        ['region', '--output', isA<String>()],
-        ['region', '--output', isA<String>()],
-      ]);
-      expect(await File(calls.last.last).exists(), isFalse);
-    },
-  );
-
-  test('Linux Rust region cancellation adds no image', () async {
-    final provider = LinuxCaptureProvider(
-      executablePath: '/opt/zommi/zommi-x11-capture',
-      runCommand: (_, _, _) async =>
-          ProcessResult(12, 0, '{"cancelled":true}', ''),
-    );
-    expect(await provider.selectImage(), isNull);
-  });
-
-  test(
-    'Wayland capture uses portal commands and preserves degraded context',
-    () async {
-      final calls = <List<String>>[];
-      final provider = LinuxCaptureProvider(
-        executablePath: '/opt/zommi/zommi-x11-capture',
-        useWaylandPortals: true,
-        runCommand: (_, arguments, _) async {
-          calls.add(arguments);
-          if (arguments.first == 'portal-context') {
-            return ProcessResult(
-              20,
-              0,
-              jsonEncode({
-                'application': 'Linux desktop',
-                'processName': 'wayland-session',
-                'windowTitle': '',
-                'degraded': true,
-                'limitation': 'Wayland active-window metadata is unavailable',
-              }),
-              '',
-            );
-          }
-          await File(arguments.last).writeAsBytes([4, 5, 6]);
-          return ProcessResult(
-            21,
-            0,
-            jsonEncode({
-              'cancelled': false,
-              'provider': 'wayland-portal',
-              'bounds': {'width': 80, 'height': 60},
-            }),
-            '',
-          );
-        },
-      );
-
-      final context = await provider.capture();
-      expect(context.snapshot?['application'], 'Linux desktop');
-      expect(context.snapshot?['confidence'], 'limited');
-      expect(
-        context.previewText,
-        contains('active-window metadata is unavailable'),
-      );
-      final image = await provider.selectImage();
-      expect(image?.dataUrl, 'data:image/png;base64,BAUG');
-      expect(image?.bounds?['width'], 80);
-      expect(calls, [
-        ['portal-context'],
-        ['portal-region', '--output', isA<String>()],
-      ]);
-    },
-  );
-
-  test('Wayland screenshot portal cancellation adds no image', () async {
-    final provider = LinuxCaptureProvider(
-      executablePath: '/opt/zommi/zommi-x11-capture',
-      useWaylandPortals: true,
-      runCommand: (_, arguments, _) async {
-        expect(arguments.first, 'portal-region');
-        return ProcessResult(22, 0, '{"cancelled":true}', '');
-      },
-    );
-    expect(await provider.selectImage(), isNull);
-  });
-
-  test(
-    'Wayland portal only activates the content selection shortcut',
-    () async {
-      final client = _FakeWaylandPortalShortcutClient();
+      final client = _FakeGnomeShortcutClient();
       var contextInvocations = 0;
       final errors = <Object>[];
-      final registration = await registerWaylandPortalShortcuts(
+      final registration = await registerGnomeShortcuts(
         client,
         onContext: () => contextInvocations += 1,
         onError: errors.add,
@@ -1388,7 +1256,7 @@ void main() {
   );
 
   test(
-    'Wayland portal process client parses readiness and activations',
+    'GNOME integration process client parses readiness and activations',
     () async {
       final directory = await Directory.systemTemp.createTemp(
         'zommi-wayland-shortcut-test-',
@@ -1402,7 +1270,7 @@ print('{"event":"activated","shortcutId":"context"}', flush=True)
 print('{"event":"activated","shortcutId":"image"}', flush=True)
 sys.stdin.read()
 ''');
-      final client = ProcessWaylandPortalShortcutClient(
+      final client = ProcessGnomeShortcutClient(
         Platform.isWindows ? 'python' : 'python3',
         argumentsBeforeCommand: [script.path],
       );
@@ -1416,41 +1284,19 @@ sys.stdin.read()
     },
   );
 
-  test('Wayland portal selection follows the desktop session authority', () {
-    expect(
-      shouldUseWaylandPortals(const {
-        'XDG_SESSION_TYPE': 'wayland',
-        'DISPLAY': ':1',
-        'WAYLAND_DISPLAY': 'wayland-0',
-      }),
-      isTrue,
-    );
-    expect(
-      shouldUseWaylandPortals(const {
-        'DISPLAY': ':0',
-        'WAYLAND_DISPLAY': 'wayland-0',
-      }),
-      isFalse,
-    );
-    expect(
-      shouldUseWaylandPortals(const {'WAYLAND_DISPLAY': 'wayland-0'}),
-      isTrue,
-    );
-  });
-
   test('Linux capture helper resolves beside the packaged Flutter binary', () {
     expect(
       resolveLinuxCaptureExecutable(
         applicationDirectory: '/opt/zommi',
         pathSeparator: '/',
         environment: const {},
-        exists: (path) => path == '/opt/zommi/zommi-x11-capture',
+        exists: (path) => path == '/opt/zommi/zommi-linux-capture',
       ),
-      '/opt/zommi/zommi-x11-capture',
+      '/opt/zommi/zommi-linux-capture',
     );
     expect(
       resolveLinuxCaptureExecutable(
-        environment: const {'ZOMMI_X11_CAPTURE_HOST': '/custom/capture'},
+        environment: const {'ZOMMI_LINUX_CAPTURE_HOST': '/custom/capture'},
         exists: (_) => false,
       ),
       '/custom/capture',
@@ -1498,8 +1344,7 @@ final class _FakeNativeCaptureClient implements NativeCaptureClient {
   }
 }
 
-final class _FakeWaylandPortalShortcutClient
-    implements WaylandPortalShortcutClient {
+final class _FakeGnomeShortcutClient implements GnomeShortcutClient {
   final StreamController<String> _controller =
       StreamController<String>.broadcast(sync: true);
 

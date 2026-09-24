@@ -59,8 +59,83 @@ class _ChangingBrowser implements NativeCaptureClient {
   Future<void> close() async {}
 }
 
+class _SessionBackend implements UnixRegionBackend, UnixCaptureSession {
+  bool fail = false;
+  int releases = 0;
+  @override
+  Future<List<CapturedDisplay>> captureDisplays() async {
+    if (fail) throw StateError('Screen sharing disconnected.');
+    return [await display()];
+  }
+
+  @override
+  Future<Map<String, Object?>> observe(Rect bounds) async =>
+      throw StateError('Source disconnected.');
+  @override
+  Future<void> release() async {
+    releases++;
+  }
+
+  @override
+  Future<void> close() async {}
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test(
+    'capture releases sharing after cancellation and failure, then can retry',
+    () async {
+      final backend = _SessionBackend();
+      final provider = UnixCaptureProvider(
+        backend: backend,
+        browser: _ChangingBrowser(),
+        editor: (_) async => [],
+      );
+      addTearDown(provider.close);
+      expect(await provider.selectContext(), isEmpty);
+      expect(backend.releases, 1);
+      backend.fail = true;
+      await expectLater(provider.selectContext(), throwsStateError);
+      expect(backend.releases, 2);
+      backend.fail = false;
+      expect(await provider.selectContext(), isEmpty);
+      expect(backend.releases, 3);
+    },
+  );
+  test(
+    'source disconnect retains the frozen annotated image and releases sharing',
+    () async {
+      final backend = _SessionBackend();
+      final provider = UnixCaptureProvider(
+        backend: backend,
+        browser: _ChangingBrowser(),
+        editor: (frames) async {
+          final region = SelectedRegion(
+            frames.single,
+            const Rect.fromLTWH(10, 10, 30, 20),
+          );
+          region.addStroke(
+            RegionStroke(
+              tool: RegionDrawingTool.pen,
+              color: Colors.blue,
+              width: 2,
+              points: const [Offset(12, 12), Offset(20, 20)],
+            ),
+          );
+          return [region];
+        },
+      );
+      addTearDown(provider.close);
+      final result = (await provider.selectContext()).single.image!;
+      expect(result.alignment?['status'], 'image-only');
+      expect(
+        result.snapshot?['imageAnnotations'],
+        containsPair('strokeCount', 1),
+      );
+      expect(result.dataUrl, startsWith('data:image/png;base64,'));
+      expect(backend.releases, 1);
+    },
+  );
   test('regions keep physical pixels, negative screen origins, limits and independent drawing histories', () async {
     final frame = await display();
     addTearDown(frame.image.dispose);
@@ -242,6 +317,42 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     },
   );
+
+  testWidgets('closing keys release before the editor gives up its window', (
+    tester,
+  ) async {
+    final frame = (await tester.runAsync(display))!;
+    addTearDown(frame.image.dispose);
+    for (final key in [
+      LogicalKeyboardKey.enter,
+      LogicalKeyboardKey.escape,
+      LogicalKeyboardKey.enter,
+    ]) {
+      final session = RegionSelectionSession([frame]);
+      session.addRegion(const Rect.fromLTWH(10, 10, 30, 20));
+      var finished = false;
+      session.result.then((_) => finished = true);
+      await tester.pumpWidget(
+        MaterialApp(home: RegionCaptureEditor(session: session)),
+      );
+      await tester.sendKeyDownEvent(key);
+      await tester.pump();
+      expect(finished, isFalse);
+      await tester.sendKeyUpEvent(key);
+      await tester.pump();
+      expect(finished, isTrue);
+      expect(
+        HardwareKeyboard.instance.logicalKeysPressed,
+        isNot(contains(key)),
+      );
+      expect(
+        await session.result,
+        key == LogicalKeyboardKey.escape ? isEmpty : hasLength(1),
+      );
+      await tester.pumpWidget(const SizedBox());
+      session.dispose();
+    }
+  });
 
   test('failed DOM confirmation discards all semantic metadata and releases the host', () async {
     final frame = await display();

@@ -38,13 +38,13 @@ its dependencies. You can use `sudo dpkg -i Zommi-Ubuntu-amd64.deb`, then
 `sudo apt-get -f install` if dependencies are missing. Open **Zommi** from the app
 menu or run `zommi`. Follow the [Ubuntu testing guide](ubuntu-testing.md) to test
 the installer or build it from source.
-On Wayland, use **Select** in Zommi, complete the desktop screenshot prompt,
-then select regions and draw in the captured image. Ubuntu 24.04's GNOME 46
-does not provide the global-shortcut portal that Zommi currently uses for
-Alt+A, so that shortcut is unavailable on the stock Wayland desktop. Aligned
-DOM/accessibility capture is also still a gap; these captures attach images.
-**Ubuntu on Xorg** remains a compatibility option with Alt+A and aligned
-AT-SPI/browser capture. Other distributions are outside the supported scope.
+The package includes the GNOME desktop extension. After installation, sign out
+and sign in if GNOME has not loaded it, then choose **Enable desktop integration**
+in Zommi's first-run setup or App settings. This enables Alt+A and window/context
+alignment. Use **Select** or **Alt+A**, authorize the monitors to share, then
+select regions and draw. Sharing stops when that selection completes or is
+cancelled. A dismissed prompt can be retried without restarting the chat.
+Ubuntu on Xorg and other desktop environments are outside the supported scope.
 
 ## 2. Choose the agent you already have
 

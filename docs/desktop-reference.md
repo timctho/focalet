@@ -11,7 +11,8 @@ Start with [installation](install.md) to use Zommi or
 | `crates/zommi-core` | Agent discovery, runtime adapters and context handoff |
 | `crates/zommi-core-host` | JSONL broker between Flutter and the runtime adapters |
 | `src/Zommi.Windows` and `src/Zommi.Capture.Core` | Windows selection, annotations, accessibility and browser capture |
-| `crates/zommi-x11-capture` | Linux X11 and Wayland portal capture |
+| `crates/zommi-linux-capture` | GNOME Wayland ScreenCast and AT-SPI capture |
+| `src/Zommi.Gnome` | GNOME window geometry, identity and Alt+A integration |
 | `src/Zommi.Flutter/macos/Runner` | macOS selection and platform integration |
 
 The selected agent owns authentication, tools, permissions and canonical chat

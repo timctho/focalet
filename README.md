@@ -72,7 +72,7 @@ Press **Alt+A**, select a region, review the attachment and ask your question.
 On Windows, use the drawing toolbar to annotate or add more regions, then press
 **Attach**. Multiple attachments keep their **A**, **B**, **C** references.
 
-On Windows, Ubuntu X11 and macOS, attachments can include source identity, text, links, element
+On Windows, Ubuntu Wayland and macOS, attachments can include source identity, text, links, element
 structure and coordinates through accessibility and an optional authorized
 browser connection. When reliable alignment is unavailable, Zommi attaches
 **Image only** with an explanation.
@@ -87,11 +87,10 @@ policies apply. [Capture controls and limitations](docs/browser-context.md)
 | --- | --- | --- |
 | **Windows 10/11 · x64** | Preview installer | Multiple regions, drawing, accessibility and optional browser context |
 | **macOS 12+ · Apple Silicon / Intel** | `.dmg` when listed in a release | Multiple regions, drawing, native Accessibility and optional browser context |
-| **Ubuntu 24.04 LTS · x64 · Wayland** | Primary Linux target; integration in progress; [install and test](docs/ubuntu-testing.md) | Portal images, multiple regions and drawing; use **Select** on stock GNOME 46; aligned DOM/accessibility and global Alt+A remain gaps |
-| **Ubuntu 24.04 LTS · x64 · X11** | Compatibility option; `.deb` when listed in a release | Multiple regions, drawing, AT-SPI and optional browser context |
+| **Ubuntu 24.04 LTS · x64 · GNOME Wayland** | `.deb` when listed in a release; [install and test](docs/ubuntu-testing.md) | Multiple regions, drawing, AT-SPI and optional browser context; requires the bundled desktop integration and screen-sharing authorization |
 
-Linux support is limited to Ubuntu 24.04. Use its default **Wayland** session for
-primary desktop testing; **Ubuntu on Xorg** remains a compatibility option.
+Linux support targets Ubuntu 24.04's GNOME Wayland desktop. Enable **Zommi
+Desktop Integration** in App settings for Alt+A and aligned app context.
 
 [Releases](https://github.com/timctho/zommi/releases) ·
 [Installation and permissions](docs/install.md) ·

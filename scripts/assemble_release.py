@@ -159,7 +159,7 @@ def _write_manifest(
         "components": {
             "desktopUi": "flutter",
             "runtimeCore": "rust",
-            "captureProvider": {"windows": "dotnet-uia", "linux": "x11-atspi", "macos": "screen-capture-ax"}[target_platform],
+            "captureProvider": {"windows": "dotnet-uia", "linux": "gnome-wayland-atspi", "macos": "screen-capture-ax"}[target_platform],
             **({"browserProvider": "shared-dom"} if browser_capture_host else {}),
             **(
                 {"wslTransport": "persistent-authenticated-relay", "windowsReset": "owned-profile-reset"}
@@ -333,12 +333,15 @@ def assemble(args: argparse.Namespace) -> tuple[Path, Path]:
                 shutil.copytree(browser_source, (pending / browser_relative).parent)
                 (pending / browser_relative).chmod(0o755)
                 core_relative = "zommi-core-host"
-                capture_relative = "zommi-x11-capture"
+                capture_relative = "zommi-linux-capture"
                 if args.linux_capture_host is None:
                     raise ValueError("Linux releases require --linux-capture-host.")
                 capture_destination = pending / capture_relative
                 shutil.copy2(args.linux_capture_host, capture_destination)
                 capture_destination.chmod(capture_destination.stat().st_mode | 0o111)
+                extension = pending / "gnome-extension/zommi@zommi"
+                shutil.copytree(REPOSITORY / "src/Zommi.Gnome", extension)
+                subprocess.run(["glib-compile-schemas", str(extension / "schemas")], check=True)
                 flutter_binary = pending / "zommi"
                 packaged_binary = pending / "zommi-bin"
                 flutter_binary.replace(packaged_binary)

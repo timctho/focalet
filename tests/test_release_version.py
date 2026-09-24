@@ -51,7 +51,7 @@ class ReleaseVersionTests(unittest.TestCase):
         with patch.object(assemble_release, "REPOSITORY", self.root):
             assemble_release._write_manifest(
                 package, target_platform="linux", architecture="x64", commit="a" * 40,
-                entrypoint="zommi", core_host="zommi-core-host", capture_host="zommi-x11-capture",
+                entrypoint="zommi", core_host="zommi-core-host", capture_host="zommi-linux-capture",
                 signing={"status": "unsigned", "mechanism": "none"},
             )
         manifest = json.loads((package / "release-manifest.json").read_text())

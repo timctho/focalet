@@ -58,6 +58,10 @@ def ubuntu_installer(package: Path, output: Path, manifest: dict, tag: str | Non
         root = Path(temporary) / "root"
         destination = root / "opt/zommi"
         shutil.copytree(package, destination, symlinks=True)
+        extension = package / "gnome-extension/zommi@zommi"
+        if not (extension / "schemas/gschemas.compiled").is_file():
+            raise ValueError("The Ubuntu GNOME integration is missing from the bundle.")
+        shutil.copytree(extension, root / "usr/share/gnome-shell/extensions/zommi@zommi")
         for directory in ("DEBIAN", "usr/bin", "usr/share/applications",
                           "usr/share/icons/hicolor/256x256/apps", "usr/share/doc/zommi"):
             (root / directory).mkdir(parents=True, exist_ok=True)
@@ -81,7 +85,10 @@ def ubuntu_installer(package: Path, output: Path, manifest: dict, tag: str | Non
             f"Depends: libc6 (>= {GLIBC_MINIMUM}), libgcc-s1, libstdc++6 (>= {LIBSTDCXX_MINIMUM}), "
             "libgtk-3-0t64, libglib2.0-0t64, libwebkit2gtk-4.1-0, libayatana-appindicator3-1, "
             "libx11-6, libxext6, libxfixes3, libxrandr2, libxi6, libxtst6, "
-            "libegl1, libgl1, libepoxy0, libnotify4, at-spi2-core, libicu74, libssl3t64, libgssapi-krb5-2, zlib1g\n"
+            "libegl1, libgl1, libepoxy0, libnotify4, at-spi2-core, libicu74, libssl3t64, libgssapi-krb5-2, zlib1g, "
+            "gnome-shell (>= 46), gnome-shell (<< 47), xdg-desktop-portal, xdg-desktop-portal-gnome, "
+            "pipewire, wireplumber, gstreamer1.0-pipewire, gstreamer1.0-plugins-base, "
+            "libgstreamer1.0-0 (>= 1.24), libgstreamer-plugins-base1.0-0 (>= 1.24)\n"
             "Recommends: gnome-shell-extension-appindicator\n"
             "Homepage: https://github.com/timctho/zommi\n"
             "Description: Desktop companion for your existing agent\n"
