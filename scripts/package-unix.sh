@@ -10,6 +10,10 @@ fi
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 flutter_directory="$repository_root/src/Zommi.Flutter"
 
+if [[ "$target_platform" == linux ]]; then
+  python3 "$repository_root/scripts/ubuntu_compatibility.py" build-host
+fi
+
 if [[ "$target_platform" == macos ]]; then
   # Keep this checkout's local builds on the same identity. Ad-hoc signatures
   # use binary hashes, so replacing the app invalidates existing TCC grants.

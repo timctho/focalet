@@ -10,6 +10,8 @@ from pathlib import Path
 import subprocess
 from typing import Any
 
+from ubuntu_compatibility import UbuntuCompatibilityError, verify_ubuntu_abi
+
 
 class ReleaseValidationError(RuntimeError):
     pass
@@ -263,6 +265,12 @@ def verify_package(
         for relative in LICENSE_DOCUMENTS:
             _inside(root, prefix + relative, "License document")
     file_count = _verify_checksums(root)
+    ubuntu_compatibility = None
+    if manifest.get("platform") == "linux":
+        try:
+            ubuntu_compatibility = verify_ubuntu_abi(root)
+        except UbuntuCompatibilityError as error:
+            raise ReleaseValidationError(str(error)) from error
     if smoke_processes:
         _smoke_core(core_host)
         if browser_host:
@@ -283,6 +291,7 @@ def verify_package(
         "captureHost": capture_host.relative_to(root).as_posix() if capture_host else None,
         "files": file_count,
         "signing": manifest.get("signing"),
+        **({"ubuntuCompatibility": ubuntu_compatibility} if ubuntu_compatibility else {}),
     }
 
 

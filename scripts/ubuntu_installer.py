@@ -8,6 +8,8 @@ import shutil
 import subprocess
 import tempfile
 
+from ubuntu_compatibility import GLIBC_MINIMUM, LIBSTDCXX_MINIMUM, UBUNTU_VERSION
+
 
 def debian_version(version: str, tag: str | None, commit: str) -> str:
     if not re.fullmatch(r"\d+\.\d+\.\d+", version):
@@ -76,14 +78,14 @@ def ubuntu_installer(package: Path, output: Path, manifest: dict, tag: str | Non
             "Maintainer: Zommi contributors <noreply@github.com>\n"
             "Section: utils\nPriority: optional\n"
             f"Installed-Size: {(size + 1023) // 1024}\n"
-            "Depends: libc6 (>= 2.39), libgcc-s1, libstdc++6 (>= 13.2), "
+            f"Depends: libc6 (>= {GLIBC_MINIMUM}), libgcc-s1, libstdc++6 (>= {LIBSTDCXX_MINIMUM}), "
             "libgtk-3-0t64, libglib2.0-0t64, libwebkit2gtk-4.1-0, libayatana-appindicator3-1, "
             "libx11-6, libxext6, libxfixes3, libxrandr2, libxi6, libxtst6, "
             "libegl1, libgl1, libepoxy0, libnotify4, at-spi2-core, libicu74, libssl3t64, libgssapi-krb5-2, zlib1g\n"
             "Recommends: gnome-shell-extension-appindicator\n"
             "Homepage: https://github.com/timctho/zommi\n"
             "Description: Desktop companion for your existing agent\n"
-            " Select screen context and send it to an agent. Ubuntu 24.04 LTS x64.\n",
+            f" Select screen context and send it to an agent. Ubuntu {UBUNTU_VERSION} LTS x64.\n",
             encoding="utf-8")
         # The portable bundle is staged with mkdtemp (0700). A system package
         # must be readable/traversable by normal users after root installs it.

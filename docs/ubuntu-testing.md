@@ -13,6 +13,11 @@ and global-shortcut portals. A headless server or WSL terminal can run automated
 checks, but does not verify Ubuntu's tray, permissions or desktop capture.
 Other Linux distributions are outside the supported scope.
 
+Wayland and X11 are desktop display systems: they coordinate windows, screen
+content and input. Wayland restricts direct access to other apps, so Zommi uses
+desktop portals for screenshots and global shortcuts. Portal support varies by
+desktop version; use Xorg for the currently supported capture experience.
+
 ## Install a release
 
 When an Ubuntu asset is listed in [Releases](https://github.com/timctho/zommi/releases),
@@ -38,7 +43,7 @@ Install the Ubuntu build dependencies:
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libepoxy-dev \
+sudo apt-get install -y binutils clang cmake ninja-build pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libepoxy-dev \
   libayatana-appindicator3-dev libx11-dev libsqlite3-dev python3 python3-venv
 flutter config --enable-linux-desktop
 flutter doctor -v
@@ -64,6 +69,26 @@ python3 scripts/build_installer.py artifacts/zommi-linux-x64 \
 
 The package retains the release version from `src/Zommi.Flutter/pubspec.yaml`;
 no manual tag is needed. Windows release assets cannot run as the Ubuntu app.
+
+## Package compatibility
+
+Release builds require Ubuntu **24.04**, including for local packaging. A newer
+host can use a 24.04 VM or container. Keep the Linux release runner on
+`ubuntu-24.04` while this version is supported.
+
+Package verification uses `readelf` from `binutils` to check every bundled ELF
+binary and shared library. It rejects requirements above `GLIBC_2.39`,
+`GLIBCXX_3.4.32` or `CXXABI_1.3.14`, matching the installer's `libc6 >= 2.39` and
+`libstdc++6 >= 13.2` dependency floors. This catches incompatible prebuilt
+components even on the correct build OS, and still runs with
+`--skip-process-smoke`. It does not replace installed-package startup tests or
+detect every dynamically loaded dependency.
+
+Ubuntu 22.04 and newer Ubuntu releases are not release targets. Before adding a
+future release, check its available package names (especially `libicu74` and
+the `t64` libraries), install and launch the `.deb` in a clean environment, and
+run the desktop checks below. Keep building on 24.04 while supporting it; review
+ABI limits and Debian dependencies together when changing the baseline.
 
 ## Try the desktop flow
 

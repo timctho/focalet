@@ -32,6 +32,11 @@ assemble_release = _load_script("assemble_release")
 
 class ReleasePackageTests(unittest.TestCase):
     def setUp(self) -> None:
+        # Inventory fixtures use text placeholders; native ELF coverage lives in
+        # test_ubuntu_compatibility.py.
+        abi_check = mock.patch.object(verify_release, "verify_ubuntu_abi", return_value={"ubuntu": "24.04"})
+        self.abi_check = abi_check.start()
+        self.addCleanup(abi_check.stop)
         self.temporary = tempfile.TemporaryDirectory(prefix="zommi-release-test-")
         self.root = Path(self.temporary.name)
         (self.root / "zommi").write_text(
@@ -89,6 +94,13 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertEqual(result["entrypoint"], "zommi")
         self.assertEqual(result["captureHost"], "zommi-x11-capture")
         self.assertEqual(result["files"], 5 + len(verify_release.LINUX_RUNTIME_LIBRARIES))
+        self.abi_check.assert_called_once_with(self.root)
+        self.assertEqual(result["ubuntuCompatibility"]["ubuntu"], "24.04")
+
+    def test_skipping_process_smoke_still_rejects_incompatible_ubuntu_binaries(self) -> None:
+        self.abi_check.side_effect = verify_release.UbuntuCompatibilityError("plugin requires GLIBC_2.40")
+        with self.assertRaisesRegex(verify_release.ReleaseValidationError, "GLIBC_2.40"):
+            verify_release.verify_package(self.root, smoke_processes=False)
 
     def test_windows_icon_path_changes_when_icon_bytes_change(self) -> None:
         icon = self.root / "data/flutter_assets/windows/runner/resources/app_icon.ico"
@@ -152,6 +164,7 @@ class ReleasePackageTests(unittest.TestCase):
         self._write_checksums()
         result = verify_release.verify_package(self.root, smoke_processes=False)
         self.assertEqual(result["platform"], "windows")
+        self.abi_check.assert_not_called()
 
         manifest["components"]["windowsReset"] = "owned-profile-reset"
         manifest_path.write_text(json.dumps(manifest))
@@ -583,7 +596,8 @@ class ReleaseAssemblyTests(unittest.TestCase):
                     json.loads((package / "release-manifest.json").read_text())["license"],
                     "Apache-2.0",
                 )
-                verify_release.verify_package(package, smoke_processes=False)
+                with mock.patch.object(verify_release, "verify_ubuntu_abi", return_value={"ubuntu": "24.04"}):
+                    verify_release.verify_package(package, smoke_processes=False)
                 if platform == "windows":
                     with zipfile.ZipFile(archive) as bundle:
                         names = bundle.namelist()
