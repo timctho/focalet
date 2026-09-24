@@ -592,7 +592,6 @@ final class ZommiController extends ChangeNotifier {
             'hermes-acp',
             'opencode-acp',
             'gemini-acp',
-            'antigravity-stream',
             'openclaw-acp',
             'hermes-gateway',
             'openclaw-gateway',

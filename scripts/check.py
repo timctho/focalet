@@ -32,8 +32,6 @@ def isolated_runtime_environment(directory, inherited):
                 "ZOMMI_OPENCLAW_",
                 "ZOMMI_OPENCODE_",
                 "ZOMMI_GEMINI_",
-                "ZOMMI_AGY_",
-                "ZOMMI_ANTIGRAVITY_",
                 "ZOMMI_CLAUDE_",
                 "ZOMMI_FAKE_",
             )

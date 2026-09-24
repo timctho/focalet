@@ -288,10 +288,7 @@ impl HostState {
                 let models = match self.adapters.get_mut(target_id) {
                     Some(adapter)
                         if !self.prepared.contains(target_id)
-                            || matches!(
-                                adapter,
-                                RuntimeAdapter::Acp(_) | RuntimeAdapter::Antigravity(_)
-                            ) =>
+                            || matches!(adapter, RuntimeAdapter::Acp(_)) =>
                     {
                         adapter.refresh_models().await?
                     }

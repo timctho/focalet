@@ -55,14 +55,6 @@ const ACP_CAPABILITY_HINTS: &[&str] = &[
     "model.select.v1",
 ];
 
-pub(crate) const ANTIGRAVITY_CAPABILITIES: &[&str] = &[
-    "session.create.v1",
-    "session.resume.v1",
-    "turn.stream.v1",
-    "turn.interrupt.v1",
-    "model.select.v1",
-];
-
 const HERMES_GATEWAY_CAPABILITY_HINTS: &[&str] = &[
     "session.list.v1",
     "session.create.v1",
@@ -137,15 +129,6 @@ const RUNTIME_CATALOG: &[CatalogEntry] = &[
         protocol_name: "ACP",
         priority: 26,
         capability_hints: ACP_CAPABILITY_HINTS,
-    },
-    CatalogEntry {
-        executable: "agy",
-        runtime_id: "antigravity",
-        adapter_id: "antigravity-stream",
-        display_name: "Antigravity CLI",
-        protocol_name: "Streaming JSON",
-        priority: 27,
-        capability_hints: ANTIGRAVITY_CAPABILITIES,
     },
     CatalogEntry {
         executable: "hermes",
@@ -1056,7 +1039,6 @@ fn resolve_native_command(
             ("APPDATA", "npm"),
             ("LOCALAPPDATA", "Microsoft/WinGet/Links"),
             ("LOCALAPPDATA", "Programs/nodejs"),
-            ("LOCALAPPDATA", "agy/bin"),
             ("USERPROFILE", ".local/bin"),
             ("USERPROFILE", ".bun/bin"),
             ("USERPROFILE", ".opencode/bin"),
@@ -1068,11 +1050,6 @@ fn resolve_native_command(
                 directories.push(root.join(suffix));
             }
         }
-    } else if command == "agy"
-        && let Some(home) = environment.get("HOME")
-    {
-        // A running desktop may predate the installer's shell PATH update.
-        directories.push(PathBuf::from(home).join(".local/bin"));
     }
     let extensions = if platform == "windows" {
         environment
@@ -1405,69 +1382,6 @@ mod tests {
         assert_eq!(
             &command.args[command.args.len() - 2..],
             ["/home/u/bin/gemini", "--acp"]
-        );
-    }
-
-    #[test]
-    fn antigravity_discovery_uses_native_cli_and_windows_install_directory() {
-        for platform in ["linux", "macos", "windows"] {
-            let targets = discover_runtime_targets_with(
-                &HashMap::from([
-                    ("ZOMMI_AGY_COMMAND".into(), "/test/agy".into()),
-                    (
-                        "ZOMMI_RUNTIME_DISCOVERY_MODE".into(),
-                        "configured-only".into(),
-                    ),
-                ]),
-                platform,
-            );
-            assert_eq!(targets.len(), 1);
-            assert_eq!(targets[0].runtime_id, "antigravity");
-            assert_eq!(targets[0].adapter_id, "antigravity-stream");
-            assert!(
-                !targets[0]
-                    .capability_hints
-                    .iter()
-                    .any(|c| c == "input.image.v1")
-            );
-        }
-        let root = std::env::temp_dir().join(format!("zommi-agy-{}", uuid::Uuid::new_v4()));
-        let directory = root.join("agy/bin");
-        fs::create_dir_all(&directory).unwrap();
-        fs::write(directory.join("agy.exe"), "fixture").unwrap();
-        let targets = super::discover_runtime_targets_with_status(
-            &HashMap::from([("LOCALAPPDATA".into(), root.to_string_lossy().into_owned())]),
-            "windows",
-            false,
-        )
-        .0;
-        assert_eq!(targets.len(), 1);
-        assert_eq!(targets[0].adapter_id, "antigravity-stream");
-        let unix_directory = root.join(".local/bin");
-        fs::create_dir_all(&unix_directory).unwrap();
-        fs::write(unix_directory.join("agy"), "fixture").unwrap();
-        for platform in ["linux", "macos"] {
-            let targets = super::discover_runtime_targets_with_status(
-                &HashMap::from([("HOME".into(), root.to_string_lossy().into_owned())]),
-                platform,
-                false,
-            )
-            .0;
-            assert_eq!(targets.len(), 1);
-            assert_eq!(targets[0].adapter_id, "antigravity-stream");
-        }
-        fs::remove_dir_all(root).unwrap();
-
-        let targets = runtime_targets_from_wsl_probe(
-            "Ubuntu",
-            true,
-            b"__ZOMMI_RUNTIME_HOME__/home/u\n__ZOMMI_RUNTIME_PATH__agy\t/home/u/.local/bin/agy\n",
-        );
-        assert_eq!(targets.len(), 1);
-        assert_eq!(targets[0].adapter_id, "antigravity-stream");
-        assert_eq!(
-            command_for_target(&targets[0]).args.last().unwrap(),
-            "/home/u/.local/bin/agy"
         );
     }
 
