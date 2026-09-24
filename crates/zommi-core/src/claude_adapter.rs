@@ -493,6 +493,7 @@ impl Inner {
             }
         }
         let mut command = Command::new(&launch.command);
+        self.target.apply_launch_environment(&mut command);
         command.args(&launch.args).args([
             if resume.is_some() {
                 "--resume"

@@ -983,6 +983,7 @@ mod tests {
             priority: 10,
             capability_hints: Vec::new(),
             runtime_home: Some("/home/u".into()),
+            launch_path: None,
             source: None,
             endpoint: None,
             profile_id: None,

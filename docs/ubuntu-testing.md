@@ -120,7 +120,9 @@ conversation; the automated checks below use fake agents instead.
    send a message. After signing in or changing providers, use **Refresh agents**
    and check the model list.
 2. Open a native Wayland app. Press **Alt+A** or choose **Select** in Zommi,
-   then authorize the monitors to share. Select several regions, draw, undo/redo
+   then authorize the monitors to share with **Remember this selection** enabled.
+   Confirm later captures and a restarted app reuse the grant without another
+   Share prompt. Select several regions, draw, undo/redo
    and press **Enter**. Verify original pixels, text, values and checkbox states
    match the selected source; password, hidden and outside-region content must
    not be included. Supported Chromium browsers can add DOM through an authorized
@@ -132,6 +134,8 @@ conversation; the automated checks below use fake agents instead.
    fractional scaling, multiple monitors, negative monitor origins and rotation.
    Disable/re-enable the GNOME extension and stop screen sharing during selection;
    recovery must not lose the chat or draft.
+   Check all four window corners, and verify capture/Cancel returns to a painted
+   chat at the original size, without a white or black surface.
 
 3. Type an unsent draft, close with **X**, and reopen from the tray. Check that
    the chat and draft remain. Choose **Quit** to exit. Ubuntu's AppIndicator

@@ -275,6 +275,7 @@ impl CodexAdapter {
                 .map_err(|error| CodexError::new("invalid-configuration", error.to_string()))?;
         }
         let mut command = Command::new(&config.command.command);
+        config.target.apply_launch_environment(&mut command);
         if config.target.execution_host.kind != "wsl"
             && let Some(home) = &pinned_home
         {

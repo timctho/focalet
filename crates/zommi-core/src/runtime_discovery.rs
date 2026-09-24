@@ -195,6 +195,9 @@ pub struct RuntimeTarget {
     pub capability_hints: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_home: Option<String>,
+    // Keep interpreter lookup consistent with the shell that resolved the CLI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -208,6 +211,16 @@ pub struct RuntimeCommand {
     pub command: String,
     pub args: Vec<String>,
     pub working_directory: Option<String>,
+}
+
+impl RuntimeTarget {
+    pub(crate) fn apply_launch_environment(&self, command: &mut tokio::process::Command) {
+        if self.execution_host.kind == "native"
+            && let Some(path) = &self.launch_path
+        {
+            command.env("PATH", path);
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -408,7 +421,19 @@ fn valid_cached_wsl_target(target: &RuntimeTarget) -> bool {
 }
 
 pub fn discover_runtime_targets() -> Vec<RuntimeTarget> {
-    discover_runtime_targets_with(&env::vars().collect(), env::consts::OS)
+    discover_runtime_targets_with(&discovery_environment(), env::consts::OS)
+}
+
+fn discovery_environment() -> HashMap<String, String> {
+    #[allow(unused_mut)] // Only Unix desktop launchers need the account shell.
+    let mut environment: HashMap<_, _> = env::vars().collect();
+    #[cfg(unix)]
+    if !environment.contains_key("SHELL")
+        && let Some(shell) = crate::native_runtime_probe::default_shell()
+    {
+        environment.insert("SHELL".into(), shell);
+    }
+    environment
 }
 
 pub fn discover_runtime_targets_with_overrides(
@@ -429,7 +454,7 @@ pub fn discover_runtime_targets_resilient_with_overrides(
     probe_wsl: bool,
 ) -> RuntimeDiscoveryOutcome {
     discover_runtime_targets_resilient_with(
-        &env::vars().collect(),
+        &discovery_environment(),
         env::consts::OS,
         overrides,
         cache,
@@ -632,6 +657,18 @@ fn discover_runtime_targets_with_status(
         .get("ZOMMI_RUNTIME_DISCOVERY_MODE")
         .is_some_and(|mode| mode == "configured-only");
     let mut targets = Vec::new();
+    let shell_runtimes = if !configured_only && platform == env::consts::OS && platform != "windows"
+    {
+        let mut names: Vec<_> = RUNTIME_CATALOG
+            .iter()
+            .map(|entry| entry.executable)
+            .collect();
+        names.sort_unstable();
+        names.dedup();
+        crate::native_runtime_probe::discover(environment, &names)
+    } else {
+        crate::native_runtime_probe::ShellRuntimes::default()
+    };
     let native_host = ExecutionHost {
         id: format!("native:{platform}"),
         kind: "native".into(),
@@ -662,16 +699,24 @@ fn discover_runtime_targets_with_status(
                 Some("configured"),
             ));
         } else if !configured_only
-            && let Some(executable) =
-                resolve_native_command(entry.executable, environment, platform)
+            && let Some(executable) = shell_runtimes
+                .executables
+                .get(entry.executable)
+                .cloned()
+                .or_else(|| resolve_native_command(entry.executable, environment, platform))
         {
-            targets.push(target_for(
+            let mut target = target_for(
                 &native_host,
                 &executable.to_string_lossy(),
                 entry,
                 environment.get("HOME").map(String::as_str),
-                None,
-            ));
+                shell_runtimes
+                    .executables
+                    .contains_key(entry.executable)
+                    .then_some("login-shell"),
+            );
+            target.launch_path = shell_runtimes.path.clone();
+            targets.push(target);
         }
     }
 
@@ -1114,6 +1159,7 @@ fn target_for(
         runtime_home: runtime_home
             .filter(|value| !value.is_empty())
             .map(str::to_owned),
+        launch_path: None,
         source: source.map(str::to_owned),
         endpoint: None,
         profile_id: None,
@@ -1149,6 +1195,7 @@ fn openclaw_gateway_target(
             .map(|value| (*value).into())
             .collect(),
         runtime_home: None,
+        launch_path: None,
         source: Some("configured".into()),
         endpoint: Some(endpoint),
         profile_id,
@@ -1237,6 +1284,68 @@ mod tests {
         runtime_targets_from_wsl_probe, select_default_target, target_from_override,
         wsl_runtime_probe_script,
     };
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn desktop_discovery_uses_shell_path_and_launches_env_interpreters() {
+        use std::os::unix::fs::PermissionsExt;
+        let root =
+            std::env::temp_dir().join(format!("zommi-shell-discovery-{}", uuid::Uuid::new_v4()));
+        let bin = root.join("CLI tools ; literal");
+        fs::create_dir_all(&bin).unwrap();
+        let executable = |path: &std::path::Path, content: &str| {
+            fs::write(path, content).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        let shell = root.join("bash");
+        executable(
+            &shell,
+            "#!/bin/sh\nprintf 'startup banner\\n'\nexport PATH=\"$FIXTURE_BIN:/usr/bin:/bin\"\nexec /bin/sh -c \"$2\"\n",
+        );
+        executable(&bin.join("codex"), "#!/usr/bin/env fixture-node\n");
+        executable(
+            &bin.join("fixture-node"),
+            "#!/bin/sh\nprintf 'interpreter-ready\\n'\n",
+        );
+        let mut environment = HashMap::from([
+            ("SHELL".into(), shell.to_string_lossy().into_owned()),
+            ("FIXTURE_BIN".into(), bin.to_string_lossy().into_owned()),
+            ("HOME".into(), root.to_string_lossy().into_owned()),
+            ("PATH".into(), "/usr/bin:/bin".into()),
+        ]);
+        let targets = discover_runtime_targets_with(&environment, std::env::consts::OS);
+        let target = targets
+            .iter()
+            .find(|target| target.adapter_id == "codex-app-server")
+            .unwrap();
+        assert_eq!(target.executable_path, bin.join("codex").to_string_lossy());
+        assert_eq!(target.source.as_deref(), Some("login-shell"));
+        let launch = command_for_target(target);
+        let mut command = tokio::process::Command::new(&launch.command);
+        command.args(&launch.args).env_clear().envs(&environment);
+        target.apply_launch_environment(&mut command);
+        let result = command.output().await.unwrap();
+        assert!(result.status.success());
+        assert_eq!(result.stdout, b"interpreter-ready\n");
+
+        executable(&bin.join("gemini"), "#!/bin/sh\nexit 0\n");
+        let refreshed = discover_runtime_targets_with(&environment, std::env::consts::OS);
+        assert!(
+            refreshed
+                .iter()
+                .any(|target| target.executable_path == bin.join("gemini").to_string_lossy())
+        );
+        assert_eq!(
+            refreshed.iter().find(|t| t.id == target.id).unwrap().id,
+            target.id
+        );
+        environment.insert(
+            "ZOMMI_RUNTIME_DISCOVERY_MODE".into(),
+            "configured-only".into(),
+        );
+        assert!(discover_runtime_targets_with(&environment, std::env::consts::OS).is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn runtime_children_drop_parent_namespaces_but_keep_agent_configuration() {
@@ -1532,6 +1641,7 @@ mod tests {
             priority: 10,
             capability_hints: Vec::new(),
             runtime_home: None,
+            launch_path: None,
             source: None,
             endpoint: None,
             profile_id: None,
@@ -1564,6 +1674,7 @@ mod tests {
             priority: 10,
             capability_hints: Vec::new(),
             runtime_home: Some("/home/u".into()),
+            launch_path: None,
             source: None,
             endpoint: None,
             profile_id: None,
@@ -1805,6 +1916,7 @@ mod tests {
             priority: 10,
             capability_hints: Vec::new(),
             runtime_home: Some("/home/u".into()),
+            launch_path: None,
             source: None,
             endpoint: None,
             profile_id: None,
