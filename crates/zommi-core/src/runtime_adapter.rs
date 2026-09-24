@@ -59,9 +59,10 @@ impl RuntimeAdapter {
         &self,
         session_id: Option<String>,
         cwd: Option<&str>,
+        full_access: bool,
     ) -> Result<Value, CodexError> {
         match self {
-            Self::Codex(adapter) => adapter.activate(session_id, cwd).await?,
+            Self::Codex(adapter) => adapter.activate(session_id, cwd, full_access).await?,
             Self::Acp(adapter) => adapter.activate(session_id.as_deref(), cwd).await?,
             Self::Claude(adapter) => adapter.activate(session_id.as_deref(), cwd).await?,
             Self::HermesGateway(adapter) => adapter.activate(session_id, cwd).await?,
@@ -299,13 +300,14 @@ impl RuntimeAdapter {
         effort: Option<&str>,
         cwd: Option<&str>,
         profile: Option<&str>,
+        full_access: bool,
     ) -> Result<Value, CodexError> {
         match self {
             Self::Codex(adapter) => {
                 let connection = adapter
                     .ready()
                     .await?
-                    .create_session(model, effort, cwd)
+                    .create_session(model, effort, cwd, full_access)
                     .await?;
                 adapter.ensure_monitor().await;
                 serde_json::to_value(connection).map_err(|error| CodexError {
