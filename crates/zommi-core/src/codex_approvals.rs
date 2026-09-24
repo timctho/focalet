@@ -35,6 +35,7 @@ fn normalize(method: &str, params: &Value, rpc_id: Value) -> Option<(PendingAppr
         choices.push((id.to_owned(), result));
         options.push(json!({"optionId":id,"name":name,"kind":kind}));
     };
+    let mut has_reject = false;
     let denied = if permissions {
         // Grant exactly the requested profile, never a broader inferred scope.
         let requested = params.get("permissions")?.as_object()?;
@@ -56,6 +57,46 @@ fn normalize(method: &str, params: &Value, rpc_id: Value) -> Option<(PendingAppr
             json!({"permissions":profile,"scope":"session"}),
         );
         json!({"permissions":{},"scope":"turn"})
+    } else if let Some(available) = params
+        .get("availableDecisions")
+        .and_then(Value::as_array)
+        .filter(|_| !legacy)
+    {
+        for (index, decision) in available.iter().enumerate() {
+            let (name, kind) = match decision.as_str() {
+                Some("accept") => ("Allow once".to_owned(), "allow_once"),
+                Some("acceptForSession") => ("Allow for this session".to_owned(), "allow_always"),
+                Some("decline") => ("Deny".to_owned(), "reject_once"),
+                Some("cancel") => ("Deny and stop".to_owned(), "reject_once"),
+                _ if decision.get("acceptWithExecpolicyAmendment").is_some() => {
+                    ("Always allow this command rule".to_owned(), "allow_always")
+                }
+                _ if decision.get("applyNetworkPolicyAmendment").is_some() => {
+                    let rule = &decision["applyNetworkPolicyAmendment"]["network_policy_amendment"];
+                    let host = rule["host"].as_str().unwrap_or("this host");
+                    match rule["action"].as_str() {
+                        Some("allow") => (
+                            format!("Always allow network access to {host}"),
+                            "allow_always",
+                        ),
+                        Some("deny") => {
+                            (format!("Block network access to {host}"), "reject_always")
+                        }
+                        _ => continue,
+                    }
+                }
+                _ => continue,
+            };
+            has_reject |= kind.starts_with("reject");
+            add(
+                &format!("decision-{index}"),
+                &name,
+                kind,
+                json!({"decision":decision}),
+            );
+        }
+        // Closing/expiring a prompt must never persist an allow or deny rule.
+        json!({"decision": if available.iter().any(|value| value == "decline") { "decline" } else { "cancel" }})
     } else {
         add(
             "allow_once",
@@ -71,12 +112,14 @@ fn normalize(method: &str, params: &Value, rpc_id: Value) -> Option<(PendingAppr
         );
         json!({"decision":if legacy { "abort" } else { "decline" }})
     };
-    add(
-        "reject_once",
-        if legacy { "Deny and stop" } else { "Deny" },
-        "reject_once",
-        denied.clone(),
-    );
+    if !has_reject {
+        add(
+            "reject_once",
+            if legacy { "Deny and stop" } else { "Deny" },
+            "reject_once",
+            denied.clone(),
+        );
+    }
     let mut detail = params.clone();
     if let Some(object) = detail.as_object_mut() {
         for key in [
@@ -295,6 +338,41 @@ mod tests {
         assert_eq!(pending.denied, json!({"permissions":{},"scope":"turn"}));
         assert!(normalize("item/fileChange/requestApproval", &json!({}), json!(1)).is_none());
     }
+    #[test]
+    fn restricted_decisions_do_not_offer_unavailable_permissions() {
+        let rule =
+            json!({"acceptWithExecpolicyAmendment":{"execpolicy_amendment":["git", "status"]}});
+        let (pending, event) = normalize(
+            "item/commandExecution/requestApproval",
+            &json!({"threadId":"chat", "availableDecisions":[rule, "decline"]}),
+            json!(2),
+        )
+        .unwrap();
+        assert_eq!(pending.choices.len(), 2);
+        assert_eq!(pending.choices[0].1, json!({"decision":rule}));
+        assert_eq!(pending.denied, json!({"decision":"decline"}));
+        assert_eq!(
+            event["options"][0]["name"],
+            "Always allow this command rule"
+        );
+        assert!(
+            !pending
+                .choices
+                .iter()
+                .any(|(_, value)| value["decision"] == "acceptForSession")
+        );
+        let (pending, _) = normalize(
+            "item/commandExecution/requestApproval",
+            &json!({"threadId":"chat", "availableDecisions":[]}),
+            json!(3),
+        )
+        .unwrap();
+        assert_eq!(
+            pending.choices,
+            vec![("reject_once".into(), json!({"decision":"cancel"}))]
+        );
+    }
+
     #[tokio::test]
     async fn timeout_denies_on_the_wire_and_clears_the_prompt() {
         let root = std::env::temp_dir().join(format!("zommi-approval-{}", uuid::Uuid::new_v4()));
