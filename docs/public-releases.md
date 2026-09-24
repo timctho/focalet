@@ -99,8 +99,10 @@ creating an installer. Installers are unsigned by this
 workflow; Mac apps use ad-hoc signing and DMGs are not notarized. Ubuntu runs an
 installed-package X11 check in a virtual display and removes the package;
 Windows runs packaged non-visual capture checks; Mac verifies selection geometry
-and the mounted DMG. These checks do not replace real desktop acceptance of tray
-menus, OS permissions, or agent sign-in.
+and the mounted DMG. Ubuntu's Xvfb checks cover its X11 compatibility path;
+release acceptance for the primary Wayland target also needs the
+[GNOME desktop checks](ubuntu-testing.md#try-the-desktop-flow). These checks do
+not replace real desktop acceptance of tray menus, OS permissions, or agent sign-in.
 
 Each selected platform must succeed. Missing platforms, mixed source revisions,
 incorrect Ubuntu package versions and changed installer hashes stop publication.

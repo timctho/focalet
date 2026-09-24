@@ -1,22 +1,28 @@
 # Build and test on Ubuntu
 
-The Linux target is **Ubuntu 24.04 LTS x64**. Use a desktop installation or a VM
-with a graphical session. At the login screen, select your user, open the gear
-menu and choose **Ubuntu on Xorg**. Confirm the session with:
+The primary Linux target is **Ubuntu 24.04 LTS x64** with its default **Wayland**
+desktop. Use a desktop installation or a VM with a graphical session. Confirm
+the session with:
 
 ```sh
 echo "$XDG_SESSION_TYPE"
 ```
 
-Start with `x11`. Wayland is experimental and depends on the desktop's screenshot
-and global-shortcut portals. A headless server or WSL terminal can run automated
-checks, but does not verify Ubuntu's tray, permissions or desktop capture.
-Other Linux distributions are outside the supported scope.
+Use `wayland` for primary desktop acceptance. If a machine starts an X11 session,
+choose a Wayland session at the login screen on a supported graphics setup.
+**Ubuntu on Xorg** remains a compatibility test configuration. A headless server
+or WSL terminal can run automated checks, but does not verify Ubuntu's tray,
+permissions or desktop capture. Other Linux distributions are outside the
+supported scope.
 
 Wayland and X11 are desktop display systems: they coordinate windows, screen
 content and input. Wayland restricts direct access to other apps, so Zommi uses
 desktop portals for screenshots and global shortcuts. Portal support varies by
-desktop version; use Xorg for the currently supported capture experience.
+desktop version. Ubuntu 24.04 uses GNOME 46, while GNOME's global-shortcut portal
+backend was [introduced in GNOME 48](https://gitlab.gnome.org/GNOME/xdg-desktop-portal-gnome/-/blob/48.0/NEWS).
+Zommi currently relies on that portal for Wayland Alt+A, so use **Select** in the
+app on stock Ubuntu 24.04. Shortcut integration for GNOME 46 and aligned
+DOM/accessibility capture remain gaps in the primary target.
 
 ## Install a release
 
@@ -114,16 +120,17 @@ conversation; the automated checks below use fake agents instead.
 1. In **Welcome to Zommi**, confirm the installed agent appears, connect, and
    send a message. After signing in or changing providers, use **Refresh agents**
    and check the model list.
-2. Open another app. Press **Alt+A**, drag a region, and confirm the attachment
-   matches it. Add several regions, draw with pen/arrow/shape/highlighter, undo
-   and redo, then press **Enter** to attach the batch. Press **Escape** to cancel.
-   On X11, accessible apps supply AT-SPI text, roles, values, states and bounds.
-   Supported Chromium browsers can also supply DOM through an authorized CDP
-   connection (see [browser context](browser-context.md)). UIA is Windows-specific;
-   AT-SPI is the Ubuntu equivalent. Change the selected content while the editor
-   is open: the original image and drawings should remain, with **Image only**
-   instead of newer context. Wayland portal captures support cropping and drawing,
-   but do not provide the screen origin needed for aligned DOM/accessibility.
+2. Open another app, including a native Wayland app. In Zommi, choose **Select**
+   and complete the desktop screenshot prompt. Confirm the captured pixels match
+   the source, then select several regions, draw with pen/arrow/shape/highlighter,
+   undo and redo, and press **Enter** to attach the batch. Press **Escape** to
+   cancel the editor. These portal captures should be **Image only**: the portal
+   does not provide the screen origin needed for aligned DOM/accessibility.
+   Test with display scaling and multiple monitors when available.
+   Cancel the desktop screenshot prompt too, then retry **Select**; the app and
+   draft must remain usable. Check permission-denial recovery where the desktop
+   offers that choice. A test using only XWayland apps does not cover native
+   Wayland sources.
 
 3. Type an unsent draft, close with **X**, and reopen from the tray. Check that
    the chat and draft remain. Choose **Quit** to exit. Ubuntu's AppIndicator
@@ -131,6 +138,18 @@ conversation; the automated checks below use fake agents instead.
 4. Restart with the same test directories and check the saved session. Then
    test an unavailable agent: connection failure should release the controls and
    offer recovery without losing the draft.
+
+### X11 compatibility checks
+
+At the login screen, choose **Ubuntu on Xorg** and confirm `XDG_SESSION_TYPE=x11`.
+Test agent connection, region selection/drawing, tray behavior and recovery;
+use **Alt+A** to start selection. Accessible apps can supply AT-SPI
+text, roles, values, states and bounds; supported Chromium browsers can also
+supply DOM through an authorized CDP connection (see
+[browser context](browser-context.md)). UIA is Windows-specific; AT-SPI is the
+Ubuntu equivalent. Change the source content while the editor is open: the
+original image and drawings should remain, with **Image only** instead of newer
+context when alignment is no longer reliable.
 
 ## Automated checks
 
@@ -158,10 +177,11 @@ xvfb-run -a -s "-screen 0 1280x960x24 +extension GLX +render -noreset" \
   python3 scripts/accept-linux-x11.py artifacts/zommi-linux-x64
 ```
 
-The script creates temporary Zommi configuration and state. Passing this check
-does not verify the real GNOME tray or Wayland portal prompts; use the desktop
-steps above for those. When reporting a problem, include the source revision,
-Ubuntu version, X11/Wayland session and the failing step.
+The script creates temporary Zommi configuration and state. These Xvfb checks
+exercise the X11 compatibility path. Primary Wayland acceptance still requires
+the GNOME desktop steps above, including portal prompts, native Wayland source
+apps and cancellation/retry. When reporting a problem, include the source
+revision, Ubuntu version, X11/Wayland session and the failing step.
 
 The native AT-SPI regression uses only a synthetic GTK window on a private X11
 and D-Bus session. Install `xvfb dbus-x11 at-spi2-core openbox`, then run:

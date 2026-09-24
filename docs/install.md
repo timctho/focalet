@@ -31,15 +31,20 @@ After checking the release source and checksum, Windows may require
 **More info → Run anyway**. On Mac, use
 **System Settings → Privacy & Security → Open Anyway** for a trusted download.
 
-On Linux, Zommi targets **Ubuntu 24.04 LTS x64** with **Ubuntu on Xorg**.
+On Linux, Zommi's primary target is **Ubuntu 24.04 LTS x64** with its default
+**Wayland** desktop session.
 Install the `.deb` when it is listed in the selected release; `apt` also installs
 its dependencies. You can use `sudo dpkg -i Zommi-Ubuntu-amd64.deb`, then
 `sudo apt-get -f install` if dependencies are missing. Open **Zommi** from the app
 menu or run `zommi`. Follow the [Ubuntu testing guide](ubuntu-testing.md) to test
 the installer or build it from source.
-Wayland is experimental: capture needs a screenshot portal and Alt+A also
-needs a compatible global-shortcut portal. Other distributions are outside
-the supported scope.
+On Wayland, use **Select** in Zommi, complete the desktop screenshot prompt,
+then select regions and draw in the captured image. Ubuntu 24.04's GNOME 46
+does not provide the global-shortcut portal that Zommi currently uses for
+Alt+A, so that shortcut is unavailable on the stock Wayland desktop. Aligned
+DOM/accessibility capture is also still a gap; these captures attach images.
+**Ubuntu on Xorg** remains a compatibility option with Alt+A and aligned
+AT-SPI/browser capture. Other distributions are outside the supported scope.
 
 ## 2. Choose the agent you already have
 
