@@ -87,10 +87,11 @@ policies apply. [Capture controls and limitations](docs/browser-context.md)
 | --- | --- | --- |
 | **Windows 10/11 · x64** | Preview installer | Multiple regions, drawing, accessibility and optional browser context |
 | **macOS 12+ · Apple Silicon / Intel** | `.dmg` when listed in a release | Multiple regions, drawing, native Accessibility and optional browser context |
-| **Ubuntu 24.04 LTS · x64 · X11** | `.deb` when listed in a release; [install and test](docs/ubuntu-testing.md) | Multiple regions, drawing, AT-SPI and optional browser context |
-| **Ubuntu 24.04 LTS · x64 · Wayland** | Experimental; requires compatible desktop portals | Portal images and drawing; no aligned DOM/accessibility; shortcuts depend on the desktop |
+| **Ubuntu 24.04 LTS · x64 · Wayland** | Primary Linux target; integration in progress; [install and test](docs/ubuntu-testing.md) | Portal images, multiple regions and drawing; use **Select** on stock GNOME 46; aligned DOM/accessibility and global Alt+A remain gaps |
+| **Ubuntu 24.04 LTS · x64 · X11** | Compatibility option; `.deb` when listed in a release | Multiple regions, drawing, AT-SPI and optional browser context |
 
-Linux support is limited to Ubuntu. Start with **Ubuntu on Xorg** for desktop testing.
+Linux support is limited to Ubuntu 24.04. Use its default **Wayland** session for
+primary desktop testing; **Ubuntu on Xorg** remains a compatibility option.
 
 [Releases](https://github.com/timctho/zommi/releases) ·
 [Installation and permissions](docs/install.md) ·
