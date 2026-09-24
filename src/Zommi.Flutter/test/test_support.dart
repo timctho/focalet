@@ -206,9 +206,9 @@ class RichFakeCore
     RuntimeTarget(
       id: 'runtime-claude',
       runtimeId: 'claude',
-      adapterId: 'pty-compatibility',
-      displayName: 'Claude CLI',
-      protocolName: 'Terminal compatibility',
+      adapterId: 'claude-stream-json',
+      displayName: 'Claude Code',
+      protocolName: 'Stream JSON',
       executablePath: '/usr/bin/claude',
       executionHost: {
         'id': 'native:linux',
@@ -388,12 +388,18 @@ class RichFakeCore
         protocolVersion: 1,
         runtimeVersion: '9.8.7',
         history: history,
-        models:
-            modelCatalogByRuntime[activeTargetId] ??
-            (activeTargetId == 'runtime-claude' ? const [] : models),
+        models: modelCatalogByRuntime[activeTargetId] ?? models,
         sessions: _sessions(),
         capabilities: activeTargetId == 'runtime-claude'
-            ? const ['turn.stream.v1']
+            ? const [
+                'turn.stream.v1',
+                'turn.interrupt.v1',
+                'input.image.v1',
+                'model.select.v1',
+                'session.create.v1',
+                'session.resume.v1',
+                'approval.resolve.v1',
+              ]
             : capabilities,
         sessionMetadata: activeTargetId == 'runtime-hermes'
             ? const {

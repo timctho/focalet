@@ -5,13 +5,13 @@ use serde_json::Value;
 use crate::{
     RuntimeCommand, RuntimeTarget,
     acp_adapter::{AcpAdapter, AcpConfig, AcpTurnRequest},
+    claude_adapter::ClaudeAdapter,
     codex_adapter::{CodexConfig, CodexError, CodexTurnRequest, EventSender, TurnReceipt},
     hermes_gateway_adapter::{HermesGatewayAdapter, HermesGatewayConfig, HermesGatewayTurnRequest},
     openclaw_gateway_adapter::{
         OpenClawGatewayAdapter, OpenClawGatewayConfig, OpenClawGatewayTurnRequest,
     },
     pi_adapter::{PiAdapter, PiConfig, PiTurnRequest},
-    pty_adapter::{PtyAdapter, PtyConfig, PtyTurnRequest},
     supervised_codex::SupervisedCodex,
 };
 
@@ -32,10 +32,10 @@ pub struct AdapterTurnRequest<'a> {
 pub enum RuntimeAdapter {
     Codex(SupervisedCodex),
     Acp(AcpAdapter),
+    Claude(ClaudeAdapter),
     HermesGateway(HermesGatewayAdapter),
     OpenClawGateway(OpenClawGatewayAdapter),
     Pi(PiAdapter),
-    Pty(PtyAdapter),
 }
 
 impl RuntimeAdapter {
@@ -46,6 +46,7 @@ impl RuntimeAdapter {
                 | "hermes-acp"
                 | "opencode-acp"
                 | "gemini-acp"
+                | "claude-stream-json"
                 | "openclaw-acp"
                 | "hermes-gateway"
                 | "openclaw-gateway"
@@ -62,6 +63,7 @@ impl RuntimeAdapter {
         match self {
             Self::Codex(adapter) => adapter.activate(session_id, cwd).await?,
             Self::Acp(adapter) => adapter.activate(session_id.as_deref(), cwd).await?,
+            Self::Claude(adapter) => adapter.activate(session_id.as_deref(), cwd).await?,
             Self::HermesGateway(adapter) => adapter.activate(session_id, cwd).await?,
             Self::OpenClawGateway(adapter) => adapter.activate(session_id).await?,
             _ => {
@@ -107,6 +109,7 @@ impl RuntimeAdapter {
                 | "hermes-acp"
                 | "opencode-acp"
                 | "gemini-acp"
+                | "claude-stream-json"
                 | "openclaw-acp"
                 | "openclaw-gateway"
         ) {
@@ -177,6 +180,17 @@ impl RuntimeAdapter {
                 )
                 .await?,
             )),
+            "claude-stream-json" => Ok(Self::Claude(
+                ClaudeAdapter::connect(
+                    target,
+                    command,
+                    cwd,
+                    preferred_session_id,
+                    event_tx,
+                    list_only,
+                )
+                .await?,
+            )),
             "pi-rpc" => Ok(Self::Pi(
                 PiAdapter::connect(
                     PiConfig {
@@ -185,17 +199,6 @@ impl RuntimeAdapter {
                         cwd,
                         preferred_session_id,
                         preferred_session_file,
-                    },
-                    event_tx,
-                )
-                .await?,
-            )),
-            "pty-compatibility" => Ok(Self::Pty(
-                PtyAdapter::connect(
-                    PtyConfig {
-                        target,
-                        command,
-                        cwd,
                     },
                     event_tx,
                 )
@@ -213,10 +216,10 @@ impl RuntimeAdapter {
         match self {
             Self::Codex(adapter) => adapter.target_id(),
             Self::Acp(adapter) => adapter.target_id(),
+            Self::Claude(adapter) => adapter.target_id(),
             Self::HermesGateway(adapter) => adapter.target_id(),
             Self::OpenClawGateway(adapter) => adapter.target_id(),
             Self::Pi(adapter) => adapter.target_id(),
-            Self::Pty(adapter) => adapter.target_id(),
         }
     }
 
@@ -224,10 +227,10 @@ impl RuntimeAdapter {
         match self {
             Self::Codex(adapter) => adapter.is_running().await,
             Self::Acp(adapter) => adapter.is_running().await,
+            Self::Claude(adapter) => adapter.is_running().await,
             Self::HermesGateway(adapter) => adapter.is_running().await,
             Self::OpenClawGateway(adapter) => adapter.is_running().await,
             Self::Pi(adapter) => adapter.is_running().await,
-            Self::Pty(_) => true,
         }
     }
 
@@ -235,10 +238,10 @@ impl RuntimeAdapter {
         match self {
             Self::Codex(adapter) => adapter.ready().await?.active_session_id().await,
             Self::Acp(adapter) => adapter.active_session_id().await,
+            Self::Claude(adapter) => adapter.active_session_id().await,
             Self::HermesGateway(adapter) => adapter.active_session_id().await,
             Self::OpenClawGateway(adapter) => adapter.active_session_id().await,
             Self::Pi(adapter) => adapter.active_session_id().await,
-            Self::Pty(adapter) => Ok(adapter.active_session_id()),
         }
     }
 
@@ -254,10 +257,10 @@ impl RuntimeAdapter {
                 })
             }
             Self::Acp(adapter) => adapter.connection_value().await,
+            Self::Claude(adapter) => adapter.connection_value().await,
             Self::HermesGateway(adapter) => adapter.connection_value().await,
             Self::OpenClawGateway(adapter) => adapter.connection_value().await,
             Self::Pi(adapter) => adapter.connection_value().await,
-            Self::Pty(adapter) => Ok(adapter.connection_value().await),
         }
     }
 
@@ -272,9 +275,9 @@ impl RuntimeAdapter {
                 return Ok(models);
             }
             Self::Pi(adapter) => adapter.refresh_models().await?,
+            Self::Claude(adapter) => adapter.refresh_models().await?,
             Self::HermesGateway(adapter) => adapter.reload_models().await?,
             Self::OpenClawGateway(adapter) => adapter.reload_models().await?,
-            Self::Pty(_) => return Ok(None),
         };
         Ok(Some(models))
     }
@@ -283,17 +286,10 @@ impl RuntimeAdapter {
         match self {
             Self::Codex(adapter) => adapter.ready().await?.list_sessions().await,
             Self::Acp(adapter) => adapter.list_sessions().await,
+            Self::Claude(adapter) => Ok(adapter.list_sessions().await),
             Self::HermesGateway(adapter) => adapter.list_sessions().await,
             Self::OpenClawGateway(adapter) => adapter.list_sessions().await,
             Self::Pi(adapter) => adapter.list_sessions().await,
-            Self::Pty(adapter) => {
-                let connection = adapter.connection_value().await;
-                Ok(connection
-                    .get("sessions")
-                    .and_then(Value::as_array)
-                    .cloned()
-                    .unwrap_or_default())
-            }
         }
     }
 
@@ -319,17 +315,12 @@ impl RuntimeAdapter {
                 })
             }
             Self::Acp(adapter) => adapter.create_session(model).await,
+            Self::Claude(adapter) => adapter.create_session(model, cwd).await,
             Self::HermesGateway(adapter) => {
                 adapter.create_session(model, effort, cwd, profile).await
             }
             Self::OpenClawGateway(adapter) => adapter.create_session(model, effort).await,
             Self::Pi(adapter) => adapter.create_session(model, effort).await,
-            Self::Pty(_) => Err(CodexError {
-                code: "capability-unavailable".into(),
-                message: "Terminal compatibility creates a new session only by reconnecting."
-                    .into(),
-                retryable: false,
-            }),
         }
     }
 
@@ -417,14 +408,10 @@ impl RuntimeAdapter {
                     })
             }
             Self::Acp(adapter) => adapter.open_session(session_id).await,
+            Self::Claude(adapter) => adapter.open_session(session_id, cwd).await,
             Self::HermesGateway(adapter) => adapter.open_session(session_id, profile).await,
             Self::OpenClawGateway(adapter) => adapter.open_session(session_id).await,
             Self::Pi(adapter) => adapter.open_session(session_id, cwd).await,
-            Self::Pty(_) => Err(CodexError {
-                code: "capability-unavailable".into(),
-                message: "Terminal compatibility does not provide canonical session resume.".into(),
-                retryable: false,
-            }),
         }
     }
 
@@ -466,10 +453,16 @@ impl RuntimeAdapter {
         match self {
             Self::Codex(adapter) => adapter.ready().await?.read_session(session_id).await,
             Self::Acp(adapter) => adapter.read_session(session_id).await,
+            Self::Claude(_) => Err(CodexError {
+                code: "capability-unavailable".into(),
+                message:
+                    "Claude owns saved history; stream-json supports resume but not history export."
+                        .into(),
+                retryable: false,
+            }),
             Self::HermesGateway(adapter) => adapter.read_session(session_id).await,
             Self::OpenClawGateway(adapter) => adapter.read_session(session_id).await,
             Self::Pi(adapter) => adapter.read_session(session_id).await,
-            Self::Pty(adapter) => adapter.read_session(session_id).await,
         }
     }
 
@@ -524,14 +517,10 @@ impl RuntimeAdapter {
         let commands = match self {
             Self::Codex(a) => a.ready().await?.list_commands(session_id, force).await?,
             Self::Acp(a) => a.list_commands(session_id, force).await?,
+            Self::Claude(a) => a.list_commands(session_id).await?,
             Self::Pi(a) => a.list_commands(session_id, force).await?,
             Self::HermesGateway(a) => a.list_commands(session_id, force).await?,
             Self::OpenClawGateway(a) => a.list_commands(session_id, force).await?,
-            Self::Pty(_) => {
-                return Err(crate::command_catalog::error(
-                    "Terminal compatibility does not expose command discovery.",
-                ));
-            }
         };
         Ok(serde_json::json!({"commands":commands}))
     }
@@ -553,6 +542,7 @@ impl RuntimeAdapter {
             )?;
         }
         match self {
+            Self::Claude(adapter) => adapter.start_turn(request).await,
             Self::Codex(adapter) => {
                 adapter
                     .ready()
@@ -625,17 +615,6 @@ impl RuntimeAdapter {
                     })
                     .await
             }
-            Self::Pty(adapter) => {
-                adapter
-                    .start_turn(PtyTurnRequest {
-                        session_id: request.session_id,
-                        message: request.message,
-                        snapshots: request.snapshots,
-                        images: request.images,
-                        client_operation_id: request.client_operation_id,
-                    })
-                    .await
-            }
         }
     }
 
@@ -653,16 +632,10 @@ impl RuntimeAdapter {
                     .await
             }
             Self::Acp(adapter) => adapter.interrupt_turn(session_id, turn_id).await,
+            Self::Claude(adapter) => adapter.interrupt_turn(session_id, turn_id).await,
             Self::HermesGateway(adapter) => adapter.interrupt_turn(session_id, turn_id).await,
             Self::OpenClawGateway(adapter) => adapter.interrupt_turn(session_id, turn_id).await,
             Self::Pi(adapter) => adapter.interrupt_turn(session_id, turn_id).await,
-            Self::Pty(_) => Err(CodexError {
-                code: "capability-unavailable".into(),
-                message:
-                    "This terminal compatibility profile does not advertise reliable interruption."
-                        .into(),
-                retryable: false,
-            }),
         }
     }
 
@@ -705,6 +678,11 @@ impl RuntimeAdapter {
         option_id: Option<&str>,
     ) -> Result<Value, CodexError> {
         match self {
+            Self::Claude(adapter) => {
+                adapter
+                    .resolve_approval(session_id, approval_id, option_id)
+                    .await
+            }
             Self::Acp(adapter) => {
                 adapter
                     .resolve_approval(session_id, approval_id, option_id)
@@ -730,11 +708,6 @@ impl RuntimeAdapter {
                 message: "Pi does not expose structured approvals.".into(),
                 retryable: false,
             }),
-            Self::Pty(_) => Err(CodexError {
-                code: "capability-unavailable".into(),
-                message: "Terminal compatibility does not expose structured approvals.".into(),
-                retryable: false,
-            }),
         }
     }
 
@@ -742,10 +715,10 @@ impl RuntimeAdapter {
         match self {
             Self::Codex(adapter) => adapter.shutdown().await,
             Self::Acp(adapter) => adapter.shutdown().await,
+            Self::Claude(adapter) => adapter.shutdown().await,
             Self::HermesGateway(adapter) => adapter.shutdown().await,
             Self::OpenClawGateway(adapter) => adapter.shutdown().await,
             Self::Pi(adapter) => adapter.shutdown().await,
-            Self::Pty(adapter) => adapter.shutdown().await,
         }
     }
 

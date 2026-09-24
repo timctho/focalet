@@ -1,6 +1,7 @@
 pub mod acp_adapter;
 pub mod artifacts;
 pub mod broker_protocol;
+pub mod claude_adapter;
 pub mod codex_adapter;
 mod codex_home;
 pub mod command_catalog;
@@ -9,7 +10,6 @@ pub mod hermes_gateway_adapter;
 mod openclaw_device_identity;
 pub mod openclaw_gateway_adapter;
 pub mod pi_adapter;
-pub mod pty_adapter;
 pub mod runtime_adapter;
 pub mod runtime_discovery;
 pub mod session_binding;

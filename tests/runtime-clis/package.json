@@ -1,0 +1,9 @@
+{
+  "name": "zommi-runtime-cli-tests",
+  "private": true,
+  "description": "Pinned real CLIs for credential-free broker acceptance",
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.281",
+    "@google/gemini-cli": "0.61.0"
+  }
+}

@@ -51,6 +51,13 @@ jobs:
         env:
           ZOMMI_TEST_CHROMIUM: /usr/bin/google-chrome
         run: python scripts/check.py
+      - name: Install pinned Gemini and Claude CLIs for integration tests
+        run: |
+          npm ci --prefix tests/runtime-clis --ignore-scripts --no-audit --no-fund
+          node tests/runtime-clis/node_modules/@anthropic-ai/claude-code/install.cjs
+      - name: Verify real agent CLIs without accounts or external network
+        run: |
+          sudo --preserve-env=PATH unshare --net -- bash -c 'ip link set lo up; exec python3 scripts/verify-runtime-clis.py'
       - name: Verify native Ubuntu accessibility and pixels
         run: |
           cargo build --locked --bin zommi-x11-capture
@@ -126,6 +133,8 @@ jobs:
           dotnet-version: 8.0.x
       - name: Check core, Flutter and macOS golden contracts
         run: python3 scripts/check.py --suite rust --suite flutter
+      - name: Verify Claude stream controls and recovery on macOS
+        run: python3 -m unittest discover -s tests -p test_claude_runtime.py -v
       - name: Test native macOS selection geometry
         run: |
           xcrun swiftc -swift-version 5 \

@@ -61,7 +61,7 @@ void main() {
     await entered.future;
     expect(controller.starting, isFalse);
     expect(controller.runtimeBusy, isFalse);
-    expect(core.prepares, ['runtime-hermes']);
+    expect(core.prepares, ['runtime-claude', 'runtime-hermes']);
     controller.updateComposerValue(
       const TextEditingValue(text: 'Draft during startup'),
     );

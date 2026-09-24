@@ -34,6 +34,23 @@ In PowerShell, activate it with `.\.venv\Scripts\Activate.ps1` instead.
 You do **not** need an agent account, model credentials, or a running gateway to
 run contract tests. Process tests launch the Rust broker with local protocol
 fixtures. Do not replace those fixtures with your personal agent installation.
+Linux CI also runs the real Gemini and Claude Code CLIs pinned in
+`tests/runtime-clis/package-lock.json`, through the Rust broker. Gemini uses its
+test response generator; Claude uses a local Messages API fixture. Temporary
+runtime profiles and a network namespace prevent personal-account access and
+external requests. This validates CLI compatibility, not cloud authentication
+or model quality. To run the same acceptance checks on Ubuntu after building
+the broker:
+
+```sh
+npm ci --prefix tests/runtime-clis --ignore-scripts --no-audit --no-fund
+node tests/runtime-clis/node_modules/@anthropic-ai/claude-code/install.cjs
+sudo --preserve-env=PATH unshare --net -- bash -c 'ip link set lo up; exec python3 scripts/verify-runtime-clis.py'
+```
+
+The runtime fixture tests cover failure recovery, cancellation and approval
+identity on all platforms. Update the pinned CLI version and its acceptance
+assertion together; Gemini's fake-response switches are upstream test interfaces.
 The check runner enables `ZOMMI_RUNTIME_DISCOVERY_MODE=configured-only` and
 temporary binding/discovery/override stores for its child processes. This
 disables automatic native/WSL discovery only in that test invocation. Individual

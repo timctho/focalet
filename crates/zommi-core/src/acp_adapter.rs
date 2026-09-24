@@ -239,6 +239,9 @@ impl AcpAdapter {
                 .cloned()
                 .unwrap_or_else(|| json!({}));
             state.capabilities = negotiated_capabilities(&initialized);
+            if unsafe_gemini_resume(&self.inner.target, &state) {
+                state.capabilities.retain(|c| c != "session.resume.v1");
+            }
         }
         let auth_methods = initialized
             .get("authMethods")
@@ -277,6 +280,11 @@ impl AcpAdapter {
         }
         if list_only {
             return Ok(());
+        }
+        if preferred_session_id.is_some()
+            && unsafe_gemini_resume(&self.inner.target, &*self.inner.state.lock().await)
+        {
+            return Err(gemini_resume_error());
         }
         self.load_sessions().await?;
         let can_load = self
@@ -383,6 +391,24 @@ impl AcpAdapter {
             false,
         )
         .await?;
+        // Gemini's model inventory is session-scoped. Probe an empty session in
+        // isolation, retaining the live transport and its exact conversation. In
+        // 0.60/0.61 session/load resets saved messages before it reads them.
+        if unsafe_gemini_resume(&self.inner.target, &*self.inner.state.lock().await) {
+            let result = replacement.new_session(None).await;
+            if let Err(error) = result {
+                replacement.shutdown().await;
+                return Err(error);
+            }
+            {
+                let probe = replacement.inner.state.lock().await;
+                let mut current = self.inner.state.lock().await;
+                current.models = probe.models.clone();
+                current.model_config_id = probe.model_config_id.clone();
+            }
+            replacement.shutdown().await;
+            return Ok(self.clone());
+        }
         let restored = async {
             if let Some(session_id) = session_id {
                 replacement
@@ -428,7 +454,7 @@ impl AcpAdapter {
 
     pub async fn model_inventory(&self) -> Option<Vec<Value>> {
         let state = self.inner.state.lock().await;
-        state.session_id.as_ref().map(|_| state.models.clone())
+        (!state.models.is_empty()).then(|| state.models.clone())
     }
 
     pub async fn is_running(&self) -> bool {
@@ -504,6 +530,16 @@ impl AcpAdapter {
         session_id: &str,
         cwd: Option<&str>,
     ) -> Result<Value, CodexError> {
+        {
+            let state = self.inner.state.lock().await;
+            if unsafe_gemini_resume(&self.inner.target, &state) {
+                if state.session_id.as_deref() == Some(session_id) {
+                    drop(state);
+                    return self.connection_value().await;
+                }
+                return Err(gemini_resume_error());
+            }
+        }
         self.inner
             .state
             .lock()
@@ -1703,6 +1739,22 @@ fn adapter_error(code: impl Into<String>, message: impl Into<String>) -> CodexEr
 
 fn short_id(value: &str) -> &str {
     value.get(..8).unwrap_or(value)
+}
+
+// These upstream versions recreate a recording with the requested ID before
+// resolving session/load. Keep the CLI-owned file untouched until fixed upstream.
+fn unsafe_gemini_resume(target: &RuntimeTarget, state: &State) -> bool {
+    target.adapter_id == "gemini-acp"
+        && state
+            .runtime_version
+            .as_deref()
+            .is_some_and(|v| v.starts_with("0.60.") || v.starts_with("0.61."))
+}
+fn gemini_resume_error() -> CodexError {
+    adapter_error(
+        "capability-unavailable",
+        "Gemini CLI 0.60/0.61 cannot safely resume saved chats through ACP. The saved conversation was left unchanged. Start a new chat or use a CLI release that fixes session/load.",
+    )
 }
 
 #[cfg(test)]

@@ -62,9 +62,17 @@ sign in there, and return to Zommi:
 Zommi uses the runtime's existing account, models, tools and permissions. It does
 not merge histories across agents or move credentials into its settings. Native
 commands and session actions depend on the protocol your runtime exposes.
-Claude CLI uses limited terminal compatibility rather than full structured
-session support; on Windows it currently requires WSL. Codex, Pi, OpenCode
-and Gemini CLI can use native Windows installations. See [runtime commands](runtime-commands.md).
+Codex, Pi, OpenCode, Gemini CLI and Claude Code can use native Windows
+installations. See [runtime commands](runtime-commands.md).
+
+Claude Code connects through its [bidirectional stream-json interface](https://code.claude.com/docs/en/headless).
+Install Claude Code and run `claude` in the same host to finish its setup and
+authentication, then choose **New agent → Refresh agents → Claude Code**.
+Zommi supports images, model selection, streaming, interruption, tool approvals
+and resuming chats started in Zommi. The CLI owns permissions and saved context;
+Zommi does not import unrelated terminal chats or export canonical history.
+Older terminal-compatibility chats have no native Claude session ID; start a new
+Claude chat after upgrading. Existing manually configured CLI paths are reused.
 
 Gemini CLI connects through [`gemini --acp`](https://geminicli.com/docs/cli/acp-mode/).
 With Node.js 20 or newer, install a recent version using
@@ -73,6 +81,12 @@ With Node.js 20 or newer, install a recent version using
 authentication method. Its ACP interface supports resuming
 chats started in Zommi but does not currently advertise a saved-chat listing
 method, so unrelated terminal chats are not imported into the sidebar.
+
+Gemini CLI **0.60.x and 0.61.x** have an upstream ACP `session/load` issue that
+resets recorded messages before loading them. Zommi disables resume for these
+versions and leaves saved conversation files unchanged. Start a new chat, or use
+a CLI release that fixes this issue. **Refresh agents** still updates their model
+list without reloading the active conversation.
 
 OpenCode connects through [`opencode acp`](https://opencode.ai/docs/acp/).
 Install a version with ACP support and run `opencode auth login` to connect your
