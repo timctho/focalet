@@ -375,9 +375,18 @@ void main() {
     await tester.tap(find.byType(DropdownButton<double>));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
+    final navigator = Navigator.of(
+      tester.element(find.byType(RegionCaptureEditor)),
+    );
+    expect(navigator.canPop(), isTrue);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('region-capture-canvas')), findsOneWidget);
+    expect(
+      navigator.canPop(),
+      isFalse,
+      reason: "Escape must dismiss the popup route",
+    );
     expect(session.regions, hasLength(1));
     expect(
       finished,
@@ -389,6 +398,12 @@ void main() {
     await tester.tap(find.text('16 px').last);
     await tester.pumpAndSettle();
     expect(session.strokeWidth, 16);
+    await mouse.moveTo(tester.getCenter(find.byTooltip('Pen (P)')));
+    await tester.pump(const Duration(seconds: 1));
+    await mouse.down(tester.getCenter(find.byTooltip('Pen (P)')));
+    await mouse.up();
+    await tester.pumpAndSettle();
+    expect(session.tool, RegionDrawingTool.pen);
     await mouse.removePointer();
     await tester.pumpWidget(const SizedBox());
   });

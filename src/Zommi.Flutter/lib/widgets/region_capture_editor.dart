@@ -36,6 +36,7 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
   final _controls = <String, GlobalKey>{};
   GlobalKey _control(String name) => _controls.putIfAbsent(name, GlobalKey.new);
   LogicalKeyboardKey? _closingKey;
+  LogicalKeyboardKey? _dismissedMenuKey;
   Offset? _start;
   Offset? _end;
   List<Offset> _points = [];
@@ -50,8 +51,22 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
   }
 
   bool _handleKey(KeyEvent event) {
-    if (ModalRoute.of(context)?.isCurrent == false) {
+    final key = event.logicalKey;
+    if (_dismissedMenuKey == key) {
+      if (event is KeyUpEvent) _dismissedMenuKey = null;
+      return true;
+    }
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) {
       _closingKey = null;
+      // This navigator belongs only to capture. Dismiss its popup directly;
+      // desktop key routing can otherwise leave the invisible modal barrier
+      // consuming the next tool click after Escape.
+      if (event is KeyDownEvent && key == LogicalKeyboardKey.escape) {
+        _dismissedMenuKey = key;
+        navigator.pop();
+        return true;
+      }
       return false;
     }
     return _key(_focus, event) == KeyEventResult.handled;
