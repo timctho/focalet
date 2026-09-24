@@ -104,6 +104,11 @@ class RuntimePermissionTests(unittest.TestCase):
         self.core.request('session.create', dict(self.identity, fullAccess=True))
         starts = [v for v in self.wire() if v.get('method')=='thread/start']
         self.assertTrue(all(v['params']['approvalPolicy']=='never' and v['params']['sandbox']=='danger-full-access' for v in starts))
+        self.core.request('session.goal', dict(self.identity, action='set', objective='fixture goal', model='fixture-model'))
+        settings = [v for v in self.wire() if v.get('method')=='thread/settings/update'][-1]['params']
+        self.assertEqual(settings['approvalPolicy'], 'never')
+        self.assertEqual(settings['sandboxPolicy'], {'type':'dangerFullAccess'})
+        self.assertNotIn('sandbox', settings)
         # Changing the preference must not escalate or downgrade a running agent.
         self.core.request('session.create', dict(self.identity, fullAccess=False))
         self.assertEqual(len([v for v in self.wire() if 'launchArgs' in v]), 2)

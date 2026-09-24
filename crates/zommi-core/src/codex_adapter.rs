@@ -1784,11 +1784,11 @@ impl Inner {
     ) -> Result<Value, CodexError> {
         if self.config.command.full_access {
             match method {
-                "thread/start" | "thread/resume" | "thread/fork" | "thread/settings/update" => {
+                "thread/start" | "thread/resume" | "thread/fork" => {
                     params["approvalPolicy"] = json!("never");
                     params["sandbox"] = json!("danger-full-access");
                 }
-                "turn/start" => {
+                "turn/start" | "thread/settings/update" => {
                     params["approvalPolicy"] = json!("never");
                     params["sandboxPolicy"] = json!({"type":"dangerFullAccess"});
                 }
