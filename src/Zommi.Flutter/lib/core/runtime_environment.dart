@@ -32,7 +32,6 @@ Map<String, String> coreRuntimeEnvironment({
       ('APPDATA', r'\npm'),
       ('LOCALAPPDATA', r'\Microsoft\WinGet\Links'),
       ('LOCALAPPDATA', r'\Programs\nodejs'),
-      ('LOCALAPPDATA', r'\agy\bin'),
       ('USERPROFILE', r'\.local\bin'),
       ('USERPROFILE', r'\.bun\bin'),
       ('USERPROFILE', r'\.opencode\bin'),

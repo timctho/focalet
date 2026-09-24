@@ -980,8 +980,8 @@ final class FlutterDesktopBridge
       'pi-rpc' => const ['onboard'],
       'hermes-acp' => const ['acp', '--setup'],
       'opencode-acp' => const ['auth', 'login'],
-      // These CLIs own sign-in in their interactive startup flow.
-      'gemini-acp' || 'antigravity-stream' => const <String>[],
+      // Gemini's interactive CLI owns sign-in; it has no login subcommand.
+      'gemini-acp' => const <String>[],
       'openclaw-acp' => const ['onboard'],
       _ => null,
     };

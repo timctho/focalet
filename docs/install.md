@@ -55,7 +55,6 @@ sign in there, and return to Zommi:
 [Codex](https://github.com/openai/codex),
 [Pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent),
 [OpenCode](https://opencode.ai/docs/),
-[Antigravity CLI](https://antigravity.google/docs/cli/install),
 [Gemini CLI](https://geminicli.com/docs/get-started/installation/),
 [Hermes](https://github.com/NousResearch/hermes-agent), or
 [OpenClaw](https://github.com/openclaw/openclaw).
@@ -64,35 +63,15 @@ Zommi uses the runtime's existing account, models, tools and permissions. It doe
 not merge histories across agents or move credentials into its settings. Native
 commands and session actions depend on the protocol your runtime exposes.
 Claude CLI uses limited terminal compatibility rather than full structured
-session support; on Windows it currently requires WSL. Codex, Pi, OpenCode,
-Antigravity CLI and Gemini CLI can use native Windows installations. See
-[runtime commands](runtime-commands.md).
-
-Antigravity CLI connects through its [streaming JSON interface](https://antigravity.google/docs/cli/headless/).
-Install `agy` using Google's [installer](https://antigravity.google/docs/cli/install),
-then run `agy` in the same host to complete Google sign-in. Select
-**Antigravity CLI** in Zommi. **Refresh agents** reruns `agy models`, so the picker
-reflects your account's current model list. Zommi can create and resume its chats;
-Antigravity owns their conversation IDs and context. The CLI does not expose a
-saved-chat catalog or history export, so terminal-only chats are not imported.
-
-Antigravity's streaming input currently accepts text only. Zommi can send
-selected text and structured context; image attachments are unavailable. Its
-configured headless tool policy still applies: tools needing interactive approval
-are denied by the CLI unless its own rules already allow them. Zommi does not
-auto-approve tools. Interactive slash commands stay in the CLI.
+session support; on Windows it currently requires WSL. Codex, Pi, OpenCode
+and Gemini CLI can use native Windows installations. See [runtime commands](runtime-commands.md).
 
 Gemini CLI connects through [`gemini --acp`](https://geminicli.com/docs/cli/acp-mode/).
 With Node.js 20 or newer, install a recent version using
-`npm install -g @google/gemini-cli`, then run
-`gemini` in the same host to finish sign-in. Choose **Gemini CLI** in Zommi;
-**Refresh agents** picks up newly installed runtimes and refreshes models after
-sign-in. Zommi preserves Gemini CLI's configured authentication method.
-[Google retired personal Google sign-in for Gemini CLI](https://developers.google.com/gemini-code-assist/docs/deprecations/code-assist-individuals)
-on June 18, 2026, including AI Pro and Ultra accounts. For personal Google
-sign-in use Antigravity CLI; Gemini CLI still supports API keys, Vertex AI and
-eligible Code Assist Standard or Enterprise accounts. Its ACP interface supports
-resuming chats started in Zommi but does not currently advertise a saved-chat listing
+`npm install -g @google/gemini-cli`, then follow the
+[Gemini test steps](#test-gemini-cli) below. Zommi preserves Gemini CLI's configured
+authentication method. Its ACP interface supports resuming
+chats started in Zommi but does not currently advertise a saved-chat listing
 method, so unrelated terminal chats are not imported into the sidebar.
 
 OpenCode connects through [`opencode acp`](https://opencode.ai/docs/acp/).
@@ -104,6 +83,32 @@ model selection. Its models, tools, permissions and
 saved sessions remain in OpenCode. Images, saved-chat loading and commands use
 the capabilities advertised by that version; built-in `/undo` and `/redo` are
 currently unavailable through OpenCode ACP.
+
+### Test Gemini CLI
+
+[Google retired personal Google sign-in for Gemini CLI](https://developers.google.com/gemini-code-assist/docs/deprecations/code-assist-individuals)
+on June 18, 2026, including AI Pro and Ultra accounts. Personal accounts can use
+a Gemini API key; Vertex AI and eligible Code Assist Standard or Enterprise
+accounts remain alternatives.
+
+1. Create an API key in [Google AI Studio](https://aistudio.google.com/apikey).
+2. Run `gemini` in the same host and OS account that Zommi uses (Windows
+   PowerShell for a Windows runtime, or the matching WSL distribution). Choose
+   **Use Gemini API Key** and enter the key in Gemini's prompt. If Gemini is
+   already open, use `/auth` to change the method. Recent CLI versions save the
+   key in their own credential storage, so Zommi can reuse it.
+3. Ask `Reply with GEMINI_OK only`. After a successful reply, quit and reopen
+   `gemini` in a new terminal and repeat to confirm authentication persists.
+4. In Zommi, choose **New agent → Refresh agents → Gemini CLI**, select a model,
+   and send the same prompt. To check context capture, use **Alt+A** on selected
+   text or **Alt+Shift+A** for an image, then ask Gemini about the selection.
+
+If Zommi reports missing authentication, confirm the selected runtime uses the
+same host and account as the successful terminal test, then retry. Setting
+`GEMINI_API_KEY` only in a terminal does not pass it to an already running Zommi;
+use Gemini's credential prompt or launch Zommi from the configured environment.
+See [Gemini authentication](https://geminicli.com/docs/get-started/authentication/)
+for API-key and Vertex AI setup.
 
 ### An installed agent is missing
 
