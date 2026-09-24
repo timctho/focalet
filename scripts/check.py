@@ -242,6 +242,7 @@ def check_windows():
         )
     ]
     check_flutter(*tests)
+    run(sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_claude_runtime.py", "-v")
     check_capture()
     run("pwsh", "-NoProfile", "-File", "scripts/test-windows-deployment-helpers.ps1")
 
