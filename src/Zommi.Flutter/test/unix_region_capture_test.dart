@@ -337,6 +337,8 @@ void main() {
     addTearDown(frame.image.dispose);
     final session = RegionSelectionSession([frame]);
     addTearDown(session.dispose);
+    var finished = false;
+    session.result.then((_) => finished = true);
     session.addRegion(const Rect.fromLTWH(10, 10, 30, 20));
     await tester.pumpWidget(
       MaterialApp(
@@ -377,6 +379,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('region-capture-canvas')), findsOneWidget);
     expect(session.regions, hasLength(1));
+    expect(
+      finished,
+      isFalse,
+      reason: "Escape in the menu must not finish capture",
+    );
     await tester.tap(find.byType(DropdownButton<double>));
     await tester.pumpAndSettle();
     await tester.tap(find.text('16 px').last);

@@ -35,6 +35,7 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
   final _focus = FocusNode();
   final _controls = <String, GlobalKey>{};
   GlobalKey _control(String name) => _controls.putIfAbsent(name, GlobalKey.new);
+  LogicalKeyboardKey? _closingKey;
   Offset? _start;
   Offset? _end;
   List<Offset> _points = [];
@@ -48,9 +49,13 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
     HardwareKeyboard.instance.addHandler(_handleKey);
   }
 
-  bool _handleKey(KeyEvent event) =>
-      ModalRoute.of(context)?.isCurrent != false &&
-      _key(_focus, event) == KeyEventResult.handled;
+  bool _handleKey(KeyEvent event) {
+    if (ModalRoute.of(context)?.isCurrent == false) {
+      _closingKey = null;
+      return false;
+    }
+    return _key(_focus, event) == KeyEventResult.handled;
+  }
 
   @override
   void dispose() {
@@ -150,7 +155,12 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
       // Wait for key-up before hiding the Wayland surface. Otherwise the
       // release goes to the source window and Flutter retains a pressed Enter,
       // turning the next selection's Enter into an ignored repeat event.
+      if (event is KeyDownEvent) _closingKey = key;
       if (event is KeyUpEvent) {
+        // A menu may consume key-down and disappear before key-up arrives.
+        // Only finish for a key press that began in this capture route.
+        if (_closingKey != key) return KeyEventResult.ignored;
+        _closingKey = null;
         session.finish(cancel: key == LogicalKeyboardKey.escape);
       }
       return KeyEventResult.handled;

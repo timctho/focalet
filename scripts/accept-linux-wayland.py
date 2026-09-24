@@ -844,11 +844,20 @@ def ui_acceptance(session, package, fixture_app):
                     changed = sum(count for value, count in enumerate(difference.histogram()) if value > 8)
                     assert changed < expected.width * expected.height * 0.01, f"Canvas changed while hovering {name}"
                 assert app.poll() is None, name
-            session.driver("Click", *control_point("Stroke width"))
-            time.sleep(0.3)
+            def click_control(name):
+                session.driver("Motion", *control_point(name))
+                time.sleep(0.1)
+                session.driver("Button", "true")
+                time.sleep(0.1)
+                session.driver("Button", "false")
+                time.sleep(0.3)
+
+            click_control("Stroke width")
+            session.driver("Snapshot", session.evidence / f"editor-menu-{index}.png")
             session.key(0xFF1B)  # Dismiss only the menu, preserving the editor.
+            time.sleep(0.3)
             assert len(events(trace, "selection.content")) == selections
-            session.driver("Click", *control_point("Pen (P)"))
+            click_control("Pen (P)")
             session.drag(point(x + 15, y + 15), point(x + 160, y + 100))
             session.driver("Snapshot", session.evidence / "editor-drawn.png")
             session.driver("Motion", 1200, 740)
