@@ -10,12 +10,14 @@ import 'package:zommi_flutter/widgets/gnome_integration_setup.dart';
 class _Settings implements GnomeDesktopSettings {
   bool fail = true;
   int enables = 0;
+  Map<String, Object?>? status;
   @override
   bool get supportsGnomeIntegration => true;
   @override
   Future<Map<String, Object?>> gnomeIntegrationStatus({
     bool enable = false,
   }) async {
+    if (status != null) return status!;
     if (enable) {
       enables++;
       if (fail) throw StateError('Sign out and sign in, then retry.');
@@ -30,6 +32,32 @@ class _Settings implements GnomeDesktopSettings {
 }
 
 void main() {
+  testWidgets('unsupported desktop does not offer an ineffective enable loop', (
+    tester,
+  ) async {
+    final settings = _Settings()
+      ..status = {
+        'ready': false,
+        'canEnable': false,
+        'reason': 'x11-session',
+        'message': 'GNOME is running on Xorg (X11).',
+        'diagnostics': {'compositorSession': 'x11'},
+      };
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: GnomeIntegrationSetup(bridge: settings)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('GNOME is running on Xorg (X11).'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('enable-gnome-integration')),
+      findsNothing,
+    );
+    expect(find.byTooltip('Copy desktop diagnostics'), findsOneWidget);
+    expect(find.byTooltip('Check desktop integration'), findsOneWidget);
+  });
+
   testWidgets(
     'extension enable failure remains actionable and retry succeeds',
     (tester) async {

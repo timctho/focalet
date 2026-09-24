@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use std::{fs, time::Duration};
 
 pub(crate) const EXTENSION_UUID: &str = "zommi@zommi";
-pub(crate) const SETUP_HINT: &str = "Enable Zommi Desktop Integration in App settings. If it was just installed, sign out of Ubuntu and sign in again, then retry.";
+pub(crate) const SETUP_HINT: &str = "Open App settings > Ubuntu desktop integration to check the session and repair the connection.";
 
 pub(crate) async fn proxy(connection: &Connection) -> AppResult<Proxy<'_>> {
     Ok(Proxy::new(
@@ -72,47 +72,9 @@ pub(crate) async fn snapshot(connection: &Connection) -> AppResult<Value> {
 }
 
 pub(crate) async fn status(connection: &Connection) -> Value {
-    let session = std::env::var("XDG_SESSION_TYPE").unwrap_or_default();
-    let wayland = session == "wayland"
-        || (session.is_empty() && std::env::var_os("WAYLAND_DISPLAY").is_some());
-    match snapshot(connection).await {
-        Ok(_) if wayland => {
-            json!({"ready":true,"wayland":true,"message":"Desktop integration is ready. Screen sharing is requested when you select content."})
-        }
-        _ if !wayland => {
-            json!({"ready":false,"wayland":false,"message":"Capture requires Ubuntu 24.04's GNOME Wayland session. Sign out and choose Ubuntu at the login screen."})
-        }
-        Err(error) => json!({"ready":false,"wayland":true,"message":error.to_string()}),
-        _ => unreachable!(),
-    }
+    crate::desktop_status::status(connection).await
 }
 
 pub(crate) async fn enable(connection: &Connection) -> AppResult<Value> {
-    let extensions = Proxy::new(
-        connection,
-        "org.gnome.Shell",
-        "/org/gnome/Shell",
-        "org.gnome.Shell.Extensions",
-    )
-    .await?;
-    if !extensions
-        .get_property::<bool>("UserExtensionsEnabled")
-        .await?
-    {
-        return Err("GNOME extensions are disabled globally. Turn them on in the Extensions app, then retry.".into());
-    }
-    let enabled: bool = extensions
-        .call("EnableExtension", &(EXTENSION_UUID,))
-        .await?;
-    if !enabled {
-        return Err(format!("GNOME has not loaded the bundled extension. {SETUP_HINT}").into());
-    }
-    for _ in 0..10 {
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        let status = status(connection).await;
-        if status["ready"] == true {
-            return Ok(status);
-        }
-    }
-    Ok(status(connection).await)
+    Ok(crate::desktop_status::enable(connection).await)
 }

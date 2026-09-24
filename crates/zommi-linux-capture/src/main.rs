@@ -7,6 +7,7 @@ use std::{
     time::Duration,
 };
 mod accessibility;
+mod desktop_status;
 mod geometry;
 mod gnome;
 mod restore_token;
@@ -31,7 +32,24 @@ async fn run() -> AppResult<()> {
     if command == "probe" {
         return emit(&json!({"ok":true,"providers":["gnome-wayland","atspi","screencast"]}));
     }
-    let connection = Connection::session().await?;
+    let connection = match tokio::time::timeout(Duration::from_secs(3), Connection::session()).await
+    {
+        Ok(Ok(connection)) => connection,
+        result => {
+            let error = match result {
+                Ok(Err(error)) => error.to_string(),
+                _ => "Session bus connection timed out".into(),
+            };
+            if matches!(command.as_str(), "status" | "enable-extension") {
+                return emit(&desktop_status::connection_unavailable(&error));
+            }
+            return Err(format!(
+                "Cannot connect to the desktop session. {} ({error})",
+                gnome::SETUP_HINT
+            )
+            .into());
+        }
+    };
     match command.as_str() {
         "status" => emit(&gnome::status(&connection).await),
         "enable-extension" => emit(&gnome::enable(&connection).await?),
