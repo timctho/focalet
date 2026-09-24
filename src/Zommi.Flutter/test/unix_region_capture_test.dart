@@ -372,28 +372,21 @@ void main() {
       await mouse.moveTo(Offset.zero);
       await tester.pumpAndSettle();
     }
-    await tester.tap(find.byType(DropdownButton<double>));
+    await tester.tap(find.byKey(const ValueKey('stroke-width-menu')));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    final navigator = Navigator.of(
-      tester.element(find.byType(RegionCaptureEditor)),
-    );
-    expect(navigator.canPop(), isTrue);
+    expect(find.widgetWithText(MenuItemButton, '16 px'), findsOneWidget);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('region-capture-canvas')), findsOneWidget);
-    expect(
-      navigator.canPop(),
-      isFalse,
-      reason: "Escape must dismiss the popup route",
-    );
+    expect(find.widgetWithText(MenuItemButton, '16 px'), findsNothing);
     expect(session.regions, hasLength(1));
     expect(
       finished,
       isFalse,
       reason: "Escape in the menu must not finish capture",
     );
-    await tester.tap(find.byType(DropdownButton<double>));
+    await tester.tap(find.byKey(const ValueKey('stroke-width-menu')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('16 px').last);
     await tester.pumpAndSettle();

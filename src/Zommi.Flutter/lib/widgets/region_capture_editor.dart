@@ -33,6 +33,7 @@ class RegionCaptureEditor extends StatefulWidget {
 
 class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
   final _focus = FocusNode();
+  final _strokeMenu = MenuController();
   final _controls = <String, GlobalKey>{};
   GlobalKey _control(String name) => _controls.putIfAbsent(name, GlobalKey.new);
   LogicalKeyboardKey? _closingKey;
@@ -55,6 +56,15 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
     if (_dismissedMenuKey == key) {
       if (event is KeyUpEvent) _dismissedMenuKey = null;
       return true;
+    }
+    if (_strokeMenu.isOpen) {
+      _closingKey = null;
+      if (event is KeyDownEvent && key == LogicalKeyboardKey.escape) {
+        _dismissedMenuKey = key;
+        _strokeMenu.close();
+        return true;
+      }
+      return false;
     }
     final navigator = Navigator.of(context);
     if (navigator.canPop()) {
@@ -400,21 +410,46 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
                           color: color,
                         ),
                       ),
-                    DropdownButton<double>(
+                    MenuAnchor(
                       key: _control('Stroke width'),
-                      value: session.strokeWidth,
-                      items: [
+                      controller: _strokeMenu,
+                      consumeOutsideTap: false,
+                      onClose: () {
+                        // A menu shortcut must not turn into Attach/Cancel
+                        // when its key-up returns to the capture surface.
+                        for (final key in [
+                          LogicalKeyboardKey.escape,
+                          LogicalKeyboardKey.enter,
+                          LogicalKeyboardKey.numpadEnter,
+                        ]) {
+                          if (HardwareKeyboard.instance.logicalKeysPressed
+                              .contains(key)) {
+                            _dismissedMenuKey = key;
+                            _closingKey = null;
+                          }
+                        }
+                      },
+                      menuChildren: [
                         for (final width in [2.0, 4.0, 8.0, 16.0])
-                          DropdownMenuItem(
-                            value: width,
+                          MenuItemButton(
+                            onPressed: () => session.change(
+                              () => session.strokeWidth = width,
+                            ),
                             child: Text('${width.toInt()} px'),
                           ),
                       ],
-                      onChanged: (value) {
-                        if (value != null) {
-                          session.change(() => session.strokeWidth = value);
-                        }
-                      },
+                      builder: (context, menu, child) => TextButton(
+                        key: const ValueKey('stroke-width-menu'),
+                        onPressed: () =>
+                            menu.isOpen ? menu.close() : menu.open(),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('${session.strokeWidth.toInt()} px'),
+                            const Icon(Icons.arrow_drop_down, size: 18),
+                          ],
+                        ),
+                      ),
                     ),
                     IconButton(
                       key: _control('Undo'),
