@@ -110,7 +110,7 @@ jobs:
           python3 scripts/verify_release.py /opt/zommi --expected-platform linux --expected-commit "$GITHUB_SHA"
           desktop-file-validate /usr/share/applications/com.zommi.desktop.desktop
           test -x /usr/bin/zommi
-          /usr/bin/python3 scripts/accept-linux-wayland.py --package /opt/zommi --browser /usr/bin/google-chrome
+          /usr/bin/python3 scripts/accept-linux-wayland.py --package /opt/zommi --system-extension --browser /usr/bin/google-chrome
           sudo apt-get remove -y zommi
           test ! -e /opt/zommi/zommi
           test ! -e /usr/bin/zommi

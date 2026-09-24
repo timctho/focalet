@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:zommi_flutter/desktop/gnome_integration.dart';
 
 class GnomeIntegrationSetup extends StatefulWidget {
@@ -11,6 +14,9 @@ class GnomeIntegrationSetup extends StatefulWidget {
 class _GnomeIntegrationSetupState extends State<GnomeIntegrationSetup> {
   bool _busy = false;
   bool _ready = false;
+  bool _canEnable = true;
+  String _enableLabel = 'Enable desktop integration';
+  String? _diagnostics;
   String _message =
       'Enable desktop integration for Alt+A and app context. You choose which screens to share when selecting content.';
   @override
@@ -28,12 +34,21 @@ class _GnomeIntegrationSetupState extends State<GnomeIntegrationSetup> {
         setState(() {
           _ready = result['ready'] == true;
           _message = result['message']?.toString() ?? _message;
+          _canEnable = result['canEnable'] != false;
+          _enableLabel =
+              result['enableLabel']?.toString() ?? 'Enable desktop integration';
+          _diagnostics = result['diagnostics'] is Map
+              ? const JsonEncoder.withIndent('  ').convert(result)
+              : null;
         });
       }
     } on Object catch (error) {
       if (mounted) {
         setState(() {
           _ready = false;
+          _canEnable = true;
+          _enableLabel = 'Retry desktop integration';
+          _diagnostics = null;
           _message = '$error'.replaceFirst('Bad state: ', '');
         });
       }
@@ -56,6 +71,13 @@ class _GnomeIntegrationSetupState extends State<GnomeIntegrationSetup> {
             ),
           ),
           if (_ready) const Icon(Icons.check_circle_outline, size: 18),
+          if (_diagnostics != null)
+            IconButton(
+              onPressed: () =>
+                  Clipboard.setData(ClipboardData(text: _diagnostics!)),
+              tooltip: 'Copy desktop diagnostics',
+              icon: const Icon(Icons.copy_outlined, size: 16),
+            ),
           IconButton(
             onPressed: _busy ? null : _check,
             tooltip: 'Check desktop integration',
@@ -64,11 +86,11 @@ class _GnomeIntegrationSetupState extends State<GnomeIntegrationSetup> {
         ],
       ),
       Text(_message, style: const TextStyle(fontSize: 10)),
-      if (!_ready)
+      if (!_ready && _canEnable)
         TextButton(
           key: const ValueKey('enable-gnome-integration'),
           onPressed: _busy ? null : () => _check(enable: true),
-          child: Text(_busy ? 'Checking…' : 'Enable desktop integration'),
+          child: Text(_busy ? 'Checking…' : _enableLabel),
         ),
     ],
   );

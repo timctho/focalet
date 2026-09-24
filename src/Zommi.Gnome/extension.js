@@ -4,8 +4,10 @@ import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as Config from 'resource:///org/gnome/shell/misc/config.js';
 
 const INTERFACE = `<node><interface name="com.zommi.Desktop">
+  <method name="Status"><arg type="s" direction="out"/></method>
   <method name="Snapshot"><arg type="s" direction="out"/></method>
   <method name="Present"><arg type="u" direction="in"/><arg type="b" direction="out"/></method>
   <signal name="SelectContent"/>
@@ -29,10 +31,21 @@ export default class ZommiExtension extends Extension {
             () => this._service?.emit_signal('SelectContent', new GLib.Variant('()', [])));
     }
 
+    _status() {
+        return {schemaVersion: 1, integrationVersion: 2, sessionId: this._sessionId,
+            sessionType: Meta.is_wayland_compositor() ? 'wayland' : 'x11',
+            shellVersion: Config.PACKAGE_VERSION,
+            available: !Main.overview.visible && !Main.sessionMode.isLocked && Main.modalCount === 0};
+    }
+
+    Status() {
+        return JSON.stringify(this._status());
+    }
+
     Snapshot() {
-        if (Main.overview.visible || Main.sessionMode.isLocked || Main.modalCount !== 0)
-            return JSON.stringify({schemaVersion: 1, sessionId: this._sessionId,
-                available: false, monitors: [], windows: []});
+        const status = this._status();
+        if (!status.available)
+            return JSON.stringify({...status, monitors: [], windows: []});
         const windows = [];
         const workspace = global.workspace_manager.get_active_workspace();
         const ordered = global.display.sort_windows_by_stacking(
@@ -68,8 +81,7 @@ export default class ZommiExtension extends Extension {
                 windows.unshift({bounds: {x,y,width,height}, obstruction: true});
         }
         global.stage.queue_redraw();
-        return JSON.stringify({schemaVersion: 1, sessionId: this._sessionId,
-            available: true,
+        return JSON.stringify({...status,
             monitors: Main.layoutManager.monitors.map(rectangle), windows});
     }
 

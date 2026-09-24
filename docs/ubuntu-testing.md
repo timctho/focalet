@@ -39,6 +39,38 @@ The [release workflow](public-releases.md#run-a-release-from-github-actions)
 can build and publish this asset. Existing previews without a `.deb` still
 require a source build.
 
+## If desktop integration fails
+
+Open **App settings → Ubuntu desktop integration** and recheck. Zommi queries
+the running GNOME compositor; an inherited `XDG_SESSION_TYPE` value alone does
+not decide whether capture is supported. **Copy desktop diagnostics** includes
+the detected session, GNOME version, loaded extension path and failure reason.
+
+- **Xorg / X11:** at the login screen, select your user and choose **Ubuntu**
+  from the gear menu, rather than **Ubuntu on Xorg**. If Wayland is unavailable,
+  logging out again will not enable it; check your system's Wayland configuration.
+- **WSLg without GNOME:** WSL app windows do not provide a GNOME desktop.
+  Use the Windows build to capture Windows, or use an Ubuntu 24.04 desktop/VM.
+- **Extensions disabled globally:** turn on extensions in Ubuntu's **Extensions**
+  app. If only Zommi is disabled, choose **Enable desktop integration** in Zommi.
+- **Disconnected integration:** choose **Repair desktop integration**. This
+  disables and re-enables the integration without losing your chat.
+- **Extension load error:** inspect the reported error and installation path.
+  Fix the reported problem or reinstall the Ubuntu package before starting a new
+  desktop session. GNOME cannot retry an extension in its error state by toggling it.
+- **Missing or older extension:** reinstall the Ubuntu `.deb`, then sign out
+  of the desktop once to load it. GNOME cannot replace already imported extension
+  code until a new desktop session. If this persists, inspect `extensionPath` in
+  the copied diagnostics: a copy under your user data directory can override the
+  system extension. Back up that older copy outside `gnome-shell/extensions`,
+  then sign out once and recheck.
+- **Session bus unavailable:** launch Zommi from Ubuntu's app menu as your normal
+  user, without `sudo` or SSH.
+
+If it still fails, include the copied diagnostics in your report. They are not
+uploaded automatically. Repeatedly restarting Zommi or signing out without
+addressing the reported condition will not repair it.
+
 ## Build and launch from source
 
 Clone the repository, then install Rust **1.93.0** and Flutter **3.47.2** with
@@ -173,10 +205,13 @@ cargo build --locked --bin zommi-linux-capture
   --browser /usr/bin/google-chrome
 ```
 
-The tests cover GTK 3/4 pixels and accessibility geometry, password filtering,
-portal cancellation, extension recovery, packaged selection/drawing, and floating
+The tests cover compositor detection with stale or missing session variables,
+unavailable desktops, extension recovery, GTK 3/4 pixels and accessibility
+geometry, password filtering, portal cancellation, packaged selection/drawing, and floating
 HTML previews. `--browser` adds native Wayland Chromium DOM alignment. GTK 4 text
 input values are intentionally omitted when masked fields cannot be distinguished.
+For an installed `.deb`, use `--package /opt/zommi --system-extension` to also
+verify that GNOME discovers the extension from its system installation path.
 
 Evidence goes to `artifacts/wayland-acceptance`. CI uses the same test. Real GNOME
 tray integration and physical display configurations still need the desktop

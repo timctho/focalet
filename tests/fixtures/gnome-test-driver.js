@@ -13,6 +13,8 @@ const XML = `<node><interface name="com.zommi.TestDriver">
   <method name="Window"><arg type="u" direction="in"/><arg type="s" direction="out"/></method>
   <method name="Activate"><arg type="u" direction="in"/></method>
   <method name="Snapshot"><arg type="s" direction="in"/></method>
+  <method name="DisconnectIntegration"/>
+  <method name="FailIntegration"/>
 </interface></node>`;
 export default class Driver extends Extension {
     enable() {
@@ -23,6 +25,14 @@ export default class Driver extends Extension {
         this.owner = Gio.bus_own_name_on_connection(Gio.DBus.session, 'com.zommi.TestDriver', Gio.BusNameOwnerFlags.NONE, null, null);
     }
     Ready() { Main.overview.hide(); }
+    DisconnectIntegration() {
+        const integration = Main.extensionManager.lookup('zommi@zommi').stateObj;
+        integration._service.unexport();
+        integration._service = null;
+    }
+    FailIntegration() {
+        Main.extensionManager.logExtensionError('zommi@zommi', new Error('Synthetic integration failure'));
+    }
     Key(key, pressed) { this.keyboard.notify_keyval(GLib.get_monotonic_time(), key, pressed ? Clutter.KeyState.PRESSED : Clutter.KeyState.RELEASED); }
     Motion(x,y) { this.pointer.notify_absolute_motion(GLib.get_monotonic_time(),x,y); }
     Button(pressed) { this.pointer.notify_button(GLib.get_monotonic_time(),1,pressed ? Clutter.ButtonState.PRESSED : Clutter.ButtonState.RELEASED); }

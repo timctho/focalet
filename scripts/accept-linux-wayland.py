@@ -62,8 +62,10 @@ class Session:
         self.env.pop("DISPLAY", None)
         self.env.pop("GSETTINGS_BACKEND", None)
         extensions = root / "data/gnome-shell/extensions"
-        shutil.copytree(extension, extensions / "zommi@zommi")
-        self.run("glib-compile-schemas", str(extensions / "zommi@zommi/schemas"))
+        extensions.mkdir(parents=True)
+        if extension is not None:
+            shutil.copytree(extension, extensions / "zommi@zommi")
+            self.run("glib-compile-schemas", str(extensions / "zommi@zommi/schemas"))
         driver = extensions / "zommi-test@zommi"
         driver.mkdir()
         (driver / "metadata.json").write_text(
@@ -294,6 +296,69 @@ class Session:
                     process.wait(timeout=4)
 
 
+def desktop_status_without_gnome(session, helper):
+    status = json.loads(session.run(helper, "status").stdout)
+    assert not status["ready"] and not status["canEnable"], status
+    assert status["reason"] in ("gnome-unavailable", "wslg-without-gnome"), status
+    disconnected = json.loads(session.run(
+        "env", "DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent-zommi-test-bus",
+        helper, "status",
+    ).stdout)
+    assert disconnected["reason"] == "session-bus-unavailable", disconnected
+    assert not disconnected["canEnable"], disconnected
+    (session.evidence / "desktop-unavailable.json").write_text(
+        json.dumps({"noGnome": status, "noSessionBus": disconnected}, indent=2)
+    )
+
+
+def desktop_status_acceptance(session, helper):
+    def status(command="status", reported=None):
+        prefix = [] if reported is None else [
+            "env", "-u", "WAYLAND_DISPLAY", "-u", "XDG_SESSION_TYPE",
+            *([f"XDG_SESSION_TYPE={reported}"] if reported else []),
+        ]
+        return json.loads(session.run(*prefix, helper, command).stdout)
+
+    def ready():
+        session.driver("Ready")
+        return status()["ready"]
+
+    wait("desktop status ready", ready)
+    results = {}
+    for reported in ("wayland", "tty", "x11", ""):
+        result = status(reported=reported)
+        assert result["ready"] and result["wayland"], result
+        assert result["diagnostics"]["compositorSession"] == "wayland", result
+        assert result["diagnostics"]["reportedSession"] == reported, result
+        assert not result["diagnostics"]["waylandDisplayPresent"], result
+        results[reported or "unset"] = result
+    try:
+        session.driver("DisconnectIntegration")
+        disconnected = status()
+        assert disconnected["reason"] == "extension-unresponsive", disconnected
+        assert disconnected["canEnable"], disconnected
+        assert status("enable-extension")["ready"]
+        results["disconnected"] = disconnected
+        session.run("gnome-extensions", "disable", "zommi@zommi")
+        disabled = status()
+        assert disabled["reason"] == "extension-disabled", disabled
+        assert disabled["canEnable"], disabled
+        assert status("enable-extension")["ready"]
+        results["disabled"] = disabled
+        session.run("gsettings", "set", "org.gnome.shell", "disable-user-extensions", "true")
+        blocked = status()
+        assert blocked["reason"] == "extensions-disabled", blocked
+        assert not blocked["canEnable"], blocked
+        assert status("enable-extension")["reason"] == "extensions-disabled"
+        results["globallyDisabled"] = blocked
+    finally:
+        session.run("gsettings", "set", "org.gnome.shell", "disable-user-extensions", "false")
+        session.run(helper, "enable-extension")
+    wait("desktop status recovered", ready)
+    (session.evidence / "desktop-session-matrix.json").write_text(json.dumps(results, indent=2))
+    print("PASS desktop diagnostics: stale/unset session environment, disabled integration and global extension switch.", flush=True)
+
+
 def native_acceptance(session, helper, toolkit="3.0"):
     from PIL import Image, ImageChops
 
@@ -325,7 +390,9 @@ def native_acceptance(session, helper, toolkit="3.0"):
     assert session.line(shortcuts, 8)["contextShortcut"]
     session.shortcut()
     assert session.line(shortcuts, 5)["event"] == "activated"
-    host = session.start("capture", [helper, "--capture-host"], pipes=True)
+    # Capture must work even when a launcher reports the wrong session type.
+    host = session.start("capture", [helper, "--capture-host"], pipes=True,
+                         env={**session.env, "XDG_SESSION_TYPE": "tty"})
     cancelled = session.request(host, "selectContent", authorize=False)
     assert cancelled["ok"] and cancelled["result"]["cancelled"], cancelled
     capture = session.request(host, "selectContent", authorize=True)
@@ -790,6 +857,8 @@ def ui_acceptance(session, package, fixture_app):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--package", type=Path)
+    parser.add_argument("--system-extension", action="store_true",
+                        help="Test the .deb-installed GNOME extension instead of a temporary user copy")
     parser.add_argument(
         "--helper", type=Path, default=ROOT / "target/debug/zommi-linux-capture"
     )
@@ -827,9 +896,14 @@ def main():
         else ROOT / "src/Zommi.Gnome"
     )
     with tempfile.TemporaryDirectory(prefix="zommi-wayland-acceptance-") as temporary:
-        session = Session(Path(temporary), args.output, extension)
+        session = Session(Path(temporary), args.output, None if args.system_extension else extension)
         try:
+            desktop_status_without_gnome(session, helper)
             session.start_desktop()
+            desktop_status_acceptance(session, helper)
+            if args.system_extension:
+                status = json.loads(session.run(helper, "status").stdout)
+                assert status["diagnostics"]["extensionPath"] == "/usr/share/gnome-shell/extensions/zommi@zommi", status
             fixture_app, _ = native_acceptance(session, helper)
             gtk4, _ = native_acceptance(session, helper, "4.0")
             gtk4.terminate()
@@ -846,6 +920,16 @@ def main():
             if args.package:
                 ui_acceptance(session, args.package.resolve(), fixture_app)
                 document_acceptance(session, args.package.resolve())
+            # GNOME cannot retry an ERROR state through disable/enable. Do not
+            # offer an ineffective repair loop; retain the actual load error.
+            session.driver("FailIntegration")
+            for command in ("status", "enable-extension"):
+                failed = json.loads(session.run(helper, command).stdout)
+                assert failed["reason"] == "extension-error", failed
+                assert not failed["canEnable"], failed
+                assert "Synthetic integration failure" in failed["diagnostics"]["extensionError"], failed
+            (session.evidence / "desktop-extension-error.json").write_text(json.dumps(failed, indent=2))
+            print("PASS extension load error: actionable diagnostics without an ineffective repair.", flush=True)
         finally:
             session.close()
     return 0
