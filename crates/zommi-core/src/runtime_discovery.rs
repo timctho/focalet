@@ -160,11 +160,11 @@ const RUNTIME_CATALOG: &[CatalogEntry] = &[
     CatalogEntry {
         executable: "claude",
         runtime_id: "claude",
-        adapter_id: "pty-compatibility",
-        display_name: "Claude CLI",
-        protocol_name: "Terminal compatibility",
-        priority: 1_000,
-        capability_hints: &["turn.stream.v1"],
+        adapter_id: "claude-stream-json",
+        display_name: "Claude Code",
+        protocol_name: "Stream JSON",
+        priority: 27,
+        capability_hints: crate::claude_adapter::CAPABILITIES,
     },
 ];
 
@@ -507,7 +507,11 @@ pub fn target_from_override(
 
     let entry = RUNTIME_CATALOG
         .iter()
-        .find(|entry| entry.adapter_id == configured.adapter_id)
+        .find(|entry| {
+            entry.adapter_id == configured.adapter_id
+                || (configured.adapter_id == "pty-compatibility"
+                    && entry.adapter_id == "claude-stream-json")
+        })
         .ok_or_else(|| "Runtime adapter is not supported.".to_owned())?;
     let path = configured
         .executable_path
@@ -1193,6 +1197,17 @@ fn launch_args(adapter_id: &str) -> &'static [&'static str] {
             "--skip-build",
             "--isolated",
         ],
+        "claude-stream-json" => &[
+            "--print",
+            "--verbose",
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+            "--include-partial-messages",
+            "--permission-prompt-tool",
+            "stdio",
+        ],
         "pty-compatibility" => &[],
         _ => &[],
     }
@@ -1485,7 +1500,7 @@ mod tests {
             "hermes-acp",
             "hermes-gateway",
             "openclaw-acp",
-            "pty-compatibility",
+            "claude-stream-json",
         ] {
             assert!(adapters.contains(adapter), "missing {adapter}");
         }
@@ -1838,9 +1853,9 @@ mod tests {
     }
 
     #[test]
-    fn native_windows_terminal_targets_are_never_discovered_or_configured() {
+    fn native_windows_claude_and_legacy_overrides_use_structured_protocol() {
         let root = std::env::temp_dir().join(format!(
-            "zommi-native-pty-{}-{}",
+            "zommi-native-claude-{}-{}",
             std::process::id(),
             uuid::Uuid::new_v4()
         ));
@@ -1860,7 +1875,7 @@ mod tests {
             )
             .targets
             .iter()
-            .all(|target| target.adapter_id != "pty-compatibility")
+            .any(|target| target.adapter_id == "claude-stream-json")
         );
         let configured = ConfiguredRuntimeOverride {
             id: "native-claude".into(),
@@ -1877,7 +1892,12 @@ mod tests {
             endpoint: None,
             profile_id: None,
         };
-        assert!(target_from_override(&configured, "windows").is_err());
+        assert_eq!(
+            target_from_override(&configured, "windows")
+                .unwrap()
+                .adapter_id,
+            "claude-stream-json"
+        );
         let _ = fs::remove_dir_all(root);
     }
 }

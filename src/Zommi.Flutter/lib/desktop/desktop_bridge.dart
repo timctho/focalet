@@ -981,7 +981,7 @@ final class FlutterDesktopBridge
       'hermes-acp' => const ['acp', '--setup'],
       'opencode-acp' => const ['auth', 'login'],
       // Gemini's interactive CLI owns sign-in; it has no login subcommand.
-      'gemini-acp' => const <String>[],
+      'gemini-acp' || 'claude-stream-json' => const <String>[],
       'openclaw-acp' => const ['onboard'],
       _ => null,
     };

@@ -65,7 +65,7 @@ void main() {
       expect(desktop.responseNotifications, hasLength(3));
       expect(
         desktop.responseNotifications.map((value) => value['runtimeName']),
-        ['Codex', 'Pi', 'Claude CLI'],
+        ['Codex', 'Pi', 'Claude Code'],
       );
       expect(
         desktop.responseNotifications.every(

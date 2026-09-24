@@ -17,7 +17,8 @@ FIXTURES = ROOT / "crates/zommi-core-host/tests"
 
 
 class Core:
-    def __init__(self, environment):
+    def __init__(self, environment, receive_timeout=20):
+        self.receive_timeout = receive_timeout
         self.process = subprocess.Popen([str(HOST)], cwd=ROOT, env=environment,
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         stderr=subprocess.DEVNULL, text=True, encoding="utf-8")
@@ -33,7 +34,7 @@ class Core:
         self.reader.start()
 
     def receive(self):
-        message = self.messages.get(timeout=20)
+        message = self.messages.get(timeout=self.receive_timeout)
         if message is None:
             raise AssertionError("Core exited without a response")
         if "event" in message:

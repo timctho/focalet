@@ -356,8 +356,8 @@ void main() {
       await controller.selectRuntime('runtime-claude');
       expect(controller.sessionNavigationSupported, isTrue);
       expect(controller.sessionCreationSupported, isTrue);
-      expect(controller.modelSelectionSupported, isFalse);
-      expect(controller.capabilities, ['turn.stream.v1']);
+      expect(controller.modelSelectionSupported, isTrue);
+      expect(controller.capabilities, contains('input.image.v1'));
       await controller.switchSession(
         'session-1',
         runtimeTargetId: 'runtime-codex',
