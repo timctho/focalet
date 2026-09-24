@@ -1,3 +1,4 @@
+import 'package:zommi_flutter/theme/app_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:zommi_flutter/desktop/capture_permissions.dart';
 import 'package:zommi_flutter/desktop/gnome_integration.dart';
@@ -12,10 +13,14 @@ class FirstRunSetup extends StatefulWidget {
   const FirstRunSetup({
     required this.controller,
     required this.onCompleted,
+    this.preferences = const AppPreferences(),
+    this.onPreferencesChanged,
     super.key,
   });
 
   final ZommiController controller;
+  final AppPreferences preferences;
+  final ValueChanged<AppPreferences>? onPreferencesChanged;
   final Future<void> Function() onCompleted;
 
   @override
@@ -115,6 +120,10 @@ class _FirstRunSetupState extends State<FirstRunSetup> {
                         fontSize: 12,
                         color: colors.onSurfaceVariant,
                       ),
+                    ),
+                    RuntimePermissionSetting(
+                      preferences: widget.preferences,
+                      onChanged: busy ? null : widget.onPreferencesChanged,
                     ),
                     const SizedBox(height: 20),
                     if (controller.starting)

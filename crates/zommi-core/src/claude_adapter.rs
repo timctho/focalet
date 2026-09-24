@@ -430,6 +430,12 @@ impl ClaudeAdapter {
             json!({"behavior":"deny","message":"Denied by the user."})
         };
         stream.write(&json!({"type":"control_response","response":{"subtype":"success","request_id":approval,"response":result}})).await?;
+        stream.emit(
+            "approval.resolved",
+            None,
+            None,
+            json!({"approvalId":approval,"reason":"answered"}),
+        );
         Ok(json!({"resolved":true,"approvalId":approval}))
     }
     pub async fn shutdown(&self) {
@@ -734,6 +740,12 @@ impl Stream {
         if value["type"] == "control_cancel_request" {
             if let Some(id) = value["request_id"].as_str() {
                 self.state.lock().await.approvals.remove(id);
+                self.emit(
+                    "approval.resolved",
+                    None,
+                    None,
+                    json!({"approvalId":id,"reason":"cancelled"}),
+                );
             }
             return;
         }
@@ -751,14 +763,27 @@ impl Stream {
                 .await
                 .approvals
                 .insert(id.clone(), request.clone());
-            self.emit("approval.requested", None, None, json!({"approvalId":id,"toolCall":{"title":request["tool_name"],"rawInput":request["input"]},"options":[{"optionId":"allow_once","kind":"allow_once","name":"Allow once"},{"optionId":"reject_once","kind":"reject_once","name":"Deny"}]}));
+            let turn_id = self
+                .state
+                .lock()
+                .await
+                .turn
+                .as_ref()
+                .map(|turn| turn.id.clone());
+            self.emit("approval.requested", turn_id.as_deref(), None, json!({"approvalId":id,"toolCall":{"title":request["tool_name"],"rawInput":request["input"]},"options":[{"optionId":"allow_once","kind":"allow_once","name":"Allow once"},{"optionId":"reject_once","kind":"reject_once","name":"Deny"}]}));
             let weak = Arc::downgrade(self);
             tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_secs(60)).await;
+                tokio::time::sleep(Duration::from_secs(300)).await;
                 if let Some(s) = weak.upgrade()
                     && s.state.lock().await.approvals.remove(&id).is_some()
                 {
                     let _ = s.write(&json!({"type":"control_response","response":{"subtype":"success","request_id":id,"response":{"behavior":"deny","message":"Approval expired."}}})).await;
+                    s.emit(
+                        "approval.resolved",
+                        None,
+                        None,
+                        json!({"approvalId":id,"reason":"expired"}),
+                    );
                 }
             });
             return;

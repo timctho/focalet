@@ -291,6 +291,7 @@ mod tests {
                     profile_id: None,
                 },
                 RuntimeCommand {
+                    full_access: false,
                     command: python.into(),
                     working_directory: None,
                     args: vec![

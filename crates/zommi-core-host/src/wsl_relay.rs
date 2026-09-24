@@ -96,6 +96,7 @@ pub fn wrap_wsl_command(
     ];
     args.extend(inner.iter().cloned());
     Ok(RuntimeCommand {
+        full_access: direct.full_access,
         command: proxy.to_string_lossy().into_owned(),
         args,
         working_directory: None,
@@ -988,7 +989,8 @@ mod tests {
             endpoint: None,
             profile_id: None,
         };
-        let direct = RuntimeCommand {
+        let mut direct = RuntimeCommand {
+            full_access: false,
             command: "wsl.exe".into(),
             args: vec![
                 "-d".into(),
@@ -1005,7 +1007,15 @@ mod tests {
             ],
             working_directory: None,
         };
+        direct.enable_full_access(&target).unwrap();
         let wrapped = wrap_wsl_command(&target, direct).expect("wrap relay command");
+        assert!(wrapped.full_access);
+        assert!(wrapped.args.ends_with(&[
+            "-c".into(),
+            "approval_policy=\"never\"".into(),
+            "-c".into(),
+            "sandbox_mode=\"danger-full-access\"".into()
+        ]));
         assert!(wrapped.command.ends_with(std::env::consts::EXE_SUFFIX));
         assert_eq!(wrapped.args[0], "--wsl-proxy");
         assert_eq!(wrapped.args[2], "Ubuntu");

@@ -81,6 +81,10 @@ Capture happens when you invoke it. Review what you share: source metadata can
 extend beyond the selected pixels. Your selected agent's provider and data
 policies apply. [Capture controls and limitations](docs/browser-context.md)
 
+First launch and App settings include an optional **Full access (YOLO)** setting.
+By default, Zommi follows each agent’s permission policy and shows its approval
+requests. [Runtime permissions](docs/install.md#2-choose-the-agent-you-already-have)
+
 ## Platforms
 
 | Platform | Availability | Capture support |

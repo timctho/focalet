@@ -7,6 +7,23 @@ import 'package:zommi_flutter/desktop/desktop_bridge.dart';
 import 'package:zommi_flutter/desktop/region_selection.dart';
 
 /// Shared selection and drawing controls for native Ubuntu/macOS screen frames.
+/// Capture is mounted above the shell navigator. Its menus and tooltips need
+/// their own navigator/overlay so opening one cannot replace the canvas.
+class RegionCaptureOverlay extends StatelessWidget {
+  const RegionCaptureOverlay({required this.session, super.key});
+  final RegionSelectionSession session;
+
+  @override
+  Widget build(BuildContext context) => HeroControllerScope.none(
+    child: Navigator(
+      key: ObjectKey(session),
+      onGenerateRoute: (_) => MaterialPageRoute<void>(
+        builder: (_) => RegionCaptureEditor(session: session),
+      ),
+    ),
+  );
+}
+
 class RegionCaptureEditor extends StatefulWidget {
   const RegionCaptureEditor({required this.session, super.key});
   final RegionSelectionSession session;
@@ -16,6 +33,8 @@ class RegionCaptureEditor extends StatefulWidget {
 
 class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
   final _focus = FocusNode();
+  final _controls = <String, GlobalKey>{};
+  GlobalKey _control(String name) => _controls.putIfAbsent(name, GlobalKey.new);
   Offset? _start;
   Offset? _end;
   List<Offset> _points = [];
@@ -30,6 +49,7 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
   }
 
   bool _handleKey(KeyEvent event) =>
+      ModalRoute.of(context)?.isCurrent != false &&
       _key(_focus, event) == KeyEventResult.handled;
 
   @override
@@ -320,6 +340,7 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
                       ),
                     ])
                       IconButton.filledTonal(
+                        key: _control(label),
                         isSelected: session.tool == tool,
                         tooltip: label,
                         onPressed:
@@ -340,6 +361,7 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
                       Colors.black,
                     ])
                       IconButton(
+                        key: _control('color-${color.toARGB32()}'),
                         tooltip:
                             'Drawing color ${color.toARGB32().toRadixString(16)}',
                         onPressed: () =>
@@ -354,6 +376,7 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
                         ),
                       ),
                     DropdownButton<double>(
+                      key: _control('Stroke width'),
                       value: session.strokeWidth,
                       items: [
                         for (final width in [2.0, 4.0, 8.0, 16.0])
@@ -369,6 +392,7 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
                       },
                     ),
                     IconButton(
+                      key: _control('Undo'),
                       tooltip: 'Undo',
                       onPressed: session.selected?.canUndo == true
                           ? () => session.change(() => session.selected!.undo())
@@ -376,6 +400,7 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
                       icon: const Icon(Icons.undo),
                     ),
                     IconButton(
+                      key: _control('Redo'),
                       tooltip: 'Redo',
                       onPressed: session.selected?.canRedo == true
                           ? () => session.change(() => session.selected!.redo())
@@ -383,6 +408,7 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
                       icon: const Icon(Icons.redo),
                     ),
                     IconButton(
+                      key: _control('Delete region'),
                       tooltip: 'Delete region',
                       onPressed: session.selected == null
                           ? null
@@ -408,6 +434,14 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
         'session': identityHashCode(session).toString(),
         'bounds': regionRectJson((local + position) & _imageBounds.size),
         'localBounds': regionRectJson(local & _imageBounds.size),
+        'controls': {
+          for (final entry in _controls.entries)
+            if (entry.value.currentContext?.findRenderObject()
+                case final RenderBox control)
+              entry.key: regionRectJson(
+                control.localToGlobal(Offset.zero) & control.size,
+              ),
+        },
         'imageWidth': session.display.image.width,
         'imageHeight': session.display.image.height,
       });

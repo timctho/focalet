@@ -9,11 +9,15 @@ import 'package:zommi_flutter/state/zommi_models.dart';
 class RichFakeCore
     implements
         CoreBridge,
+        RuntimePermissionBridge,
         RuntimeConfigurationBridge,
         RuntimeModelRefreshBridge,
         SessionCatalogBridge,
         SessionRewindBridge,
         GoalControlBridge {
+  @override
+  bool fullAccessRuntimes = false;
+
   final Map<String, Map<String, Object?>> goals = {};
   final List<Map<String, Object?>> goalCommands = [];
   bool goalCommandFails = false;

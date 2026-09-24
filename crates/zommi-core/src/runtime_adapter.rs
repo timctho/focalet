@@ -698,11 +698,13 @@ impl RuntimeAdapter {
                     .resolve_approval(session_id, approval_id, option_id)
                     .await
             }
-            Self::Codex(_) => Err(CodexError {
-                code: "capability-unavailable".into(),
-                message: "This Codex target does not expose structured approvals.".into(),
-                retryable: false,
-            }),
+            Self::Codex(adapter) => {
+                adapter
+                    .ready()
+                    .await?
+                    .resolve_approval(session_id, approval_id, option_id)
+                    .await
+            }
             Self::Pi(_) => Err(CodexError {
                 code: "capability-unavailable".into(),
                 message: "Pi does not expose structured approvals.".into(),

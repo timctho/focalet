@@ -20,6 +20,11 @@ abstract interface class PagedHistoryBridge {
   });
 }
 
+/// Launch preference; does not mutate permissions in a running runtime.
+abstract interface class RuntimePermissionBridge {
+  set fullAccessRuntimes(bool value);
+}
+
 abstract interface class CoreBridge {
   Stream<CoreEvent> get events;
 
@@ -412,6 +417,7 @@ final class CoreProtocolException implements Exception {
 final class ProcessCoreBridge
     implements
         CoreBridge,
+        RuntimePermissionBridge,
         CoreRecoveryBridge,
         RuntimeConfigurationBridge,
         RuntimePreparationBridge,
@@ -423,6 +429,9 @@ final class ProcessCoreBridge
         SessionStatusBridge,
         PagedHistoryBridge,
         RuntimeCommandBridge {
+  @override
+  bool fullAccessRuntimes = false;
+
   ProcessCoreBridge({
     this.executablePath,
     this.requestTimeout = const Duration(seconds: 30),
@@ -553,6 +562,7 @@ final class ProcessCoreBridge
     String? cwd,
   }) async {
     final result = await _request('runtime.connect', <String, Object?>{
+      'fullAccess': fullAccessRuntimes,
       'runtimeTargetId': runtimeTargetId,
       'preferredSessionId': ?preferredSessionId,
       'cwd': ?cwd,
@@ -582,7 +592,10 @@ final class ProcessCoreBridge
 
   @override
   Future<void> prepareRuntime({required String runtimeTargetId}) async {
-    await _request('runtime.prepare', {'runtimeTargetId': runtimeTargetId});
+    await _request('runtime.prepare', {
+      'runtimeTargetId': runtimeTargetId,
+      'fullAccess': fullAccessRuntimes,
+    });
   }
 
   @override
@@ -623,6 +636,7 @@ final class ProcessCoreBridge
     String? profile,
   }) async {
     final result = await _request('session.create', <String, Object?>{
+      'fullAccess': fullAccessRuntimes,
       'runtimeTargetId': runtimeTargetId,
       'model': ?model,
       'effort': ?effort,

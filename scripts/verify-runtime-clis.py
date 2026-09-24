@@ -102,19 +102,22 @@ class RealCliTests(unittest.TestCase):
         allowed = {'PATH', 'Path', 'PATHEXT', 'SystemRoot', 'WINDIR', 'COMSPEC',
                    'LD_LIBRARY_PATH', 'TMP', 'TEMP', 'LANG', 'LC_ALL'}
         self.env = {k: v for k, v in os.environ.items() if k in allowed}
+        isolated_home = self.path / 'home'
+        isolated_home.mkdir()
+        self.env.update(HOME=str(isolated_home), USERPROFILE=str(isolated_home), XDG_CONFIG_HOME=str(isolated_home / '.config'))
         self.env.update(ZOMMI_RUNTIME_DISCOVERY_MODE='configured-only',
                         ZOMMI_CORE_STATE_PATH=str(self.path / 'binding.json'),
                         ZOMMI_RUNTIME_OVERRIDES_PATH=str(self.path / 'overrides.json'),
                         ZOMMI_RUNTIME_DISCOVERY_CACHE_PATH=str(self.path / 'discovery.json'))
         self.serial = 0
 
-    def connect(self, runtime, preferred=None):
+    def connect(self, runtime, preferred=None, *, full_access=False):
         self.core = Core(self.env)
         self.addCleanup(self.core.close)
         self.core.request('core.initialize')
         target = next(t for t in self.core.request('runtime.discover')['targets'] if t['runtimeId'] == runtime)
         self.target = target['id']
-        connection = self.core.request('runtime.connect', {'runtimeTargetId':self.target, 'cwd':str(self.workspace), 'preferredSessionId':preferred})
+        connection = self.core.request('runtime.connect', {'runtimeTargetId':self.target, 'cwd':str(self.workspace), 'preferredSessionId':preferred, 'newSession':preferred is None, 'fullAccess':full_access})
         self.identity = {'runtimeTargetId':self.target, 'sessionId':connection['sessionId']}
         return connection
 
@@ -178,6 +181,11 @@ class RealCliTests(unittest.TestCase):
         self.assertIn('0.60/0.61', resumed['error']['message'])
         self.assertEqual({p: p.read_bytes() for p in files}, files, 'Known-broken session/load must never touch saved conversation files')
         self.assertEqual((self.path / 'binding.json').read_text(), saved_binding)
+        self.core.close()
+        self.connect('gemini', full_access=True)
+        op, _ = self.turn('full access fixture')
+        self.assertIn('GEMINI_REAL_CLI_OK', self.reply(op))
+        self.assertFalse(any(e['name'] == 'approval.requested' for e in self.core.events))
 
     def test_claude_real_stream_models_context_approval_refresh_and_restart_resume(self):
         package = PACKAGES / '@anthropic-ai/claude-code'
@@ -215,6 +223,14 @@ class RealCliTests(unittest.TestCase):
         self.assertEqual(self.connect('claude', saved)['sessionId'], saved)
         op, _ = self.turn('recall-marker')
         self.assertEqual(self.reply(op), 'REMEMBERED')
+        self.core.close()
+        server.output_file = str(self.workspace / 'full-access.txt')
+        self.connect('claude', full_access=True)
+        op, _ = self.turn('request-tool')
+        self.assertIn('TOOL_DONE', self.reply(op))
+        self.assertEqual(Path(server.output_file).read_text(), 'synthetic tool output')
+        self.assertFalse(any(e['name'] == 'approval.requested' for e in self.core.events))
+
 
 
 if __name__ == '__main__':

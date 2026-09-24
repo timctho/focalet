@@ -30,6 +30,7 @@ final class AppPreferences {
   const AppPreferences({
     this.chatFontSize = 14,
     this.browserPageDetails = true,
+    this.fullAccessRuntimes = false,
     this.themeColor = ZommiThemeColor.ocean,
     this.themeMode = ThemeMode.system,
     this.customThemeColor = const Color(0xff8178c9),
@@ -39,6 +40,7 @@ final class AppPreferences {
   });
 
   final bool browserPageDetails;
+  final bool fullAccessRuntimes;
   final double chatFontSize;
   final ZommiThemeColor themeColor;
   final ThemeMode themeMode;
@@ -52,6 +54,7 @@ final class AppPreferences {
 
   AppPreferences copyWith({
     bool? browserPageDetails,
+    bool? fullAccessRuntimes,
     double? chatFontSize,
     ZommiThemeColor? themeColor,
     ThemeMode? themeMode,
@@ -61,6 +64,7 @@ final class AppPreferences {
     CaptureShortcut? selectionShortcut,
   }) => AppPreferences(
     browserPageDetails: browserPageDetails ?? this.browserPageDetails,
+    fullAccessRuntimes: fullAccessRuntimes ?? this.fullAccessRuntimes,
     chatFontSize: chatFontSize ?? this.chatFontSize,
     themeColor: themeColor ?? this.themeColor,
     themeMode: themeMode ?? this.themeMode,
@@ -72,6 +76,7 @@ final class AppPreferences {
 
   Map<String, Object?> toJson() => {
     'browserPageDetails': browserPageDetails,
+    'fullAccessRuntimes': fullAccessRuntimes,
     'chatFontSize': chatFontSize,
     'themeColor': themeColor.id,
     'themeMode': themeMode.name,
@@ -91,6 +96,7 @@ final class AppPreferences {
           !value.containsKey('runtimeSetupCompleted') ||
           value['runtimeSetupCompleted'] == true,
       browserPageDetails: value['browserPageDetails'] != false,
+      fullAccessRuntimes: value['fullAccessRuntimes'] == true,
       // The retired Medium preset follows Default on existing installs.
       chatFontSize: fontSize == 13 ? 14 : fontSize.clamp(12, 17).toDouble(),
       themeColor:
@@ -123,6 +129,7 @@ final class AppPreferences {
   bool operator ==(Object other) =>
       other is AppPreferences &&
       other.browserPageDetails == browserPageDetails &&
+      other.fullAccessRuntimes == fullAccessRuntimes &&
       other.chatFontSize == chatFontSize &&
       other.themeColor == themeColor &&
       other.themeMode == themeMode &&
@@ -134,6 +141,7 @@ final class AppPreferences {
   @override
   int get hashCode => Object.hash(
     browserPageDetails,
+    fullAccessRuntimes,
     chatFontSize,
     themeColor,
     themeMode,

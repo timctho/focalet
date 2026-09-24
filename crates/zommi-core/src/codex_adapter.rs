@@ -10,6 +10,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+#[path = "codex_approvals.rs"]
+mod approvals;
+
 use serde::Serialize;
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -96,6 +99,7 @@ pub struct CodexConfig {
     pub list_only: bool,
     pub resume_required: bool,
     pub request_timeout: Duration,
+    pub approval_timeout: Duration,
 }
 
 impl CodexConfig {
@@ -113,6 +117,7 @@ impl CodexConfig {
             list_only: false,
             resume_required: false,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
+            approval_timeout: Duration::from_secs(300),
         }
     }
 }
@@ -223,6 +228,8 @@ impl Drop for ProcessGroup {
 
 #[derive(Default)]
 struct AdapterState {
+    approvals: HashMap<String, approvals::PendingApproval>,
+    approval_items: HashMap<String, Value>,
     initial_history: Option<Value>,
     history_paging: Option<bool>,
     token_usage: HashMap<String, Value>,
@@ -550,7 +557,11 @@ impl CodexAdapter {
             "cwd": state.active_cwd.as_deref().unwrap_or_else(|| self.inner.cwd.to_str().unwrap_or_default())
         });
         Ok(CodexConnection {
-            capabilities: vec!["session.rewind.v1".into(), "session.status.v1".into()],
+            capabilities: vec![
+                "session.rewind.v1".into(),
+                "session.status.v1".into(),
+                "approval.resolve.v1".into(),
+            ],
             runtime_target_id: self.inner.target_id.clone(),
             session_id: state
                 .thread_id
@@ -1619,6 +1630,9 @@ impl CodexAdapter {
     }
 
     pub async fn shutdown(&self) {
+        self.inner
+            .clear_approvals(None, None, None, "disconnected")
+            .await;
         self.inner.state.lock().await.stopping = true;
         if let Some(task) = self.inner.wait_task.lock().await.take() {
             task.abort();
@@ -1765,9 +1779,22 @@ impl Inner {
     async fn request_with_timeout(
         &self,
         method: &str,
-        params: Value,
+        mut params: Value,
         deadline: Duration,
     ) -> Result<Value, CodexError> {
+        if self.config.command.full_access {
+            match method {
+                "thread/start" | "thread/resume" | "thread/fork" | "thread/settings/update" => {
+                    params["approvalPolicy"] = json!("never");
+                    params["sandbox"] = json!("danger-full-access");
+                }
+                "turn/start" => {
+                    params["approvalPolicy"] = json!("never");
+                    params["sandboxPolicy"] = json!({"type":"dangerFullAccess"});
+                }
+                _ => {}
+            }
+        }
         let state = self.state.lock().await;
         if state.exited || state.stopping {
             return Err(CodexError::new(
@@ -1916,6 +1943,9 @@ impl Inner {
     async fn handle_message(self: &Arc<Self>, message: Value) {
         if let Some(method) = message.get("method").and_then(Value::as_str) {
             if let Some(id) = message.get("id") {
+                if self.handle_approval(method, &message).await {
+                    return;
+                }
                 self.emit(
                     "runtime.diagnostic",
                     None,
@@ -1969,6 +1999,41 @@ impl Inner {
     }
 
     async fn handle_notification(self: &Arc<Self>, method: &str, params: Value) {
+        if method == "serverRequest/resolved" {
+            if let (Some(session), Some(id)) =
+                (params["threadId"].as_str(), params.get("requestId"))
+            {
+                self.clear_approvals(Some(session), None, Some(id), "resolved-by-runtime")
+                    .await;
+            }
+            return;
+        }
+        if method == "turn/completed"
+            && let Some(session) = params["threadId"].as_str()
+        {
+            self.clear_approvals(
+                Some(session),
+                params.pointer("/turn/id").and_then(Value::as_str),
+                None,
+                "turn-ended",
+            )
+            .await;
+        }
+        if method == "item/started"
+            && params.pointer("/item/type").and_then(Value::as_str) == Some("fileChange")
+            && let Some(id) = params.pointer("/item/id").and_then(Value::as_str)
+        {
+            self.state
+                .lock()
+                .await
+                .approval_items
+                .insert(id.into(), params["item"]["changes"].clone());
+        }
+        if method == "item/completed"
+            && let Some(id) = params.pointer("/item/id").and_then(Value::as_str)
+        {
+            self.state.lock().await.approval_items.remove(id);
+        }
         if method == "thread/tokenUsage/updated" {
             if let (Some(id), Some(usage)) = (
                 params.get("threadId").and_then(Value::as_str),
@@ -2187,6 +2252,7 @@ impl Inner {
     }
 
     async fn handle_failure(&self, message: String) {
+        self.clear_approvals(None, None, None, "disconnected").await;
         let mut state = self.state.lock().await;
         if state.exited || state.stopping {
             return;

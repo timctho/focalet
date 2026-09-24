@@ -33,6 +33,8 @@ def log(message):
             stream.write(json.dumps(message, separators=(",", ":")) + "\n")
 
 
+log({"permissionEnvironment": {key: os.environ.get(key) for key in ["OPENCODE_PERMISSION", "HERMES_YOLO_MODE"]}})
+
 for line in sys.stdin:
     try:
         request = json.loads(line)
@@ -42,6 +44,11 @@ for line in sys.stdin:
     method = request.get("method")
     request_id = request.get("id")
 
+    if method is None and request_id == "permission-1":
+        if pending_prompt is not None:
+            send({"jsonrpc":"2.0", "id":pending_prompt, "result":{"stopReason":"end_turn"}})
+            pending_prompt = None
+        continue
     if method == "session/cancel":
         if pending_prompt is not None:
             send({"jsonrpc": "2.0", "id": pending_prompt, "result": {"stopReason": "cancelled"}})
@@ -230,7 +237,7 @@ for line in sys.stdin:
             )
             sys.stderr.flush()
             raise SystemExit(25)
-        if "hold-for-interrupt" not in prompt_text:
+        if "hold-for-interrupt" not in prompt_text and "request-approval" not in prompt_text:
             send({"jsonrpc": "2.0", "id": request_id, "result": {"stopReason": "end_turn"}})
             pending_prompt = None
             if "late-frame" in prompt_text:

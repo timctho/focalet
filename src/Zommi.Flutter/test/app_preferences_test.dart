@@ -9,6 +9,45 @@ import 'test_support.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 
 void main() {
+  testWidgets('first launch and settings persist runtime launch permissions', (
+    tester,
+  ) async {
+    final store = _PermissionPreferencesStore();
+    final core = RichFakeCore();
+    await tester.pumpWidget(
+      ZommiApp(
+        core: core,
+        preferencesStore: store,
+        initialPreferences: const AppPreferences(runtimeSetupCompleted: false),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(core.fullAccessRuntimes, isFalse);
+    expect(AppPreferences.fromJson(const {}).fullAccessRuntimes, isFalse);
+    await tester.tap(find.byKey(const ValueKey('runtime-full-access')));
+    await tester.pumpAndSettle();
+    expect(core.fullAccessRuntimes, isTrue);
+    final saved = await store.load();
+    expect(saved.fullAccessRuntimes, isTrue);
+    await tester.pumpWidget(const SizedBox());
+    final restarted = RichFakeCore();
+    await tester.pumpWidget(
+      ZommiApp(
+        core: restarted,
+        preferencesStore: store,
+        initialPreferences: saved.copyWith(runtimeSetupCompleted: true),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(restarted.fullAccessRuntimes, isTrue);
+    await tester.tap(find.byKey(const ValueKey('app-settings')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('runtime-full-access')));
+    await tester.pumpAndSettle();
+    expect(restarted.fullAccessRuntimes, isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'full webpage capture can be disabled and restored without changing other preferences',
     (tester) async {
@@ -67,6 +106,7 @@ void main() {
     addTearDown(() => directory.delete(recursive: true));
     final store = FileAppPreferencesStore('${directory.path}/settings.json');
     const expected = AppPreferences(
+      fullAccessRuntimes: true,
       chatFontSize: 17,
       themeColor: ZommiThemeColor.ocean,
       windowSize: WindowSizeSetting.wide,
@@ -75,6 +115,7 @@ void main() {
     await store.save(expected);
     final restored = await store.load();
 
+    expect(restored.fullAccessRuntimes, isTrue);
     expect(restored.chatFontSize, 17);
     expect(restored.themeColor, ZommiThemeColor.ocean);
     expect(restored.windowSize, WindowSizeSetting.wide);
@@ -96,4 +137,15 @@ void main() {
       '/tmp/config/zommi/settings.json',
     );
   });
+}
+
+class _PermissionPreferencesStore implements AppPreferencesStore {
+  AppPreferences saved = const AppPreferences();
+  @override
+  Future<AppPreferences> load() async =>
+      AppPreferences.fromJson(saved.toJson());
+  @override
+  Future<void> save(AppPreferences preferences) async {
+    saved = preferences;
+  }
 }

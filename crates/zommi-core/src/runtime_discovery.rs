@@ -16,6 +16,7 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(4);
 const DISCOVERY_CACHE_SCHEMA_VERSION: u32 = 1;
 
 const CODEX_CAPABILITY_HINTS: &[&str] = &[
+    "approval.resolve.v1",
     "session.list.v1",
     "session.create.v1",
     "session.resume.v1",
@@ -208,9 +209,73 @@ pub struct RuntimeTarget {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeCommand {
+    pub full_access: bool,
     pub command: String,
     pub args: Vec<String>,
     pub working_directory: Option<String>,
+}
+
+impl RuntimeCommand {
+    /// Apply only to this child process; never rewrite the user's CLI config.
+    /// WSL args still contain the direct invocation at this point (before relay).
+    pub fn enable_full_access(&mut self, target: &RuntimeTarget) -> io::Result<()> {
+        let adapter = target.adapter_id.as_str();
+        self.full_access = true;
+        let flags: &[&str] = match adapter {
+            "codex-app-server" => &[
+                "-c",
+                "approval_policy=\"never\"",
+                "-c",
+                "sandbox_mode=\"danger-full-access\"",
+            ],
+            "claude-stream-json" => &["--permission-mode", "bypassPermissions"],
+            "gemini-acp" => &["--approval-mode", "yolo"],
+            // ACP clients grant individual permission requests in full-access
+            // mode. Pi has no built-in permission gate; gateways own policy.
+            _ => &[],
+        };
+        self.args
+            .extend(flags.iter().map(|value| (*value).to_owned()));
+        let environment = self.permission_environment(adapter);
+        if target.execution_host.kind == "wsl" && !environment.is_empty() {
+            let executable = self
+                .args
+                .iter()
+                .position(|argument| argument == &target.executable_path)
+                .filter(|index| {
+                    self.args[..*index]
+                        .iter()
+                        .any(|argument| argument == "/usr/bin/env")
+                })
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "WSL full access requires a direct /usr/bin/env runtime invocation.",
+                    )
+                })?;
+            self.args.splice(
+                executable..executable,
+                environment
+                    .iter()
+                    .map(|(key, value)| format!("{key}={value}")),
+            );
+        }
+        Ok(())
+    }
+
+    pub(crate) fn permission_environment(
+        &self,
+        adapter: &str,
+    ) -> &'static [(&'static str, &'static str)] {
+        if !self.full_access {
+            return &[];
+        }
+        match adapter {
+            "opencode-acp" => &[("OPENCODE_PERMISSION", "{\"*\":\"allow\"}")],
+            "hermes-acp" => &[("HERMES_YOLO_MODE", "1")],
+            _ => &[],
+        }
+    }
 }
 
 impl RuntimeTarget {
@@ -885,6 +950,7 @@ pub fn command_for_target(target: &RuntimeTarget) -> RuntimeCommand {
         args.push(target.executable_path.clone());
         args.extend(launch_args.iter().map(|value| (*value).into()));
         return RuntimeCommand {
+            full_access: false,
             command: windows_wsl_executable(),
             args,
             working_directory: None,
@@ -895,6 +961,7 @@ pub fn command_for_target(target: &RuntimeTarget) -> RuntimeCommand {
     // An explicit cmd.exe /c wrapper bypasses that escaping for paths with
     // spaces and shell metacharacters.
     RuntimeCommand {
+        full_access: false,
         command: target.executable_path.clone(),
         args: launch_args.iter().map(|value| (*value).into()).collect(),
         working_directory: target.runtime_home.clone(),
@@ -1556,6 +1623,42 @@ mod tests {
         );
         assert_eq!(String::from_utf8_lossy(&result.stdout).trim(), "app-server");
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn full_access_environment_stays_inside_the_selected_native_or_wsl_child() {
+        let probe = b"__ZOMMI_RUNTIME_HOME__/home/u\n__ZOMMI_RUNTIME_PATH__opencode\t/home/u/bin/opencode\n__ZOMMI_RUNTIME_PATH__hermes\t/home/u/bin/hermes\n";
+        for target in runtime_targets_from_wsl_probe("Ubuntu", true, probe)
+            .into_iter()
+            .filter(|target| matches!(target.adapter_id.as_str(), "opencode-acp" | "hermes-acp"))
+        {
+            let default = command_for_target(&target);
+            assert!(
+                default
+                    .permission_environment(&target.adapter_id)
+                    .is_empty()
+            );
+            let mut full = default.clone();
+            full.enable_full_access(&target).unwrap();
+            let key = if target.adapter_id == "opencode-acp" {
+                "OPENCODE_PERMISSION={\"*\":\"allow\"}"
+            } else {
+                "HERMES_YOLO_MODE=1"
+            };
+            let index = full
+                .args
+                .iter()
+                .position(|value| value == &target.executable_path)
+                .unwrap();
+            assert_eq!(full.args[index - 1], key);
+            assert!(!default.args.contains(&key.to_string()));
+            let mut native = target.clone();
+            native.execution_host.kind = "native".into();
+            let mut full = command_for_target(&native);
+            full.enable_full_access(&native).unwrap();
+            assert!(!full.permission_environment(&native.adapter_id).is_empty());
+            assert_eq!(full.args, vec!["acp"]);
+        }
     }
 
     #[test]

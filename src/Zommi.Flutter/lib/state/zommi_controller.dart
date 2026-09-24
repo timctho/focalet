@@ -183,7 +183,24 @@ final class ZommiController extends ChangeNotifier {
   bool imageShortcutRegistered = false;
   int focusComposerEpoch = 0;
   int sessionSettingsOverviewEpoch = 0;
-  PendingApproval? approval;
+  final List<PendingApproval> _approvals = [];
+  PendingApproval? get approval => _approvals.firstOrNull;
+  int get pendingApprovalCount => _approvals.length;
+  String get approvalSource {
+    final request = approval;
+    if (request == null) return '';
+    final runtime =
+        _runtimeTarget(request.runtimeTargetId)?.displayName ?? 'Agent';
+    final chat = sessions
+        .where(
+          (session) =>
+              session.id == request.sessionId &&
+              session.runtimeTargetId == request.runtimeTargetId,
+        )
+        .firstOrNull;
+    return '$runtime · ${chat?.title ?? request.sessionId}';
+  }
+
   PendingQuestion? question;
   ContextAttachment? previewAttachment;
   ArtifactPreview? previewArtifact;
@@ -954,7 +971,6 @@ final class ZommiController extends ChangeNotifier {
     runtimeBusy = true;
     final epoch = _switchEpoch;
     switchingRuntimeId = targetId;
-    approval = null;
     question = null;
     previewArtifact = null;
     closeTransientPanels();
@@ -1543,7 +1559,6 @@ final class ZommiController extends ChangeNotifier {
       profiles = [];
     }
     if (!sessionSettingsBusy) {
-      approval = null;
       question = null;
       previewArtifact = null;
       modelPanelOpen = false;
@@ -1850,7 +1865,6 @@ final class ZommiController extends ChangeNotifier {
       _messageQueues.remove(sessionKey);
       _newSessions.remove(sessionKey);
       _pausedQueues.remove(sessionKey);
-      approval = null;
       question = null;
       previewArtifact = null;
       _transcriptChanged(nextKey);
@@ -2278,11 +2292,20 @@ final class ZommiController extends ChangeNotifier {
         approvalId: request.id,
         optionId: optionId,
       );
-      approval = null;
+      _approvals.remove(request);
       _setStatus(
         optionId == null ? 'Permission denied' : 'Permission response sent',
       );
     } on Object catch (error) {
+      if (error is CoreProtocolException &&
+          const [
+            'approval-expired',
+            'invalid-request',
+            'runtime-exited',
+            'runtime-unavailable',
+          ].contains(error.code)) {
+        _approvals.remove(request);
+      }
       _setStatus('Could not answer permission · $error', warning: true);
     } finally {
       resolvingPrompt = false;
@@ -2813,8 +2836,8 @@ final class ZommiController extends ChangeNotifier {
       sessionBusy = false;
       runtimeBusy = false;
       switchingRuntimeId = null;
+      _approvals.clear();
       _startingSessions.clear();
-      approval = null;
       question = null;
       _setStatus(
         'Agent connection lost. Your chats and drafts are kept; submitted requests were not resent.',
@@ -2923,6 +2946,15 @@ final class ZommiController extends ChangeNotifier {
         _notify();
         return;
       case 'runtime.status':
+        if (const [
+          'unavailable',
+          'recovering',
+          'stopped',
+        ].contains(event.payload['status'])) {
+          _approvals.removeWhere(
+            (request) => request.runtimeTargetId == event.runtimeTargetId,
+          );
+        }
         final message = event.payload['message']?.toString();
         final runtimeStatus = event.payload['status']?.toString();
         if (runtimeStatus?.isNotEmpty == true) {
@@ -2937,7 +2969,6 @@ final class ZommiController extends ChangeNotifier {
               activeRuntime = runtimeTargets[index];
               if (runtimeStatus == 'unavailable' ||
                   runtimeStatus == 'recovering') {
-                approval = null;
                 question = null;
               }
             }
@@ -2951,6 +2982,7 @@ final class ZommiController extends ChangeNotifier {
             warning: event.payload['status']?.toString() == 'degraded',
           );
         }
+        _notify();
         return;
       case 'turn.started':
         if (sessionId == null) return;
@@ -2992,14 +3024,32 @@ final class ZommiController extends ChangeNotifier {
         _applyItemUpdate(event.runtimeTargetId, sessionId, event);
         return;
       case 'approval.requested':
-        if (sessionId == null) return;
-        if (_isActiveSession(event.runtimeTargetId, sessionId)) {
-          approval = PendingApproval.fromEvent(
-            event.runtimeTargetId,
-            sessionId,
-            event.payload,
-          );
+        if (sessionId == null || event.sessionId == null) return;
+        final request = PendingApproval.fromEvent(
+          event.runtimeTargetId,
+          sessionId,
+          event.payload,
+          turnId: event.turnId,
+        );
+        if (request.id.isEmpty) return;
+        if (!_approvals.any(
+          (item) =>
+              item.id == request.id &&
+              item.runtimeTargetId == request.runtimeTargetId &&
+              item.sessionId == sessionId,
+        )) {
+          _approvals.add(request);
         }
+        _notify();
+        return;
+      case 'approval.resolved':
+        if (event.sessionId == null) return;
+        _approvals.removeWhere(
+          (request) =>
+              request.id == event.payload['approvalId'] &&
+              request.runtimeTargetId == event.runtimeTargetId &&
+              request.sessionId == sessionId,
+        );
         _notify();
         return;
       case 'question.requested':
@@ -3034,6 +3084,12 @@ final class ZommiController extends ChangeNotifier {
             !_startingSessions.contains(sessionKey)) {
           return;
         }
+        _approvals.removeWhere(
+          (request) =>
+              request.runtimeTargetId == event.runtimeTargetId &&
+              request.sessionId == sessionId &&
+              (request.turnId == null || request.turnId == event.turnId),
+        );
         if (completesActive) {
           _activeTurns.remove(sessionKey);
           _interruptingSessions.remove(sessionKey);

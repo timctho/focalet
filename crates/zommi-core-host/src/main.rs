@@ -83,6 +83,7 @@ struct HostState {
     targets: Vec<zommi_core::RuntimeTarget>,
     adapters: HashMap<String, RuntimeAdapter>,
     prepared: HashSet<String>,
+    prepared_full_access: HashMap<String, bool>,
     binding_generation: Arc<Mutex<u64>>,
     request_generation: u64,
     binding_store: SessionBindingStore,
@@ -106,6 +107,7 @@ impl HostState {
             targets: Vec::new(),
             adapters: HashMap::new(),
             prepared: HashSet::new(),
+            prepared_full_access: HashMap::new(),
             binding_generation: Arc::new(Mutex::new(0)),
             request_generation: 0,
             binding_store: SessionBindingStore::platform_default(),
@@ -309,6 +311,7 @@ impl HostState {
             }
             "session.create" => {
                 let target_id = required_string(payload, "runtimeTargetId")?;
+                self.discard_prepared_permissions(target_id, payload).await;
                 let running = match self.adapters.get(target_id) {
                     Some(adapter) => adapter.is_running().await,
                     None => false,
@@ -724,6 +727,27 @@ impl HostState {
         })
     }
 
+    async fn discard_prepared_permissions(&mut self, target_id: &str, payload: &Value) {
+        let full_access = payload
+            .get("fullAccess")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if self.prepared.contains(target_id)
+            && self
+                .prepared_full_access
+                .get(target_id)
+                .copied()
+                .unwrap_or(false)
+                != full_access
+        {
+            self.prepared.remove(target_id);
+            self.prepared_full_access.remove(target_id);
+            if let Some(adapter) = self.adapters.remove(target_id) {
+                adapter.shutdown().await;
+            }
+        }
+    }
+
     async fn connect_runtime(
         &mut self,
         payload: &Value,
@@ -817,6 +841,9 @@ impl HostState {
                     .and_then(Value::as_str)
                     .map(str::to_owned)
             });
+        if !catalog_only {
+            self.discard_prepared_permissions(&target.id, payload).await;
+        }
         if let Some(adapter) = self.adapters.get(&target.id).cloned() {
             if adapter.is_running().await && catalog_only {
                 return Ok(json!({"data": adapter.list_sessions().await?}));
@@ -873,6 +900,13 @@ impl HostState {
                 })?;
             runtime_command.args = parsed;
         }
+        let full_access =
+            !catalog_only && payload.get("fullAccess").and_then(Value::as_bool) == Some(true);
+        if full_access {
+            runtime_command
+                .enable_full_access(&target)
+                .map_err(|error| HostError::new("invalid-configuration", error.to_string()))?;
+        }
         if cfg!(target_os = "windows") && target.execution_host.kind == "wsl" {
             runtime_command = wsl_relay::wrap_wsl_command(&target, runtime_command)
                 .map_err(|error| HostError::new("runtime-unavailable", error.to_string()))?;
@@ -887,6 +921,8 @@ impl HostState {
             .await?;
             if prepare_only {
                 self.prepared.insert(adapter.target_id().to_owned());
+                self.prepared_full_access
+                    .insert(adapter.target_id().to_owned(), full_access);
                 self.adapters
                     .insert(adapter.target_id().to_owned(), adapter);
                 return Ok(json!({"prepared": true}));

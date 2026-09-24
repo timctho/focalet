@@ -1177,6 +1177,34 @@ class _SettingsOverview extends StatelessWidget {
   }
 }
 
+class RuntimePermissionSetting extends StatelessWidget {
+  const RuntimePermissionSetting({
+    required this.preferences,
+    required this.onChanged,
+    super.key,
+  });
+  final AppPreferences preferences;
+  final ValueChanged<AppPreferences>? onChanged;
+
+  @override
+  Widget build(BuildContext context) => SwitchListTile(
+    key: const ValueKey('runtime-full-access'),
+    contentPadding: EdgeInsets.zero,
+    title: const Text('Full access (YOLO)', style: TextStyle(fontSize: 12)),
+    subtitle: Text(
+      '${preferences.fullAccessRuntimes ? "Automatically allow tool permissions; agents may change files and run commands without asking." : "Use each agent’s permission settings and show its approval requests."} '
+      'Applies to newly started runtimes. Quit and reopen Zommi to change agents already running. '
+      'Pi already runs tools without approval. Remote gateway policies still apply.',
+      style: const TextStyle(fontSize: 10),
+    ),
+    value: preferences.fullAccessRuntimes,
+    onChanged: onChanged == null
+        ? null
+        : (value) =>
+              onChanged!(preferences.copyWith(fullAccessRuntimes: value)),
+  );
+}
+
 class AppSettingsPanel extends StatelessWidget {
   const AppSettingsPanel({
     required this.controller,
@@ -1194,144 +1222,152 @@ class AppSettingsPanel extends StatelessWidget {
     return ZommiOverlayPanelSurface(
       key: const ValueKey('app-settings-panel'),
       width: 310,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              'App settings',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-            ),
-            const Text(
-              'Build ${String.fromEnvironment('ZOMMI_BUILD_REVISION', defaultValue: 'development')}',
-              key: ValueKey('build-revision'),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 10),
-            ),
-            if (controller.desktop case final CapturePermissionBridge bridge
-                when bridge.supportsCapturePermissions)
-              CapturePermissionSetup(bridge: bridge),
-            if (controller.desktop case final GnomeDesktopSettings bridge
-                when bridge.supportsGnomeIntegration)
-              GnomeIntegrationSetup(bridge: bridge),
-            if (controller.desktop case final CaptureShortcutSettings settings)
-              CaptureShortcutSetting(
-                settings: settings,
-                value: preferences.selectionShortcut,
-                onChanged: (shortcut) => onChanged(
-                  preferences.copyWith(selectionShortcut: shortcut),
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'App settings',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+              ),
+              const Text(
+                'Build ${String.fromEnvironment('ZOMMI_BUILD_REVISION', defaultValue: 'development')}',
+                key: ValueKey('build-revision'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 10),
+              ),
+              RuntimePermissionSetting(
+                preferences: preferences,
+                onChanged: onChanged,
+              ),
+              if (controller.desktop case final CapturePermissionBridge bridge
+                  when bridge.supportsCapturePermissions)
+                CapturePermissionSetup(bridge: bridge),
+              if (controller.desktop case final GnomeDesktopSettings bridge
+                  when bridge.supportsGnomeIntegration)
+                GnomeIntegrationSetup(bridge: bridge),
+              if (controller.desktop
+                  case final CaptureShortcutSettings settings)
+                CaptureShortcutSetting(
+                  settings: settings,
+                  value: preferences.selectionShortcut,
+                  onChanged: (shortcut) => onChanged(
+                    preferences.copyWith(selectionShortcut: shortcut),
+                  ),
+                ),
+              if (controller.desktop case final BrowserCaptureSettings settings
+                  when settings.supportsBrowserPageDetails)
+                SwitchListTile(
+                  key: const ValueKey('browser-page-details'),
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text(
+                    'Full webpage details',
+                    style: TextStyle(fontSize: 11.5),
+                  ),
+                  subtitle: const Text(
+                    'May ask for browser permission. Off keeps images, screen positions and accessible text; some links may be unavailable.',
+                    style: TextStyle(fontSize: 10),
+                  ),
+                  value: preferences.browserPageDetails,
+                  onChanged: (enabled) => onChanged(
+                    preferences.copyWith(browserPageDetails: enabled),
+                  ),
+                ),
+              const SizedBox(height: 14),
+              const Text(
+                'Chat message size',
+                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 7),
+              SegmentedButton<double>(
+                key: const ValueKey('chat-font-size-control'),
+                showSelectedIcon: false,
+                segments: const [
+                  ButtonSegment(value: 12, label: Text('Small')),
+                  ButtonSegment(value: 14, label: Text('Default')),
+                  ButtonSegment(value: 15, label: Text('Large')),
+                  ButtonSegment(value: 17, label: Text('XL')),
+                ],
+                selected: {preferences.chatFontSize},
+                onSelectionChanged: (selection) => onChanged(
+                  preferences.copyWith(chatFontSize: selection.single),
+                ),
+                style: const ButtonStyle(
+                  visualDensity: VisualDensity(horizontal: -3, vertical: -3),
+                  textStyle: WidgetStatePropertyAll(
+                    TextStyle(fontSize: 10, fontFamily: codexUiFontFamily),
+                  ),
                 ),
               ),
-            if (controller.desktop case final BrowserCaptureSettings settings
-                when settings.supportsBrowserPageDetails)
-              SwitchListTile(
-                key: const ValueKey('browser-page-details'),
-                contentPadding: EdgeInsets.zero,
-                title: const Text(
-                  'Full webpage details',
-                  style: TextStyle(fontSize: 11.5),
-                ),
-                subtitle: const Text(
-                  'May ask for browser permission. Off keeps images, screen positions and accessible text; some links may be unavailable.',
-                  style: TextStyle(fontSize: 10),
-                ),
-                value: preferences.browserPageDetails,
-                onChanged: (enabled) => onChanged(
-                  preferences.copyWith(browserPageDetails: enabled),
+              const SizedBox(height: 14),
+              const Text(
+                'Theme type',
+                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 7),
+              SegmentedButton<ThemeMode>(
+                key: const ValueKey('theme-mode-control'),
+                showSelectedIcon: false,
+                segments: const [
+                  ButtonSegment(value: ThemeMode.system, label: Text('System')),
+                  ButtonSegment(value: ThemeMode.light, label: Text('Light')),
+                  ButtonSegment(value: ThemeMode.dark, label: Text('Dark')),
+                ],
+                selected: {preferences.themeMode},
+                onSelectionChanged: (selection) => onChanged(
+                  preferences.copyWith(themeMode: selection.single),
                 ),
               ),
-            const SizedBox(height: 14),
-            const Text(
-              'Chat message size',
-              style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 7),
-            SegmentedButton<double>(
-              key: const ValueKey('chat-font-size-control'),
-              showSelectedIcon: false,
-              segments: const [
-                ButtonSegment(value: 12, label: Text('Small')),
-                ButtonSegment(value: 14, label: Text('Default')),
-                ButtonSegment(value: 15, label: Text('Large')),
-                ButtonSegment(value: 17, label: Text('XL')),
-              ],
-              selected: {preferences.chatFontSize},
-              onSelectionChanged: (selection) => onChanged(
-                preferences.copyWith(chatFontSize: selection.single),
+              const SizedBox(height: 14),
+              const Text(
+                'Theme color',
+                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
               ),
-              style: const ButtonStyle(
-                visualDensity: VisualDensity(horizontal: -3, vertical: -3),
-                textStyle: WidgetStatePropertyAll(
-                  TextStyle(fontSize: 10, fontFamily: codexUiFontFamily),
-                ),
-              ),
-            ),
-            const SizedBox(height: 14),
-            const Text(
-              'Theme type',
-              style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 7),
-            SegmentedButton<ThemeMode>(
-              key: const ValueKey('theme-mode-control'),
-              showSelectedIcon: false,
-              segments: const [
-                ButtonSegment(value: ThemeMode.system, label: Text('System')),
-                ButtonSegment(value: ThemeMode.light, label: Text('Light')),
-                ButtonSegment(value: ThemeMode.dark, label: Text('Dark')),
-              ],
-              selected: {preferences.themeMode},
-              onSelectionChanged: (selection) =>
-                  onChanged(preferences.copyWith(themeMode: selection.single)),
-            ),
-            const SizedBox(height: 14),
-            const Text(
-              'Theme color',
-              style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 7),
-            Row(
-              key: const ValueKey('theme-color-control'),
-              children: [
-                for (final color in ZommiThemeColor.values) ...[
-                  if (color != ZommiThemeColor.values.first)
-                    const SizedBox(width: 7),
-                  Expanded(
-                    child: _ThemeColorChoice(
-                      color: color,
-                      seed: color == ZommiThemeColor.custom
-                          ? preferences.customThemeColor
-                          : color.seed,
-                      selected: preferences.themeColor == color,
-                      onTap: () async {
-                        if (color == ZommiThemeColor.custom) {
-                          final chosen = await showDialog<Color>(
-                            context: context,
-                            builder: (_) => ThemeColorPicker(
-                              initialColor: preferences.customThemeColor,
-                            ),
-                          );
-                          if (chosen != null) {
-                            onChanged(
-                              preferences.copyWith(
-                                themeColor: color,
-                                customThemeColor: chosen,
+              const SizedBox(height: 7),
+              Row(
+                key: const ValueKey('theme-color-control'),
+                children: [
+                  for (final color in ZommiThemeColor.values) ...[
+                    if (color != ZommiThemeColor.values.first)
+                      const SizedBox(width: 7),
+                    Expanded(
+                      child: _ThemeColorChoice(
+                        color: color,
+                        seed: color == ZommiThemeColor.custom
+                            ? preferences.customThemeColor
+                            : color.seed,
+                        selected: preferences.themeColor == color,
+                        onTap: () async {
+                          if (color == ZommiThemeColor.custom) {
+                            final chosen = await showDialog<Color>(
+                              context: context,
+                              builder: (_) => ThemeColorPicker(
+                                initialColor: preferences.customThemeColor,
                               ),
                             );
+                            if (chosen != null) {
+                              onChanged(
+                                preferences.copyWith(
+                                  themeColor: color,
+                                  customThemeColor: chosen,
+                                ),
+                              );
+                            }
+                          } else {
+                            onChanged(preferences.copyWith(themeColor: color));
                           }
-                        } else {
-                          onChanged(preferences.copyWith(themeColor: color));
-                        }
-                      },
+                        },
+                      ),
                     ),
-                  ),
+                  ],
                 ],
-              ],
-            ),
-          ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -2039,6 +2075,12 @@ class ApprovalDialogCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
+            '${controller.approvalSource}${controller.pendingApprovalCount > 1 ? " · ${controller.pendingApprovalCount} pending" : ""}',
+            key: const ValueKey('approval-source'),
+            style: const TextStyle(fontSize: 11),
+          ),
+          const SizedBox(height: 6),
+          Text(
             request.title,
             key: const ValueKey('approval-title'),
             style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
@@ -2064,7 +2106,12 @@ class ApprovalDialogCard extends StatelessWidget {
               for (final option in request.options)
                 FilledButton.tonal(
                   key: ValueKey('approval-${option.id}'),
-                  autofocus: identical(option, request.options.first),
+                  autofocus:
+                      option.isReject &&
+                      identical(
+                        option,
+                        request.options.where((item) => item.isReject).first,
+                      ),
                   onPressed: controller.resolvingPrompt
                       ? null
                       : () => unawaited(controller.resolveApproval(option.id)),
