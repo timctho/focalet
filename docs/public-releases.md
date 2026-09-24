@@ -52,6 +52,13 @@ creates the tag at the exact built commit when publishing. Before a subsequent
 release, bump the version in a PR (for example to `0.1.0-preview.9+2`); changing
 only `+N` does not create a new release version. Published tags are never overwritten.
 
+GitHub sorts releases from the same day by their numeric version, then compares
+prerelease suffixes alphabetically. That puts `preview.9` above `preview.10`.
+Before crossing that boundary, increase the patch version and restart the preview
+counter: for example, use `0.1.1-preview.1+5` after `0.1.0-preview.11+4`.
+The publisher rejects tags that could sort below an existing version. Leave old
+tags and installers unchanged; their manifests identify their original versions.
+
 Automatic releases use the `all` platform set: Windows x64, Ubuntu x64, macOS
 Apple Silicon and macOS Intel. The workflow builds the installers once, runs
 the release checks below and publishes those same files only if every selected
