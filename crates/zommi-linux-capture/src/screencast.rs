@@ -2,6 +2,7 @@ use crate::{
     AppResult, accessibility,
     geometry::{Bounds, source_at},
     gnome,
+    restore_token::RestoreToken,
 };
 use ashpd::desktop::{
     PersistMode, ResponseError, Session,
@@ -191,6 +192,8 @@ impl Capture {
         gst::init()?;
         let _ = ashpd::register_host_app(ashpd::AppID::try_from("com.zommi.desktop")?).await;
         let portal = Screencast::new().await?;
+        let tokens = RestoreToken::for_user();
+        let restore_token = tokens.take();
         let mut session = PortalSession(Some(portal.create_session(Default::default()).await?));
         let result: AppResult<_> = async {
             portal
@@ -200,7 +203,8 @@ impl Capture {
                         .set_sources(ashpd::enumflags2::BitFlags::from(SourceType::Monitor))
                         .set_multiple(true)
                         .set_cursor_mode(CursorMode::Hidden)
-                        .set_persist_mode(PersistMode::DoNot),
+                        .set_persist_mode(PersistMode::ExplicitlyRevoked)
+                        .set_restore_token(restore_token.as_deref()),
                 )
                 .await?
                 .response()?;
@@ -209,6 +213,9 @@ impl Capture {
                 .start(session.get(), None, Default::default())
                 .await?
                 .response()?;
+            if let Err(error) = tokens.save(response.restore_token()) {
+                eprintln!("Could not remember screen-sharing authorization: {error}");
+            }
             eprintln!(
                 "Wayland capture: authorized {} streams",
                 response.streams().len()

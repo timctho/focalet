@@ -232,6 +232,7 @@ impl HermesGatewayAdapter {
     ) -> Result<Self, CodexError> {
         let session_token = Uuid::new_v4().to_string();
         let mut command = Command::new(&config.command.command);
+        config.target.apply_launch_environment(&mut command);
         let is_wsl = config.target.execution_host.kind == "wsl";
         let arguments = hermes_gateway_arguments(&config.command.args, is_wsl, &session_token)?;
         if !is_wsl {

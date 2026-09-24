@@ -185,6 +185,9 @@ class Session:
             "gsettings", "set", "org.gnome.desktop.screensaver", "lock-enabled", "false"
         )
         self.run("gsettings", "set", "org.gnome.desktop.session", "idle-delay", "0")
+        for setting, value in (("picture-uri", "''"), ("picture-uri-dark", "''"),
+                               ("primary-color", "'#0d3355'"), ("color-shading-type", "'solid'")):
+            self.run("gsettings", "set", "org.gnome.desktop.background", setting, value)
         self.run(
             "gsettings",
             "set",
@@ -200,7 +203,7 @@ class Session:
                 "--headless",
                 "--no-x11",
                 "--virtual-monitor",
-                "1280x800",
+                "1600x1000",
                 "--wayland-display",
                 "zommi-test",
             ],
@@ -294,6 +297,9 @@ class Session:
 def native_acceptance(session, helper, toolkit="3.0"):
     from PIL import Image, ImageChops
 
+    token_path = Path(session.env["XDG_STATE_HOME"]) / "zommi/screencast-restore-token"
+    token_path.unlink(missing_ok=True)
+
     fixture = session.root / f"fixture-{toolkit}"
     fixture.mkdir()
     app = session.start(
@@ -324,6 +330,7 @@ def native_acceptance(session, helper, toolkit="3.0"):
     assert cancelled["ok"] and cancelled["result"]["cancelled"], cancelled
     capture = session.request(host, "selectContent", authorize=True)
     assert capture["ok"], capture
+    assert token_path.is_file(), "The remembered grant was not saved"
     frame = capture["result"]["frames"][0]
     source = next(w for w in frame["windows"] if w.get("processId") == app.pid)
     bounds = source["bufferBounds"]
@@ -412,6 +419,17 @@ def native_acceptance(session, helper, toolkit="3.0"):
         changed["result"]["dataUrl"] != observation["dataUrl"]
     ), "Changed pixels must invalidate the old attachment"
     session.request(host, "release")
+    restored = session.request(host, "selectContent")
+    assert restored["ok"] and restored["result"]["frames"], restored
+    assert token_path.read_text(), "The returned portal grant was not saved"
+    session.request(host, "release")
+    token_path.write_text("00000000-0000-0000-0000-000000000000")
+    revoked = session.request(host, "selectContent", authorize=False)
+    assert revoked["ok"] and revoked["result"]["cancelled"], revoked
+    assert not token_path.exists(), "A rejected grant must not keep breaking retries"
+    renewed = session.request(host, "selectContent", authorize=True)
+    assert renewed["ok"] and renewed["result"]["frames"], renewed
+    session.request(host, "release")
     session.run("gnome-extensions", "disable", "zommi@zommi")
     assert not json.loads(session.run(helper, "status").stdout)["ready"]
     unavailable = session.request(host, "selectContent")
@@ -425,7 +443,7 @@ def native_acceptance(session, helper, toolkit="3.0"):
 
     wait("shortcut after extension re-enable", reactivated)
     host = session.start("capture-reconnected", [helper, "--capture-host"], pipes=True)
-    recovered = session.request(host, "selectContent", authorize=True)
+    recovered = session.request(host, "selectContent")
     assert recovered["ok"], recovered
     session.request(host, "release")
     host.terminate()
@@ -433,7 +451,7 @@ def native_acceptance(session, helper, toolkit="3.0"):
     shortcuts.terminate()
     shortcuts.wait(timeout=5)
     print(
-        f"PASS GTK {toolkit} on GNOME Wayland: Alt+A, cancel/retry, ScreenCast pixels, window identity, AT-SPI alignment, filtering, changed pixels and extension recovery.",
+        f"PASS GTK {toolkit} on GNOME Wayland: Alt+A, cancel/retry, ScreenCast pixels, window identity, AT-SPI alignment, filtering, changed pixels, remembered sharing and helper/extension recovery.",
         flush=True,
     )
     return app, source
@@ -609,7 +627,6 @@ section:target{display:grid;grid-template-columns:1fr 1fr;gap:24px}.card{backgro
     assert original[3] - original[1] == page["viewport"]["height"]
     session.driver("Click", original[0] + 100, original[1] + 100)
     session.shortcut()
-    wait("document screen-sharing prompt", session.portal_action)
     wait("document capture editor", lambda: events(trace, "capture.editor.ready"))
     assert document_bounds() is None, "The document covers the editor"
     session.key(0xFF1B)
@@ -629,12 +646,42 @@ section:target{display:grid;grid-template-columns:1fr 1fr;gap:24px}.card{backgro
     )
 
 
+def assert_app_surface(session, app, name, expected_size=None):
+    from PIL import Image
+
+    path = session.evidence / f"{name}.png"
+
+    def painted():
+        window = json.loads(session.driver("Window", app.pid)[0])
+        if not window.get("focused"):
+            return False
+        if expected_size and (window["width"], window["height"]) != expected_size:
+            return False
+        session.driver("Snapshot", path)
+        with Image.open(path) as image:
+            pixels = image.convert("RGB")
+            x, y, width, height = (window[key] for key in ("x", "y", "width", "height"))
+            header = pixels.getpixel((x + width // 2, y + 25))
+            sidebar = pixels.getpixel((x + 30, y + height // 2))
+            # A live process or an all-white/transparent surface is not a UI.
+            if min(header) < 240 or sum(abs(a - b) for a, b in zip(header, sidebar)) < 20:
+                return False
+            for dx, dy in ((1, 1), (width - 2, 1), (1, height - 2), (width - 2, height - 2)):
+                corner = pixels.getpixel((x + dx, y + dy))
+                if max(abs(a - b) for a, b in zip(corner, (13, 51, 85))) > 2:
+                    return False
+        (session.evidence / f"{name}.json").write_text(json.dumps(window, indent=2))
+        return window
+
+    return wait(f"painted app surface after {name}", painted, seconds=5)
+
+
 def ui_acceptance(session, package, fixture_app):
     trace = session.evidence / "ui-events.jsonl"
     trace.unlink(missing_ok=True)
     config = session.root / "ui-config/zommi"
     config.mkdir(parents=True)
-    (config / "settings.json").write_text('{"runtimeSetupCompleted":true}')
+    (config / "settings.json").write_text('{"runtimeSetupCompleted":true,"themeMode":"light"}')
     app = session.start(
         "ui",
         [package / "zommi"],
@@ -652,7 +699,11 @@ def ui_acceptance(session, package, fixture_app):
         "packaged Wayland window",
         lambda: json.loads(session.driver("Window", app.pid)[0]).get("width"),
     )
-    for action in ("draw", "cancel", "draw"):
+    session.driver("Activate", app.pid)
+    initial = assert_app_surface(session, app, "startup-surface")
+    size = (initial["width"], initial["height"])
+    assert size[0] < 1600 and size[1] < 968, "The test must exercise a normal-sized window"
+    for index, action in enumerate(("draw", "cancel", "draw")):
         session.driver("Activate", fixture_app.pid)
         wait(
             "focused source fixture",
@@ -667,7 +718,6 @@ def ui_acceptance(session, package, fixture_app):
         before = len(events(trace, "capture.editor.ready"))
         selections = len(events(trace, "selection.content"))
         session.shortcut()
-        wait("UI screen-sharing prompt", session.portal_action)
         wait(
             "capture editor",
             lambda: len(events(trace, "capture.editor.ready")) > before,
@@ -724,6 +774,7 @@ def ui_acceptance(session, package, fixture_app):
             "restored focused app",
             lambda: json.loads(session.driver("Window", app.pid)[0]).get("focused"),
         )
+        assert_app_surface(session, app, f"returned-{index}-{action}", size)
         # selection.content precedes the controller's final composer focus.
         # Let that restoration finish before simulating the next app switch.
         time.sleep(1)
@@ -731,7 +782,7 @@ def ui_acceptance(session, package, fixture_app):
     app.terminate()
     app.wait(timeout=10)
     print(
-        "PASS packaged Wayland UI: Alt+A, aligned region, handwritten stroke, cancel, retry and focus recovery.",
+        "PASS packaged Wayland UI: transparent corners, painted startup/return, restored size, remembered sharing, Alt+A, aligned region, handwritten stroke, cancel, retry and focus recovery.",
         flush=True,
     )
 

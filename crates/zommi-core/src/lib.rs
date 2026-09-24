@@ -7,6 +7,7 @@ mod codex_home;
 pub mod command_catalog;
 pub mod context_handoff;
 pub mod hermes_gateway_adapter;
+mod native_runtime_probe;
 mod openclaw_device_identity;
 pub mod openclaw_gateway_adapter;
 pub mod pi_adapter;

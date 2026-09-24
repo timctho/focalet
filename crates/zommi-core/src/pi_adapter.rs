@@ -111,6 +111,7 @@ impl PiAdapter {
         }
         set_launch_cwd(&mut config.command, &config.target, &config.cwd)?;
         let mut command = Command::new(&config.command.command);
+        config.target.apply_launch_environment(&mut command);
         command.args(&config.command.args);
         if let Some(file) = &config.preferred_session_file {
             command.args(["--session", file]);

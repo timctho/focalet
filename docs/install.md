@@ -41,9 +41,11 @@ the installer or build it from source.
 The package includes the GNOME desktop extension. After installation, sign out
 and sign in if GNOME has not loaded it, then choose **Enable desktop integration**
 in Zommi's first-run setup or App settings. This enables Alt+A and window/context
-alignment. Use **Select** or **Alt+A**, authorize the monitors to share, then
-select regions and draw. Sharing stops when that selection completes or is
-cancelled. A dismissed prompt can be retried without restarting the chat.
+alignment. Use **Select** or **Alt+A**, authorize the monitors to share, and keep
+**Remember this selection** checked to reuse that permission on later captures
+and app launches. Then select regions and draw. Sharing stops when that selection
+completes or is cancelled. A dismissed prompt can be retried without restarting
+the chat.
 Ubuntu on Xorg and other desktop environments are outside the supported scope.
 
 ## 2. Choose the agent you already have
@@ -51,6 +53,8 @@ Ubuntu on Xorg and other desktop environments are outside the supported scope.
 1. Confirm your agent works in its usual terminal, including sign-in.
 2. Open Zommi. In **Welcome to Zommi**, choose a detected agent and connect.
    Windows detects native Windows installations and agents inside WSL.
+   Ubuntu and macOS also check the login shell with `command -v`, so CLIs
+   installed through a shell version manager can be detected and launched.
 3. If prompted to sign in, finish that in the runtime's own flow and retry.
    **Scan again** refreshes discovery; **Set up later** leaves setup available
    without creating a chat.

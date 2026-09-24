@@ -9,6 +9,7 @@ use std::{
 mod accessibility;
 mod geometry;
 mod gnome;
+mod restore_token;
 mod screencast;
 type AppResult<T> = Result<T, Box<dyn Error>>;
 fn emit(value: &Value) -> AppResult<()> {

@@ -117,6 +117,7 @@ impl AcpAdapter {
         emit_events: bool,
     ) -> Result<Self, CodexError> {
         let mut command = Command::new(&config.command.command);
+        config.target.apply_launch_environment(&mut command);
         command
             .args(&config.command.args)
             .stdin(Stdio::piped())

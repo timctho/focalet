@@ -26,6 +26,13 @@ static void my_application_activate(GApplication* application) {
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
 
+  // The rounded Flutter surface leaves transparent pixels at the corners.
+  // Configure alpha before realization; GTK CSS alone does not change the
+  // Flutter framebuffer's default opaque black background.
+  gtk_widget_set_app_paintable(GTK_WIDGET(window), TRUE);
+  GdkVisual* visual = gdk_screen_get_rgba_visual(gtk_window_get_screen(window));
+  if (visual != nullptr) gtk_widget_set_visual(GTK_WIDGET(window), visual);
+
   // Use a header bar when running in GNOME as this is the common style used
   // by applications and is the setup most users will be using (e.g. Ubuntu
   // desktop).
@@ -58,6 +65,9 @@ static void my_application_activate(GApplication* application) {
   gtk_window_set_default_size(window, 720, 620);
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
+  // Impeller left empty surfaces across GTK/Wayland hide and resize cycles.
+  // Keep hardware-accelerated Skia until that path passes native pixel checks.
+  fl_dart_project_set_enable_impeller(project, FALSE);
   g_autofree gchar* icon_path = g_build_filename(
       fl_dart_project_get_assets_path(project), "assets", "branding",
       "app-icon.png", nullptr);
@@ -67,9 +77,7 @@ static void my_application_activate(GApplication* application) {
 
   FlView* view = fl_view_new(project);
   GdkRGBA background_color;
-  // Background defaults to black, override it here if necessary, e.g. #00000000
-  // for transparent.
-  gdk_rgba_parse(&background_color, "#000000");
+  gdk_rgba_parse(&background_color, "rgba(0, 0, 0, 0)");
   fl_view_set_background_color(view, &background_color);
   gtk_widget_show(GTK_WIDGET(view));
   gtk_container_add(GTK_CONTAINER(window), zommi_document_container_new(view));

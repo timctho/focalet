@@ -285,6 +285,7 @@ mod tests {
                     priority: 0,
                     capability_hints: vec![],
                     runtime_home: None,
+                    launch_path: None,
                     source: None,
                     endpoint: None,
                     profile_id: None,
