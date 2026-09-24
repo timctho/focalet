@@ -1191,12 +1191,6 @@ class RuntimePermissionSetting extends StatelessWidget {
     key: const ValueKey('runtime-full-access'),
     contentPadding: EdgeInsets.zero,
     title: const Text('Full access (YOLO)', style: TextStyle(fontSize: 12)),
-    subtitle: Text(
-      '${preferences.fullAccessRuntimes ? "Automatically allow tool permissions; agents may change files and run commands without asking." : "Use each agent’s permission settings and show its approval requests."} '
-      'Applies to newly started runtimes. Quit and reopen Zommi to change agents already running. '
-      'Pi already runs tools without approval. Remote gateway policies still apply.',
-      style: const TextStyle(fontSize: 10),
-    ),
     value: preferences.fullAccessRuntimes,
     onChanged: onChanged == null
         ? null
@@ -1232,13 +1226,6 @@ class AppSettingsPanel extends StatelessWidget {
               const Text(
                 'App settings',
                 style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-              ),
-              const Text(
-                'Build ${String.fromEnvironment('ZOMMI_BUILD_REVISION', defaultValue: 'development')}',
-                key: ValueKey('build-revision'),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 10),
               ),
               RuntimePermissionSetting(
                 preferences: preferences,
