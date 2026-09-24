@@ -82,6 +82,52 @@ class _SessionBackend implements UnixRegionBackend, UnixCaptureSession {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('Wayland accepts sparse one-level RGB rounding but rejects content changes', () async {
+    Future<String> png(int count, int delta) async {
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      canvas.drawColor(Colors.white, BlendMode.src);
+      canvas.drawRect(
+        Rect.fromLTWH(0, 0, count.toDouble(), 1),
+        Paint()
+          ..isAntiAlias = false
+          ..color = Color.fromARGB(255, 255 - delta, 255, 255),
+      );
+      final picture = recorder.endRecording();
+      final image = await picture.toImage(100, 80);
+      try {
+        final data = (await image.toByteData(format: ui.ImageByteFormat.png))!;
+        return 'data:image/png;base64,${base64Encode(data.buffer.asUint8List())}';
+      } finally {
+        image.dispose();
+        picture.dispose();
+      }
+    }
+
+    final original = await png(0, 0);
+    final noise = await png(10, 1);
+    expect(await sameCapturedPixels(original, noise), isFalse);
+    expect(
+      await sameCapturedPixels(original, noise, allowRoundingNoise: true),
+      isTrue,
+    );
+    expect(
+      await sameCapturedPixels(
+        original,
+        await png(10, 2),
+        allowRoundingNoise: true,
+      ),
+      isFalse,
+    );
+    expect(
+      await sameCapturedPixels(
+        original,
+        await png(21, 1),
+        allowRoundingNoise: true,
+      ),
+      isFalse,
+    );
+  });
   test(
     'capture releases sharing after cancellation and failure, then can retry',
     () async {

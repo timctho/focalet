@@ -255,7 +255,11 @@ final class NativeUnixRegionBackend
   Future<void> close() => _linuxClient.close();
 }
 
-Future<bool> sameCapturedPixels(String original, String current) async {
+Future<bool> sameCapturedPixels(
+  String original,
+  String current, {
+  bool allowRoundingNoise = false,
+}) async {
   Future<ui.Image> decode(String url) async {
     final codec = await ui.instantiateImageCodec(
       base64Decode(url.substring(url.indexOf(',') + 1)),
@@ -274,9 +278,33 @@ Future<bool> sameCapturedPixels(String original, String current) async {
       if (a.width != b.width || a.height != b.height) return false;
       final bytesA = await a.toByteData();
       final bytesB = await b.toByteData();
-      return bytesA != null &&
-          bytesB != null &&
-          listEquals(bytesA.buffer.asUint8List(), bytesB.buffer.asUint8List());
+      if (bytesA == null || bytesB == null) return false;
+      final pixelsA = bytesA.buffer.asUint8List(
+        bytesA.offsetInBytes,
+        bytesA.lengthInBytes,
+      );
+      final pixelsB = bytesB.buffer.asUint8List(
+        bytesB.offsetInBytes,
+        bytesB.lengthInBytes,
+      );
+      if (listEquals(pixelsA, pixelsB)) return true;
+      if (!allowRoundingNoise || pixelsA.length != pixelsB.length) return false;
+      // GNOME can redraw an unchanged control with one-level RGB rounding.
+      // Accept only sparse rounding noise: never alpha, geometry, larger colour
+      // changes or a changed area exceeding 0.25% (capped at 1024 pixels).
+      final budget = math.min(1024, (a.width * a.height * .0025).floor());
+      var changed = 0;
+      for (var i = 0; i < pixelsA.length; i += 4) {
+        if (pixelsA[i + 3] != pixelsB[i + 3]) return false;
+        var different = false;
+        for (var channel = 0; channel < 3; channel++) {
+          final delta = (pixelsA[i + channel] - pixelsB[i + channel]).abs();
+          if (delta > 1) return false;
+          different |= delta != 0;
+        }
+        if (different && ++changed > budget) return false;
+      }
+      return true;
     } finally {
       b.dispose();
     }
@@ -338,7 +366,11 @@ Future<ImageSelection> enrichSelectedRegion(
         observation['stable'] == true &&
         sameNativeRegionSource(source, _nullableMap(observation['source'])) &&
         observation['dataUrl'] is String &&
-        await sameCapturedPixels(original, observation['dataUrl'] as String);
+        await sameCapturedPixels(
+          original,
+          observation['dataUrl'] as String,
+          allowRoundingNoise: Platform.isLinux,
+        );
     if (!await valid(before)) {
       throw StateError(
         'The source or selected pixels changed. The original image and drawings were kept.',

@@ -662,6 +662,8 @@ def ui_acceptance(session, package, fixture_app):
         )
         time.sleep(0.3)
         origin = json.loads(session.driver("Window", fixture_app.pid)[0])
+        # Keep the live source's hover state identical before and after capture.
+        session.driver("Motion", 1200, 740)
         before = len(events(trace, "capture.editor.ready"))
         selections = len(events(trace, "selection.content"))
         session.shortcut()
@@ -701,6 +703,7 @@ def ui_acceptance(session, package, fixture_app):
             session.key(ord("p"))
             session.drag(point(x + 15, y + 15), point(x + 160, y + 100))
             session.driver("Snapshot", session.evidence / "editor-drawn.png")
+            session.driver("Motion", 1200, 740)
             session.key(0xFF0D)
         result = wait(
             "attached selection",

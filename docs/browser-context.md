@@ -32,6 +32,8 @@ identity and pixels are checked before retaining structured context. If the
 pixels changed, the frozen annotated image is retained with **Image only**, its
 original observation time and an explanation. Newer application metadata is
 omitted. Drawing is bounded to 256 strokes per region and 4,096 points per stroke.
+Ubuntu tolerates sparse one-level RGB rounding from the compositor; source
+identity and accessibility consistency checks still have to match.
 
 The rectangle is the primary user reference. Zommi enriches it with DOM or native accessibility when the source and image
 can be aligned: UI Automation on Windows, AT-SPI on Ubuntu Wayland, and AX on macOS.
