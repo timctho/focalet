@@ -32,9 +32,11 @@ identity and pixels are checked before retaining structured context. If the
 pixels changed, the frozen annotated image is retained with **Image only**, its
 original observation time and an explanation. Newer application metadata is
 omitted. Drawing is bounded to 256 strokes per region and 4,096 points per stroke.
+Ubuntu tolerates sparse one-level RGB rounding from the compositor; source
+identity and accessibility consistency checks still have to match.
 
 The rectangle is the primary user reference. Zommi enriches it with DOM or native accessibility when the source and image
-can be aligned: UI Automation on Windows, AT-SPI on Ubuntu X11, and AX on macOS.
+can be aligned: UI Automation on Windows, AT-SPI on Ubuntu Wayland, and AX on macOS.
 macOS requires Accessibility permission; browser DOM additionally requires a
 supported Chromium browser with an authorized CDP connection. Safari can supply
 AX context but is not a CDP provider.
@@ -134,12 +136,18 @@ missing. The preference persists and is on by default. It does not change
 connections made by the agent's separate browser tools.
 
 Without an available connection, native accessibility remains usable. Ubuntu
-X11 and macOS use the same DOM extraction core as Windows, with native AT-SPI
+Wayland and macOS use the same DOM extraction core as Windows, with native AT-SPI
 or AX browser viewport alignment. Their portable browser helper is bundled in
 the installer. If accessibility permission or a matching page viewport is
 unavailable, the capture remains an image with any reliable native context.
-Wayland portals do not supply the desktop origin needed for aligned context;
-the editor still supports image selection and drawing.
+Ubuntu uses the bundled GNOME extension to bind monitor pixels to the source
+window and maps AT-SPI window-relative coordinates through the monitor's logical
+geometry. Browser context requires the same unambiguous PID/window/tab binding
+and before/after consistency checks. If integration is disabled or screen sharing
+ends, enable it in App settings and retry; an already selected image is preserved.
+GTK 4 text input values are omitted when its accessibility interface cannot
+reliably distinguish masked fields. Labels, other controls and the original
+image remain available.
 
 ## Identity and geometry
 

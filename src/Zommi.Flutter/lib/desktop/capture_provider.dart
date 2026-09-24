@@ -310,114 +310,6 @@ typedef CaptureCommandRunner = Future<ProcessResult> Function(
   Duration timeout,
 );
 
-final class LinuxCaptureProvider implements CaptureProvider {
-  LinuxCaptureProvider({
-    String? executablePath,
-    CaptureCommandRunner? runCommand,
-    bool? useWaylandPortals,
-  }) : _executablePath = executablePath ?? resolveLinuxCaptureExecutable(),
-       _runCommand = runCommand ?? _runProcess,
-       _useWaylandPortals =
-           useWaylandPortals ?? shouldUseWaylandPortals(Platform.environment);
-
-  final String _executablePath;
-  final CaptureCommandRunner _runCommand;
-  final bool _useWaylandPortals;
-
-  @override
-  Future<void> initialize() async {}
-
-  @override
-  Future<CaptureResult> capture({
-    Offset? point,
-    void Function()? onReady,
-  }) async {
-    final response = await _request([
-      _useWaylandPortals ? 'portal-context' : 'context',
-    ], const Duration(seconds: 5));
-    return _portableResultFromLinuxResponse(response);
-  }
-
-  CaptureResult _portableResultFromLinuxResponse(
-    Map<String, Object?> response,
-  ) => portableCaptureResult(
-    application:
-        response['application']?.toString() ??
-        (_useWaylandPortals ? 'Linux desktop' : 'X11 application'),
-    processName: response['processName']?.toString(),
-    windowTitle: response['windowTitle']?.toString() ?? '',
-    url: '',
-    limitation: response['limitation']?.toString() ?? 'This quick lookup contains window metadata. Use Select for region images, AT-SPI and supported browser DOM.',
-  );
-
-  @override
-  Future<List<CaptureResult>> selectContext() async {
-    final image = await selectImage();
-    return image == null ? const [] : [CaptureResult(image: image)];
-  }
-
-  @override
-  Future<ImageSelection?> selectImage() async {
-    final temporary = File(
-      '${Directory.systemTemp.path}${Platform.pathSeparator}'
-      'zommi-region-${DateTime.now().microsecondsSinceEpoch}.png',
-    );
-    try {
-      final response = await _request([
-        _useWaylandPortals ? 'portal-region' : 'region',
-        '--output',
-        temporary.path,
-      ], const Duration(minutes: 5));
-      if (response['cancelled'] == true) return null;
-      if (!await temporary.exists()) {
-        throw StateError('The Linux selector did not produce an image.');
-      }
-      final bytes = await temporary.readAsBytes();
-      if (bytes.isEmpty) {
-        throw StateError('The Linux selector produced an empty image.');
-      }
-      return ImageSelection(
-        dataUrl: 'data:image/png;base64,${base64Encode(bytes)}',
-        bounds: _nullableMap(response['bounds']),
-      );
-    } finally {
-      if (await temporary.exists()) await temporary.delete();
-    }
-  }
-
-  Future<Map<String, Object?>> _request(
-    List<String> arguments,
-    Duration timeout,
-  ) async {
-    final result = await _runCommand(_executablePath, arguments, timeout);
-    if (result.exitCode != 0) {
-      throw StateError(
-        'Linux capture failed: ${result.stderr.toString().trim()}',
-      );
-    }
-    for (final line in result.stdout.toString().split('\n').reversed) {
-      if (line.trim().isEmpty) continue;
-      try {
-        final value = jsonDecode(line);
-        final mapped = _nullableMap(value);
-        if (mapped != null) return mapped;
-      } on FormatException {
-        continue;
-      }
-    }
-    throw StateError('Linux capture returned no JSON result.');
-  }
-
-  static Future<ProcessResult> _runProcess(
-    String executable,
-    List<String> arguments,
-    Duration timeout,
-  ) => Process.run(executable, arguments).timeout(timeout);
-
-  @override
-  Future<void> close() async {}
-}
-
 Future<void> hideDesktopForCapture() => Platform.isMacOS
     ? MacCapturePermissions.channel.invokeMethod<void>('hideForCapture')
     : windowManager.hide();
@@ -647,15 +539,16 @@ String resolveLinuxCaptureExecutable({
 }) {
   if (configured?.trim().isNotEmpty == true) return configured!.trim();
   final processEnvironment = environment ?? Platform.environment;
-  final environmentPath = processEnvironment['ZOMMI_X11_CAPTURE_HOST']?.trim();
+  final environmentPath = processEnvironment['ZOMMI_LINUX_CAPTURE_HOST']
+      ?.trim();
   if (environmentPath?.isNotEmpty == true) return environmentPath!;
   final separator = pathSeparator ?? Platform.pathSeparator;
   final executableDirectory =
       applicationDirectory ??
       File(resolvedExecutable ?? Platform.resolvedExecutable).parent.path;
-  final candidate = '$executableDirectory${separator}zommi-x11-capture';
+  final candidate = '$executableDirectory${separator}zommi-linux-capture';
   if (exists?.call(candidate) ?? File(candidate).existsSync()) return candidate;
-  return 'zommi-x11-capture';
+  return 'zommi-linux-capture';
 }
 
 abstract interface class NativeCaptureClient {

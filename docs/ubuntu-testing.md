@@ -8,21 +8,16 @@ the session with:
 echo "$XDG_SESSION_TYPE"
 ```
 
-Use `wayland` for primary desktop acceptance. If a machine starts an X11 session,
-choose a Wayland session at the login screen on a supported graphics setup.
-**Ubuntu on Xorg** remains a compatibility test configuration. A headless server
-or WSL terminal can run automated checks, but does not verify Ubuntu's tray,
-permissions or desktop capture. Other Linux distributions are outside the
-supported scope.
+Use `wayland` for desktop acceptance. Zommi targets GNOME 46 on Ubuntu 24.04;
+X11 sessions and other desktop environments are outside the supported scope.
+A headless server or WSL terminal can run the isolated GNOME checks below, but
+real monitor scaling, tray behavior and permissions should also be tested on a
+desktop installation.
 
-Wayland and X11 are desktop display systems: they coordinate windows, screen
-content and input. Wayland restricts direct access to other apps, so Zommi uses
-desktop portals for screenshots and global shortcuts. Portal support varies by
-desktop version. Ubuntu 24.04 uses GNOME 46, while GNOME's global-shortcut portal
-backend was [introduced in GNOME 48](https://gitlab.gnome.org/GNOME/xdg-desktop-portal-gnome/-/blob/48.0/NEWS).
-Zommi currently relies on that portal for Wayland Alt+A, so use **Select** in the
-app on stock Ubuntu 24.04. Shortcut integration for GNOME 46 and aligned
-DOM/accessibility capture remain gaps in the primary target.
+Zommi uses ScreenCast/PipeWire for monitor pixels, the bundled GNOME extension
+for window identity, geometry and Alt+A, and AT-SPI for accessibility. Authorized
+browser connections add DOM details. The extension supports GNOME 46; new GNOME
+major versions need explicit compatibility testing.
 
 ## Install a release
 
@@ -37,7 +32,10 @@ zommi
 `sudo dpkg -i Zommi-Ubuntu-amd64.deb` also works, but does not fetch dependencies;
 follow it with `sudo apt-get -f install` if needed. The package installs under
 `/opt/zommi` with an app-menu entry. You do not need Flutter, Rust or .NET to run
-it. The [release workflow](public-releases.md#run-a-release-from-github-actions)
+it. Enable **Zommi Desktop Integration** in first-run setup or App settings.
+If GNOME has not loaded a newly installed extension, sign out and sign in, then
+retry Enable. The app remains available while desktop integration is disabled.
+The [release workflow](public-releases.md#run-a-release-from-github-actions)
 can build and publish this asset. Existing previews without a `.deb` still
 require a source build.
 
@@ -49,7 +47,7 @@ Install the Ubuntu build dependencies:
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y binutils clang cmake ninja-build pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libepoxy-dev \
+sudo apt-get install -y binutils clang cmake ninja-build pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-pipewire libepoxy-dev \
   libayatana-appindicator3-dev libx11-dev libsqlite3-dev python3 python3-venv
 flutter config --enable-linux-desktop
 flutter doctor -v
@@ -59,6 +57,7 @@ From the repository root:
 
 ```sh
 bash scripts/package-unix.sh linux
+bash scripts/install-gnome-extension.sh artifacts/zommi-linux-x64
 ./artifacts/zommi-linux-x64/zommi
 ```
 
@@ -120,17 +119,19 @@ conversation; the automated checks below use fake agents instead.
 1. In **Welcome to Zommi**, confirm the installed agent appears, connect, and
    send a message. After signing in or changing providers, use **Refresh agents**
    and check the model list.
-2. Open another app, including a native Wayland app. In Zommi, choose **Select**
-   and complete the desktop screenshot prompt. Confirm the captured pixels match
-   the source, then select several regions, draw with pen/arrow/shape/highlighter,
-   undo and redo, and press **Enter** to attach the batch. Press **Escape** to
-   cancel the editor. These portal captures should be **Image only**: the portal
-   does not provide the screen origin needed for aligned DOM/accessibility.
-   Test with display scaling and multiple monitors when available.
-   Cancel the desktop screenshot prompt too, then retry **Select**; the app and
-   draft must remain usable. Check permission-denial recovery where the desktop
-   offers that choice. A test using only XWayland apps does not cover native
-   Wayland sources.
+2. Open a native Wayland app. Press **Alt+A** or choose **Select** in Zommi,
+   then authorize the monitors to share. Select several regions, draw, undo/redo
+   and press **Enter**. Verify original pixels, text, values and checkbox states
+   match the selected source; password, hidden and outside-region content must
+   not be included. Supported Chromium browsers can add DOM through an authorized
+   connection (see [browser context](browser-context.md)). Apps that expose no
+   accessibility retain images with an explanation.
+   Cancel both the portal prompt and editor with **Escape**, then retry. Change
+   the source while the editor is open: retain the original image and drawings,
+   and downgrade to **Image only** when the source no longer matches. Test
+   fractional scaling, multiple monitors, negative monitor origins and rotation.
+   Disable/re-enable the GNOME extension and stop screen sharing during selection;
+   recovery must not lose the chat or draft.
 
 3. Type an unsent draft, close with **X**, and reopen from the tray. Check that
    the chat and draft remain. Choose **Quit** to exit. Ubuntu's AppIndicator
@@ -138,18 +139,6 @@ conversation; the automated checks below use fake agents instead.
 4. Restart with the same test directories and check the saved session. Then
    test an unavailable agent: connection failure should release the controls and
    offer recovery without losing the draft.
-
-### X11 compatibility checks
-
-At the login screen, choose **Ubuntu on Xorg** and confirm `XDG_SESSION_TYPE=x11`.
-Test agent connection, region selection/drawing, tray behavior and recovery;
-use **Alt+A** to start selection. Accessible apps can supply AT-SPI
-text, roles, values, states and bounds; supported Chromium browsers can also
-supply DOM through an authorized CDP connection (see
-[browser context](browser-context.md)). UIA is Windows-specific; AT-SPI is the
-Ubuntu equivalent. Change the source content while the editor is open: the
-original image and drawings should remain, with **Image only** instead of newer
-context when alignment is no longer reliable.
 
 ## Automated checks
 
@@ -167,27 +156,25 @@ python scripts/check.py --suite rust --suite flutter
 These tests use local fake agents and need no account. `python scripts/check.py`
 runs all suites, including browser and managed capture contracts.
 
-To exercise the built package's X11 shortcuts, region selection and cancellation
-in an isolated virtual display:
+The native acceptance test starts a private GNOME Wayland compositor, D-Bus,
+PipeWire, desktop portals and synthetic apps. It does not use the logged-in
+user's session or settings:
 
 ```sh
-sudo apt-get install -y xvfb xauth libxtst6 dbus-x11 libgl1-mesa-dri
-xvfb-run -a -s "-screen 0 1280x960x24 +extension GLX +render -noreset" \
-  dbus-run-session -- env ZOMMI_RUNTIME_DISCOVERY_MODE=configured-only \
-  python3 scripts/accept-linux-x11.py artifacts/zommi-linux-x64
+sudo apt-get install -y gnome-shell xdg-desktop-portal-gnome pipewire wireplumber \
+  dbus-x11 python3-pyatspi python3-gi gir1.2-gtk-3.0 gir1.2-gtk-4.0 python3-pil
+cargo build --locked --bin zommi-linux-capture
+/usr/bin/python3 scripts/accept-linux-wayland.py
+/usr/bin/python3 scripts/accept-linux-wayland.py --package artifacts/zommi-linux-x64 \
+  --browser /usr/bin/google-chrome
 ```
 
-The script creates temporary Zommi configuration and state. These Xvfb checks
-exercise the X11 compatibility path. Primary Wayland acceptance still requires
-the GNOME desktop steps above, including portal prompts, native Wayland source
-apps and cancellation/retry. When reporting a problem, include the source
-revision, Ubuntu version, X11/Wayland session and the failing step.
+The tests cover GTK 3/4 pixels and accessibility geometry, password filtering,
+portal cancellation, extension recovery, packaged selection/drawing, and floating
+HTML previews. `--browser` adds native Wayland Chromium DOM alignment. GTK 4 text
+input values are intentionally omitted when masked fields cannot be distinguished.
 
-The native AT-SPI regression uses only a synthetic GTK window on a private X11
-and D-Bus session. Install `xvfb dbus-x11 at-spi2-core openbox`, then run:
-
-```bash
-cargo build --locked --bin zommi-x11-capture
-xvfb-run -a -s '-screen 0 1100x800x24' env GSETTINGS_BACKEND=memory \
-  dbus-run-session -- python3 scripts/accept-linux-context.py
-```
+Evidence goes to `artifacts/wayland-acceptance`. CI uses the same test. Real GNOME
+tray integration and physical display configurations still need the desktop
+steps above. Include the source revision, Ubuntu/GNOME version, monitor scaling
+and failing step when reporting a problem.

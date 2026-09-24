@@ -21,7 +21,7 @@ class UbuntuInstallerTests(unittest.TestCase):
         self.package.mkdir()
         self.package.chmod(0o700)
         self.output.mkdir()
-        for name in ("zommi", "zommi-bin", "zommi-core-host", "zommi-x11-capture"):
+        for name in ("zommi", "zommi-bin", "zommi-core-host", "zommi-linux-capture"):
             path = self.package / name
             path.write_text("#!/bin/sh\nexit 0\n")
             path.chmod(0o755)
@@ -32,6 +32,9 @@ class UbuntuInstallerTests(unittest.TestCase):
         (self.package / "lib").mkdir()
         (self.package / "lib/libsqlite3.so.0").write_bytes(b"library fixture")
         (self.package / "lib/libsqlite3.so").symlink_to("libsqlite3.so.0")
+        extension = self.package / 'gnome-extension/zommi@zommi/schemas'
+        extension.mkdir(parents=True)
+        (extension / 'gschemas.compiled').write_bytes(b'schema fixture')
         self.manifest = {"platform": "linux", "architecture": "x64", "version": "0.1.0", "gitCommit": "a" * 40}
 
     def build(self, tag="v0.1.0-preview.8"):

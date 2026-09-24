@@ -50,7 +50,7 @@ void main() {
               'desktop_bridge.dart',
               'capture_provider.dart',
               'surface_window.dart',
-              'wayland_shortcuts.dart',
+              'gnome_shortcuts.dart',
             ]
             .map(
               (name) =>
@@ -68,11 +68,9 @@ void main() {
       "'selectImage',",
       "'returnProcessId': pid",
       "_runCommand('osascript'",
-      'LinuxCaptureProvider',
-      'zommi-x11-capture',
-      'portal-shortcuts',
-      'portal-region',
-      'shouldUseWaylandPortals',
+      'zommi-linux-capture',
+      "'shortcuts'",
+      'ProcessGnomeShortcutClient',
     ]) {
       expect(bridge, contains(contract));
     }
@@ -346,8 +344,8 @@ void main() {
       "if: github.event_name == 'workflow_dispatch' && inputs.windows_interactive",
       'scripts/accept-windows-capture.ps1',
       'python3 scripts/check.py',
-      'Accept Linux X11 shortcuts and capture UX',
-      'scripts/accept-linux-x11.py',
+      'Accept GNOME Wayland capture and recovery',
+      'scripts/accept-linux-wayland.py',
     ]) {
       expect(workflow, contains(contract));
     }
@@ -432,29 +430,29 @@ void main() {
     expect(linuxSmoke, contains('hotkeyWarnings'));
 
     expect(unixPackager, contains('--linux-capture-host'));
-    expect(unixPackager, contains('--bin zommi-x11-capture'));
+    expect(unixPackager, contains('--bin zommi-linux-capture'));
     final linuxCapture = File(
-      '${repository.path}/crates/zommi-x11-capture/src/main.rs',
+      '${repository.path}/crates/zommi-linux-capture/src/main.rs',
     ).readAsStringSync();
     expect(
       linuxCapture,
       allOf(
-        contains('GlobalShortcuts'),
-        contains('AvailableTargets::Area'),
-        contains('Wayland portals do not expose active-window metadata'),
+        contains('gnome::status'),
+        contains('screencast::Capture::open'),
+        contains('Screen sharing ended'),
       ),
     );
 
     final linuxAcceptance = File(
-      '${repository.path}/scripts/accept-linux-x11.py',
+      '${repository.path}/scripts/accept-linux-wayland.py',
     ).readAsStringSync();
     expect(
       linuxAcceptance,
       allOf(
-        contains('XTestFakeKeyEvent'),
-        contains('selection.content'),
-        contains('ZOMMI_X11_CONTEXT_FIXTURE'),
-        contains('contentCancelRestoredFocusedTaskbar'),
+        contains('gnome-shell'),
+        contains('--no-x11'),
+        contains('WAYLAND_VISIBLE_LABEL'),
+        contains('cancel/retry'),
       ),
     );
   });

@@ -84,7 +84,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y binutils clang cmake ninja-build pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libepoxy-dev libayatana-appindicator3-dev libx11-dev libsqlite3-dev libasound2t64 ffmpeg dpkg-dev desktop-file-utils xvfb xauth libxtst6 dbus-x11 libgl1-mesa-dri openbox
+          sudo apt-get install -y binutils clang cmake ninja-build pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-pipewire libepoxy-dev libayatana-appindicator3-dev libx11-dev libsqlite3-dev libasound2t64 ffmpeg dpkg-dev desktop-file-utils dbus-x11 libgl1-mesa-dri gnome-shell xdg-desktop-portal-gnome pipewire wireplumber python3-pil python3-pyatspi python3-gi gir1.2-gtk-3.0 gir1.2-gtk-4.0
           python -m pip install -r tests/requirements.txt
       - name: Check Ubuntu and macOS source
         if: runner.os != 'Windows'
@@ -110,7 +110,7 @@ jobs:
           python3 scripts/verify_release.py /opt/zommi --expected-platform linux --expected-commit "$GITHUB_SHA"
           desktop-file-validate /usr/share/applications/com.zommi.desktop.desktop
           test -x /usr/bin/zommi
-          xvfb-run -a -s "-screen 0 1280x960x24 +extension GLX +render -noreset" env GSETTINGS_BACKEND=memory ZOMMI_RUNTIME_DISCOVERY_MODE=configured-only dbus-run-session -- bash -c 'openbox >/tmp/zommi-test-wm.log 2>&1 & python3 scripts/accept-linux-x11.py /opt/zommi'
+          /usr/bin/python3 scripts/accept-linux-wayland.py --package /opt/zommi --browser /usr/bin/google-chrome
           sudo apt-get remove -y zommi
           test ! -e /opt/zommi/zommi
           test ! -e /usr/bin/zommi

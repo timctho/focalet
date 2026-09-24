@@ -19,6 +19,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/desktop/capture_permissions.dart';
+import 'package:zommi_flutter/desktop/gnome_integration.dart';
 import 'package:zommi_flutter/desktop/capture_shortcut.dart';
 import 'package:zommi_flutter/desktop/response_notifications.dart';
 import 'package:zommi_flutter/desktop/region_selection.dart';
@@ -29,7 +30,7 @@ import 'package:zommi_flutter/theme/app_preferences.dart';
 part 'capture_provider.dart';
 part 'unix_capture_provider.dart';
 part 'surface_window.dart';
-part 'wayland_shortcuts.dart';
+part 'gnome_shortcuts.dart';
 
 const Size compactWindowSize = Size(56, 56);
 const Size normalWindowSize = Size(1120, 820);
@@ -293,29 +294,36 @@ final class FlutterDesktopBridge
         BrowserCaptureSettings,
         CaptureThemeSettings,
         CapturePermissionBridge,
+        GnomeDesktopSettings,
         CaptureShortcutSettings,
         TrayMenuAppearance {
   FlutterDesktopBridge({
     CaptureProvider? captureProvider,
     DesktopAcceptanceRecorder? acceptanceRecorder,
-    WaylandPortalShortcutClient? waylandPortalShortcutClient,
-    bool? useWaylandPortals,
+    GnomeShortcutClient? gnomeShortcutClient,
+    bool? useGnomeIntegration,
     bool? useNativeSurface,
+    Future<void> Function()? presentGnome,
     CaptureShortcut? selectionShortcut,
   }) : _selectionShortcut = selectionShortcut ?? CaptureShortcut.standard,
        _captureProvider = captureProvider ?? platformCaptureProvider(),
+       _presentGnome = presentGnome ?? presentGnomeWindow,
        _useNativeSurface = useNativeSurface ?? Platform.isWindows,
-       _waylandPortalShortcutClient =
-           waylandPortalShortcutClient ??
-           ProcessWaylandPortalShortcutClient(resolveLinuxCaptureExecutable()),
-       _useWaylandPortals =
-           useWaylandPortals ??
-           (Platform.isLinux && shouldUseWaylandPortals(Platform.environment)),
+       _gnomeShortcutClient =
+           gnomeShortcutClient ??
+           ProcessGnomeShortcutClient(resolveLinuxCaptureExecutable()),
+       _useGnomeIntegration = useGnomeIntegration ?? Platform.isLinux,
        _acceptanceRecorder =
            acceptanceRecorder ??
            FileDesktopAcceptanceRecorder.fromEnvironment();
 
+  final Future<void> Function() _presentGnome;
   final bool _useNativeSurface;
+  @override
+  bool get supportsGnomeIntegration => Platform.isLinux;
+  @override
+  Future<Map<String, Object?>> gnomeIntegrationStatus({bool enable = false}) =>
+      runGnomeIntegration(resolveLinuxCaptureExecutable(), enable: enable);
   late final ResponseNotifications _notifications = ResponseNotifications(
     isForeground: () async =>
         await windowManager.isVisible() &&
@@ -435,8 +443,8 @@ final class FlutterDesktopBridge
     }
   }
 
-  final WaylandPortalShortcutClient _waylandPortalShortcutClient;
-  final bool _useWaylandPortals;
+  final GnomeShortcutClient _gnomeShortcutClient;
+  final bool _useGnomeIntegration;
   final DesktopAcceptanceRecorder? _acceptanceRecorder;
   final StreamController<DesktopInvocation> _invocations =
       StreamController<DesktopInvocation>.broadcast(sync: true);
@@ -446,7 +454,7 @@ final class FlutterDesktopBridge
   Future<void> _shortcutQueue = Future<void>.value();
 
   @override
-  bool get canCustomizeSelectionShortcut => !_useWaylandPortals;
+  bool get canCustomizeSelectionShortcut => !_useGnomeIntegration;
 
   Future<void> _queueShortcut(Future<void> Function() action) {
     final next = _shortcutQueue.then((_) => action());
@@ -508,6 +516,10 @@ final class FlutterDesktopBridge
 
   @override
   Future<void> resumeSelectionShortcut() => _queueShortcut(() async {
+    if (_useGnomeIntegration) {
+      _shortcutSuspended = false;
+      return;
+    }
     if (_shortcutSuspended) {
       await _registerSelectionShortcut(_selectionShortcut);
     }
@@ -519,7 +531,7 @@ final class FlutterDesktopBridge
   Offset? _surfaceAnchor;
   bool _nativeContextRegistered = false;
   DesktopReadiness _readiness = const DesktopReadiness();
-  StreamSubscription<String>? _portalShortcutSubscription;
+  StreamSubscription<String>? _gnomeShortcutSubscription;
   String? _trayIconPath;
   Map<String, Object?> _trayColors = const {};
 
@@ -566,15 +578,17 @@ final class FlutterDesktopBridge
     }
 
     var contextRegistered = false;
-    if (_useWaylandPortals) {
+    if (_useGnomeIntegration) {
       try {
-        final registration = await registerWaylandPortalShortcuts(
-          _waylandPortalShortcutClient,
-          onContext: () => unawaited(invokeContentSelection()),
+        final registration = await registerGnomeShortcuts(
+          _gnomeShortcutClient,
+          onContext: () {
+            if (!_shortcutSuspended) unawaited(invokeContentSelection());
+          },
           onError: (error) =>
               _emitWarning('Wayland global shortcuts stopped: $error'),
         );
-        _portalShortcutSubscription = registration.subscription;
+        _gnomeShortcutSubscription = registration.subscription;
         contextRegistered = registration.readiness.contextShortcut;
       } on Object catch (error) {
         _emitWarning('Wayland global shortcuts are unavailable: $error');
@@ -688,6 +702,9 @@ final class FlutterDesktopBridge
               'alignmentStatus': mapValue(
                 attachment.snapshot?['region'],
               )['status'],
+              'alignmentReason': mapValue(
+                attachment.snapshot?['region'],
+              )['reason'],
               'annotationCount':
                   mapValue(
                     attachment.snapshot?['imageAnnotations'],
@@ -918,6 +935,13 @@ final class FlutterDesktopBridge
       focus: windowManager.focus,
       keepOnTop: () => windowManager.setAlwaysOnTop(false),
     );
+    if (Platform.isLinux) {
+      try {
+        await _presentGnome();
+      } on Object {
+        // The visible window remains usable while integration is disabled.
+      }
+    }
   }
 
   @override
@@ -1186,8 +1210,8 @@ final class FlutterDesktopBridge
     _windowAnimationChannel.setMethodCallHandler(null);
     windowManager.removeListener(this);
     trayManager.removeListener(this);
-    await _portalShortcutSubscription?.cancel();
-    await _waylandPortalShortcutClient.close();
+    await _gnomeShortcutSubscription?.cancel();
+    await _gnomeShortcutClient.close();
     await suspendSelectionShortcut();
     await trayManager.destroy();
     await _captureProvider.close();

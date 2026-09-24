@@ -97,10 +97,10 @@ validate bundled ELF runtime requirements against the
 [package compatibility baseline](ubuntu-testing.md#package-compatibility) before
 creating an installer. Installers are unsigned by this
 workflow; Mac apps use ad-hoc signing and DMGs are not notarized. Ubuntu runs an
-installed-package X11 check in a virtual display and removes the package;
+installed-package GNOME Wayland check in a private virtual desktop and removes the package;
 Windows runs packaged non-visual capture checks; Mac verifies selection geometry
-and the mounted DMG. Ubuntu's Xvfb checks cover its X11 compatibility path;
-release acceptance for the primary Wayland target also needs the
+and the mounted DMG. Ubuntu's automated checks use real GNOME, portals and synthetic apps;
+physical display and tray acceptance also needs the
 [GNOME desktop checks](ubuntu-testing.md#try-the-desktop-flow). These checks do
 not replace real desktop acceptance of tray menus, OS permissions, or agent sign-in.
 

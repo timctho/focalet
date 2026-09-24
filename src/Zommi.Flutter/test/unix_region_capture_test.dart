@@ -59,8 +59,129 @@ class _ChangingBrowser implements NativeCaptureClient {
   Future<void> close() async {}
 }
 
+class _SessionBackend implements UnixRegionBackend, UnixCaptureSession {
+  bool fail = false;
+  int releases = 0;
+  @override
+  Future<List<CapturedDisplay>> captureDisplays() async {
+    if (fail) throw StateError('Screen sharing disconnected.');
+    return [await display()];
+  }
+
+  @override
+  Future<Map<String, Object?>> observe(Rect bounds) async =>
+      throw StateError('Source disconnected.');
+  @override
+  Future<void> release() async {
+    releases++;
+  }
+
+  @override
+  Future<void> close() async {}
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('Wayland accepts sparse one-level RGB rounding but rejects content changes', () async {
+    Future<String> png(int count, int delta) async {
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      canvas.drawColor(Colors.white, BlendMode.src);
+      canvas.drawRect(
+        Rect.fromLTWH(0, 0, count.toDouble(), 1),
+        Paint()
+          ..isAntiAlias = false
+          ..color = Color.fromARGB(255, 255 - delta, 255, 255),
+      );
+      final picture = recorder.endRecording();
+      final image = await picture.toImage(100, 80);
+      try {
+        final data = (await image.toByteData(format: ui.ImageByteFormat.png))!;
+        return 'data:image/png;base64,${base64Encode(data.buffer.asUint8List())}';
+      } finally {
+        image.dispose();
+        picture.dispose();
+      }
+    }
+
+    final original = await png(0, 0);
+    final noise = await png(10, 1);
+    expect(await sameCapturedPixels(original, noise), isFalse);
+    expect(
+      await sameCapturedPixels(original, noise, allowRoundingNoise: true),
+      isTrue,
+    );
+    expect(
+      await sameCapturedPixels(
+        original,
+        await png(10, 2),
+        allowRoundingNoise: true,
+      ),
+      isFalse,
+    );
+    expect(
+      await sameCapturedPixels(
+        original,
+        await png(21, 1),
+        allowRoundingNoise: true,
+      ),
+      isFalse,
+    );
+  });
+  test(
+    'capture releases sharing after cancellation and failure, then can retry',
+    () async {
+      final backend = _SessionBackend();
+      final provider = UnixCaptureProvider(
+        backend: backend,
+        browser: _ChangingBrowser(),
+        editor: (_) async => [],
+      );
+      addTearDown(provider.close);
+      expect(await provider.selectContext(), isEmpty);
+      expect(backend.releases, 1);
+      backend.fail = true;
+      await expectLater(provider.selectContext(), throwsStateError);
+      expect(backend.releases, 2);
+      backend.fail = false;
+      expect(await provider.selectContext(), isEmpty);
+      expect(backend.releases, 3);
+    },
+  );
+  test(
+    'source disconnect retains the frozen annotated image and releases sharing',
+    () async {
+      final backend = _SessionBackend();
+      final provider = UnixCaptureProvider(
+        backend: backend,
+        browser: _ChangingBrowser(),
+        editor: (frames) async {
+          final region = SelectedRegion(
+            frames.single,
+            const Rect.fromLTWH(10, 10, 30, 20),
+          );
+          region.addStroke(
+            RegionStroke(
+              tool: RegionDrawingTool.pen,
+              color: Colors.blue,
+              width: 2,
+              points: const [Offset(12, 12), Offset(20, 20)],
+            ),
+          );
+          return [region];
+        },
+      );
+      addTearDown(provider.close);
+      final result = (await provider.selectContext()).single.image!;
+      expect(result.alignment?['status'], 'image-only');
+      expect(
+        result.snapshot?['imageAnnotations'],
+        containsPair('strokeCount', 1),
+      );
+      expect(result.dataUrl, startsWith('data:image/png;base64,'));
+      expect(backend.releases, 1);
+    },
+  );
   test('regions keep physical pixels, negative screen origins, limits and independent drawing histories', () async {
     final frame = await display();
     addTearDown(frame.image.dispose);
@@ -242,6 +363,42 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     },
   );
+
+  testWidgets('closing keys release before the editor gives up its window', (
+    tester,
+  ) async {
+    final frame = (await tester.runAsync(display))!;
+    addTearDown(frame.image.dispose);
+    for (final key in [
+      LogicalKeyboardKey.enter,
+      LogicalKeyboardKey.escape,
+      LogicalKeyboardKey.enter,
+    ]) {
+      final session = RegionSelectionSession([frame]);
+      session.addRegion(const Rect.fromLTWH(10, 10, 30, 20));
+      var finished = false;
+      session.result.then((_) => finished = true);
+      await tester.pumpWidget(
+        MaterialApp(home: RegionCaptureEditor(session: session)),
+      );
+      await tester.sendKeyDownEvent(key);
+      await tester.pump();
+      expect(finished, isFalse);
+      await tester.sendKeyUpEvent(key);
+      await tester.pump();
+      expect(finished, isTrue);
+      expect(
+        HardwareKeyboard.instance.logicalKeysPressed,
+        isNot(contains(key)),
+      );
+      expect(
+        await session.result,
+        key == LogicalKeyboardKey.escape ? isEmpty : hasLength(1),
+      );
+      await tester.pumpWidget(const SizedBox());
+      session.dispose();
+    }
+  });
 
   test('failed DOM confirmation discards all semantic metadata and releases the host', () async {
     final frame = await display();

@@ -125,11 +125,8 @@ jobs:
           ZOMMI_VERIFY_SQLITE_CACHE: '1'
         run: bash scripts/package-linux-self-hosted.sh
 
-      - name: Accept Linux X11 shortcuts and capture UX
-        run: >-
-          xvfb-run -a -s "-screen 0 1280x960x24 +extension GLX +render -noreset"
-          env GSETTINGS_BACKEND=memory dbus-run-session -- bash -c
-          'openbox >/tmp/zommi-test-wm.log 2>&1 & python3 scripts/accept-linux-x11.py artifacts/zommi-linux-x64'
+      - name: Accept GNOME Wayland capture and recovery
+        run: /usr/bin/python3 scripts/accept-linux-wayland.py --package artifacts/zommi-linux-x64
 
       - name: Show release identity and signing state
         run: |

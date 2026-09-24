@@ -45,7 +45,7 @@ jobs:
       - name: Install native test dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y binutils libsqlite3-dev libgtk-3-dev libwebkit2gtk-4.1-dev libepoxy-dev libayatana-appindicator3-dev libx11-dev clang cmake ninja-build pkg-config libasound2t64 ffmpeg xvfb dbus-x11 at-spi2-core openbox
+          sudo apt-get install -y binutils libsqlite3-dev libgtk-3-dev libwebkit2gtk-4.1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-pipewire libepoxy-dev libayatana-appindicator3-dev libx11-dev clang cmake ninja-build pkg-config libasound2t64 ffmpeg dbus-x11 at-spi2-core gnome-shell xdg-desktop-portal-gnome pipewire wireplumber python3-pil python3-pyatspi python3-gi gir1.2-gtk-3.0 gir1.2-gtk-4.0
           python -m pip install -r tests/requirements.txt
       - name: Check all contracts, widgets, processes and browser capture
         env:
@@ -58,21 +58,10 @@ jobs:
       - name: Verify real agent CLIs without accounts or external network
         run: |
           sudo --preserve-env=PATH unshare --net -- bash -c 'ip link set lo up; exec python3 scripts/verify-runtime-clis.py'
-      - name: Verify native Ubuntu accessibility and pixels
-        run: |
-          cargo build --locked --bin zommi-x11-capture
-          xvfb-run -a -s "-screen 0 1100x800x24" env GSETTINGS_BACKEND=memory dbus-run-session -- bash -c 'openbox >/tmp/zommi-test-wm.log 2>&1 & python3 scripts/accept-linux-context.py'
-      - name: Verify native Ubuntu browser alignment
-        run: |
-          xvfb-run -a -s "-screen 0 1440x1000x24" env GSETTINGS_BACKEND=memory dbus-run-session -- bash -c 'openbox >/tmp/zommi-test-wm.log 2>&1 & python3 scripts/accept-linux-browser.py --browser /usr/bin/google-chrome'
       - name: Compile and verify the Linux desktop package
         run: bash scripts/package-unix.sh linux
-      - name: Verify packaged Ubuntu selection and drawing
-        run: |
-          xvfb-run -a -s "-screen 0 1440x1000x24" env GSETTINGS_BACKEND=memory dbus-run-session -- bash -c 'openbox >/tmp/zommi-test-wm.log 2>&1 & python3 scripts/accept-linux-x11.py artifacts/zommi-linux-x64'
-      - name: Verify floating Ubuntu documents and capture recovery
-        run: |
-          xvfb-run -a -s "-screen 0 1440x1000x24" env GSETTINGS_BACKEND=memory dbus-run-session -- bash -c 'openbox >/tmp/zommi-test-wm.log 2>&1 & python3 scripts/accept-linux-documents.py artifacts/zommi-linux-x64'
+      - name: Verify GNOME Wayland capture, context and recovery
+        run: /usr/bin/python3 scripts/accept-linux-wayland.py --package artifacts/zommi-linux-x64 --browser /usr/bin/google-chrome
       - name: Ensure checks did not rewrite committed files
         run: git diff --exit-code
 

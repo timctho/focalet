@@ -44,11 +44,15 @@ class ReleasePackageTests(unittest.TestCase):
         )
         (self.root / "zommi-bin").write_text("flutter", encoding="utf-8")
         (self.root / "zommi-core-host").write_text("rust", encoding="utf-8")
-        (self.root / "zommi-x11-capture").write_text("x11", encoding="utf-8")
+        (self.root / "zommi-linux-capture").write_text("wayland", encoding="utf-8")
         for relative in verify_release.LINUX_RUNTIME_LIBRARIES:
             library = self.root / relative
             library.parent.mkdir(parents=True, exist_ok=True)
             library.write_text("runtime", encoding="utf-8")
+        for relative in ('metadata.json', 'extension.js', 'schemas/gschemas.compiled'):
+            path = self.root / 'gnome-extension/zommi@zommi' / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('extension fixture')
         manifest = {
             "schemaVersion": 1,
             "product": "Zommi",
@@ -57,7 +61,7 @@ class ReleasePackageTests(unittest.TestCase):
             "architecture": "x64",
             "entrypoint": "zommi",
             "coreHost": "zommi-core-host",
-            "captureHost": "zommi-x11-capture",
+            "captureHost": "zommi-linux-capture",
             "components": {
                 "desktopUi": "flutter",
                 "runtimeCore": "rust",
@@ -92,8 +96,8 @@ class ReleasePackageTests(unittest.TestCase):
             smoke_processes=False,
         )
         self.assertEqual(result["entrypoint"], "zommi")
-        self.assertEqual(result["captureHost"], "zommi-x11-capture")
-        self.assertEqual(result["files"], 5 + len(verify_release.LINUX_RUNTIME_LIBRARIES))
+        self.assertEqual(result["captureHost"], "zommi-linux-capture")
+        self.assertEqual(result["files"], 8 + len(verify_release.LINUX_RUNTIME_LIBRARIES))
         self.abi_check.assert_called_once_with(self.root)
         self.assertEqual(result["ubuntuCompatibility"]["ubuntu"], "24.04")
 
@@ -188,7 +192,7 @@ class ReleasePackageTests(unittest.TestCase):
             verify_release.verify_package(self.root, smoke_processes=False)
 
     def test_missing_linux_capture_host_is_rejected(self) -> None:
-        (self.root / "zommi-x11-capture").unlink()
+        (self.root / "zommi-linux-capture").unlink()
         self._write_checksums()
         with self.assertRaisesRegex(
             verify_release.ReleaseValidationError,
@@ -199,13 +203,13 @@ class ReleasePackageTests(unittest.TestCase):
     def test_linux_capture_smoke_uses_display_independent_probe(self) -> None:
         completed = mock.Mock(
             returncode=0,
-            stdout='{"ok":true,"providers":["x11","wayland-portal"]}\n',
+            stdout='{"ok":true,"providers":["gnome-wayland","atspi","screencast"]}\n',
             stderr="",
         )
         with mock.patch.object(verify_release.subprocess, "run", return_value=completed) as run:
-            verify_release._smoke_linux_capture(self.root / "zommi-x11-capture")
+            verify_release._smoke_linux_capture(self.root / "zommi-linux-capture")
         run.assert_called_once_with(
-            [str(self.root / "zommi-x11-capture"), "probe"],
+            [str(self.root / "zommi-linux-capture"), "probe"],
             text=True,
             capture_output=True,
             timeout=15,

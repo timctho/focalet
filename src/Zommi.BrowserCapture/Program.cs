@@ -70,7 +70,7 @@ sealed class UnixBrowserCapture : IDisposable
                 window.TryGetProperty("processId", out var pid) && pid.ValueKind == JsonValueKind.Number &&
                 pid.TryGetInt32(out var windowProcessId) && windowProcessId == processId &&
                 WindowTitleMatches(window.GetProperty("windowTitle").GetString() ?? "", pageTitle)) == 1 &&
-            windows.Any(window => window.GetProperty("nativeWindowId").GetString() == nativeId);
+            windows.Any(window => window.TryGetProperty("nativeWindowId", out var id) && id.GetString() == nativeId);
         var processName = source.TryGetProperty("processName", out var name) ? name.GetString() ?? "" : "";
         foreach (var endpoint in Endpoints(processName))
         {

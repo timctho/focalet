@@ -41,7 +41,9 @@ final class CapturedDisplay {
     for (final window in windows) {
       final bounds = regionRect(window['bounds']);
       if (!bounds.overlaps(region)) continue;
-      return bounds.intersect(region) == region ? window : null;
+      return window['obstruction'] != true && bounds.intersect(region) == region
+          ? window
+          : null;
     }
     return null;
   }

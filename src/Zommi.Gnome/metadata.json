@@ -1,0 +1,9 @@
+{
+  "uuid": "zommi@zommi",
+  "name": "Zommi Desktop Integration",
+  "description": "Connect screen selections to their application context and open Zommi with Alt+A.",
+  "shell-version": ["46"],
+  "version": 1,
+  "url": "https://github.com/timctho/zommi",
+  "settings-schema": "org.gnome.shell.extensions.zommi"
+}

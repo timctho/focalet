@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:zommi_flutter/desktop/capture_permissions.dart';
+import 'package:zommi_flutter/desktop/gnome_integration.dart';
+import 'package:zommi_flutter/widgets/gnome_integration_setup.dart';
 import 'package:zommi_flutter/widgets/capture_permission_setup.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/widgets/overlay_panels.dart';
@@ -255,6 +257,10 @@ class _FirstRunSetupState extends State<FirstRunSetup> {
                         case final CapturePermissionBridge permissions)
                       if (permissions.supportsCapturePermissions)
                         CapturePermissionSetup(bridge: permissions),
+                    if (controller.desktop
+                        case final GnomeDesktopSettings bridge
+                        when bridge.supportsGnomeIntegration)
+                      GnomeIntegrationSetup(bridge: bridge),
                   ],
                 ),
               ),

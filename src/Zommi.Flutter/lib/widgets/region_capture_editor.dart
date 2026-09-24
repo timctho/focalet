@@ -122,15 +122,22 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
   }
 
   KeyEventResult _key(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent || _start != null) return KeyEventResult.ignored;
+    if (_start != null) return KeyEventResult.ignored;
     final key = event.logicalKey;
-    final shortcuts = HardwareKeyboard.instance;
-    if (key == LogicalKeyboardKey.escape) {
-      session.finish(cancel: true);
-    } else if (key == LogicalKeyboardKey.enter ||
+    if (key == LogicalKeyboardKey.escape ||
+        key == LogicalKeyboardKey.enter ||
         key == LogicalKeyboardKey.numpadEnter) {
-      session.finish();
-    } else if (key == LogicalKeyboardKey.delete ||
+      // Wait for key-up before hiding the Wayland surface. Otherwise the
+      // release goes to the source window and Flutter retains a pressed Enter,
+      // turning the next selection's Enter into an ignored repeat event.
+      if (event is KeyUpEvent) {
+        session.finish(cancel: key == LogicalKeyboardKey.escape);
+      }
+      return KeyEventResult.handled;
+    }
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final shortcuts = HardwareKeyboard.instance;
+    if (key == LogicalKeyboardKey.delete ||
         key == LogicalKeyboardKey.backspace) {
       session.removeSelected();
     } else if ((shortcuts.isControlPressed || shortcuts.isMetaPressed) &&
@@ -400,6 +407,7 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
       await _recorder?.record('capture.editor.ready', {
         'session': identityHashCode(session).toString(),
         'bounds': regionRectJson((local + position) & _imageBounds.size),
+        'localBounds': regionRectJson(local & _imageBounds.size),
         'imageWidth': session.display.image.width,
         'imageHeight': session.display.image.height,
       });

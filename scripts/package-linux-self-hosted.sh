@@ -2,7 +2,7 @@
 set -euo pipefail
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 if ! command -v clang++ >/dev/null || ! command -v ninja >/dev/null ||
-   ! pkg-config --exists gtk+-3.0 webkit2gtk-4.1 x11 ayatana-appindicator3-0.1; then
+   ! pkg-config --exists gtk+-3.0 webkit2gtk-4.1 gstreamer-app-1.0 gstreamer-video-1.0 ayatana-appindicator3-0.1; then
   echo 'Install the Ubuntu 24.04 build dependencies listed in docs/ubuntu-testing.md.' >&2
   exit 2
 fi
