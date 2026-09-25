@@ -12,7 +12,8 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use wait_timeout::ChildExt;
 
-const PROBE_TIMEOUT: Duration = Duration::from_secs(4);
+// Native PATH probes are fast; waking a stopped WSL distribution is not.
+const WSL_PROBE_TIMEOUT: Duration = Duration::from_secs(25);
 const DISCOVERY_CACHE_SCHEMA_VERSION: u32 = 1;
 
 const CODEX_CAPABILITY_HINTS: &[&str] = &[
@@ -974,8 +975,8 @@ struct WslDiscoveryOutcome {
 fn discover_wsl_targets(environment: &HashMap<String, String>) -> WslDiscoveryOutcome {
     let wsl = windows_wsl_executable();
     let (quiet, verbose) = std::thread::scope(|scope| {
-        let quiet = scope.spawn(|| run_command(&wsl, &["--list", "--quiet"], None));
-        let verbose = scope.spawn(|| run_command(&wsl, &["--list", "--verbose"], None));
+        let quiet = scope.spawn(|| run_wsl_probe(&wsl, &["--list", "--quiet"], None));
+        let verbose = scope.spawn(|| run_wsl_probe(&wsl, &["--list", "--verbose"], None));
         (quiet.join().ok().flatten(), verbose.join().ok().flatten())
     });
     let (Some(quiet), Some(verbose)) = (quiet, verbose) else {
@@ -1026,7 +1027,7 @@ fn detect_wsl_runtimes(
 ) -> Option<Vec<RuntimeTarget>> {
     let script = wsl_runtime_probe_script();
     let wsl = windows_wsl_executable();
-    let output = run_command(
+    let output = run_wsl_probe(
         &wsl,
         &["-d", distribution, "-e", "sh", "-lc", &script],
         Some(environment),
@@ -1096,7 +1097,7 @@ pub fn runtime_targets_from_wsl_probe(
         .collect()
 }
 
-fn run_command(
+fn run_wsl_probe(
     executable: &str,
     arguments: &[&str],
     environment: Option<&HashMap<String, String>>,
@@ -1111,7 +1112,7 @@ fn run_command(
         command.envs(environment);
     }
     let mut child = command.spawn().ok()?;
-    match child.wait_timeout(PROBE_TIMEOUT).ok()? {
+    match child.wait_timeout(WSL_PROBE_TIMEOUT).ok()? {
         Some(status) if status.success() => {
             let mut output = Vec::new();
             child.stdout.take()?.read_to_end(&mut output).ok()?;
@@ -1339,6 +1340,24 @@ fn normalize_command_output(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn discovery_waits_for_a_cold_distribution_before_reading_cli_paths() {
+        let output = super::run_wsl_probe(
+            "/bin/sh",
+            &[
+                "-c",
+                "sleep 5; printf '__ZOMMI_RUNTIME_PATH__codex\\t/usr/bin/codex\\n'",
+            ],
+            None,
+        )
+        .expect("cold WSL probe should finish instead of being killed at four seconds");
+        assert_eq!(
+            super::runtime_targets_from_wsl_probe("Ubuntu", true, &output)[0].executable_path,
+            "/usr/bin/codex"
+        );
+    }
+
     use std::{collections::HashMap, fs};
 
     use super::{

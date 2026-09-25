@@ -22,9 +22,11 @@ use zommi_core::{
     runtime_targets_from_wsl_probe, wsl_runtime_probe_script,
 };
 
-// A new version starts a daemon with the fixed CLI environment instead of
-// reusing an older daemon that is still serving existing chats.
-const TRANSPORT_VERSION: u32 = 8;
+// Readiness challenges and session heartbeats require the matching daemon.
+const TRANSPORT_VERSION: u32 = 9;
+const BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(30);
+const READINESS_TIMEOUT: Duration = Duration::from_secs(1);
+const LOOKUP_TIMEOUT: Duration = Duration::from_secs(25);
 const ENDPOINT_SCHEMA_VERSION: u32 = 1;
 const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 const CHANNEL_STDOUT: u8 = 1;
@@ -116,17 +118,28 @@ pub fn run_proxy(arguments: &[String]) -> io::Result<i32> {
     }
 }
 
+/// Complete cold WSL startup before an adapter starts its protocol deadline.
+pub fn prepare_transport(distribution: &str) -> io::Result<()> {
+    if !valid_distribution(distribution) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Invalid WSL distribution.",
+        ));
+    }
+    ensure_relay(distribution, &endpoint_path(distribution)?).map(|_| ())
+}
+
 pub fn cached_default_relay_available(targets: &[RuntimeTarget]) -> bool {
     targets
         .iter()
         .filter(|target| target.execution_host.kind == "wsl" && target.execution_host.is_default)
         .filter_map(|target| target.execution_host.name.as_deref())
         .any(|distribution| {
-            endpoint_path(distribution)
-                .and_then(|path| load_endpoint(&path))
-                .is_ok_and(|endpoint| {
-                    endpoint_matches(&endpoint, distribution) && relay_is_alive(&endpoint)
+            endpoint_path(distribution).is_ok_and(|path| {
+                load_endpoint(&path).is_ok_and(|endpoint| {
+                    endpoint_matches(&endpoint, distribution) && relay_responds(&endpoint, &path)
                 })
+            })
         })
 }
 
@@ -153,7 +166,8 @@ pub fn discover_targets_via_cached_relays(
         }
         let endpoint = endpoint_path(distribution).and_then(|path| load_endpoint(&path));
         if endpoint.is_ok_and(|endpoint| {
-            endpoint_matches(&endpoint, distribution) && relay_is_alive(&endpoint)
+            endpoint_matches(&endpoint, distribution)
+                && endpoint_path(distribution).is_ok_and(|path| relay_responds(&endpoint, &path))
         }) {
             hosts.push((
                 distribution.to_owned(),
@@ -188,6 +202,7 @@ pub fn discover_targets_via_cached_relays(
             false,
             &mut stdout,
             &mut stderr,
+            Some(Instant::now() + LOOKUP_TIMEOUT),
         )?;
         if status != 0 {
             return Err(io::Error::other(format!(
@@ -242,6 +257,7 @@ pub fn workspace_directory_exists(target: &RuntimeTarget, path: &str) -> io::Res
         false,
         &mut stdout,
         &mut stderr,
+        Some(Instant::now() + LOOKUP_TIMEOUT),
     )? {
         0 => Ok(true),
         1 => Ok(false),
@@ -287,6 +303,7 @@ pub fn resolve_runtime_executable(distribution: &str, path: &str) -> io::Result<
         false,
         &mut stdout,
         &mut stderr,
+        Some(Instant::now() + LOOKUP_TIMEOUT),
     )?;
     let resolved = String::from_utf8(stdout).map_err(io::Error::other)?;
     if status != 0 {
@@ -389,9 +406,10 @@ fn endpoint_path(distribution: &str) -> io::Result<PathBuf> {
         .join("Zommi")
         .join("wsl-relay")
         .join(format!("v{TRANSPORT_VERSION}"));
-    Ok(root
-        .join("endpoints")
-        .join(format!("{}.json", hex_name(distribution))))
+    Ok(root.join("endpoints").join(format!(
+        "{}.json",
+        hex_name(&distribution.to_ascii_lowercase())
+    )))
 }
 
 fn hex_name(value: &str) -> String {
@@ -405,7 +423,7 @@ fn hex_name(value: &str) -> String {
 fn ensure_relay(distribution: &str, endpoint_path: &Path) -> io::Result<RelayEndpoint> {
     if let Ok(endpoint) = load_endpoint(endpoint_path)
         && endpoint_matches(&endpoint, distribution)
-        && relay_is_alive(&endpoint)
+        && relay_responds(&endpoint, endpoint_path)
     {
         return Ok(endpoint);
     }
@@ -415,8 +433,47 @@ fn ensure_relay(distribution: &str, endpoint_path: &Path) -> io::Result<RelayEnd
             "Configured WSL relay is not available.",
         ));
     }
-    start_relay(distribution, endpoint_path)?;
-    let deadline = Instant::now() + Duration::from_secs(6);
+    let deadline = Instant::now() + BOOTSTRAP_TIMEOUT;
+    // Several core/catalog processes can connect to the same distribution.
+    // The OS releases this lock even if its owner crashes; no stale PID lease.
+    fs::create_dir_all(
+        endpoint_path
+            .parent()
+            .ok_or_else(|| io::Error::other("WSL endpoint has no parent."))?,
+    )?;
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(endpoint_path.with_extension("launch.lock"))?;
+    loop {
+        match lock.try_lock() {
+            Ok(()) => break,
+            Err(std::fs::TryLockError::WouldBlock) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(50));
+            }
+            Err(std::fs::TryLockError::WouldBlock) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "WSL is still starting. Retry the connection.",
+                ));
+            }
+            Err(std::fs::TryLockError::Error(error)) => return Err(error),
+        }
+    }
+    // Another requester may have completed startup while we waited.
+    if let Ok(endpoint) = load_endpoint(endpoint_path)
+        && endpoint_matches(&endpoint, distribution)
+        && relay_responds(&endpoint, endpoint_path)
+    {
+        return Ok(endpoint);
+    }
+    start_relay(
+        distribution,
+        endpoint_path,
+        deadline.saturating_duration_since(Instant::now()),
+    )?;
     let mut last_error = None;
     while Instant::now() < deadline {
         match load_endpoint(endpoint_path).and_then(|endpoint| {
@@ -426,12 +483,12 @@ fn ensure_relay(distribution: &str, endpoint_path: &Path) -> io::Result<RelayEnd
                     "WSL relay endpoint identity does not match.",
                 ));
             }
-            if relay_is_alive(&endpoint) {
+            if relay_responds(&endpoint, endpoint_path) {
                 Ok(endpoint)
             } else {
                 Err(io::Error::new(
                     io::ErrorKind::TimedOut,
-                    "WSL relay heartbeat is stale.",
+                    "WSL started but its transport did not answer. Retry the connection.",
                 ))
             }
         }) {
@@ -467,8 +524,43 @@ fn endpoint_matches(endpoint: &RelayEndpoint, distribution: &str) -> bool {
         && endpoint.token.len() >= 32
 }
 
-fn relay_is_alive(endpoint: &RelayEndpoint) -> bool {
-    now_ms().saturating_sub(endpoint.heartbeat_ms) <= 5_000
+fn relay_responds(endpoint: &RelayEndpoint, endpoint_path: &Path) -> bool {
+    probe_relay(endpoint, endpoint_path).unwrap_or(false)
+}
+
+fn probe_relay(endpoint: &RelayEndpoint, endpoint_path: &Path) -> io::Result<bool> {
+    let root = endpoint_path
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| io::Error::other("WSL endpoint has no root."))?;
+    let directory = root
+        .join("spool")
+        .join(format!("probe-{}", Uuid::new_v4().simple()));
+    fs::create_dir_all(&directory)?;
+    let _cleanup = SpoolSession {
+        directory: directory.clone(),
+        running: Arc::new(AtomicBool::new(false)),
+    };
+    let nonce = Uuid::new_v4().simple().to_string();
+    let request = json!({"op":"ping", "token":endpoint.token, "transportVersion":TRANSPORT_VERSION, "nonce":nonce});
+    fs::write(directory.join("request.tmp"), serde_json::to_vec(&request)?)?;
+    fs::rename(
+        directory.join("request.tmp"),
+        directory.join("request.json"),
+    )?;
+    let deadline = Instant::now() + READINESS_TIMEOUT;
+    while Instant::now() < deadline {
+        if let Ok(bytes) = fs::read(directory.join("ready.json"))
+            && let Ok(reply) = serde_json::from_slice::<Value>(&bytes)
+            && reply["nonce"] == nonce
+            && reply["pid"] == endpoint.pid
+            && reply["transportVersion"] == TRANSPORT_VERSION
+        {
+            return Ok(true);
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    Ok(false)
 }
 
 fn now_ms() -> u64 {
@@ -491,7 +583,7 @@ fn connect(endpoint: &RelayEndpoint) -> io::Result<TcpStream> {
     Ok(stream)
 }
 
-fn start_relay(distribution: &str, endpoint_path: &Path) -> io::Result<()> {
+fn start_relay(distribution: &str, endpoint_path: &Path, timeout: Duration) -> io::Result<()> {
     let root = endpoint_path
         .parent()
         .and_then(Path::parent)
@@ -499,8 +591,13 @@ fn start_relay(distribution: &str, endpoint_path: &Path) -> io::Result<()> {
             io::Error::new(io::ErrorKind::InvalidInput, "WSL relay path has no root.")
         })?;
     fs::create_dir_all(root.join("endpoints"))?;
-    let relay = root.join("zommi-wsl-relay.js");
-    let launcher = root.join("launch-wsl-relay.sh");
+    // Each distribution's bootstrap is protected by its own launch lock.
+    // Do not race another distribution while replacing scripts on Windows.
+    let bootstrap_name = hex_name(&distribution.to_ascii_lowercase());
+    let bootstrap = root.join("bootstrap").join(&bootstrap_name);
+    fs::create_dir_all(&bootstrap)?;
+    let relay = bootstrap.join("zommi-wsl-relay.js");
+    let launcher = bootstrap.join("launch-wsl-relay.sh");
     let relay_source = RELAY_SOURCE.replace("\r\n", "\n");
     let launcher_source = normalize_shell_script(LAUNCHER_SOURCE);
     write_if_changed(&relay, relay_source.as_bytes())?;
@@ -511,33 +608,40 @@ fn start_relay(distribution: &str, endpoint_path: &Path) -> io::Result<()> {
         Err(error) => return Err(error),
     }
 
-    let linux_root = wsl_path(distribution, root)?;
-    let linux_relay = format!("{linux_root}/zommi-wsl-relay.js");
-    let linux_launcher = format!("{linux_root}/launch-wsl-relay.sh");
     let endpoint_name = endpoint_path
         .file_name()
         .and_then(|value| value.to_str())
         .ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidInput, "WSL endpoint name is invalid.")
         })?;
-    let linux_endpoint = format!("{linux_root}/endpoints/{endpoint_name}");
     let token = Uuid::new_v4().simple().to_string() + &Uuid::new_v4().simple().to_string();
     let version = TRANSPORT_VERSION.to_string();
     let output = run_wsl(
         &[
             "-d",
             distribution,
+            "--cd",
+            "/",
             "-e",
-            "sh",
-            &linux_launcher,
-            &linux_relay,
-            &linux_endpoint,
+            "/bin/sh",
+            "-c",
+            "set -eu; zommi_root=$(wslpath -a -u \"$1\"); exec /bin/sh \"$zommi_root/bootstrap/$6/launch-wsl-relay.sh\" \"$zommi_root/bootstrap/$6/zommi-wsl-relay.js\" \"$zommi_root/endpoints/$2\" \"$3\" \"$4\" \"$5\"",
+            "zommi-relay-bootstrap",
+            &root.to_string_lossy(),
+            endpoint_name,
             &token,
             &version,
             distribution,
+            &bootstrap_name,
         ],
-        Duration::from_secs(5),
+        timeout,
     )?;
+    if output.status.code() == Some(43) {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "WSL needs Node.js 18 or newer to connect agent runtimes. Install Node in this distribution, then retry.",
+        ));
+    }
     if !output.status.success() {
         return Err(io::Error::other(format!(
             "Could not launch persistent WSL relay: {}",
@@ -565,28 +669,6 @@ fn write_if_changed(path: &Path, bytes: &[u8]) -> io::Result<()> {
     fs::rename(temporary, path)
 }
 
-fn wsl_path(distribution: &str, windows_path: &Path) -> io::Result<String> {
-    let value = windows_path.to_string_lossy();
-    let output = run_wsl(
-        &["-d", distribution, "-e", "wslpath", "-a", "-u", &value],
-        Duration::from_secs(5),
-    )?;
-    if !output.status.success() {
-        return Err(io::Error::other(format!(
-            "Could not map the WSL relay path: {}",
-            bounded_text(&output.stderr)
-        )));
-    }
-    let mapped = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    if !mapped.starts_with('/') || mapped.contains('\0') {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "wslpath returned an invalid relay path.",
-        ));
-    }
-    Ok(mapped)
-}
-
 fn run_wsl(arguments: &[&str], timeout: Duration) -> io::Result<std::process::Output> {
     let executable = windows_wsl_executable();
     let mut child = Command::new(&executable)
@@ -606,7 +688,7 @@ fn run_wsl(arguments: &[&str], timeout: Duration) -> io::Result<std::process::Ou
         let _ = child.wait();
         return Err(io::Error::new(
             io::ErrorKind::TimedOut,
-            "WSL relay bootstrap timed out.",
+            "WSL did not finish starting. Open this distribution in Windows Terminal, then retry the connection; your chats are preserved.",
         ));
     }
     child.wait_with_output()
@@ -703,6 +785,7 @@ fn proxy_runtime_spool(
         true,
         &mut stdout,
         &mut stderr,
+        None,
     )
 }
 
@@ -713,6 +796,7 @@ fn proxy_runtime_spool_to(
     interactive_stdin: bool,
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
+    deadline: Option<Instant>,
 ) -> io::Result<i32> {
     let relay_root = endpoint_path
         .parent()
@@ -798,8 +882,15 @@ fn proxy_runtime_spool_to(
     let mut claimed = false;
     let mut relay_seen = Instant::now();
     let mut relay_check = Instant::now();
+    let mut heartbeat_value = String::new();
     let mut buffered = Vec::new();
     let result = 'output: loop {
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "WSL lookup did not finish. Check that the distribution and its login shell respond, then retry.",
+            ));
+        }
         let mut chunk = [0_u8; 64 * 1024];
         let bytes = output.read(&mut chunk)?;
         if bytes > 0 {
@@ -859,9 +950,13 @@ fn proxy_runtime_spool_to(
         }
         if relay_check.elapsed() >= Duration::from_secs(1) {
             relay_check = Instant::now();
-            if load_endpoint(endpoint_path).is_ok_and(|current| {
-                endpoint_matches(&current, &invocation.distribution) && relay_is_alive(&current)
-            }) {
+            // Observe this session's relay with a monotonic clock. A stale
+            // endpoint, clock jump, or a replacement daemon is not liveness.
+            if let Ok(current) = fs::read_to_string(session_directory.join("relay-heartbeat"))
+                && !current.is_empty()
+                && current != heartbeat_value
+            {
+                heartbeat_value = current;
                 relay_seen = Instant::now();
             } else if relay_seen.elapsed() > Duration::from_secs(6) {
                 return Err(io::Error::new(
@@ -909,6 +1004,80 @@ fn read_json_line(reader: &mut BufReader<TcpStream>) -> io::Result<Value> {
 mod tests {
     use super::{LAUNCHER_SOURCE, ProxyInvocation, RELAY_SOURCE, hex_name, wrap_wsl_command};
     use zommi_core::{ExecutionHost, RuntimeCommand, RuntimeTarget};
+
+    #[cfg(unix)]
+    #[test]
+    fn a_healthy_relay_cannot_keep_a_stalled_lookup_running_forever() {
+        use std::{
+            fs,
+            process::{Child, Command, Stdio},
+            thread,
+            time::{Duration, Instant},
+        };
+        struct Relay {
+            child: Child,
+            root: std::path::PathBuf,
+        }
+        impl Drop for Relay {
+            fn drop(&mut self) {
+                let _ = self.child.kill();
+                let _ = self.child.wait();
+                let _ = fs::remove_dir_all(&self.root);
+            }
+        }
+        let root = std::env::temp_dir().join(format!("zommi-lookup-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(root.join("endpoints")).unwrap();
+        let endpoint_path = root.join("endpoints/test.json");
+        let script = root.join("relay.js");
+        fs::write(&script, RELAY_SOURCE).unwrap();
+        let _relay = Relay {
+            child: Command::new("node")
+                .arg(&script)
+                .args([
+                    "--endpoint",
+                    endpoint_path.to_str().unwrap(),
+                    "--token",
+                    "0123456789abcdef0123456789abcdef",
+                    "--version",
+                    &super::TRANSPORT_VERSION.to_string(),
+                    "--distribution",
+                    "test",
+                ])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap(),
+            root,
+        };
+        let ready = Instant::now() + Duration::from_secs(5);
+        let endpoint = loop {
+            if let Ok(endpoint) = super::load_endpoint(&endpoint_path) {
+                break endpoint;
+            }
+            assert!(Instant::now() < ready, "fixture relay did not start");
+            thread::sleep(Duration::from_millis(10));
+        };
+        let mut output = Vec::new();
+        let result = super::proxy_runtime_spool_to(
+            endpoint,
+            &endpoint_path,
+            ProxyInvocation {
+                distribution: "test".into(),
+                cwd: "/".into(),
+                command: "/bin/sh".into(),
+                args: vec!["-c".into(), "printf waiting; sleep 2".into()],
+            },
+            false,
+            &mut output,
+            &mut Vec::new(),
+            Some(Instant::now() + Duration::from_secs(1)),
+        );
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::TimedOut);
+        assert_eq!(output, b"waiting");
+        // Dropping the request removes its spool and cancels the lookup child.
+        thread::sleep(Duration::from_millis(100));
+    }
 
     #[test]
     fn per_chat_permissions_apply_inside_an_already_wrapped_wsl_command() {

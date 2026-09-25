@@ -1100,7 +1100,7 @@ final class FlutterDesktopBridge
       await file.writeAsBytes(bytes.buffer.asUint8List(), flush: true);
       _trayIconPath = file.path;
       await trayManager.setIcon(file.path, isTemplate: Platform.isMacOS);
-      if (!Platform.isLinux) await trayManager.setToolTip('Zommi agent chat');
+      if (!Platform.isLinux) await trayManager.setToolTip('Zommi');
       await trayManager.setContextMenu(
         Menu(
           items: [
