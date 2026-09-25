@@ -26,6 +26,7 @@ use zommi_core::{
 const TRANSPORT_VERSION: u32 = 9;
 const BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(30);
 const READINESS_TIMEOUT: Duration = Duration::from_secs(1);
+const LOOKUP_TIMEOUT: Duration = Duration::from_secs(25);
 const ENDPOINT_SCHEMA_VERSION: u32 = 1;
 const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 const CHANNEL_STDOUT: u8 = 1;
@@ -201,6 +202,7 @@ pub fn discover_targets_via_cached_relays(
             false,
             &mut stdout,
             &mut stderr,
+            Some(Instant::now() + LOOKUP_TIMEOUT),
         )?;
         if status != 0 {
             return Err(io::Error::other(format!(
@@ -255,6 +257,7 @@ pub fn workspace_directory_exists(target: &RuntimeTarget, path: &str) -> io::Res
         false,
         &mut stdout,
         &mut stderr,
+        Some(Instant::now() + LOOKUP_TIMEOUT),
     )? {
         0 => Ok(true),
         1 => Ok(false),
@@ -300,6 +303,7 @@ pub fn resolve_runtime_executable(distribution: &str, path: &str) -> io::Result<
         false,
         &mut stdout,
         &mut stderr,
+        Some(Instant::now() + LOOKUP_TIMEOUT),
     )?;
     let resolved = String::from_utf8(stdout).map_err(io::Error::other)?;
     if status != 0 {
@@ -781,6 +785,7 @@ fn proxy_runtime_spool(
         true,
         &mut stdout,
         &mut stderr,
+        None,
     )
 }
 
@@ -791,6 +796,7 @@ fn proxy_runtime_spool_to(
     interactive_stdin: bool,
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
+    deadline: Option<Instant>,
 ) -> io::Result<i32> {
     let relay_root = endpoint_path
         .parent()
@@ -879,6 +885,12 @@ fn proxy_runtime_spool_to(
     let mut heartbeat_value = String::new();
     let mut buffered = Vec::new();
     let result = 'output: loop {
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "WSL lookup did not finish. Check that the distribution and its login shell respond, then retry.",
+            ));
+        }
         let mut chunk = [0_u8; 64 * 1024];
         let bytes = output.read(&mut chunk)?;
         if bytes > 0 {
@@ -992,6 +1004,80 @@ fn read_json_line(reader: &mut BufReader<TcpStream>) -> io::Result<Value> {
 mod tests {
     use super::{LAUNCHER_SOURCE, ProxyInvocation, RELAY_SOURCE, hex_name, wrap_wsl_command};
     use zommi_core::{ExecutionHost, RuntimeCommand, RuntimeTarget};
+
+    #[cfg(unix)]
+    #[test]
+    fn a_healthy_relay_cannot_keep_a_stalled_lookup_running_forever() {
+        use std::{
+            fs,
+            process::{Child, Command, Stdio},
+            thread,
+            time::{Duration, Instant},
+        };
+        struct Relay {
+            child: Child,
+            root: std::path::PathBuf,
+        }
+        impl Drop for Relay {
+            fn drop(&mut self) {
+                let _ = self.child.kill();
+                let _ = self.child.wait();
+                let _ = fs::remove_dir_all(&self.root);
+            }
+        }
+        let root = std::env::temp_dir().join(format!("zommi-lookup-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(root.join("endpoints")).unwrap();
+        let endpoint_path = root.join("endpoints/test.json");
+        let script = root.join("relay.js");
+        fs::write(&script, RELAY_SOURCE).unwrap();
+        let _relay = Relay {
+            child: Command::new("node")
+                .arg(&script)
+                .args([
+                    "--endpoint",
+                    endpoint_path.to_str().unwrap(),
+                    "--token",
+                    "0123456789abcdef0123456789abcdef",
+                    "--version",
+                    &super::TRANSPORT_VERSION.to_string(),
+                    "--distribution",
+                    "test",
+                ])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap(),
+            root,
+        };
+        let ready = Instant::now() + Duration::from_secs(5);
+        let endpoint = loop {
+            if let Ok(endpoint) = super::load_endpoint(&endpoint_path) {
+                break endpoint;
+            }
+            assert!(Instant::now() < ready, "fixture relay did not start");
+            thread::sleep(Duration::from_millis(10));
+        };
+        let mut output = Vec::new();
+        let result = super::proxy_runtime_spool_to(
+            endpoint,
+            &endpoint_path,
+            ProxyInvocation {
+                distribution: "test".into(),
+                cwd: "/".into(),
+                command: "/bin/sh".into(),
+                args: vec!["-c".into(), "printf waiting; sleep 2".into()],
+            },
+            false,
+            &mut output,
+            &mut Vec::new(),
+            Some(Instant::now() + Duration::from_secs(1)),
+        );
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::TimedOut);
+        assert_eq!(output, b"waiting");
+        // Dropping the request removes its spool and cancels the lookup child.
+        thread::sleep(Duration::from_millis(100));
+    }
 
     #[test]
     fn per_chat_permissions_apply_inside_an_already_wrapped_wsl_command() {

@@ -22,7 +22,7 @@ HOST = Path(os.environ.get('ZOMMI_TEST_CORE_HOST', ROOT / 'target/debug/zommi-co
 @unittest.skipUnless(sys.platform.startswith('linux') and shutil.which('node'), 'Linux fixture host required')
 class WslStartupTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix='zommi-wsl-startup-')
+        self.temporary = tempfile.TemporaryDirectory(prefix='zommi wsl startup-')
         self.root = Path(self.temporary.name)
         self.bin = self.root / 'bin'
         self.bin.mkdir()

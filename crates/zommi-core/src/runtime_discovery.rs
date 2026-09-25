@@ -1340,6 +1340,24 @@ fn normalize_command_output(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn discovery_waits_for_a_cold_distribution_before_reading_cli_paths() {
+        let output = super::run_wsl_probe(
+            "/bin/sh",
+            &[
+                "-c",
+                "sleep 5; printf '__ZOMMI_RUNTIME_PATH__codex\\t/usr/bin/codex\\n'",
+            ],
+            None,
+        )
+        .expect("cold WSL probe should finish instead of being killed at four seconds");
+        assert_eq!(
+            super::runtime_targets_from_wsl_probe("Ubuntu", true, &output)[0].executable_path,
+            "/usr/bin/codex"
+        );
+    }
+
     use std::{collections::HashMap, fs};
 
     use super::{
