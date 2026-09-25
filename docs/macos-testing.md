@@ -88,18 +88,39 @@ folder on your Mac, close Zommi, enable its permissions, then run:
 python3 docs/accept-macos.py . --output macos-acceptance --require-capture
 ```
 
-The script opens a disposable TextEdit fixture and starts only this package.
+The script opens a disposable TextEdit fixture and uses LaunchServices to start
+the app with its own macOS permission identity. Directly executing the binary
+can inherit the terminal or automation host's TCC identity instead. To test the
+copy already granted permission in Applications, add `--app /Applications/Zommi.app`.
 The report identifies the process and executable. It requires the fixture's
-real title and a decodable screen image. It closes the Zommi process it started;
+actual text in a region attachment, aligned Accessibility elements and captured
+pixels. This backend check does not inject mouse gestures. It closes only the Zommi process it started;
 it never changes permissions automatically. Temporary captured pixels are
 removed; the output desktop screenshot remains in your local evidence folder.
+
+For a separately launched local Chromium fixture, pass `--window-title`,
+`--expected-text`, `--browser-endpoint` and `--require-dom`. This exercises the
+installed app's native AX viewport and the packaged DOM helper together. A
+normal browser without an authorized CDP connection can provide AX context but
+does not count as a DOM pass. The probe never enables CDP in the user's browser.
+
+Native window binding ignores the omitted cursor and uses the Dock's actual AX
+list bounds instead of macOS 26's full-display transparent backing window.
+Recording indicators outside the crop no longer erase unrelated window data;
+changed or overlapping windows still block that region. Kernel process start
+times identify CLI-launched browsers, and Chromium's lazy AX tree is requested
+for the selected app, with a bounded wait for its first web subtree. Repeated AX observations compare nested values rather
+than dictionary insertion order; changed text, bounds or element order still
+discard semantic metadata.
 
 ## Interactive capture acceptance
 
 The interactive probe drives the shared capture editor with CGEvents, verifies
 the PNG matches its region mapping, and cancels a second selection with Escape. This
 requires input permission for the driver as well as Zommi capture permissions.
-Run the same path with `--interactive` on an authorized test desktop, or manually
+Run the same path with `--interactive` on an authorized test desktop. Use
+`--manual-interactive` to drive the two gestures yourself or through Computer
+Use without launching the CGEvent driver. Otherwise manually
 verify these gestures:
 
 1. With TextEdit or Safari in front, press Option+A or click Select, then drag a

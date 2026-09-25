@@ -4,6 +4,7 @@ import Cocoa
 // and Retina crop geometry without screen access, UI input, or user data.
 @main
 struct MacRegionSelectionTests {
+  @MainActor
   static func main() {
     var state = MacRegionSelectionState()
     let screen = CGSize(width: 400, height: 300)
@@ -39,6 +40,33 @@ struct MacRegionSelectionTests {
     assert(decoded.colorAt(x: 10, y: 10)!.redComponent > 0.9)
     for _ in 0..<10 { state.undo() }
     assert(state.regions.isEmpty)
+    let birth = MacRegionCaptureBackend.processStartToken(getpid())
+    assert(birth != nil && birth == MacRegionCaptureBackend.processStartToken(getpid()))
+    assert(MacRegionCaptureBackend.processStartToken(-1) == nil)
+    func window(_ id: String, _ bounds: CGRect) -> [String: Any] {
+      ["nativeWindowId": id, "bounds": MacRegionCaptureBackend.json(bounds), "windowTitle": id]
+    }
+    let document = window("document", CGRect(x: 100, y: 100, width: 500, height: 400))
+    let crop = CGRect(x: 200, y: 200, width: 100, height: 100)
+    let indicator = window("StatusIndicator", CGRect(x: 1000, y: 0, width: 28, height: 28))
+    let stable = MacRegionCaptureBackend.stableWindows(before: [document], after: [indicator, document])
+    assert(MacRegionCaptureBackend.sourceAt(stable, crop)?["nativeWindowId"] as? String == "document")
+    let overlay = window("overlay", crop)
+    let covered = MacRegionCaptureBackend.stableWindows(before: [document], after: [overlay, document])
+    assert(MacRegionCaptureBackend.sourceAt(covered, crop) == nil)
+    let removed = MacRegionCaptureBackend.stableWindows(before: [overlay, document], after: [document])
+    assert(MacRegionCaptureBackend.sourceAt(removed, crop) == nil)
+    let movedOverlay = window("overlay", crop.offsetBy(dx: 120, dy: 0))
+    let moved = MacRegionCaptureBackend.stableWindows(before: [overlay, document], after: [movedOverlay, document])
+    assert(MacRegionCaptureBackend.sourceAt(moved, crop) == nil)
+    assert(MacRegionCaptureBackend.sourceAt(moved, crop.offsetBy(dx: 120, dy: 0)) == nil)
+    let reordered = MacRegionCaptureBackend.stableWindows(before: [overlay, document], after: [document, overlay])
+    assert(MacRegionCaptureBackend.sourceAt(reordered, crop) == nil)
+    var renamed = document
+    renamed["windowTitle"] = "different document"
+    let changed = MacRegionCaptureBackend.stableWindows(before: [document], after: [renamed])
+    assert(MacRegionCaptureBackend.sourceAt(changed, crop) == nil)
     print("Passed: reverse drag, display/order retention, undo, duplicates, minimum size, eight-region limit, edge clamping, Retina/fractional crop, PNG round trip")
+    print("Passed: recording indicator preserves unrelated context; added/removed/moved overlays, changed titles and overlapping window reorders block stale context")
   }
 }

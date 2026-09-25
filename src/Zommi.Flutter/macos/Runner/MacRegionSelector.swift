@@ -1,6 +1,7 @@
 import Cocoa
 import ScreenCaptureKit
 import ApplicationServices
+import Darwin
 
 struct MacSelectedRegion: Equatable {
   let displayIndex: Int
@@ -359,6 +360,12 @@ private final class MacRegionOverlayView: NSView {
 /// No input is sent to the observed application, and password subtrees are omitted.
 @MainActor
 enum MacRegionCaptureBackend {
+  static func processStartToken(_ pid: pid_t) -> String? {
+    var info = proc_bsdinfo()
+    let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+    guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return nil }
+    return "\(info.pbi_start_tvsec).\(info.pbi_start_tvusec)"
+  }
   static func rect(_ value: [String: Any]) -> CGRect {
     func number(_ key: String) -> CGFloat { CGFloat((value[key] as? NSNumber)?.doubleValue ?? 0) }
     return CGRect(x: number("x"), y: number("y"), width: number("width"), height: number("height"))
@@ -378,10 +385,26 @@ enum MacRegionCaptureBackend {
             pid != ProcessInfo.processInfo.processIdentifier,
             let id = entry[kCGWindowNumber as String] as? Int,
             let dictionary = entry[kCGWindowBounds as String] as? [String: Any],
-            let bounds = CGRect(dictionaryRepresentation: dictionary as CFDictionary),
+            var bounds = CGRect(dictionaryRepresentation: dictionary as CFDictionary),
             bounds.width > 0, bounds.height > 0,
             (entry[kCGWindowAlpha as String] as? Double ?? 1) > 0 else { return nil }
       let app = NSRunningApplication(processIdentifier: pid)
+      let layer = (entry[kCGWindowLayer as String] as? NSNumber)?.int32Value
+      // Screenshots explicitly omit the cursor. Its WindowServer surface must
+      // not cover an otherwise valid source window in the metadata either.
+      if layer == CGWindowLevelForKey(.cursorWindow) { return nil }
+      // On macOS 26 the Dock's transparent backing window spans the display.
+      // AX exposes the actual Dock list, including its off-screen hidden state.
+      if app?.bundleIdentifier == "com.apple.dock", layer == CGWindowLevelForKey(.dockWindow), AXIsProcessTrusted() {
+        let dock = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(dock, 0.04)
+        if let children = attribute(dock, kAXChildrenAttribute) as? [AXUIElement],
+           let list = children.first(where: { attribute($0, kAXRoleAttribute) as? String == "AXList" }),
+           let visible = elementBounds(list) {
+          guard attribute(list, "AXHidden") as? Bool != true, visible.intersects(bounds) else { return nil }
+          bounds = bounds.intersection(visible)
+        }
+      }
       var source: [String: Any] = [
         "nativeWindowId": String(id), "processId": pid, "platform": "macos", "provider": "macos-ax",
         "hostName": Host.current().localizedName ?? "Mac", "bounds": json(bounds), "windowBounds": json(bounds),
@@ -389,15 +412,17 @@ enum MacRegionCaptureBackend {
         "processName": app?.bundleIdentifier ?? "application",
         "windowTitle": entry[kCGWindowName as String] as? String ?? "",
       ]
-      if let date = app?.launchDate { source["processStartToken"] = String(date.timeIntervalSince1970) }
+      // launchDate is nil for apps started directly from a CLI (including
+      // Chromium with CDP). Kernel process birth time also protects against PID reuse.
+      source["processStartToken"] = processStartToken(pid)
       return source
     }
   }
-  private static func sourceAt(_ windows: [[String: Any]], _ region: CGRect) -> [String: Any]? {
+  static func sourceAt(_ windows: [[String: Any]], _ region: CGRect) -> [String: Any]? {
     for window in windows {
       let bounds = rect(window["bounds"] as? [String: Any] ?? [:])
       if !bounds.intersects(region) { continue }
-      return bounds.contains(region) ? window : nil
+      return window["obstruction"] as? Bool != true && bounds.contains(region) ? window : nil
     }
     return nil
   }
@@ -405,6 +430,30 @@ enum MacRegionCaptureBackend {
     guard let left = try? JSONSerialization.data(withJSONObject: a, options: [.sortedKeys, .fragmentsAllowed]),
           let right = try? JSONSerialization.data(withJSONObject: b, options: [.sortedKeys, .fragmentsAllowed]) else { return false }
     return left == right
+  }
+  static func stableWindows(before: [[String: Any]], after: [[String: Any]]) -> [[String: Any]] {
+    // ScreenCaptureKit creates a menu-bar recording indicator while taking the
+    // first screenshot. Changes outside a selected window must not erase its
+    // identity. Changed windows block both their old and new occupied areas.
+    let matches = before.map { item in after.firstIndex(where: { equal(item, $0) }) }
+    func obstruction(_ item: [String: Any]) -> [String: Any] {
+      var result = item
+      result["obstruction"] = true
+      return result
+    }
+    let additions = after.filter { item in !before.contains(where: { equal(item, $0) }) }
+    let retained = before.enumerated().map { index, item -> [String: Any] in
+      guard let currentIndex = matches[index] else { return obstruction(item) }
+      let bounds = rect(item["bounds"] as? [String: Any] ?? [:])
+      for (otherIndex, other) in before.enumerated() {
+        guard let currentOther = matches[otherIndex],
+              (index < otherIndex) != (currentIndex < currentOther),
+              bounds.intersects(rect(other["bounds"] as? [String: Any] ?? [:])) else { continue }
+        return obstruction(item)
+      }
+      return item
+    }
+    return additions.map(obstruction) + retained
   }
   private static func dataURL(_ image: CGImage) throws -> String {
     guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
@@ -418,7 +467,7 @@ enum MacRegionCaptureBackend {
     let after = windows()
     return ["frames": try screens.enumerated().map { index, snapshot -> [String: Any] in
       ["dataUrl": try dataURL(snapshot.image), "bounds": json(screenBounds(snapshot.screen)),
-       "windows": equal(before, after) ? before : [], "label": "Display \(index + 1)",
+       "windows": stableWindows(before: before, after: after), "label": "Display \(index + 1)",
        "coordinateSpace": "screen-points"]
     }]
   }
@@ -430,6 +479,7 @@ enum MacRegionCaptureBackend {
     }
     let beforeWindows = windows()
     let source = sourceAt(beforeWindows, region)
+    if let source = source { await prepareAccessibility(source) }
     let screens = try await MacRegionSelector.captureScreens()
     guard let screen = screens.first(where: { screenBounds($0.screen).contains(region) }) else {
       throw MacRegionSelectionError.captureUnavailable
@@ -441,7 +491,18 @@ enum MacRegionCaptureBackend {
     guard let crop = screen.image.cropping(to: pixels) else { throw MacRegionSelectionError.captureUnavailable }
     let scaleX = CGFloat(crop.width) / region.width
     let scaleY = CGFloat(crop.height) / region.height
-    let before = source.map { accessibility($0, region, scaleX, scaleY) } ?? ["limitation": "The region has no single unobscured source window."]
+    var before = source.map { accessibility($0, region, scaleX, scaleY) } ?? ["limitation": "The region has no single unobscured source window."]
+    // Chromium publishes its web AX subtree asynchronously after the first
+    // assistive-client request. Wait for that tree, including when the crop is
+    // in browser chrome, before taking the two final matching observations.
+    let processName = (source?["processName"] as? String ?? "").lowercased()
+    if let source = source, ["chrome", "chromium", "edge", "brave"].contains(where: { processName.contains($0) }) {
+      let deadline = ProcessInfo.processInfo.systemUptime + 3
+      while before["browserTreeAvailable"] as? Bool != true && ProcessInfo.processInfo.systemUptime < deadline {
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        before = accessibility(source, region, scaleX, scaleY)
+      }
+    }
     // Read pixels again between the two AX observations. The caller compares
     // them with the original frozen crop before retaining any metadata.
     let currentScreens = try await MacRegionSelector.captureScreens()
@@ -464,6 +525,23 @@ enum MacRegionCaptureBackend {
   private static func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
     var value: CFTypeRef?
     return AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success ? value : nil
+  }
+  private static func prepareAccessibility(_ source: [String: Any]) async {
+    guard AXIsProcessTrusted(), let pid = source["processId"] as? Int32 else { return }
+    let application = AXUIElementCreateApplication(pid)
+    AXUIElementSetMessagingTimeout(application, 0.04)
+    // Chromium/Electron lazily expose their web tree to assistive clients.
+    // This enables that tree for the selected app; it is not an OS permission.
+    var needsWarmup = false
+    for name in ["AXManualAccessibility", "AXEnhancedUserInterface"] {
+      let enabled = attribute(application, name) as? Bool
+      if enabled == true { continue }
+      let result = AXUIElementSetAttributeValue(application, name as CFString, kCFBooleanTrue)
+      needsWarmup = needsWarmup || enabled != nil || result == .success
+    }
+    if needsWarmup {
+      try? await Task.sleep(nanoseconds: 150_000_000)
+    }
   }
   private static func elementBounds(_ element: AXUIElement) -> CGRect? {
     guard let p = attribute(element, kAXPositionAttribute), CFGetTypeID(p) == AXValueGetTypeID(),
@@ -491,6 +569,7 @@ enum MacRegionCaptureBackend {
     var seen = Set<CFHashCode>()
     var elements: [[String: Any]] = []
     var viewport: CGRect?
+    var browserTreeAvailable = false
     var remaining = 24000
     var truncated = false
     func bounded(_ value: String) -> String {
@@ -511,6 +590,7 @@ enum MacRegionCaptureBackend {
       let subrole = attribute(element, kAXSubroleAttribute) as? String ?? ""
       if subrole == "AXSecureTextField" || role == "AXSecureTextField" || (attribute(element, "AXProtectedContent") as? Bool) == true ||
           (attribute(element, "AXHidden") as? Bool) == true { continue }
+      if role == "AXWebArea" { browserTreeAvailable = true }
       var retainedParent = parent
       if let bounds = elementBounds(element), bounds.width > 0, bounds.height > 0 {
         if role == "AXWebArea" && bounds.contains(region) { viewport = bounds }
@@ -548,7 +628,8 @@ enum MacRegionCaptureBackend {
       if children.count > 800 { truncated = true }
       for child in children.prefix(800).reversed() { stack.append((child, retainedParent, depth+1)) }
     }
-    var result: [String: Any] = ["regionContext": ["version": 1, "selectionKind": "bbox", "coordinateSpace": "image-pixels", "elements": elements, "truncated": truncated],
+    var result: [String: Any] = ["browserTreeAvailable": browserTreeAvailable,
+      "regionContext": ["version": 1, "selectionKind": "bbox", "coordinateSpace": "image-pixels", "elements": elements, "truncated": truncated],
       "limitation": "Captured macOS Accessibility. Intersecting elements may expose labels beyond the crop; the image is the selected content."]
     if let viewport = viewport { result["browserViewport"] = json(viewport) }
     return result

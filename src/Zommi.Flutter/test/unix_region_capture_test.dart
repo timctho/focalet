@@ -283,6 +283,58 @@ void main() {
     expect(stale.dataUrl, image);
   });
 
+  test('native dictionary order does not discard unchanged context; nested changes still do', () async {
+    final frame = await display();
+    addTearDown(frame.image.dispose);
+    final selected = SelectedRegion(frame, const Rect.fromLTWH(10, 10, 30, 20));
+    final image =
+        'data:image/png;base64,${base64Encode(await selected.render(annotated: false))}';
+    for (final change in ['key-order', 'text', 'bounds', 'element-order']) {
+      var calls = 0;
+      final result = await enrichSelectedRegion(selected, (_) async {
+        final second = calls++ > 0;
+        final label = second
+            ? {
+                'bounds': {
+                  'height': 10,
+                  'width': 10,
+                  'y': 2,
+                  'x': change == 'bounds' ? 3 : 2,
+                },
+                'text': change == 'text' ? 'Changed label' : 'Observed label',
+                'role': 'label',
+                'id': 'label',
+              }
+            : {
+                'id': 'label',
+                'role': 'label',
+                'text': 'Observed label',
+                'bounds': {'x': 2, 'y': 2, 'width': 10, 'height': 10},
+              };
+        final elements = [
+          label,
+          {'id': 'button', 'role': 'button'},
+        ];
+        return {
+          'stable': true,
+          'source': source,
+          'dataUrl': image,
+          'regionContext': {
+            'elements': second && change == 'element-order'
+                ? elements.reversed.toList()
+                : elements,
+          },
+        };
+      });
+      expect(
+        result.alignment?['status'],
+        change == 'key-order' ? 'aligned' : 'image-only',
+        reason: change,
+      );
+      expect(result.dataUrl, image);
+    }
+  });
+
   test('drawings survive a changed source without attaching newer metadata', () async {
     final frame = await display();
     addTearDown(frame.image.dispose);
