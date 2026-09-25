@@ -116,7 +116,16 @@ void main() {
       ['--session', b],
       ['--session', '/sessions/legacy-a.jsonl'],
     ]);
-    expect(startups.every((r) => r['cwd'] == directory.path), isTrue);
+    // Python's getcwd resolves directory aliases such as macOS /var -> /private/var.
+    // Each process must still start in the same physical directory.
+    for (final startup in startups) {
+      final recordedCwd = startup['cwd'] as String;
+      expect(
+        await FileSystemEntity.identical(recordedCwd, directory.path),
+        isTrue,
+        reason: 'Pi started in $recordedCwd instead of ${directory.path}',
+      );
+    }
     expect(
       requests.where(
         (r) => ['prompt', 'new_session', 'fork'].contains(r['type']),
