@@ -155,7 +155,9 @@ impl HostState {
             );
         }
 
-        let result = self.execute(operation, &request.payload).await;
+        // Keep adapter futures out of the request frame. Catalog requests run
+        // on Windows' small main stack, including select! and cancellation.
+        let result = Box::pin(self.execute(operation, &request.payload)).await;
         match result {
             Ok(result) => HostAction {
                 response: success_response(id, result),
@@ -1574,6 +1576,23 @@ mod tests {
         assert!(live.get("error").is_none_or(Value::is_null));
         shutdown.send(true).unwrap();
         worker.task.await.unwrap();
+    }
+
+    #[test]
+    fn request_future_leaves_room_on_the_windows_main_stack() {
+        let (event_tx, _events) = mpsc::unbounded_channel();
+        let mut host = HostState::new(event_tx);
+        let request = host.handle(CoreRequest {
+            timeout_ms: None,
+            id: Some("catalog".into()),
+            protocol_version: Some(CORE_PROTOCOL_VERSION),
+            operation: Some("session.catalog".into()),
+            payload: json!({"runtimeTargetId": "fixture"}),
+        });
+        // The catalog worker polls this on Windows' 1 MiB main stack. Async
+        // construction and select! also need temporary copies and stack space.
+        let size = std::mem::size_of_val(&request);
+        assert!(size < 8 * 1024, "request future uses {size} bytes");
     }
 
     #[tokio::test]
