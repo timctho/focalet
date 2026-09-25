@@ -69,7 +69,7 @@ sign in there, and return to Zommi:
 [OpenClaw](https://github.com/openclaw/openclaw).
 
 First launch and **App settings → Full access (YOLO)** control permissions for
-new chats. The default is off: Zommi uses the agent's own policy
+new chats. Full access is on by default. When turned off, Zommi uses the agent's own policy
 and displays approval requests with **Allow once**, **Deny**, and session scope
 when supported. Requests include the source chat and queue across chats.
 Unanswered local CLI approvals expire after five minutes and are denied.

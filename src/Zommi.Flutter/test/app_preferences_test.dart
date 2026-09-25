@@ -22,13 +22,13 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(core.fullAccessRuntimes, isFalse);
-    expect(AppPreferences.fromJson(const {}).fullAccessRuntimes, isFalse);
+    expect(core.fullAccessRuntimes, isTrue);
+    expect(AppPreferences.fromJson(const {}).fullAccessRuntimes, isTrue);
     await tester.tap(find.byKey(const ValueKey('runtime-full-access')));
     await tester.pumpAndSettle();
-    expect(core.fullAccessRuntimes, isTrue);
+    expect(core.fullAccessRuntimes, isFalse);
     final saved = await store.load();
-    expect(saved.fullAccessRuntimes, isTrue);
+    expect(saved.fullAccessRuntimes, isFalse);
     await tester.pumpWidget(const SizedBox());
     final restarted = RichFakeCore();
     await tester.pumpWidget(
@@ -39,12 +39,12 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(restarted.fullAccessRuntimes, isTrue);
+    expect(restarted.fullAccessRuntimes, isFalse);
     await tester.tap(find.byKey(const ValueKey('app-settings')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('runtime-full-access')));
     await tester.pumpAndSettle();
-    expect(restarted.fullAccessRuntimes, isFalse);
+    expect(restarted.fullAccessRuntimes, isTrue);
     expect(tester.takeException(), isNull);
   });
 
@@ -105,8 +105,9 @@ void main() {
     );
     addTearDown(() => directory.delete(recursive: true));
     final store = FileAppPreferencesStore('${directory.path}/settings.json');
+    expect((await store.load()).fullAccessRuntimes, isTrue);
     const expected = AppPreferences(
-      fullAccessRuntimes: true,
+      fullAccessRuntimes: false,
       chatFontSize: 17,
       themeColor: ZommiThemeColor.ocean,
       windowSize: WindowSizeSetting.wide,
@@ -115,7 +116,7 @@ void main() {
     await store.save(expected);
     final restored = await store.load();
 
-    expect(restored.fullAccessRuntimes, isTrue);
+    expect(restored.fullAccessRuntimes, isFalse);
     expect(restored.chatFontSize, 17);
     expect(restored.themeColor, ZommiThemeColor.ocean);
     expect(restored.windowSize, WindowSizeSetting.wide);

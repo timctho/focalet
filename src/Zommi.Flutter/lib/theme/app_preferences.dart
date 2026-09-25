@@ -30,7 +30,7 @@ final class AppPreferences {
   const AppPreferences({
     this.chatFontSize = 14,
     this.browserPageDetails = true,
-    this.fullAccessRuntimes = false,
+    this.fullAccessRuntimes = true,
     this.themeColor = ZommiThemeColor.ocean,
     this.themeMode = ThemeMode.system,
     this.customThemeColor = const Color(0xff8178c9),
@@ -96,7 +96,7 @@ final class AppPreferences {
           !value.containsKey('runtimeSetupCompleted') ||
           value['runtimeSetupCompleted'] == true,
       browserPageDetails: value['browserPageDetails'] != false,
-      fullAccessRuntimes: value['fullAccessRuntimes'] == true,
+      fullAccessRuntimes: value['fullAccessRuntimes'] != false,
       // The retired Medium preset follows Default on existing installs.
       chatFontSize: fontSize == 13 ? 14 : fontSize.clamp(12, 17).toDouble(),
       themeColor:

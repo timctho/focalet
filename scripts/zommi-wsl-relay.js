@@ -242,6 +242,20 @@ function handleSpoolSession(sessionDirectory, requestPath) {
     failSpoolSession(sessionDirectory, `Relay request is invalid: ${error.message}`);
     return;
   }
+  if (request.op === 'ping' && tokenMatches(request.token)
+      && request.transportVersion === transportVersion
+      && typeof request.nonce === 'string' && /^[a-f0-9]{32}$/.test(request.nonce)) {
+    try {
+      fs.writeFileSync(path.join(sessionDirectory, 'ready.json'), JSON.stringify({
+        nonce: request.nonce, pid: process.pid, transportVersion,
+      }));
+    } finally {
+      activeSpoolSessions.delete(sessionDirectory);
+      const cleanup = setTimeout(() => fs.rmSync(sessionDirectory, { recursive: true, force: true }), 10_000);
+      cleanup.unref();
+    }
+    return;
+  }
   if (!validSpawnRequest(request)) {
     failSpoolSession(sessionDirectory, 'Relay authentication or spawn request failed.');
     return;
@@ -272,6 +286,7 @@ function handleSpoolSession(sessionDirectory, requestPath) {
   let heartbeatSeenAt = performance.now();
   let heartbeatCheckedAt = -Infinity;
   let heartbeatError = null;
+  let relayHeartbeatAt = -Infinity;
 
   const stopInput = () => {
     inputFinished = true;
@@ -298,6 +313,10 @@ function handleSpoolSession(sessionDirectory, requestPath) {
     if (!started || finished) return;
     try {
       const now = performance.now();
+      if (now - relayHeartbeatAt >= 500) {
+        fs.writeFileSync(path.join(sessionDirectory, 'relay-heartbeat'), String(process.hrtime.bigint()));
+        relayHeartbeatAt = now;
+      }
       if (now - heartbeatCheckedAt >= 250) {
         heartbeatCheckedAt = now;
         try {
@@ -495,6 +514,12 @@ server.listen({ host: '0.0.0.0', port: 0 }, () => {
   const writeEndpoint = (required = false) => {
     const temporary = `${endpointPath}.${process.pid}.tmp`;
     try {
+      // A replacement relay owns discovery now. Existing sessions can finish
+      // on this instance using their own heartbeat, without endpoint flapping.
+      if (!required) {
+        const current = JSON.parse(fs.readFileSync(endpointPath, 'utf8'));
+        if (!tokenMatches(current.token)) return;
+      }
       endpoint.heartbeatMs = Date.now();
       fs.mkdirSync(path.dirname(endpointPath), { recursive: true });
       fs.writeFileSync(temporary, `${JSON.stringify(endpoint, null, 2)}\n`, { mode: 0o600 });

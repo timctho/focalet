@@ -932,6 +932,32 @@ impl HostState {
         }
         runtime_command.full_access = full_access;
         if cfg!(target_os = "windows") && target.execution_host.kind == "wsl" {
+            let distribution = target.execution_host.name.clone().ok_or_else(|| {
+                HostError::new("invalid-configuration", "WSL distribution is missing.")
+            })?;
+            let _ = self.event_tx.send(CoreEvent {
+                name: "runtime.status".into(),
+                sequence: 0,
+                runtime_target_id: target.id.clone(),
+                session_id: None,
+                turn_id: None,
+                client_operation_id: None,
+                payload: json!({"status":"connecting", "message":format!("Starting WSL · {distribution}…")}),
+            });
+            // WSL boot and relay recovery have their own deadline. Do not
+            // spend an agent's initialize timeout waiting for the OS to start.
+            tokio::task::spawn_blocking(move || wsl_relay::prepare_transport(&distribution))
+                .await
+                .map_err(|error| HostError {
+                    code: "wsl-startup-failed".into(),
+                    message: error.to_string(),
+                    retryable: true,
+                })?
+                .map_err(|error| HostError {
+                    code: "wsl-startup-failed".into(),
+                    message: error.to_string(),
+                    retryable: true,
+                })?;
             runtime_command = wsl_relay::wrap_wsl_command(&target, runtime_command)
                 .map_err(|error| HostError::new("runtime-unavailable", error.to_string()))?;
         }

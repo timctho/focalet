@@ -7,7 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 const TOKEN = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
-const TRANSPORT_VERSION = 8;
+const TRANSPORT_VERSION = 9;
 
 async function waitForEndpoint(endpointPath) {
   const deadline = Date.now() + 5_000;
