@@ -131,6 +131,8 @@ jobs:
             scripts/test-macos-region-selection.swift \
             -o /tmp/zommi-macos-region-tests
           /tmp/zommi-macos-region-tests
+      - name: Install locked CocoaPods version
+        run: sudo gem install cocoapods --version 1.17.0 --no-document
       - name: Compile and verify the macOS desktop package
         run: bash scripts/package-unix.sh macos
       - name: Ensure checks did not rewrite committed files

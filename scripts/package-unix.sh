@@ -83,6 +83,9 @@ fi
 
 (
   cd "$flutter_directory"
+  if [[ "$target_platform" == macos ]]; then
+    export XCODE_XCCONFIG_FILE="${XCODE_XCCONFIG_FILE:-$repository_root/scripts/macos-build.xcconfig}"
+  fi
   flutter pub get
   flutter build "$target_platform" --release --no-pub "--dart-define=ZOMMI_BUILD_REVISION=$git_commit" "${version_arguments[@]}"
 )

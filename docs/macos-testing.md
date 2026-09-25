@@ -1,5 +1,11 @@
 # macOS test package
 
+Source builds need Xcode and CocoaPods **1.17.0** (`gem install cocoapods --version
+1.17.0 --no-document`) in addition to the toolchains in [Contributing](../CONTRIBUTING.md).
+Use `scripts/package-unix.sh macos`: it applies the macOS 12 deployment target
+to Swift packages and CocoaPods dependencies as well as the app. The committed
+Podfile, lockfile and Xcode integration include plugins that still require CocoaPods.
+
 CI builds Apple Silicon (`arm64`, `macos-15`) by default. Dispatch CI with
 `macos_arch: x64` for Intel (`macos-15-intel`). A dispatch with `macos_only: true`
 and `macos_draft_release: true` provides the ZIP and probe evidence through a

@@ -478,6 +478,9 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
+      - name: Install locked CocoaPods version
+        run: sudo gem install cocoapods --version 1.17.0 --no-document
+
       - name: Build and verify macOS release
         id: package
         env:
