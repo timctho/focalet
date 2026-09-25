@@ -729,8 +729,11 @@ impl HostState {
     }
 
     async fn discard_prepared_permissions(&mut self, target_id: &str, payload: &Value) {
-        // Codex applies the current preference when starting each thread.
-        if matches!(self.adapters.get(target_id), Some(RuntimeAdapter::Codex(_))) {
+        // These adapters apply the current preference when creating each chat.
+        if matches!(
+            self.adapters.get(target_id),
+            Some(RuntimeAdapter::Codex(_) | RuntimeAdapter::Acp(_) | RuntimeAdapter::Claude(_))
+        ) {
             return;
         }
         let full_access = payload
@@ -911,11 +914,21 @@ impl HostState {
         }
         let full_access =
             !catalog_only && payload.get("fullAccess").and_then(Value::as_bool) == Some(true);
-        if full_access {
+        if full_access
+            && !matches!(
+                target.adapter_id.as_str(),
+                "hermes-acp"
+                    | "openclaw-acp"
+                    | "opencode-acp"
+                    | "gemini-acp"
+                    | "claude-stream-json"
+            )
+        {
             runtime_command
                 .enable_full_access(&target)
                 .map_err(|error| HostError::new("invalid-configuration", error.to_string()))?;
         }
+        runtime_command.full_access = full_access;
         if cfg!(target_os = "windows") && target.execution_host.kind == "wsl" {
             runtime_command = wsl_relay::wrap_wsl_command(&target, runtime_command)
                 .map_err(|error| HostError::new("runtime-unavailable", error.to_string()))?;

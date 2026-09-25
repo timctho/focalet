@@ -187,6 +187,13 @@ class RealCliTests(unittest.TestCase):
         self.assertIn('GEMINI_REAL_CLI_OK', self.reply(op))
         self.assertFalse(any(e['name'] == 'approval.requested' for e in self.core.events))
 
+        # A warmed runtime must honor each new chat's mode in both directions.
+        for full_access in [False, True, False]:
+            connection = self.core.request('session.create', dict(runtimeTargetId=self.target, cwd=str(self.workspace), fullAccess=full_access))
+            self.identity['sessionId'] = connection['sessionId']
+            op, _ = self.turn('permission transition fixture')
+            self.assertIn('GEMINI_REAL_CLI_OK', self.reply(op))
+
     def test_claude_real_stream_models_context_approval_refresh_and_restart_resume(self):
         package = PACKAGES / '@anthropic-ai/claude-code'
         self.assertEqual(json.loads((package / 'package.json').read_text())['version'], '2.1.281')
@@ -229,6 +236,27 @@ class RealCliTests(unittest.TestCase):
         op, _ = self.turn('request-tool')
         self.assertIn('TOOL_DONE', self.reply(op))
         self.assertEqual(Path(server.output_file).read_text(), 'synthetic tool output')
+        self.assertFalse(any(e['name'] == 'approval.requested' for e in self.core.events))
+        full_chat = dict(self.identity)
+        for index, full_access in enumerate([False, True, False]):
+            connection = self.core.request('session.create', dict(runtimeTargetId=self.target, cwd=str(self.workspace), fullAccess=full_access))
+            self.identity['sessionId'] = connection['sessionId']
+            server.output_file = str(self.workspace / f'transition-{index}.txt')
+            self.core.events.clear()
+            op, _ = self.turn('request-tool')
+            if not full_access:
+                while not any(e['name'] == 'approval.requested' for e in self.core.events): self.core.receive()
+                approval = next(e['payload']['approvalId'] for e in self.core.events if e['name'] == 'approval.requested')
+                self.assertFalse(Path(server.output_file).exists())
+                self.core.request('approval.resolve', dict(self.identity, approvalId=approval, optionId='reject_once'))
+            self.assertIn('TOOL_DONE' if full_access else 'TOOL_DENIED', self.reply(op))
+            self.assertEqual(Path(server.output_file).exists(), full_access)
+            self.assertEqual(any(e['name'] == 'approval.requested' for e in self.core.events), not full_access)
+        self.core.close()
+        server.output_file = str(self.workspace / 'resumed-full-access.txt')
+        self.connect('claude', full_chat['sessionId'], full_access=False)
+        op, _ = self.turn('request-tool')
+        self.assertIn('TOOL_DONE', self.reply(op))
         self.assertFalse(any(e['name'] == 'approval.requested' for e in self.core.events))
 
 

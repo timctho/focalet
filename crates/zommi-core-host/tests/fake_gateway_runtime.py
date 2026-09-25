@@ -13,6 +13,7 @@ import struct
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
@@ -20,6 +21,15 @@ from urllib.parse import parse_qs, urlsplit
 
 GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 LOG_PATH = os.environ.get("ZOMMI_FAKE_REQUEST_LOG")
+UNIQUE_SESSIONS = os.environ.get("ZOMMI_FAKE_UNIQUE_SESSIONS") == "1"
+SESSION_STORE = Path(os.environ['ZOMMI_FAKE_GATEWAY_SESSIONS']) if os.environ.get('ZOMMI_FAKE_GATEWAY_SESSIONS') else None
+CREATED_SESSIONS = json.loads(SESSION_STORE.read_text()) if SESSION_STORE and SESSION_STORE.exists() else []
+
+
+def remember_session(session_id):
+    CREATED_SESSIONS.append(session_id)
+    if SESSION_STORE:
+        SESSION_STORE.write_text(json.dumps(CREATED_SESSIONS))
 
 
 def write_log(frame: dict[str, Any]) -> None:
@@ -143,6 +153,9 @@ def serve_hermes(connection: socket.socket) -> None:
         write_log(request)
         method = request.get("method")
         params = request.get("params") or {}
+        if method == 'approval.respond' and os.environ.get('ZOMMI_FAKE_REJECT_AUTOMATIC_APPROVAL') == '1' and params.get('decision') != 'deny':
+            send_ws(connection, {'jsonrpc':'2.0', 'id':request['id'], 'error':{'code':-32000, 'message':'Fixture policy requires manual review'}})
+            continue
         result: dict[str, Any] = {}
         if method == "session.list":
             profile = str(params.get("profile") or "default")
@@ -165,6 +178,9 @@ def serve_hermes(connection: socket.socket) -> None:
             created_session_id = (
                 "hermes-coder-session" if profile == "coder" else stored_session_id
             )
+            if UNIQUE_SESSIONS:
+                created_session_id = str(uuid.uuid4())
+                remember_session(created_session_id)
             result = {
                 "session_id": runtime_session_id,
                 "stored_session_id": created_session_id,
@@ -217,6 +233,7 @@ def serve_hermes(connection: socket.socket) -> None:
         elif method == "command.dispatch":
             result = {"type":"alias", "target":"inspect"} if params.get("name") == "quick" else {"type":"skill", "message":"Expanded Hermes skill"}
         elif method == "prompt.submit":
+            pending_interactions = {"approval": False, "question": False}
             current_turn = str(params.get("text", ""))
             result = {"status": "streaming"}
         elif method == "image.attach_bytes":
@@ -231,6 +248,8 @@ def serve_hermes(connection: socket.socket) -> None:
             result = {"ok": True}
         elif method == "config.set":
             result = {"ok": True}
+        if UNIQUE_SESSIONS and method == "session.list":
+            result['sessions'] = [dict(result['sessions'][0], id=id) for id in CREATED_SESSIONS]
         send_ws(connection, {"jsonrpc": "2.0", "id": request.get("id"), "result": result})
 
         if method == "prompt.submit":
@@ -385,6 +404,9 @@ def serve_openclaw(connection: socket.socket) -> None:
             )
             continue
         result: dict[str, Any] = {"ok": True}
+        if method == 'approval.resolve' and os.environ.get('ZOMMI_FAKE_REJECT_AUTOMATIC_APPROVAL') == '1' and params.get('decision') != 'deny':
+            send_ws(connection, {'type':'res', 'id':request['id'], 'ok':False, 'error':{'message':'Fixture policy requires manual review'}})
+            continue
         if method == "sessions.list":
             result = {
                 "sessions": [
@@ -398,6 +420,9 @@ def serve_openclaw(connection: socket.socket) -> None:
                 ]
             }
         elif method == "sessions.create":
+            if UNIQUE_SESSIONS:
+                active_key = "agent:main:" + str(uuid.uuid4())
+                remember_session(active_key)
             result = {"ok": True, "key": active_key}
         elif method == "chat.history":
             result = {
@@ -418,13 +443,15 @@ def serve_openclaw(connection: socket.socket) -> None:
             send_ws(connection, {"type":"res", "id":request.get("id"), "ok":True, "payload":{"ok":True, "aborted":False, "runIds":[]}})
             continue
         elif method == "chat.send":
+            pending_interactions = {"approval": False, "question": False}
+            if UNIQUE_SESSIONS:
+                active_key = params['sessionKey']
             run_counter += 1
             active_run = f"openclaw-run-{run_counter}"
             result = {"runId": active_run, "status": "started"}
-        send_ws(
-            connection,
-            {"type": "res", "id": request.get("id"), "ok": True, "payload": result},
-        )
+        if UNIQUE_SESSIONS and method == "sessions.list":
+            result['sessions'] = [dict(result['sessions'][0], key=id) for id in CREATED_SESSIONS]
+        send_ws(connection, {"type": "res", "id": request.get("id"), "ok": True, "payload": result})
 
         if method == "chat.send":
             message = str(params.get("message", ""))
@@ -447,7 +474,7 @@ def serve_openclaw(connection: socket.socket) -> None:
                     "exec.approval.requested",
                     {
                         "id": "openclaw-approval-1",
-                        "sessionKey": active_key,
+                        **({} if os.environ.get('ZOMMI_FAKE_UNSCOPED_APPROVAL') == '1' else {"sessionKey": active_key}),
                         "presentation": {"title": "Run command"},
                     },
                     20,

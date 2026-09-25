@@ -25,7 +25,9 @@ use uuid::Uuid;
 use crate::{
     RuntimeCommand, RuntimeTarget, build_context_handoff,
     codex_adapter::{CodexError, CoreEvent, EventSender, TurnReceipt},
-    sanitize_diagnostic, validate_turn_input,
+    sanitize_diagnostic,
+    session_permissions::{SessionPermissionStore, permission_error},
+    validate_turn_input,
 };
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -61,6 +63,7 @@ pub struct HermesGatewayAdapter {
 }
 
 struct Inner {
+    permissions: SessionPermissionStore,
     target: RuntimeTarget,
     port: u16,
     session_token: String,
@@ -321,6 +324,7 @@ impl HermesGatewayAdapter {
         let (writer, reader) = socket.split();
         let adapter = Self {
             inner: Arc::new(Inner {
+                permissions: SessionPermissionStore::for_target(&config.target.id),
                 target: config.target,
                 port,
                 session_token,
@@ -368,7 +372,11 @@ impl HermesGatewayAdapter {
             }
         }));
         if let Err(error) = adapter
-            .initialize(config.preferred_session_id, config.list_only)
+            .initialize(
+                config.preferred_session_id,
+                config.list_only,
+                config.command.full_access,
+            )
             .await
         {
             adapter.shutdown().await;
@@ -381,6 +389,7 @@ impl HermesGatewayAdapter {
         &self,
         preferred_session_id: Option<String>,
         list_only: bool,
+        full_access: bool,
     ) -> Result<(), CodexError> {
         if !self.inner.state.lock().await.gateway_ready {
             timeout(REQUEST_TIMEOUT, self.inner.ready.notified())
@@ -395,13 +404,14 @@ impl HermesGatewayAdapter {
         if list_only {
             return Ok(());
         }
-        self.activate(preferred_session_id, None).await
+        self.activate(preferred_session_id, None, full_access).await
     }
 
     pub async fn activate(
         &self,
         preferred_session_id: Option<String>,
         cwd: Option<&str>,
+        full_access: bool,
     ) -> Result<(), CodexError> {
         let sessions = self.load_sessions().await?;
         if let Some(session_id) = preferred_session_id
@@ -412,7 +422,7 @@ impl HermesGatewayAdapter {
             self.resume_session(&session_id, session.get("profile").and_then(Value::as_str))
                 .await?;
         } else {
-            self.new_session(None, None, cwd, None).await?;
+            self.new_session(None, None, cwd, None, full_access).await?;
         }
         self.refresh_models().await;
         let session_id = self.active_session_id().await?;
@@ -561,8 +571,10 @@ impl HermesGatewayAdapter {
         effort: Option<&str>,
         cwd: Option<&str>,
         profile: Option<&str>,
+        full_access: bool,
     ) -> Result<Value, CodexError> {
-        self.new_session(model, effort, cwd, profile).await?;
+        self.new_session(model, effort, cwd, profile, full_access)
+            .await?;
         self.load_sessions().await?;
         self.connection_value().await
     }
@@ -623,7 +635,13 @@ impl HermesGatewayAdapter {
                 .to_owned()
         };
         if profile.is_some_and(|value| !value.is_empty() && value != current_profile) {
-            self.new_session(model, effort, cwd, profile).await?;
+            let full_access = self
+                .inner
+                .permissions
+                .full_access(session_id)
+                .map_err(permission_error)?;
+            self.new_session(model, effort, cwd, profile, full_access)
+                .await?;
             self.load_sessions().await?;
             self.refresh_models().await;
             return self.connection_value().await;
@@ -1253,6 +1271,7 @@ impl HermesGatewayAdapter {
         effort: Option<&str>,
         cwd: Option<&str>,
         profile: Option<&str>,
+        full_access: bool,
     ) -> Result<(), CodexError> {
         let selected = self.selected_model(model).await;
         let mut params = json!({"source": "zommi", "close_on_disconnect": false});
@@ -1274,6 +1293,12 @@ impl HermesGatewayAdapter {
             params["profile"] = Value::String(profile.into());
         }
         self.inner.request("session.create", params).await?;
+        if full_access {
+            self.inner
+                .permissions
+                .remember_full_access(&self.active_session_id().await?)
+                .map_err(permission_error)?;
+        }
         Ok(())
     }
 
@@ -1543,7 +1568,7 @@ impl Inner {
         }
     }
 
-    async fn handle_event(&self, event: &Value) {
+    async fn handle_event(self: &Arc<Self>, event: &Value) {
         let event_type = event
             .get("type")
             .and_then(Value::as_str)
@@ -1779,21 +1804,54 @@ impl Inner {
                     },
                 );
                 drop(state);
-                self.emit(
-                    "approval.requested",
-                    Some(&session_id),
-                    turn_id.as_deref(),
-                    operation.as_deref(),
-                    json!({
-                        "approvalId": approval_id,
-                        "options": choices.iter().map(|choice| json!({
-                            "optionId": choice,
-                            "name": approval_label(choice),
-                            "kind": if choice == "deny" { "reject" } else { "allow_once" }
-                        })).collect::<Vec<_>>(),
-                        "toolCall": {"title": payload.get("description").or_else(|| payload.get("reason")).and_then(Value::as_str).unwrap_or("Hermes command"), "rawInput": payload}
-                    }),
-                );
+                let approval = json!({
+                    "approvalId": approval_id,
+                    "options": choices.iter().map(|choice| json!({
+                        "optionId": choice,
+                        "name": approval_label(choice),
+                        "kind": if choice == "deny" { "reject" } else { "allow_once" }
+                    })).collect::<Vec<_>>(),
+                    "toolCall": {"title": payload.get("description").or_else(|| payload.get("reason")).and_then(Value::as_str).unwrap_or("Hermes command"), "rawInput": payload}
+                });
+                // Only grant permissions offered for this exact saved chat.
+                // Run the RPC outside the socket reader so it can receive the reply.
+                let automatic = payload
+                    .get("choices")
+                    .and_then(Value::as_array)
+                    .and_then(|offered| {
+                        ["once", "session"]
+                            .into_iter()
+                            .find(|choice| offered.iter().any(|v| v.as_str() == Some(choice)))
+                    })
+                    .filter(|_| self.permissions.full_access(&session_id).unwrap_or(false));
+                if let Some(choice) = automatic {
+                    let adapter = HermesGatewayAdapter {
+                        inner: self.clone(),
+                    };
+                    tokio::spawn(async move {
+                        if adapter
+                            .resolve_approval(&session_id, &approval_id, Some(choice))
+                            .await
+                            .is_err()
+                        {
+                            adapter.inner.emit(
+                                "approval.requested",
+                                Some(&session_id),
+                                turn_id.as_deref(),
+                                operation.as_deref(),
+                                approval,
+                            );
+                        }
+                    });
+                } else {
+                    self.emit(
+                        "approval.requested",
+                        Some(&session_id),
+                        turn_id.as_deref(),
+                        operation.as_deref(),
+                        approval,
+                    );
+                }
             }
             "clarify.request" | "secret.request" | "sudo.request" => {
                 let kind = event_type.split('.').next().unwrap_or("clarify");

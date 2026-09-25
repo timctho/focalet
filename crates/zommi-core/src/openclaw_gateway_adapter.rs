@@ -23,7 +23,9 @@ use crate::{
     RuntimeTarget, build_context_handoff,
     codex_adapter::{CodexError, CoreEvent, EventSender, TurnReceipt},
     openclaw_device_identity::DeviceIdentity,
-    sanitize_diagnostic, validate_turn_input,
+    sanitize_diagnostic,
+    session_permissions::{SessionPermissionStore, permission_error},
+    validate_turn_input,
 };
 
 const PROTOCOL_VERSION: u64 = 4;
@@ -35,6 +37,7 @@ type GatewayWriter = SplitSink<GatewaySocket, Message>;
 
 #[derive(Debug, Clone)]
 pub struct OpenClawGatewayConfig {
+    pub full_access: bool,
     pub target: RuntimeTarget,
     pub preferred_session_id: Option<String>,
     pub list_only: bool,
@@ -57,6 +60,7 @@ pub struct OpenClawGatewayAdapter {
 }
 
 struct Inner {
+    permissions: SessionPermissionStore,
     target: RuntimeTarget,
     agent_id: Option<String>,
     writer: Mutex<GatewayWriter>,
@@ -299,6 +303,7 @@ impl OpenClawGatewayAdapter {
         let (writer, reader) = socket.split();
         let adapter = Self {
             inner: Arc::new(Inner {
+                permissions: SessionPermissionStore::for_target(&config.target.id),
                 agent_id: config.target.profile_id.clone(),
                 target: config.target,
                 writer: Mutex::new(writer),
@@ -326,7 +331,11 @@ impl OpenClawGatewayAdapter {
             read_socket(weak, reader).await;
         }));
         if let Err(error) = adapter
-            .initialize(config.preferred_session_id, config.list_only)
+            .initialize(
+                config.preferred_session_id,
+                config.list_only,
+                config.full_access,
+            )
             .await
         {
             adapter.shutdown().await;
@@ -339,14 +348,19 @@ impl OpenClawGatewayAdapter {
         &self,
         preferred_session_id: Option<String>,
         list_only: bool,
+        full_access: bool,
     ) -> Result<(), CodexError> {
         if list_only {
             return Ok(());
         }
-        self.activate(preferred_session_id).await
+        self.activate(preferred_session_id, full_access).await
     }
 
-    pub async fn activate(&self, preferred_session_id: Option<String>) -> Result<(), CodexError> {
+    pub async fn activate(
+        &self,
+        preferred_session_id: Option<String>,
+        full_access: bool,
+    ) -> Result<(), CodexError> {
         self.load_sessions().await?;
         self.refresh_models().await;
         // A saved exact binding can be outside the current catalog page or
@@ -354,7 +368,7 @@ impl OpenClawGatewayAdapter {
         if let Some(session_id) = preferred_session_id {
             self.bind_session(&session_id).await?;
         } else {
-            self.new_session(None, None).await?;
+            self.new_session(None, None, full_access).await?;
             self.load_sessions().await?;
         }
         let session_id = self.active_session_id().await?;
@@ -473,8 +487,9 @@ impl OpenClawGatewayAdapter {
         &self,
         model: Option<&str>,
         effort: Option<&str>,
+        full_access: bool,
     ) -> Result<Value, CodexError> {
-        self.new_session(model, effort).await?;
+        self.new_session(model, effort, full_access).await?;
         self.load_sessions().await?;
         self.connection_value().await
     }
@@ -1027,6 +1042,7 @@ impl OpenClawGatewayAdapter {
         &self,
         model: Option<&str>,
         effort: Option<&str>,
+        full_access: bool,
     ) -> Result<(), CodexError> {
         let selected = self.selected_model(model).await;
         let mut params = json!({
@@ -1055,6 +1071,12 @@ impl OpenClawGatewayAdapter {
                 )
             })?
             .to_owned();
+        if full_access {
+            self.inner
+                .permissions
+                .remember_full_access(&session_id)
+                .map_err(permission_error)?;
+        }
         self.bind_session(&session_id).await
     }
 
@@ -1260,12 +1282,12 @@ impl Inner {
         }
     }
 
-    async fn handle_event(&self, name: &str, payload: &Value) {
+    async fn handle_event(self: &Arc<Self>, name: &str, payload: &Value) {
         let _event_gate = self.event_gate.lock().await;
         self.dispatch_event(name, payload).await;
     }
 
-    async fn dispatch_event(&self, name: &str, payload: &Value) {
+    async fn dispatch_event(self: &Arc<Self>, name: &str, payload: &Value) {
         if let Some(session_id) = payload.get("sessionKey").and_then(Value::as_str) {
             let mut state = self.state.lock().await;
             if state.pending_starts.contains_key(session_id)
@@ -1626,7 +1648,7 @@ impl Inner {
         );
     }
 
-    async fn handle_approval(&self, event_name: &str, payload: &Value) {
+    async fn handle_approval(self: &Arc<Self>, event_name: &str, payload: &Value) {
         let Some(id) = payload
             .get("id")
             .map(value_string)
@@ -1658,21 +1680,47 @@ impl Inner {
             );
             session_id
         };
-        self.emit(
-            "approval.requested",
-            Some(&session_id),
-            None,
-            None,
-            json!({
-                "approvalId": id,
-                "options": [
-                    {"optionId": "allow-once", "name": "Allow once", "kind": "allow_once"},
-                    {"optionId": "allow-always", "name": "Always allow", "kind": "allow_always"},
-                    {"optionId": "deny", "name": "Deny", "kind": "reject"}
-                ],
-                "toolCall": {"title": approval_title(payload), "rawInput": payload.get("presentation").unwrap_or(payload)}
-            }),
-        );
+        let approval = json!({
+            "approvalId": id,
+            "options": [
+                {"optionId": "allow-once", "name": "Allow once", "kind": "allow_once"},
+                {"optionId": "allow-always", "name": "Always allow", "kind": "allow_always"},
+                {"optionId": "deny", "name": "Deny", "kind": "reject"}
+            ],
+            "toolCall": {"title": approval_title(payload), "rawInput": payload.get("presentation").unwrap_or(payload)}
+        });
+        // A gateway can broadcast unrelated approvals. Never auto-approve an
+        // event without an explicit session identity and a saved local grant.
+        if payload.get("sessionKey").and_then(Value::as_str) == Some(&session_id)
+            && self.permissions.full_access(&session_id).unwrap_or(false)
+        {
+            let adapter = OpenClawGatewayAdapter {
+                inner: self.clone(),
+            };
+            tokio::spawn(async move {
+                if adapter
+                    .resolve_approval(&session_id, &id, Some("allow-once"))
+                    .await
+                    .is_err()
+                {
+                    adapter.inner.emit(
+                        "approval.requested",
+                        Some(&session_id),
+                        None,
+                        None,
+                        approval,
+                    );
+                }
+            });
+        } else {
+            self.emit(
+                "approval.requested",
+                Some(&session_id),
+                None,
+                None,
+                approval,
+            );
+        }
     }
 
     async fn handle_question(&self, payload: &Value) {

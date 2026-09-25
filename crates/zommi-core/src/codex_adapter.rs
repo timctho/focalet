@@ -29,9 +29,10 @@ use crate::{
     artifacts::artifacts_from_thread_item,
     build_context_handoff,
     codex_home::{CodexHomeStore, pin_wsl_home},
-    codex_permissions::CodexPermissionStore,
     runtime_discovery::inherited_parent_environment_keys,
-    sanitize_diagnostic, validate_turn_input,
+    sanitize_diagnostic,
+    session_permissions::SessionPermissionStore,
+    validate_turn_input,
 };
 
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -176,7 +177,7 @@ pub struct CodexAdapter {
 struct Inner {
     session_selection: Mutex<()>,
     home_store: CodexHomeStore,
-    permission_store: CodexPermissionStore,
+    permission_store: SessionPermissionStore,
     pinned_home: Option<String>,
     config: CodexConfig,
     target_id: String,
@@ -335,7 +336,7 @@ impl CodexAdapter {
             inner: Arc::new(Inner {
                 session_selection: Mutex::new(()),
                 home_store,
-                permission_store: CodexPermissionStore::for_target(&config.target.id),
+                permission_store: SessionPermissionStore::for_target(&config.target.id),
                 pinned_home,
                 config: config.clone(),
                 target_id: config.target.id.clone(),

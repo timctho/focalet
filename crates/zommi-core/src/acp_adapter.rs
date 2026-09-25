@@ -116,7 +116,13 @@ impl AcpAdapter {
         event_tx: EventSender,
         emit_events: bool,
     ) -> Result<Self, CodexError> {
-        let mut command = Command::new(&config.command.command);
+        let mut launch = config.command.clone();
+        if launch.full_access {
+            launch
+                .enable_full_access(&config.target)
+                .map_err(|error| adapter_error("invalid-configuration", error.to_string()))?;
+        }
+        let mut command = Command::new(&launch.command);
         config.target.apply_launch_environment(&mut command);
         if config.target.execution_host.kind != "wsl" {
             command.envs(
@@ -128,7 +134,7 @@ impl AcpAdapter {
             );
         }
         command
-            .args(&config.command.args)
+            .args(&launch.args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -525,8 +531,12 @@ impl AcpAdapter {
         self.load_sessions().await
     }
 
-    pub async fn create_session(&self, model: Option<&str>) -> Result<Value, CodexError> {
-        self.new_session(model).await?;
+    pub async fn create_session(
+        &self,
+        model: Option<&str>,
+        cwd: Option<&str>,
+    ) -> Result<Value, CodexError> {
+        self.new_session_with_cwd(model, cwd).await?;
         self.load_sessions().await?;
         self.connection_value().await
     }
