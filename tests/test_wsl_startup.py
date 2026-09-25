@@ -111,6 +111,21 @@ os.execvp(args[0], args)
         self.round_trip()
         self.assertEqual((self.root / 'launches').read_text().splitlines(), ['bootstrap'])
 
+    def test_hermes_node_bootstraps_when_node_is_not_on_the_inherited_path(self):
+        node = shutil.which('node')
+        runtime = self.root / '.hermes/node/bin'
+        runtime.mkdir(parents=True)
+        wrapper = runtime / 'node'
+        wrapper.write_text('#!/bin/sh\nprintf "hermes\\n" >> "$HOME/node-launches"\nexec "' + node + '" "$@"\n')
+        wrapper.chmod(0o755)
+        # Leave only the bootstrap utilities on PATH. System Node, if present,
+        # must not displace the private Hermes installation in the fallback.
+        for utility in ['nohup', 'setsid', 'sleep', 'sed']:
+            os.symlink(shutil.which(utility), self.bin / utility)
+        self.env.update(HOME=str(self.root), PATH=str(self.bin))
+        self.round_trip()
+        self.assertGreaterEqual(len((self.root / 'node-launches').read_text().splitlines()), 2)
+
     def test_restart_ignores_a_fresh_or_future_dated_dead_endpoint(self):
         self.round_trip()
         for heartbeat in [int(time.time() * 1000), int((time.time() + 86400) * 1000)]:

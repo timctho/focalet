@@ -8,13 +8,21 @@ relay_version=$4
 distribution=$5
 
 node_path=
-for candidate in "$(command -v node 2>/dev/null || true)" "$HOME"/.nvm/versions/node/*/bin/node /usr/local/bin/node /usr/bin/node "$HOME"/.local/bin/node; do
+for candidate in "$(command -v node 2>/dev/null || true)" "$HOME"/.hermes/node/bin/node "$HOME"/.nvm/versions/node/*/bin/node /usr/local/bin/node /usr/bin/node "$HOME"/.local/bin/node; do
   [ -n "$candidate" ] && [ -x "$candidate" ] || continue
   if "$candidate" -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)' 2>/dev/null; then
     node_path=$candidate
     break
   fi
 done
+# Other shell-managed installations (including fnm) need their initialization
+# files. Use the same bounded probe as runtime discovery, only when necessary.
+if [ -z "$node_path" ]; then
+  candidate=$(/bin/sh "$(dirname "$0")/probe-wsl-runtimes.sh" node 2>/dev/null | sed -n 's/^__ZOMMI_RUNTIME_PATH__node\t//p')
+  if [ -n "$candidate" ] && [ -x "$candidate" ] && "$candidate" -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)' 2>/dev/null; then
+    node_path=$candidate
+  fi
+fi
 [ -n "$node_path" ] || exit 43
 
 launch_log="${endpoint_file}.launch.log"

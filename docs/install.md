@@ -53,8 +53,9 @@ Ubuntu on Xorg and other desktop environments are outside the supported scope.
 1. Confirm your agent works in its usual terminal, including sign-in.
 2. Open Zommi. In **Welcome to Zommi**, choose a detected agent and connect.
    Windows detects native Windows installations and agents inside WSL.
-   Ubuntu and macOS also check the login shell with `command -v`, so CLIs
-   installed through a shell version manager can be detected and launched.
+   WSL, Ubuntu and macOS also check your terminal shell with `command -v`,
+   including PATH settings from shell startup files. CLIs installed through
+   nvm, fnm or Hermes's bundled Node keep that PATH when launched.
 3. If prompted to sign in, finish that in the runtime's own flow and retry.
    **Scan again** refreshes discovery; **Set up later** leaves setup available
    without creating a chat.

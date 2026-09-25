@@ -34,6 +34,7 @@ const CHANNEL_STDERR: u8 = 2;
 const CHANNEL_EXIT: u8 = 3;
 const RELAY_SOURCE: &str = include_str!("../../../scripts/zommi-wsl-relay.js");
 const LAUNCHER_SOURCE: &str = include_str!("../../../scripts/launch-wsl-relay.sh");
+const SHELL_PROBE_SOURCE: &str = include_str!("../../../scripts/probe-wsl-runtimes.sh");
 const RESOLVE_EXECUTABLE_SOURCE: &str = include_str!("../../../scripts/resolve-wsl-executable.sh");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -191,7 +192,7 @@ pub fn discover_targets_via_cached_relays(
             distribution: distribution.clone(),
             cwd,
             command: "/bin/sh".into(),
-            args: vec!["-lc".into(), wsl_runtime_probe_script()],
+            args: vec!["-c".into(), wsl_runtime_probe_script()],
         };
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
@@ -598,10 +599,15 @@ fn start_relay(distribution: &str, endpoint_path: &Path, timeout: Duration) -> i
     fs::create_dir_all(&bootstrap)?;
     let relay = bootstrap.join("zommi-wsl-relay.js");
     let launcher = bootstrap.join("launch-wsl-relay.sh");
+    let shell_probe = bootstrap.join("probe-wsl-runtimes.sh");
     let relay_source = RELAY_SOURCE.replace("\r\n", "\n");
     let launcher_source = normalize_shell_script(LAUNCHER_SOURCE);
     write_if_changed(&relay, relay_source.as_bytes())?;
     write_if_changed(&launcher, launcher_source.as_bytes())?;
+    write_if_changed(
+        &shell_probe,
+        normalize_shell_script(SHELL_PROBE_SOURCE).as_bytes(),
+    )?;
     match fs::remove_file(endpoint_path) {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}

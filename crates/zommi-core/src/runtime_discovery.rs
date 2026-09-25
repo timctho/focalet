@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     env, fs,
-    io::{self, Read},
+    io::{self, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -946,6 +946,11 @@ pub fn command_for_target(target: &RuntimeTarget) -> RuntimeCommand {
         if target.adapter_id == "codex-app-server" {
             args.push("CODEX_INTERNAL_ORIGINATOR_OVERRIDE=codex_exec".into());
         }
+        if let Some(path) = &target.launch_path {
+            // Set PATH inside Linux, not on wsl.exe or the shared relay. This
+            // keeps env-node CLIs on the interpreter selected by their shell.
+            args.push(format!("PATH={path}"));
+        }
         args.push(target.executable_path.clone());
         args.extend(launch_args.iter().map(|value| (*value).into()));
         return RuntimeCommand {
@@ -1029,7 +1034,7 @@ fn detect_wsl_runtimes(
     let wsl = windows_wsl_executable();
     let output = run_wsl_probe(
         &wsl,
-        &["-d", distribution, "-e", "sh", "-lc", &script],
+        &["-d", distribution, "--cd", "/", "-e", "sh", "-c", &script],
         Some(environment),
     );
     output.map(|output| {
@@ -1051,14 +1056,8 @@ pub fn wsl_runtime_probe_script() -> String {
         .collect::<Vec<_>>()
         .join(" ");
     format!(
-        "{}{}{}{}{}{}{}",
-        "zommi_shell=$(getent passwd $(id -un) 2>/dev/null | cut -d: -f7); ",
-        "[ -x \"$zommi_shell\" ] || zommi_shell=\"${SHELL:-/bin/sh}\"; ",
-        "exec \"$zommi_shell\" -lc '",
-        "printf \"__ZOMMI_RUNTIME_HOME__%s\\n\" \"$HOME\"; ",
-        "for zommi_command in ",
-        executable_names,
-        "; do zommi_path=$(command -v -- \"$zommi_command\" 2>/dev/null || true); case \"$zommi_path\" in /*) printf \"__ZOMMI_RUNTIME_PATH__%s\\t%s\\n\" \"$zommi_command\" \"$zommi_path\" ;; esac; done'"
+        "set -- {executable_names};\n{}",
+        include_str!("../../../scripts/probe-wsl-runtimes.sh").replace("\r\n", "\n")
     )
 }
 
@@ -1074,6 +1073,9 @@ pub fn runtime_targets_from_wsl_probe(
     let home = output
         .lines()
         .find_map(|line| line.strip_prefix("__ZOMMI_RUNTIME_HOME__"));
+    let launch_path = output
+        .lines()
+        .find_map(|line| line.strip_prefix("__ZOMMI_RUNTIME_ENV_PATH__"));
     let host = ExecutionHost {
         id: format!("wsl:{}", distribution.to_ascii_lowercase()),
         kind: "wsl".into(),
@@ -1091,7 +1093,11 @@ pub fn runtime_targets_from_wsl_probe(
             RUNTIME_CATALOG
                 .iter()
                 .filter(|entry| entry.executable == name)
-                .map(|entry| target_for(&host, path, entry, home, None))
+                .map(|entry| {
+                    let mut target = target_for(&host, path, entry, home, None);
+                    target.launch_path = launch_path.map(str::to_owned);
+                    target
+                })
                 .collect::<Vec<_>>()
         })
         .collect()
@@ -1102,29 +1108,46 @@ fn run_wsl_probe(
     arguments: &[&str],
     environment: Option<&HashMap<String, String>>,
 ) -> Option<Vec<u8>> {
-    let mut command = Command::new(executable);
-    command
-        .args(arguments)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    if let Some(environment) = environment {
-        command.envs(environment);
-    }
-    let mut child = command.spawn().ok()?;
-    match child.wait_timeout(WSL_PROBE_TIMEOUT).ok()? {
-        Some(status) if status.success() => {
-            let mut output = Vec::new();
-            child.stdout.take()?.read_to_end(&mut output).ok()?;
-            Some(output)
+    // Read after exit without filling a pipe or waiting for a shell background
+    // job that inherited stdout. Keep paths private and bound the result size.
+    let path = env::temp_dir().join(format!("zommi-wsl-probe-{}", uuid::Uuid::new_v4()));
+    let result = (|| {
+        let mut options = fs::OpenOptions::new();
+        options.read(true).write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
         }
-        Some(_) => None,
-        None => {
-            let _ = child.kill();
-            let _ = child.wait();
-            None
+        let mut output = options.open(&path).ok()?;
+        let mut command = Command::new(executable);
+        command
+            .args(arguments)
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(output.try_clone().ok()?))
+            .stderr(Stdio::null());
+        if let Some(environment) = environment {
+            command.envs(environment);
         }
-    }
+        let mut child = command.spawn().ok()?;
+        match child.wait_timeout(WSL_PROBE_TIMEOUT) {
+            Ok(Some(status)) if status.success() => {}
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+        if output.metadata().ok()?.len() > 262144 {
+            return None;
+        }
+        output.seek(SeekFrom::Start(0)).ok()?;
+        let mut bytes = Vec::new();
+        output.take(262144).read_to_end(&mut bytes).ok()?;
+        Some(bytes)
+    })();
+    let _ = fs::remove_file(path);
+    result
 }
 
 fn resolve_native_command(
@@ -1355,6 +1378,21 @@ mod tests {
         assert_eq!(
             super::runtime_targets_from_wsl_probe("Ubuntu", true, &output)[0].executable_path,
             "/usr/bin/codex"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn verbose_wsl_output_does_not_fill_a_pipe_before_exit() {
+        let output = super::run_wsl_probe(
+            "/bin/sh",
+            &["-c", "head -c 100000 /dev/zero; printf 'finished'"],
+            None,
+        )
+        .expect("probe output must be drained without a pipe deadlock");
+        assert!(output.ends_with(b"finished"));
+        assert!(
+            super::run_wsl_probe("/bin/sh", &["-c", "head -c 300000 /dev/zero"], None).is_none()
         );
     }
 
@@ -1738,6 +1776,32 @@ mod tests {
                 && target.execution_host.name.as_deref() == Some("Ubuntu")
                 && target.runtime_home.as_deref() == Some("/home/u")
         }));
+    }
+
+    #[test]
+    fn wsl_cli_keeps_its_shell_path_through_cache_and_launch() {
+        let mut targets = runtime_targets_from_wsl_probe(
+            "Ubuntu",
+            true,
+            b"__ZOMMI_RUNTIME_HOME__/home/u\n\
+              __ZOMMI_RUNTIME_ENV_PATH__/home/u/.hermes/node/bin:/usr/bin:/bin\n\
+              __ZOMMI_RUNTIME_PATH__codex\t/home/u/.hermes/node/bin/codex\n",
+        );
+        let target = targets.remove(0);
+        let restored: RuntimeTarget =
+            serde_json::from_str(&serde_json::to_string(&target).unwrap()).unwrap();
+        let command = command_for_target(&restored);
+        let position = command
+            .args
+            .iter()
+            .position(|arg| arg == &target.executable_path)
+            .unwrap();
+        assert_eq!(
+            command.args[position - 1],
+            "PATH=/home/u/.hermes/node/bin:/usr/bin:/bin"
+        );
+        assert_eq!(command.args[position + 1], "app-server");
+        assert_eq!(command.command, super::windows_wsl_executable());
     }
 
     #[test]
