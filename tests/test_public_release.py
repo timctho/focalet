@@ -67,6 +67,21 @@ class PublicReleaseTests(unittest.TestCase):
                 publish.collect_assets([item for item in self.metadata if item != missing],
                                        self.commit, platforms="all")
 
+    def test_mac_architecture_profiles_require_exactly_the_selected_installer(self):
+        for index, architecture in ((1, "arm64"), (2, "x64")):
+            metadata = self.metadata[index]
+            profile = f"macos-{architecture}"
+            with self.subTest(profile=profile):
+                paths, manifest = publish.collect_assets([metadata], self.commit, platforms=profile)
+                self.assertEqual([path.name for path in paths], [f"Zommi-macOS-{architecture}.dmg"])
+                self.assertEqual([(a["platform"], a["architecture"]) for a in manifest["assets"]],
+                                 [("macos", architecture)])
+                for invalid in ([], self.metadata[1:3], [self.metadata[3 - index]], self.metadata):
+                    with self.assertRaisesRegex(ValueError, "selected platforms"):
+                        publish.collect_assets(invalid, self.commit, platforms=profile)
+                with self.assertRaisesRegex(ValueError, "selected platforms"):
+                    publish.collect_assets([metadata], self.commit, platforms="macos")
+
     def test_ubuntu_archive_version_must_match_publication_tag(self):
         path = self.metadata[-1]
         value = json.loads(path.read_text())

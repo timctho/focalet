@@ -9,7 +9,17 @@
 existing agent. Select a region, add a sketch if useful, and send the image with
 available text, links and structure.
 
-### [Download the latest release →](https://github.com/timctho/zommi/releases)
+## Download
+
+| Platform | Architecture | Download |
+| --- | --- | --- |
+| Windows 10/11 | x64 | [Setup · preview.4](https://github.com/timctho/zommi/releases/download/v0.1.1-preview.4/Zommi-Setup-x64.exe) |
+| macOS 12+ | Apple Silicon (M1 or later) | [Mac releases](https://github.com/timctho/zommi/releases) · `Zommi-macOS-arm64.dmg` planned for preview.5 |
+| macOS 12+ | Intel | [Mac releases](https://github.com/timctho/zommi/releases) · `Zommi-macOS-x64.dmg` planned for preview.5 |
+| Ubuntu 24.04 LTS · GNOME Wayland | x64 | [.deb · preview.4](https://github.com/timctho/zommi/releases/download/v0.1.1-preview.4/Zommi-Ubuntu-amd64.deb) |
+
+Mac installers will appear after the preview.5 release builds pass and publish.
+[All releases and checksums](https://github.com/timctho/zommi/releases)
 
 Uses your existing agent account. [Installation guide](docs/install.md) ·
 [Build from source](CONTRIBUTING.md)
@@ -68,8 +78,8 @@ boxes, and cross out an option. The agent turns the sketch into linked formulas.
 
 ## Capture and share
 
-Press **Alt+A**, select a region, review the attachment and ask your question.
-On Windows, use the drawing toolbar to annotate or add more regions, then press
+Press **Alt+A** (**⌥ A** on Mac), select a region, review the attachment and ask your question.
+On Windows and Mac, use the drawing toolbar to annotate or add more regions, then press
 **Attach**. Multiple attachments keep their **A**, **B**, **C** references.
 
 On Windows, Ubuntu Wayland and macOS, attachments can include source identity, text, links, element
@@ -87,11 +97,11 @@ requests. [Runtime permissions](docs/install.md#2-choose-the-agent-you-already-h
 
 ## Platforms
 
-| Platform | Availability | Capture support |
-| --- | --- | --- |
-| **Windows 10/11 · x64** | Preview installer | Multiple regions, drawing, accessibility and optional browser context |
-| **macOS 12+ · Apple Silicon / Intel** | `.dmg` when listed in a release | Multiple regions, drawing, native Accessibility and optional browser context |
-| **Ubuntu 24.04 LTS · x64 · GNOME Wayland** | `.deb` when listed in a release; [install and test](docs/ubuntu-testing.md) | Multiple regions, drawing, AT-SPI and optional browser context; requires the bundled desktop integration and screen-sharing authorization |
+| Platform | Capture support |
+| --- | --- |
+| **Windows 10/11 · x64** | Multiple regions, drawing, accessibility and optional browser context |
+| **macOS 12+ · Apple Silicon / Intel** | Multiple regions, drawing, native Accessibility and optional browser context |
+| **Ubuntu 24.04 LTS · x64 · GNOME Wayland** | Multiple regions, drawing, AT-SPI and optional browser context; requires the bundled desktop integration and screen-sharing authorization; [install and test](docs/ubuntu-testing.md) |
 
 Linux support targets Ubuntu 24.04's GNOME Wayland desktop. Enable **Zommi
 Desktop Integration** in App settings for Alt+A and aligned app context.

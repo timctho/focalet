@@ -22,6 +22,8 @@ PROFILES = {
     "ubuntu": {("linux", "x64")},
     "windows-ubuntu": {("windows", "x64"), ("linux", "x64")},
     "macos": {("macos", "arm64"), ("macos", "x64")},
+    "macos-arm64": {("macos", "arm64")},
+    "macos-x64": {("macos", "x64")},
     "all": set(ASSETS),
 }
 
