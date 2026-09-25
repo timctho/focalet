@@ -5,13 +5,14 @@ import 'dart:ui' as ui;
 import 'package:window_manager/window_manager.dart';
 import 'package:zommi_flutter/desktop/capture_permissions.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
+import 'package:zommi_flutter/desktop/region_selection.dart';
 
 /// Opt-in packaged acceptance. Only interactive mode opens the capture editor.
 /// A permission-limited result is deliberately distinct from capture success.
 Future<void> runMacCaptureProbe() async {
   final path = Platform.environment['ZOMMI_MACOS_CAPTURE_PROBE']?.trim();
   if (!Platform.isMacOS || path == null || path.isEmpty) return;
-  stdout.writeln('macOS probe: entered');
+  stdout.writeln('macOS probe: process $pid');
   final report = <String, Object?>{
     'executable': Platform.resolvedExecutable,
     'processId': pid,
@@ -37,15 +38,9 @@ Future<void> runMacCaptureProbe() async {
       await Future<void>.delayed(const Duration(milliseconds: 400));
       stdout.writeln('macOS probe: reading external context');
       report['context'] = {'status': 'permission-required'};
-      if (status.accessibility) {
+      if (status.accessibility && status.screenRecording) {
         try {
-          final context = await PortableCaptureProvider().capture();
-          final snapshot = context.snapshot;
-          report['context'] = {
-            'status': snapshot == null ? 'failed' : 'captured',
-            'application': snapshot?['application'],
-            'windowTitle': snapshot?['windowTitle'],
-          };
+          report['context'] = await _probeRegion();
         } on Object catch (error) {
           report['context'] = {'status': 'failed', 'error': '$error'};
         }
@@ -134,10 +129,7 @@ Future<void> runMacCaptureProbe() async {
       final pixels = report['pixels']! as Map;
       report['captureVerified'] =
           context['status'] == 'captured' &&
-          context['application'] == 'TextEdit' &&
-          (context['windowTitle'] as String? ?? '').contains(
-            'zommi-capture-fixture',
-          ) &&
+          context['expectedTextFound'] == true &&
           pixels['status'] == 'captured';
       report['status'] = 'completed';
     } finally {
@@ -154,4 +146,108 @@ Future<void> runMacCaptureProbe() async {
     flush: true,
   );
   await temporary.rename(output.path);
+}
+
+/// Exercise the production region enrichment on a known fixture, without
+/// injecting mouse input or equating a screenshot/window title with AX success.
+Future<Map<String, Object?>> _probeRegion() async {
+  final title =
+      Platform.environment['ZOMMI_MACOS_PROBE_WINDOW_TITLE'] ??
+      'zommi-capture-fixture';
+  final expectedText =
+      Platform.environment['ZOMMI_MACOS_PROBE_EXPECTED_TEXT'] ??
+      'Zommi macOS capture acceptance fixture';
+  final requireDom = Platform.environment['ZOMMI_MACOS_PROBE_DOM'] == '1';
+  final observations = <Map<String, Object?>>[];
+  final backend = NativeUnixRegionBackend();
+  final browser = ProcessNativeCaptureClient(
+    '${File(Platform.resolvedExecutable).parent.path}/browser-capture/zommi-browser-capture',
+  );
+  final displays = await backend.captureDisplays();
+  try {
+    for (final display in displays) {
+      final matches = display.windows
+          .where(
+            (window) =>
+                (window['windowTitle']?.toString() ?? '').contains(title),
+          )
+          .toList();
+      if (matches.length != 1) continue;
+      final window = regionRect(matches.single['bounds']);
+      // Stay inside the document, away from title bars, scroll bars and the
+      // insertion caret at the left edge. AX still reports the intersected text.
+      var bounds = ui.Rect.fromLTWH(
+        window.left + 80,
+        window.top + 100,
+        (window.width - 160).clamp(4, 600),
+        (window.height - 180).clamp(4, 300),
+      ).intersect(display.bounds);
+      if (Platform.environment['ZOMMI_MACOS_PROBE_BOUNDS']
+          case final specified?) {
+        bounds = regionRect(jsonDecode(specified)).intersect(display.bounds);
+      }
+      if (bounds.isEmpty) {
+        throw StateError('Fixture region is outside the display.');
+      }
+      final scaleX = display.image.width / display.bounds.width;
+      final scaleY = display.image.height / display.bounds.height;
+      final pixels = ui.Rect.fromLTRB(
+        ((bounds.left - display.bounds.left) * scaleX).roundToDouble(),
+        ((bounds.top - display.bounds.top) * scaleY).roundToDouble(),
+        ((bounds.right - display.bounds.left) * scaleX).roundToDouble(),
+        ((bounds.bottom - display.bounds.top) * scaleY).roundToDouble(),
+      );
+      final selected = SelectedRegion(display, pixels);
+      final image = await enrichSelectedRegion(selected, (region) async {
+        final value = await backend.observe(region);
+        observations.add({
+          for (final key in [
+            'stable',
+            'source',
+            'limitation',
+            'browserViewport',
+            'regionContext',
+          ])
+            if (value.containsKey(key)) key: value[key],
+          'pixelsMatch':
+              value['dataUrl'] is String &&
+              await sameCapturedPixels(
+                'data:image/png;base64,${base64Encode(await selected.render(annotated: false))}',
+                value['dataUrl'] as String,
+              ),
+        });
+        return value;
+      }, browser: browser);
+      final snapshot = image.snapshot;
+      final elements =
+          (snapshot?['regionContext'] as Map?)?['elements'] as List? ?? [];
+      final found = elements.any(
+        (element) =>
+            element is Map &&
+            ['text', 'value', 'name', 'description'].any(
+              (key) => (element[key]?.toString() ?? '').contains(expectedText),
+            ),
+      );
+      final dom = snapshot?['dom'] is Map;
+      return {
+        'status': found && (!requireDom || dom) ? 'captured' : 'failed',
+        'expectedTextFound': found,
+        'domCaptured': dom,
+        'elementCount': elements.length,
+        'application': snapshot?['application'],
+        'windowTitle': snapshot?['windowTitle'],
+        'bounds': image.bounds,
+        'alignment': image.alignment,
+        'snapshot': snapshot,
+        'observations': observations,
+      };
+    }
+    throw StateError('No unique visible fixture window matched "$title".');
+  } finally {
+    for (final display in displays) {
+      display.image.dispose();
+    }
+    await browser.close();
+    await backend.close();
+  }
 }

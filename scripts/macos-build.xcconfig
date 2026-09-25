@@ -1,0 +1,2 @@
+// Apply the app's minimum OS to Swift packages as well as CocoaPods targets.
+MACOSX_DEPLOYMENT_TARGET = 12.0

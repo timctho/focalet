@@ -78,6 +78,8 @@ class ReleaseWorkflowTests(unittest.TestCase):
         })
         self.assertEqual(set(workflow["on"]["workflow_dispatch"]["inputs"]), {"platforms", "publish"})
         self.assertEqual(workflow["on"]["workflow_dispatch"]["inputs"]["platforms"]["default"], "all")
+        self.assertEqual(set(workflow["on"]["workflow_dispatch"]["inputs"]["platforms"]["options"]),
+                         set(release.PROFILES))
         self.assertEqual(workflow["permissions"], {"contents": "read"})
         self.assertNotIn("self-hosted", raw)
         self.assertNotIn("secrets.", raw)

@@ -326,6 +326,23 @@ bool sameNativeRegionSource(Map<String, Object?>? a, Map<String, Object?>? b) =>
     ].every((key) => a[key] == b[key]) &&
     regionRect(a['bounds']) == regionRect(b['bounds']);
 
+bool _sameRegionContext(Object? a, Object? b) {
+  // Platform-channel dictionaries have no stable insertion order. Lists do:
+  // changing the element order or any nested value invalidates the snapshot.
+  if (a is Map && b is Map) {
+    return a.length == b.length &&
+        a.keys.every(
+          (key) => b.containsKey(key) && _sameRegionContext(a[key], b[key]),
+        );
+  }
+  if (a is List && b is List) {
+    return a.length == b.length &&
+        Iterable<int>.generate(a.length)
+            .every((index) => _sameRegionContext(a[index], b[index]));
+  }
+  return a == b;
+}
+
 Future<ImageSelection> enrichSelectedRegion(
   SelectedRegion selected,
   Future<Map<String, Object?>> Function(Rect bounds) observe, {
@@ -403,8 +420,7 @@ Future<ImageSelection> enrichSelectedRegion(
     if (!await valid(after) ||
         regionRect(before['browserViewport']) !=
             regionRect(after['browserViewport']) ||
-        jsonEncode(before['regionContext']) !=
-            jsonEncode(after['regionContext'])) {
+        !_sameRegionContext(before['regionContext'], after['regionContext'])) {
       throw StateError(
         'The selected content changed during capture. The original image and drawings were kept.',
       );

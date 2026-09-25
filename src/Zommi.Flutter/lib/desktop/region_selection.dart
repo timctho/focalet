@@ -221,7 +221,8 @@ final class RegionSelectionSession extends ChangeNotifier {
   int displayIndex = 0;
   int selectedIndex = -1;
   RegionDrawingTool tool = RegionDrawingTool.select;
-  Color? color;
+  static const defaultColor = Color(0xffff686b);
+  Color color = defaultColor;
   double strokeWidth = 4;
   SelectedRegion? get selected =>
       selectedIndex >= 0 && selectedIndex < regions.length
@@ -263,6 +264,9 @@ final class RegionSelectionSession extends ChangeNotifier {
     selectedIndex = regions.isEmpty
         ? -1
         : (selectedIndex - 1).clamp(0, regions.length - 1);
+    if (selected case final region?) {
+      displayIndex = displays.indexOf(region.display);
+    }
     notifyListeners();
   }
 

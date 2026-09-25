@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -42,7 +43,6 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
   Offset? _end;
   List<Offset> _points = [];
   Rect _imageBounds = Rect.zero;
-  Rect? _reportedBounds;
   final _recorder = FileDesktopAcceptanceRecorder.fromEnvironment();
   RegionSelectionSession get session => widget.session;
   @override
@@ -115,7 +115,7 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
 
   RegionStroke _stroke() => RegionStroke(
     tool: session.tool,
-    color: session.color ?? Theme.of(context).colorScheme.primary,
+    color: session.color,
     width: session.strokeWidth,
     points:
         session.tool == RegionDrawingTool.pen ||
@@ -300,183 +300,79 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
                     fitted.destination,
                     Offset.zero & constraints.biggest,
                   );
-                  if (_recorder != null && _reportedBounds != _imageBounds) {
-                    _reportedBounds = _imageBounds;
+                  if (_recorder != null) {
                     WidgetsBinding.instance.addPostFrameCallback((_) {
                       if (!mounted) return;
                       unawaited(_recordCanvas(context));
                     });
                   }
-                  return Listener(
-                    onPointerDown: _down,
-                    onPointerMove: _move,
-                    onPointerUp: _up,
-                    onPointerCancel: (_) => setState(() {
-                      _start = _end = null;
-                      _points = [];
-                    }),
-                    child: MouseRegion(
-                      cursor: SystemMouseCursors.precise,
-                      child: CustomPaint(
-                        key: const ValueKey('region-capture-canvas'),
-                        size: constraints.biggest,
-                        painter: _RegionPainter(
-                          session: session,
-                          imageBounds: _imageBounds,
-                          accent: Theme.of(context).colorScheme.primary,
-                          dragged:
-                              _start != null &&
-                                  session.tool == RegionDrawingTool.select
-                              ? Rect.fromPoints(_start!, _end!)
-                              : null,
-                          stroke:
-                              _start != null &&
-                                  session.tool != RegionDrawingTool.select
-                              ? _stroke()
-                              : null,
+                  return Stack(
+                    children: [
+                      Positioned.fill(
+                        child: Listener(
+                          onPointerDown: _down,
+                          onPointerMove: _move,
+                          onPointerUp: _up,
+                          onPointerCancel: (_) => setState(() {
+                            _start = _end = null;
+                            _points = [];
+                          }),
+                          child: MouseRegion(
+                            cursor: SystemMouseCursors.precise,
+                            child: CustomPaint(
+                              key: const ValueKey('region-capture-canvas'),
+                              size: constraints.biggest,
+                              painter: _RegionPainter(
+                                session: session,
+                                imageBounds: _imageBounds,
+                                accent: Theme.of(context).colorScheme.primary,
+                                dragged:
+                                    _start != null &&
+                                        session.tool == RegionDrawingTool.select
+                                    ? Rect.fromPoints(_start!, _end!)
+                                    : null,
+                                stroke:
+                                    _start != null &&
+                                        session.tool != RegionDrawingTool.select
+                                    ? _stroke()
+                                    : null,
+                              ),
+                            ),
+                          ),
                         ),
                       ),
-                    ),
+                      if (_start == null)
+                        CustomSingleChildLayout(
+                          delegate: _RegionToolbarLayout(
+                            region: session.selected?.display == session.display
+                                ? Rect.fromLTWH(
+                                    _imageBounds.left +
+                                        session.selected!.pixels.left *
+                                            _imageBounds.width /
+                                            session.display.image.width,
+                                    _imageBounds.top +
+                                        session.selected!.pixels.top *
+                                            _imageBounds.height /
+                                            session.display.image.height,
+                                    session.selected!.pixels.width *
+                                        _imageBounds.width /
+                                        session.display.image.width,
+                                    session.selected!.pixels.height *
+                                        _imageBounds.height /
+                                        session.display.image.height,
+                                  )
+                                : null,
+                          ),
+                          child: SingleChildScrollView(
+                            key: const ValueKey(
+                              'region-drawing-toolbar-viewport',
+                            ),
+                            child: _toolbar(context),
+                          ),
+                        ),
+                    ],
                   );
                 },
-              ),
-            ),
-            Material(
-              color: Theme.of(context).colorScheme.surfaceContainerLow,
-              child: Padding(
-                padding: const EdgeInsets.all(8),
-                child: Wrap(
-                  spacing: 4,
-                  runSpacing: 4,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    for (final (tool, icon, label) in const [
-                      (
-                        RegionDrawingTool.select,
-                        Icons.add_box_outlined,
-                        'Add region (S)',
-                      ),
-                      (RegionDrawingTool.pen, Icons.edit_outlined, 'Pen (P)'),
-                      (RegionDrawingTool.arrow, Icons.north_east, 'Arrow (A)'),
-                      (
-                        RegionDrawingTool.rectangle,
-                        Icons.crop_square,
-                        'Rectangle (R)',
-                      ),
-                      (
-                        RegionDrawingTool.ellipse,
-                        Icons.circle_outlined,
-                        'Ellipse (O)',
-                      ),
-                      (
-                        RegionDrawingTool.highlighter,
-                        Icons.highlight_alt,
-                        'Highlighter (H)',
-                      ),
-                    ])
-                      IconButton.filledTonal(
-                        key: _control(label),
-                        isSelected: session.tool == tool,
-                        tooltip: label,
-                        onPressed:
-                            tool != RegionDrawingTool.select &&
-                                session.selected == null
-                            ? null
-                            : () => session.change(() => session.tool = tool),
-                        icon: Icon(icon),
-                      ),
-                    const SizedBox(width: 8),
-                    for (final color in [
-                      Theme.of(context).colorScheme.primary,
-                      Colors.red,
-                      Colors.orange,
-                      Colors.green,
-                      Colors.blue,
-                      Colors.white,
-                      Colors.black,
-                    ])
-                      IconButton(
-                        key: _control('color-${color.toARGB32()}'),
-                        tooltip:
-                            'Drawing color ${color.toARGB32().toRadixString(16)}',
-                        onPressed: () =>
-                            session.change(() => session.color = color),
-                        icon: Icon(
-                          (session.color ??
-                                      Theme.of(context).colorScheme.primary) ==
-                                  color
-                              ? Icons.check_circle
-                              : Icons.circle,
-                          color: color,
-                        ),
-                      ),
-                    MenuAnchor(
-                      key: _control('Stroke width'),
-                      controller: _strokeMenu,
-                      consumeOutsideTap: false,
-                      onClose: () {
-                        // A menu shortcut must not turn into Attach/Cancel
-                        // when its key-up returns to the capture surface.
-                        for (final key in [
-                          LogicalKeyboardKey.escape,
-                          LogicalKeyboardKey.enter,
-                          LogicalKeyboardKey.numpadEnter,
-                        ]) {
-                          if (HardwareKeyboard.instance.logicalKeysPressed
-                              .contains(key)) {
-                            _dismissedMenuKey = key;
-                            _closingKey = null;
-                          }
-                        }
-                      },
-                      menuChildren: [
-                        for (final width in [2.0, 4.0, 8.0, 16.0])
-                          MenuItemButton(
-                            onPressed: () => session.change(
-                              () => session.strokeWidth = width,
-                            ),
-                            child: Text('${width.toInt()} px'),
-                          ),
-                      ],
-                      builder: (context, menu, child) => TextButton(
-                        key: const ValueKey('stroke-width-menu'),
-                        onPressed: () =>
-                            menu.isOpen ? menu.close() : menu.open(),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text('${session.strokeWidth.toInt()} px'),
-                            const Icon(Icons.arrow_drop_down, size: 18),
-                          ],
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      key: _control('Undo'),
-                      tooltip: 'Undo',
-                      onPressed: session.selected?.canUndo == true
-                          ? () => session.change(() => session.selected!.undo())
-                          : null,
-                      icon: const Icon(Icons.undo),
-                    ),
-                    IconButton(
-                      key: _control('Redo'),
-                      tooltip: 'Redo',
-                      onPressed: session.selected?.canRedo == true
-                          ? () => session.change(() => session.selected!.redo())
-                          : null,
-                      icon: const Icon(Icons.redo),
-                    ),
-                    IconButton(
-                      key: _control('Delete region'),
-                      tooltip: 'Delete region',
-                      onPressed: session.selected == null
-                          ? null
-                          : session.removeSelected,
-                      icon: const Icon(Icons.delete_outline),
-                    ),
-                  ],
-                ),
               ),
             ),
           ],
@@ -484,6 +380,130 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
       ),
     ),
   );
+  Widget _toolbar(BuildContext context) => Material(
+    key: const ValueKey('region-drawing-toolbar'),
+    elevation: 6,
+    borderRadius: BorderRadius.circular(12),
+    color: Theme.of(context).colorScheme.surfaceContainerLow,
+    child: Padding(
+      padding: const EdgeInsets.all(8),
+      child: Wrap(
+        spacing: 4,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          for (final (tool, icon, label) in const [
+            (
+              RegionDrawingTool.select,
+              Icons.add_box_outlined,
+              'Add region (S)',
+            ),
+            (RegionDrawingTool.pen, Icons.edit_outlined, 'Pen (P)'),
+            (RegionDrawingTool.arrow, Icons.north_east, 'Arrow (A)'),
+            (RegionDrawingTool.rectangle, Icons.crop_square, 'Rectangle (R)'),
+            (RegionDrawingTool.ellipse, Icons.circle_outlined, 'Ellipse (O)'),
+            (
+              RegionDrawingTool.highlighter,
+              Icons.highlight_alt,
+              'Highlighter (H)',
+            ),
+          ])
+            IconButton.filledTonal(
+              key: _control(label),
+              isSelected: session.tool == tool,
+              tooltip: label,
+              onPressed:
+                  tool != RegionDrawingTool.select && session.selected == null
+                  ? null
+                  : () => session.change(() => session.tool = tool),
+              icon: Icon(icon),
+            ),
+          const SizedBox(width: 8),
+          for (final color in [
+            Theme.of(context).colorScheme.primary,
+            RegionSelectionSession.defaultColor,
+            Colors.orange,
+            Colors.green,
+            Colors.blue,
+            Colors.white,
+            Colors.black,
+          ])
+            IconButton(
+              key: _control('color-${color.toARGB32()}'),
+              tooltip: 'Drawing color ${color.toARGB32().toRadixString(16)}',
+              onPressed: () => session.change(() => session.color = color),
+              icon: Icon(
+                session.color == color ? Icons.check_circle : Icons.circle,
+                color: color,
+              ),
+            ),
+          MenuAnchor(
+            key: _control('Stroke width'),
+            controller: _strokeMenu,
+            consumeOutsideTap: false,
+            onClose: () {
+              // A menu shortcut must not turn into Attach/Cancel
+              // when its key-up returns to the capture surface.
+              for (final key in [
+                LogicalKeyboardKey.escape,
+                LogicalKeyboardKey.enter,
+                LogicalKeyboardKey.numpadEnter,
+              ]) {
+                if (HardwareKeyboard.instance.logicalKeysPressed.contains(
+                  key,
+                )) {
+                  _dismissedMenuKey = key;
+                  _closingKey = null;
+                }
+              }
+            },
+            menuChildren: [
+              for (final width in [2.0, 4.0, 8.0, 16.0])
+                MenuItemButton(
+                  onPressed: () =>
+                      session.change(() => session.strokeWidth = width),
+                  child: Text('${width.toInt()} px'),
+                ),
+            ],
+            builder: (context, menu, child) => TextButton(
+              key: const ValueKey('stroke-width-menu'),
+              onPressed: () => menu.isOpen ? menu.close() : menu.open(),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('${session.strokeWidth.toInt()} px'),
+                  const Icon(Icons.arrow_drop_down, size: 18),
+                ],
+              ),
+            ),
+          ),
+          IconButton(
+            key: _control('Undo'),
+            tooltip: 'Undo',
+            onPressed: session.selected?.canUndo == true
+                ? () => session.change(() => session.selected!.undo())
+                : null,
+            icon: const Icon(Icons.undo),
+          ),
+          IconButton(
+            key: _control('Redo'),
+            tooltip: 'Redo',
+            onPressed: session.selected?.canRedo == true
+                ? () => session.change(() => session.selected!.redo())
+                : null,
+            icon: const Icon(Icons.redo),
+          ),
+          IconButton(
+            key: _control('Delete region'),
+            tooltip: 'Delete region',
+            onPressed: session.selected == null ? null : session.removeSelected,
+            icon: const Icon(Icons.delete_outline),
+          ),
+        ],
+      ),
+    ),
+  );
+
   Future<void> _recordCanvas(BuildContext context) async {
     try {
       final box = context.findRenderObject() as RenderBox;
@@ -509,6 +529,36 @@ class _RegionCaptureEditorState extends State<RegionCaptureEditor> {
       // Optional diagnostics must never prevent selection or recovery.
     }
   }
+}
+
+/// Keep controls beside the active crop without changing the image viewport.
+class _RegionToolbarLayout extends SingleChildLayoutDelegate {
+  const _RegionToolbarLayout({required this.region});
+  final Rect? region;
+  static const margin = 12.0;
+
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints constraints) =>
+      BoxConstraints(
+        maxWidth: math.min(554, math.max(0, constraints.maxWidth - margin * 2)),
+        maxHeight: math.max(0, constraints.maxHeight - margin * 2),
+      );
+
+  @override
+  Offset getPositionForChild(Size size, Size childSize) {
+    final maxX = math.max(margin, size.width - childSize.width - margin);
+    final maxY = math.max(margin, size.height - childSize.height - margin);
+    final x = region?.left ?? (size.width - childSize.width) / 2;
+    var y = region == null ? margin : region!.bottom + margin;
+    if (region != null && y > maxY) {
+      y = region!.top - childSize.height - margin;
+    }
+    return Offset(x.clamp(margin, maxX), y.clamp(margin, maxY));
+  }
+
+  @override
+  bool shouldRelayout(_RegionToolbarLayout oldDelegate) =>
+      region != oldDelegate.region;
 }
 
 class _RegionPainter extends CustomPainter {

@@ -10,7 +10,7 @@ on:
         description: Installers to build
         type: choice
         default: all
-        options: [all, windows-ubuntu, windows, ubuntu, macos]
+        options: [all, windows-ubuntu, windows, ubuntu, macos, macos-arm64, macos-x64]
       publish:
         description: Publish to GitHub Releases after all selected builds pass
         type: boolean
@@ -89,6 +89,9 @@ jobs:
       - name: Check Ubuntu and macOS source
         if: runner.os != 'Windows'
         run: python3 scripts/check.py --suite rust --suite flutter
+      - name: Install locked CocoaPods version
+        if: runner.os == 'macOS'
+        run: sudo gem install cocoapods --version 1.17.0 --no-document
       - name: Check installer and publication contracts
         if: runner.os == 'Linux'
         run: python scripts/check.py --suite contracts

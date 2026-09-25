@@ -78,6 +78,20 @@ void main() {
         '[B]',
       ]);
       expect(composer.messageText, 'Compare these rows');
+      // Removing all inline chips starts a fresh batch at A, including its
+      // preview labels and the contextLabel later sent with each image.
+      await tester.enterText(
+        find.byKey(const ValueKey('zommi-composer')),
+        'Compare these rows',
+      );
+      await tester.pumpAndSettle();
+      expect(composer.inlineAttachments, isEmpty);
+      await tester.tap(find.byKey(const ValueKey('select-content')));
+      await tester.pumpAndSettle();
+      expect(composer.inlineAttachments.map((item) => item.reference), [
+        'A',
+        'B',
+      ]);
       desktop.nextSelections = [];
       await tester.tap(find.byKey(const ValueKey('select-content')));
       await tester.pumpAndSettle();

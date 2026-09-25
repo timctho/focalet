@@ -2230,6 +2230,7 @@ final class ZommiController extends ChangeNotifier {
 
   void removeAttachment(String id) {
     attachments.removeWhere((attachment) => attachment.id == id);
+    if (attachments.isEmpty) _attachmentSequence = 0;
     if (previewAttachment?.id == id) previewAttachment = null;
     _notify();
   }

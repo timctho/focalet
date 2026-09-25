@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
 
@@ -24,14 +25,19 @@ final class CaptureShortcut {
       modifiers < 16 &&
       (modifiers & 11) != 0;
 
-  String get label => [
-    if ((modifiers & 2) != 0) 'Ctrl',
-    if ((modifiers & 1) != 0) 'Alt',
-    if ((modifiers & 4) != 0) 'Shift',
-    if ((modifiers & 8) != 0) 'Meta',
-    if (virtualKey case final key?)
-      key >= 112 ? 'F${key - 111}' : String.fromCharCode(key),
-  ].join('+');
+  String get label => labelForPlatform(defaultTargetPlatform);
+
+  String labelForPlatform(TargetPlatform platform) {
+    final mac = platform == TargetPlatform.macOS;
+    return [
+      if ((modifiers & 2) != 0) mac ? '⌃' : 'Ctrl',
+      if ((modifiers & 1) != 0) mac ? '⌥' : 'Alt',
+      if ((modifiers & 4) != 0) mac ? '⇧' : 'Shift',
+      if ((modifiers & 8) != 0) mac ? '⌘' : 'Meta',
+      if (virtualKey case final key?)
+        key >= 112 ? 'F${key - 111}' : String.fromCharCode(key),
+    ].join(mac ? ' ' : '+');
+  }
 
   HotKey toHotKey() => HotKey(
     key: PhysicalKeyboardKey.findKeyByCode(usage)!,

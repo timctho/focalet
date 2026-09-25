@@ -1,7 +1,7 @@
 # Rectangle context capture
 
-Press `Alt+A` or use **Select** beside the composer, then drag a rectangle.
-On Windows, releasing the mouse opens the drawing toolbar beside the selection.
+Press `Alt+A` (`⌥ A` on macOS) or use **Select** beside the composer, then drag a rectangle.
+Releasing the mouse places the drawing toolbar beside the selection.
 Use a pen, arrow, rectangle, ellipse or highlighter; choose a color and stroke
 width, and undo or redo marks. Press **Enter** or **Attach** when ready to add the
 image and available context to your message. Ubuntu and macOS use the same
@@ -23,6 +23,8 @@ history. Click a region's letter to switch to it. **P**, **A**, **R**, **O** and
 **H** choose pen, arrow, rectangle, ellipse and highlighter. **Ctrl+Z** (or **Cmd+Z** on macOS) undoes;
 **Ctrl+Y** or **Ctrl+Shift+Z** redoes; **Delete** removes the active region.
 **Escape** cancels the entire capture, including its marks.
+Drawing starts in red. The toolbar follows the active region and moves above
+it when there is insufficient room below.
 
 The selector freezes the desktop before opening its overlay. Marks are clipped
 and baked into each exported PNG without changing its dimensions or coordinate
@@ -91,6 +93,8 @@ identify a partial cell without claiming all of its text was selected. Providers
 without grid semantics retain geometry without an invented row number.
 
 Attachments have stable A/B references, image previews and readable context.
+Clearing all attachments from the draft restarts the next batch at A; removing
+only some attachments preserves the remaining references.
 Hover over or click an attachment for details; **Full captured metadata** shows
 the retained snapshot. The readable preview omits ID/coordinate noise while the
 model receives those fields. Image indices preserve association when multiple

@@ -74,7 +74,7 @@ and recovery. Open **Actions → Build and publish release → Run workflow**, s
 
 | Input | Meaning |
 | --- | --- |
-| `platforms` | `all` (default), `windows-ubuntu`, `windows`, `ubuntu`, or `macos` (both Mac architectures) |
+| `platforms` | `all` (default), `windows-ubuntu`, `windows`, `ubuntu`, `macos` (both Mac architectures), `macos-arm64`, or `macos-x64` |
 | `publish` | Off: retain installers as Actions artifacts. On: publish them to this repository's Releases after all selected builds pass |
 
 For example, build all four installers without publishing:
@@ -168,6 +168,20 @@ payload with the accepted package, and verifies its code signature. The private
 draft releases `macos-test-<sha12>-<architecture>` retain the DMGs and their
 `.release.json` metadata without consuming Actions artifact storage.
 
+On a local Mac, build the native architecture and create the same verified DMG:
+
+```sh
+bash scripts/package-unix.sh macos
+python3 scripts/build_installer.py artifacts/zommi-macos-arm64 \
+  --expected-commit "$(git rev-parse HEAD)" --output artifacts/installers
+```
+
+Use `zommi-macos-x64` on Intel. The installer builder smoke-tests the bundled
+helpers, verifies the DMG, mounts it, compares the app payload and checks its
+signature. Run the [Mac acceptance checks](macos-testing.md) for capture and
+permissions as well. These local builds remain available when hosted Actions
+cannot start.
+
 ## Prepare and publish
 
 Collect the accepted installer and its `.release.json` sidecar. With an
@@ -189,19 +203,26 @@ overwritten; choose a new version for each release. Existing draft assets must
 belong to the same release asset set.
 
 For a release with Windows and Mac, omit `--windows-only` and add the accepted
-Mac Apple Silicon `.release.json` metadata; Mac Intel is optional. A partial
-platform set is rejected unless the Windows-only preview is explicitly selected.
+Mac Apple Silicon `.release.json` metadata; Mac Intel is optional. For a Mac-only
+preview, use `--platforms macos` with both DMGs, or explicitly select
+`--platforms macos-arm64` or `--platforms macos-x64` with the corresponding
+`.release.json`. Every selected installer must be present; choosing `macos`
+still requires both architectures. Automatic version releases still require all
+four installers.
 
 After publication, download the actual installer and checksum files from
 `timctho/zommi` and compare them with the accepted local bytes. Use authenticated
 downloads for a private repository; also verify anonymous downloads if it is
 public. Keep the repository's visibility unchanged.
 
-The README and installation guide link to this repository's `/releases` page,
-which includes newly published previews and stable versions without changing
-documentation for each release. GitHub's `/releases/latest` excludes prereleases
-and returns 404 while only previews exist. Keep direct versioned installer links
-in each release's notes, where they identify that release's exact assets.
+The README download table lists each platform and Mac architecture separately.
+Update a row's versioned installer link only after that asset is published and
+its download has been verified. Until then, label the planned installer and link
+to the `/releases` page; do not advertise an unavailable download. Different
+platforms can link to different accepted releases. Keep the installation guide
+and the table's all-releases link on `/releases`, which includes previews.
+GitHub's `/releases/latest` excludes prereleases and returns 404 while only
+previews exist.
 
 ## Signing
 
