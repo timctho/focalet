@@ -6,8 +6,7 @@ use sha2::{Digest, Sha256};
 use crate::SessionBindingStore;
 
 // Full access belongs to a chat, not the shared process or current preference.
-// Codex does not consistently restore sandbox overrides from stored history.
-pub(crate) struct CodexPermissionStore {
+pub(crate) struct SessionPermissionStore {
     directory: PathBuf,
     target_id: String,
 }
@@ -20,10 +19,10 @@ struct Permission {
     full_access: bool,
 }
 
-impl CodexPermissionStore {
+impl SessionPermissionStore {
     pub(crate) fn for_target(target_id: &str) -> Self {
         Self::at(
-            SessionBindingStore::platform_default().codex_permissions_directory(),
+            SessionBindingStore::platform_default().session_permissions_directory(),
             target_id,
         )
     }
@@ -43,13 +42,24 @@ impl CodexPermissionStore {
     pub(crate) fn full_access(&self, session_id: &str) -> io::Result<bool> {
         let bytes = match fs::read(self.path(session_id)) {
             Ok(bytes) => bytes,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                // Preserve chats created by the first Codex-only implementation.
+                let previous = Self::at(
+                    SessionBindingStore::platform_default().codex_permissions_directory(),
+                    &self.target_id,
+                );
+                match fs::read(previous.path(session_id)) {
+                    Ok(bytes) => bytes,
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+                    Err(error) => return Err(error),
+                }
+            }
             Err(error) => return Err(error),
         };
         let permission: Permission = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
         if permission.runtime_target_id != self.target_id || permission.session_id != session_id {
             return Err(io::Error::other(
-                "Codex permissions belong to another chat.",
+                "Session permissions belong to another chat.",
             ));
         }
         Ok(permission.full_access)
@@ -85,6 +95,16 @@ impl CodexPermissionStore {
     }
 }
 
+pub(crate) fn permission_error(error: io::Error) -> crate::codex_adapter::CodexError {
+    crate::codex_adapter::CodexError {
+        code: "persistence-failed".into(),
+        message: crate::sanitize_diagnostic(format!(
+            "Could not preserve this chat's permissions: {error}"
+        )),
+        retryable: false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,15 +112,15 @@ mod tests {
     #[test]
     fn permissions_are_durable_and_scoped_to_exact_runtime_and_chat() {
         let root = std::env::temp_dir().join(format!("zommi-permissions-{}", uuid::Uuid::new_v4()));
-        let store = CodexPermissionStore::at(root.clone(), "runtime-one");
+        let store = SessionPermissionStore::at(root.clone(), "runtime-one");
         assert!(!store.full_access("chat-one").unwrap());
         store.remember_full_access("chat-one").unwrap();
-        let reopened = CodexPermissionStore::at(root.clone(), "runtime-one");
+        let reopened = SessionPermissionStore::at(root.clone(), "runtime-one");
         assert!(reopened.full_access("chat-one").unwrap());
         reopened.remember_full_access("chat-one").unwrap();
         assert!(!reopened.full_access("chat-two").unwrap());
         assert!(
-            !CodexPermissionStore::at(root.clone(), "runtime-two")
+            !SessionPermissionStore::at(root.clone(), "runtime-two")
                 .full_access("chat-one")
                 .unwrap()
         );

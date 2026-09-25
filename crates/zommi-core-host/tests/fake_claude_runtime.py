@@ -7,6 +7,9 @@ import uuid
 
 args = sys.argv[1:]
 session = args[args.index('--resume') + 1] if '--resume' in args else args[args.index('--session-id') + 1]
+if log := os.environ.get('ZOMMI_FAKE_REQUEST_LOG'):
+    with open(log, 'a', encoding='utf-8') as out:
+        out.write(json.dumps({'type':'fixture_launch', 'launchArgs':args, 'sessionId':session}) + '\n')
 store = Path(os.environ['ZOMMI_FAKE_CLAUDE_STORE'])
 store.mkdir(exist_ok=True)
 file = store / (session + '.json')

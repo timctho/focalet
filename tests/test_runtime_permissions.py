@@ -158,6 +158,8 @@ class RuntimePermissionTests(unittest.TestCase):
         self.assert_chat_permissions(False)
         default_id = self.identity['sessionId']
         self.core.close()
+        # Earlier builds saved the same per-chat grants in a Codex-only directory.
+        (self.path / 'session-permissions').rename(self.path / 'codex-permissions')
         self.core = Core(self.env)
         self.addCleanup(self.core.close)
         self.core.request('core.initialize')

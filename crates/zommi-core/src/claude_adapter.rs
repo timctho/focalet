@@ -4,7 +4,9 @@ use crate::{
     RuntimeCommand, RuntimeTarget, build_context_handoff,
     codex_adapter::{CodexError, CoreEvent, EventSender, TurnReceipt},
     runtime_adapter::AdapterTurnRequest,
-    sanitize_diagnostic, validate_turn_input,
+    sanitize_diagnostic,
+    session_permissions::{SessionPermissionStore, permission_error},
+    validate_turn_input,
 };
 use serde_json::{Value, json};
 use std::{
@@ -45,6 +47,7 @@ pub struct ClaudeAdapter {
 struct Inner {
     target: RuntimeTarget,
     command: RuntimeCommand,
+    permissions: SessionPermissionStore,
     cwd: PathBuf,
     events: EventSender,
     sequence: AtomicU64,
@@ -59,6 +62,7 @@ struct AdapterState {
     models: Vec<Value>,
 }
 struct Stream {
+    full_access: bool,
     events_enabled: AtomicBool,
     owner: Weak<Inner>,
     id: String,
@@ -98,6 +102,7 @@ impl ClaudeAdapter {
     ) -> Result<Self, CodexError> {
         let adapter = Self {
             inner: Arc::new(Inner {
+                permissions: SessionPermissionStore::for_target(&target.id),
                 target,
                 command,
                 cwd,
@@ -108,13 +113,22 @@ impl ClaudeAdapter {
             }),
         };
         if prepare {
-            let stream = adapter.inner.spawn(None, None).await?;
+            let stream = adapter
+                .inner
+                .spawn(None, None, adapter.inner.command.full_access)
+                .await?;
             let models = stream.state.lock().await.models.clone();
             let mut state = adapter.inner.state.lock().await;
             state.models = models;
             state.prepared = Some(stream);
         } else {
-            adapter.activate(preferred.as_deref(), None).await?;
+            adapter
+                .activate(
+                    preferred.as_deref(),
+                    None,
+                    adapter.inner.command.full_access,
+                )
+                .await?;
         }
         Ok(adapter)
     }
@@ -123,17 +137,19 @@ impl ClaudeAdapter {
     }
     pub async fn is_running(&self) -> bool {
         let state = self.inner.state.lock().await;
-        let stream = state
-            .active
-            .as_ref()
-            .and_then(|id| state.sessions.get(id))
-            .or(state.prepared.as_ref())
-            .cloned();
+        let streams: Vec<_> = state
+            .sessions
+            .values()
+            .chain(state.prepared.iter())
+            .cloned()
+            .collect();
         drop(state);
-        match stream {
-            Some(s) => !s.state.lock().await.exited,
-            None => false,
+        for stream in streams {
+            if !stream.state.lock().await.exited {
+                return true;
+            }
         }
+        false
     }
     pub async fn active_session_id(&self) -> Result<String, CodexError> {
         self.inner.state.lock().await.active.clone().ok_or_else(|| {
@@ -147,8 +163,17 @@ impl ClaudeAdapter {
         &self,
         session: Option<&str>,
         cwd: Option<&str>,
+        full_access: bool,
     ) -> Result<(), CodexError> {
         let _selection = self.inner.selection.lock().await;
+        let full_access = match session {
+            Some(id) => self
+                .inner
+                .permissions
+                .full_access(id)
+                .map_err(permission_error)?,
+            None => full_access,
+        };
         if let Some(id) = session {
             Uuid::parse_str(id).map_err(|_| error("invalid-request", "Claude needs an exact saved session UUID. Start a new chat for older terminal-only conversations."))?;
             let previous = self.inner.state.lock().await.sessions.get(id).cloned();
@@ -165,9 +190,26 @@ impl ClaudeAdapter {
             None
         };
         let stream = match prepared {
-            Some(stream) if !stream.state.lock().await.exited => stream,
-            _ => self.inner.spawn(session, cwd).await?,
+            Some(stream)
+                if stream.full_access == full_access && !stream.state.lock().await.exited =>
+            {
+                stream
+            }
+            previous => {
+                if let Some(previous) = previous {
+                    previous
+                        .stop("runtime-stopped", "Runtime preparation settings changed.")
+                        .await;
+                }
+                self.inner.spawn(session, cwd, full_access).await?
+            }
         };
+        if full_access && let Err(error) = self.inner.permissions.remember_full_access(&stream.id) {
+            stream
+                .stop("persistence-failed", "Could not save chat permissions.")
+                .await;
+            return Err(permission_error(error));
+        }
         stream.events_enabled.store(true, Ordering::Release);
         let mut state = self.inner.state.lock().await;
         state.models = stream.state.lock().await.models.clone();
@@ -176,6 +218,13 @@ impl ClaudeAdapter {
         Ok(())
     }
     pub async fn connection_value(&self) -> Result<Value, CodexError> {
+        let active = self.inner.state.lock().await.active.clone();
+        if let Some(id) = active {
+            let stream = self.stream(&id).await?;
+            if stream.state.lock().await.exited {
+                self.activate(Some(&id), stream.cwd.to_str(), false).await?;
+            }
+        }
         let state = self.inner.state.lock().await;
         let stream = state
             .active
@@ -194,9 +243,10 @@ impl ClaudeAdapter {
         &self,
         model: Option<&str>,
         cwd: Option<&str>,
+        full_access: bool,
     ) -> Result<Value, CodexError> {
         let previous = self.inner.state.lock().await.active.clone();
-        self.activate(None, cwd).await?;
+        self.activate(None, cwd, full_access).await?;
         let stream = self.stream(&self.active_session_id().await?).await?;
         if let Err(error) = stream.set_model(model).await {
             let mut state = self.inner.state.lock().await;
@@ -212,7 +262,7 @@ impl ClaudeAdapter {
         self.connection_value().await
     }
     pub async fn open_session(&self, id: &str, cwd: Option<&str>) -> Result<Value, CodexError> {
-        self.activate(Some(id), cwd).await?;
+        self.activate(Some(id), cwd, false).await?;
         self.connection_value().await
     }
     pub async fn list_sessions(&self) -> Vec<Value> {
@@ -227,7 +277,7 @@ impl ClaudeAdapter {
             .collect()
     }
     pub async fn refresh_models(&self) -> Result<Vec<Value>, CodexError> {
-        let probe = self.inner.spawn(None, None).await?;
+        let probe = self.inner.spawn(None, None, false).await?;
         let models = probe.state.lock().await.models.clone();
         probe
             .stop("runtime-stopped", "Model refresh finished.")
@@ -457,12 +507,19 @@ impl Inner {
         self: &Arc<Self>,
         resume: Option<&str>,
         cwd: Option<&str>,
+        full_access: bool,
     ) -> Result<Arc<Stream>, CodexError> {
         let cwd = cwd.map(PathBuf::from).unwrap_or_else(|| self.cwd.clone());
         let id = resume
             .map(str::to_owned)
             .unwrap_or_else(|| Uuid::new_v4().to_string());
         let mut launch = self.command.clone();
+        launch.full_access = full_access;
+        if full_access {
+            launch.enable_full_access(&self.target).map_err(|error| {
+                crate::claude_adapter::error("invalid-configuration", error.to_string())
+            })?;
+        }
         if self.target.execution_host.kind == "wsl" {
             if !cwd.to_string_lossy().starts_with('/') {
                 return Err(error(
@@ -535,6 +592,7 @@ impl Inner {
             .take()
             .ok_or_else(|| error("runtime-unavailable", "Claude has no stderr."))?;
         let stream = Arc::new(Stream {
+            full_access,
             events_enabled: AtomicBool::new(false),
             owner: Arc::downgrade(self),
             id,

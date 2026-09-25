@@ -910,6 +910,32 @@ mod tests {
     use super::{LAUNCHER_SOURCE, ProxyInvocation, RELAY_SOURCE, hex_name, wrap_wsl_command};
     use zommi_core::{ExecutionHost, RuntimeCommand, RuntimeTarget};
 
+    #[test]
+    fn per_chat_permissions_apply_inside_an_already_wrapped_wsl_command() {
+        let targets = zommi_core::runtime_targets_from_wsl_probe("Ubuntu", true,
+            b"__ZOMMI_RUNTIME_HOME__/home/u\n__ZOMMI_RUNTIME_PATH__hermes\t/home/u/bin/hermes\n__ZOMMI_RUNTIME_PATH__opencode\t/home/u/bin/opencode\n__ZOMMI_RUNTIME_PATH__gemini\t/home/u/bin/gemini\n__ZOMMI_RUNTIME_PATH__claude\t/home/u/bin/claude\n");
+        let mut checked = 0;
+        for target in targets {
+            let expected = match target.adapter_id.as_str() {
+                "hermes-acp" => "HERMES_YOLO_MODE=1",
+                "opencode-acp" => "OPENCODE_PERMISSION={\"*\":\"allow\"}",
+                "gemini-acp" => "yolo",
+                "claude-stream-json" => "bypassPermissions",
+                _ => continue,
+            };
+            let normal =
+                wrap_wsl_command(&target, zommi_core::command_for_target(&target)).unwrap();
+            let mut full = normal.clone();
+            full.enable_full_access(&target).unwrap();
+            let boundary = full.args.iter().position(|v| v == "--").unwrap();
+            assert!(full.args[boundary + 1..].contains(&expected.to_owned()));
+            assert!(!normal.args.contains(&expected.to_owned()));
+            assert_eq!(full.command, normal.command);
+            checked += 1;
+        }
+        assert_eq!(checked, 4);
+    }
+
     #[cfg(unix)]
     #[test]
     fn resolves_wsl_cli_paths_in_the_linux_home_without_shell_interpolation() {

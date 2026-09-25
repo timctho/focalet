@@ -69,7 +69,7 @@ sign in there, and return to Zommi:
 [OpenClaw](https://github.com/openclaw/openclaw).
 
 First launch and **App settings → Full access (YOLO)** control permissions for
-newly started runtimes. The default is off: Zommi uses the agent's own policy
+new chats. The default is off: Zommi uses the agent's own policy
 and displays approval requests with **Allow once**, **Deny**, and session scope
 when supported. Requests include the source chat and queue across chats.
 Unanswered local CLI approvals expire after five minutes and are denied.
@@ -78,13 +78,15 @@ Full access lets agents change files and run commands without asking. Codex
 uses `approvalPolicy: never` with `danger-full-access`; Claude Code uses
 `bypassPermissions`; Gemini uses `--approval-mode yolo`; OpenCode gets an
 allow-all permission override; Hermes gets its YOLO launch setting. ACP runtimes
-also receive automatic grants for requested tools, preferring a one-time grant. Pi already runs its built-in tools without
-approval. Remote gateways retain their server policy and approval flow.
+also receive automatic grants for requested tools, preferring a one-time grant.
+Hermes and OpenClaw gateways receive automatic approval responses for Full access
+chats; questions and credential requests still need an answer. Pi already runs
+its built-in tools without approval. Gateway server policies remain in force.
 Runtime or administrator restrictions can still reject an operation.
 
-The setting is saved in Zommi, without rewriting CLI configuration. Prepared
-runtimes pick it up before use. For agents already running, **Quit** Zommi and
-reopen it to apply the change; closing the window only hides it to the tray.
+The setting is saved in Zommi without rewriting CLI configuration. It applies
+when creating each chat, including on a runtime already connected. Existing
+chats keep their permissions when switching, reconnecting or reopening Zommi.
 
 Zommi uses the runtime's existing account, models and tools. It does
 not merge histories across agents or move credentials into its settings. Native

@@ -4,7 +4,8 @@ use serde_json::Value;
 
 use crate::{
     RuntimeCommand, RuntimeTarget,
-    acp_adapter::{AcpAdapter, AcpConfig, AcpTurnRequest},
+    acp_adapter::{AcpConfig, AcpTurnRequest},
+    acp_runtime::AcpRuntime,
     claude_adapter::ClaudeAdapter,
     codex_adapter::{CodexConfig, CodexError, CodexTurnRequest, EventSender, TurnReceipt},
     hermes_gateway_adapter::{HermesGatewayAdapter, HermesGatewayConfig, HermesGatewayTurnRequest},
@@ -31,7 +32,7 @@ pub struct AdapterTurnRequest<'a> {
 #[derive(Clone)]
 pub enum RuntimeAdapter {
     Codex(SupervisedCodex),
-    Acp(AcpAdapter),
+    Acp(AcpRuntime),
     Claude(ClaudeAdapter),
     HermesGateway(HermesGatewayAdapter),
     OpenClawGateway(OpenClawGatewayAdapter),
@@ -63,10 +64,18 @@ impl RuntimeAdapter {
     ) -> Result<Value, CodexError> {
         match self {
             Self::Codex(adapter) => adapter.activate(session_id, cwd, full_access).await?,
-            Self::Acp(adapter) => adapter.activate(session_id.as_deref(), cwd).await?,
-            Self::Claude(adapter) => adapter.activate(session_id.as_deref(), cwd).await?,
-            Self::HermesGateway(adapter) => adapter.activate(session_id, cwd).await?,
-            Self::OpenClawGateway(adapter) => adapter.activate(session_id).await?,
+            Self::Acp(adapter) => {
+                adapter
+                    .activate(session_id.as_deref(), cwd, full_access)
+                    .await?
+            }
+            Self::Claude(adapter) => {
+                adapter
+                    .activate(session_id.as_deref(), cwd, full_access)
+                    .await?
+            }
+            Self::HermesGateway(adapter) => adapter.activate(session_id, cwd, full_access).await?,
+            Self::OpenClawGateway(adapter) => adapter.activate(session_id, full_access).await?,
             _ => {
                 return Err(CodexError {
                     code: "capability-unavailable".into(),
@@ -145,7 +154,7 @@ impl RuntimeAdapter {
                 .await?,
             )),
             "hermes-acp" | "openclaw-acp" | "opencode-acp" | "gemini-acp" => Ok(Self::Acp(
-                AcpAdapter::connect(
+                AcpRuntime::connect(
                     AcpConfig {
                         target,
                         command,
@@ -173,6 +182,7 @@ impl RuntimeAdapter {
             "openclaw-gateway" => Ok(Self::OpenClawGateway(
                 OpenClawGatewayAdapter::connect(
                     OpenClawGatewayConfig {
+                        full_access: command.full_access,
                         target,
                         preferred_session_id,
                         list_only,
@@ -238,7 +248,7 @@ impl RuntimeAdapter {
     pub async fn active_session_id(&self) -> Result<String, CodexError> {
         match self {
             Self::Codex(adapter) => adapter.ready().await?.active_session_id().await,
-            Self::Acp(adapter) => adapter.active_session_id().await,
+            Self::Acp(adapter) => adapter.current().await.active_session_id().await,
             Self::Claude(adapter) => adapter.active_session_id().await,
             Self::HermesGateway(adapter) => adapter.active_session_id().await,
             Self::OpenClawGateway(adapter) => adapter.active_session_id().await,
@@ -269,12 +279,7 @@ impl RuntimeAdapter {
     pub async fn refresh_models(&mut self) -> Result<Option<Vec<Value>>, CodexError> {
         let models = match self {
             Self::Codex(adapter) => adapter.ready().await?.load_models().await?,
-            Self::Acp(adapter) => {
-                let replacement = adapter.refreshed().await?;
-                let models = replacement.model_inventory().await;
-                *adapter = replacement;
-                return Ok(models);
-            }
+            Self::Acp(adapter) => return adapter.refresh_models().await,
             Self::Pi(adapter) => adapter.refresh_models().await?,
             Self::Claude(adapter) => adapter.refresh_models().await?,
             Self::HermesGateway(adapter) => adapter.reload_models().await?,
@@ -316,12 +321,16 @@ impl RuntimeAdapter {
                     retryable: false,
                 })
             }
-            Self::Acp(adapter) => adapter.create_session(model).await,
-            Self::Claude(adapter) => adapter.create_session(model, cwd).await,
+            Self::Acp(adapter) => adapter.create_session(model, cwd, full_access).await,
+            Self::Claude(adapter) => adapter.create_session(model, cwd, full_access).await,
             Self::HermesGateway(adapter) => {
-                adapter.create_session(model, effort, cwd, profile).await
+                adapter
+                    .create_session(model, effort, cwd, profile, full_access)
+                    .await
             }
-            Self::OpenClawGateway(adapter) => adapter.create_session(model, effort).await,
+            Self::OpenClawGateway(adapter) => {
+                adapter.create_session(model, effort, full_access).await
+            }
             Self::Pi(adapter) => adapter.create_session(model, effort).await,
         }
     }
@@ -409,7 +418,7 @@ impl RuntimeAdapter {
                         retryable: false,
                     })
             }
-            Self::Acp(adapter) => adapter.open_session(session_id).await,
+            Self::Acp(adapter) => adapter.open_session(session_id, cwd).await,
             Self::Claude(adapter) => adapter.open_session(session_id, cwd).await,
             Self::HermesGateway(adapter) => adapter.open_session(session_id, profile).await,
             Self::OpenClawGateway(adapter) => adapter.open_session(session_id).await,
@@ -454,7 +463,13 @@ impl RuntimeAdapter {
     pub async fn read_session(&self, session_id: &str) -> Result<Value, CodexError> {
         match self {
             Self::Codex(adapter) => adapter.ready().await?.read_session(session_id).await,
-            Self::Acp(adapter) => adapter.read_session(session_id).await,
+            Self::Acp(adapter) => {
+                adapter
+                    .for_session(session_id)
+                    .await?
+                    .read_session(session_id)
+                    .await
+            }
             Self::Claude(_) => Err(CodexError {
                 code: "capability-unavailable".into(),
                 message:
@@ -518,7 +533,12 @@ impl RuntimeAdapter {
         }
         let commands = match self {
             Self::Codex(a) => a.ready().await?.list_commands(session_id, force).await?,
-            Self::Acp(a) => a.list_commands(session_id, force).await?,
+            Self::Acp(a) => {
+                a.for_session(session_id)
+                    .await?
+                    .list_commands(session_id, force)
+                    .await?
+            }
             Self::Claude(a) => a.list_commands(session_id).await?,
             Self::Pi(a) => a.list_commands(session_id, force).await?,
             Self::HermesGateway(a) => a.list_commands(session_id, force).await?,
@@ -564,6 +584,8 @@ impl RuntimeAdapter {
             }
             Self::Acp(adapter) => {
                 adapter
+                    .for_session(request.session_id)
+                    .await?
                     .start_turn(AcpTurnRequest {
                         session_id: request.session_id,
                         message: request.message,
@@ -633,7 +655,13 @@ impl RuntimeAdapter {
                     .interrupt_turn(session_id, turn_id)
                     .await
             }
-            Self::Acp(adapter) => adapter.interrupt_turn(session_id, turn_id).await,
+            Self::Acp(adapter) => {
+                adapter
+                    .for_session(session_id)
+                    .await?
+                    .interrupt_turn(session_id, turn_id)
+                    .await
+            }
             Self::Claude(adapter) => adapter.interrupt_turn(session_id, turn_id).await,
             Self::HermesGateway(adapter) => adapter.interrupt_turn(session_id, turn_id).await,
             Self::OpenClawGateway(adapter) => adapter.interrupt_turn(session_id, turn_id).await,
@@ -687,6 +715,8 @@ impl RuntimeAdapter {
             }
             Self::Acp(adapter) => {
                 adapter
+                    .for_session(session_id)
+                    .await?
                     .resolve_approval(session_id, approval_id, option_id)
                     .await
             }

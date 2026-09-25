@@ -4,6 +4,7 @@
 import json
 import os
 import sys
+import uuid
 
 # The runtime wire protocol is UTF-8, including on Windows redirected pipes.
 sys.stdin.reconfigure(encoding="utf-8")
@@ -33,7 +34,7 @@ def log(message):
             stream.write(json.dumps(message, separators=(",", ":")) + "\n")
 
 
-log({"permissionEnvironment": {key: os.environ.get(key) for key in ["OPENCODE_PERMISSION", "HERMES_YOLO_MODE"]}})
+log({"launchArgs": sys.argv[1:], "fixturePid": os.getpid(), "permissionEnvironment": {key: os.environ.get(key) for key in ["OPENCODE_PERMISSION", "HERMES_YOLO_MODE"]}})
 
 for line in sys.stdin:
     try:
@@ -96,6 +97,8 @@ for line in sys.stdin:
             ]
         }
     elif method == "session/new":
+        if os.environ.get("ZOMMI_FAKE_UNIQUE_SESSIONS") == "1":
+            session_id = str(uuid.uuid4())
         auth_state = os.environ.get("ZOMMI_FAKE_ACP_AUTH_STATE_PATH")
         if auth_state and not os.path.isfile(auth_state):
             send({"jsonrpc": "2.0", "id": request_id, "error": {

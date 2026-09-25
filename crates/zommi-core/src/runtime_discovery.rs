@@ -217,7 +217,7 @@ pub struct RuntimeCommand {
 
 impl RuntimeCommand {
     /// Apply only to this child process; never rewrite the user's CLI config.
-    /// WSL args still contain the direct invocation at this point (before relay).
+    /// WSL args must retain the /usr/bin/env invocation, including after relay wrapping.
     pub fn enable_full_access(&mut self, target: &RuntimeTarget) -> io::Result<()> {
         let adapter = target.adapter_id.as_str();
         self.full_access = true;
@@ -229,7 +229,7 @@ impl RuntimeCommand {
             "claude-stream-json" => &["--permission-mode", "bypassPermissions"],
             "gemini-acp" => &["--approval-mode", "yolo"],
             // ACP clients grant individual permission requests in full-access
-            // mode. Pi has no built-in permission gate; gateways own policy.
+            // mode. Pi has no built-in permission gate; gateways use per-chat approvals.
             _ => &[],
         };
         self.args
