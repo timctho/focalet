@@ -1446,6 +1446,7 @@ final class ZommiController extends ChangeNotifier {
             'core-exited',
             'core-transport-failed',
             'runtime-timeout',
+            'wsl-startup-failed',
             'request-expired',
           }.contains(error.code));
 

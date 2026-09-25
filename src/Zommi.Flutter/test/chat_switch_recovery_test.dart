@@ -156,6 +156,7 @@ void main() {
     'runtime-exited',
     'unknown-outcome',
     'runtime-overloaded',
+    'wsl-startup-failed',
   ]) {
     testWidgets('$code automatically retries only the requested switch', (
       tester,
