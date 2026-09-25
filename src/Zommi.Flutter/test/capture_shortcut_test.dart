@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zommi_flutter/desktop/capture_shortcut.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
+import 'package:zommi_flutter/widgets/capture_shortcut_setting.dart';
 import 'package:zommi_flutter/zommi_app.dart';
 
 import 'test_support.dart';
@@ -44,6 +45,56 @@ class ShortcutPreferences implements AppPreferencesStore {
 }
 
 void main() {
+  test('Mac modifier glyphs leave portable shortcut bindings unchanged', () {
+    const shortcut = CaptureShortcut(usage: 0x70016, modifiers: 15);
+    expect(
+      CaptureShortcut.standard.labelForPlatform(TargetPlatform.macOS),
+      '⌥ A',
+    );
+    expect(shortcut.labelForPlatform(TargetPlatform.macOS), '⌃ ⌥ ⇧ ⌘ S');
+    for (final platform in [TargetPlatform.windows, TargetPlatform.linux]) {
+      expect(shortcut.labelForPlatform(platform), 'Ctrl+Alt+Shift+Meta+S');
+    }
+    expect(shortcut.toJson(), {'usage': 0x70016, 'modifiers': 15});
+    expect(shortcut.toHotKey().key, PhysicalKeyboardKey.keyS);
+    expect(shortcut.toHotKey().modifiers, hasLength(4));
+  });
+
+  testWidgets('Mac shortcut settings and reset use native key names', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CaptureShortcutSetting(
+            settings: ShortcutDesktop(),
+            value: CaptureShortcut.standard,
+            onChanged: (_) {},
+          ),
+        ),
+      ),
+    );
+    expect(find.text('⌥ A'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('selection-shortcut-setting')));
+    await tester.pumpAndSettle();
+    expect(find.text('Reset to ⌥ A'), findsOneWidget);
+    expect(find.textContaining('Option (⌥)'), findsOneWidget);
+    expect(find.textContaining('Alt'), findsNothing);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyS);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump();
+    expect(find.text('⌘ S'), findsOneWidget);
+    await tester.tap(find.text('Reset to ⌥ A'));
+    await tester.pump();
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('shortcut-recording')))
+          .data,
+      '⌥ A',
+    );
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
   test(
     'shortcut preferences round trip and reject malformed/unmodified keys',
     () {

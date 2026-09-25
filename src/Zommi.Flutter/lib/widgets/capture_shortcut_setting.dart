@@ -107,8 +107,10 @@ class _ShortcutDialogState extends State<_ShortcutDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
-              'Press Ctrl, Alt or Meta with a letter, number or F1–F12.',
+            Text(
+              Theme.of(context).platform == TargetPlatform.macOS
+                  ? 'Press Control (⌃), Option (⌥) or Command (⌘) with a letter, number or F1–F12.'
+                  : 'Press Ctrl, Alt or Meta with a letter, number or F1–F12.',
             ),
             const SizedBox(height: 16),
             Focus(
@@ -163,7 +165,7 @@ class _ShortcutDialogState extends State<_ShortcutDialog> {
                   _value = CaptureShortcut.standard;
                   _error = null;
                 }),
-          child: const Text('Reset to Alt+A'),
+          child: Text('Reset to ${CaptureShortcut.standard.label}'),
         ),
         TextButton(
           onPressed: _saving ? null : () => Navigator.pop(context),

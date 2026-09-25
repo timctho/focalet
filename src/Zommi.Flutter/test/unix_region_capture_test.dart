@@ -428,6 +428,28 @@ void main() {
       await pen.up();
       await tester.pump();
       expect(session.selected!.strokes.length, 1);
+      expect(session.selected!.strokes.single.color, const Color(0xffff686b));
+      final red = (await tester.runAsync(() async {
+        final codec = await ui.instantiateImageCodec(
+          await session.selected!.render(),
+        );
+        final image = (await codec.getNextFrame()).image;
+        try {
+          final rgba = (await image.toByteData())!.buffer.asUint8List();
+          return [
+            for (var i = 0; i < rgba.length; i += 4)
+              if (rgba[i] == 255 && rgba[i + 1] == 104 && rgba[i + 2] == 107) i,
+          ];
+        } finally {
+          image.dispose();
+          codec.dispose();
+        }
+      }))!;
+      expect(
+        red,
+        isNotEmpty,
+        reason: 'The exported crop must contain the default red stroke.',
+      );
       await tester.tap(find.byTooltip('Undo'));
       await tester.pump();
       expect(session.selected!.strokes, isEmpty);
@@ -440,6 +462,76 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     },
   );
+
+  testWidgets('toolbar follows the selected crop and stays within the canvas', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1280, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final frame = (await tester.runAsync(display))!;
+    final otherDisplay = (await tester.runAsync(display))!;
+    addTearDown(frame.image.dispose);
+    addTearDown(otherDisplay.image.dispose);
+    final session = RegionSelectionSession([frame, otherDisplay]);
+    addTearDown(session.dispose);
+    session.addRegion(const Rect.fromLTWH(10, 10, 20, 10));
+    await tester.pumpWidget(
+      MaterialApp(home: RegionCaptureEditor(session: session)),
+    );
+    final canvas = find.byKey(const ValueKey('region-capture-canvas'));
+    final toolbar = find.byKey(
+      const ValueKey('region-drawing-toolbar-viewport'),
+    );
+    Rect crop() {
+      final area = tester.getRect(canvas);
+      final fitted = applyBoxFit(BoxFit.contain, frame.pixels.size, area.size);
+      final image = Alignment.center.inscribe(fitted.destination, area);
+      final pixels = session.selected!.pixels;
+      final scale = image.width / frame.image.width;
+      return Rect.fromLTWH(
+        image.left + pixels.left * scale,
+        image.top + pixels.top * scale,
+        pixels.width * scale,
+        pixels.height * scale,
+      );
+    }
+
+    final first = tester.getRect(toolbar);
+    expect(first.left, closeTo(crop().left, .01));
+    expect(first.top, closeTo(crop().bottom + 12, .01));
+    session.addRegion(const Rect.fromLTWH(70, 65, 20, 10));
+    await tester.pump();
+    final second = tester.getRect(toolbar);
+    expect(second, isNot(first));
+    expect(second.bottom, closeTo(crop().top - 12, .01));
+    expect(tester.getRect(canvas).contains(second.topLeft), isTrue);
+    expect(tester.getRect(canvas).contains(second.bottomRight), isTrue);
+    await tester.tap(find.widgetWithText(ChoiceChip, 'A'));
+    await tester.pump();
+    expect(tester.getRect(toolbar), first);
+    session.change(() => session.displayIndex = 1);
+    session.addRegion(const Rect.fromLTWH(40, 40, 20, 10));
+    await tester.pump();
+    session.removeSelected();
+    await tester.pump();
+    expect(session.displayIndex, 0);
+    expect(tester.getRect(toolbar), second);
+    // Palette selection survives switching regions, and toolbar taps never
+    // create another selection through the canvas underneath.
+    await tester.tap(find.byTooltip('Drawing color ff2196f3'));
+    await tester.pump();
+    session.select(0);
+    await tester.pump();
+    expect(session.color, Colors.blue);
+    expect(session.regions, hasLength(2));
+    await tester.binding.setSurfaceSize(const Size(400, 320));
+    await tester.pumpAndSettle();
+    final compact = tester.getRect(toolbar);
+    expect(tester.getRect(canvas).contains(compact.topLeft), isTrue);
+    expect(tester.getRect(canvas).contains(compact.bottomRight), isTrue);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
 
   testWidgets('closing keys release before the editor gives up its window', (
     tester,

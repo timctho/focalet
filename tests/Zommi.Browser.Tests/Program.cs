@@ -282,7 +282,12 @@ try
         "A simultaneous capture cannot replace an active selection's observation");
     var textarea = await Bounds("#selection");
     await Click(textarea.X + 40, textarea.Y + 25);
-    await Key("a", "KeyA", 2, 65);
+    if (OperatingSystem.IsMacOS())
+    {
+        await Command("Input.dispatchKeyEvent", new { type = "keyDown", key = "a", code = "KeyA", modifiers = 4, windowsVirtualKeyCode = 65, commands = new[] { "selectAll" } });
+        await Command("Input.dispatchKeyEvent", new { type = "keyUp", key = "a", code = "KeyA", modifiers = 4, windowsVirtualKeyCode = 65 });
+    }
+    else await Key("a", "KeyA", 2, 65);
     var exact = (await Evaluate("document.querySelector('#selection').value")).GetString();
     var selection = await capture.ReadAsync("capture", textarea.X + 40, textarea.Y + 25, null, token);
     Check(selection.SelectedText.Single() == exact, "Mouse and keyboard selection preserves original newlines, spaces and Unicode");
