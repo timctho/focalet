@@ -22,11 +22,17 @@ zommi_output=$(mktemp) || exit 1
 trap 'rm -f "$zommi_output"' EXIT
 # Shell startup messages are not protocol output. Bound shell initialization
 # separately from cold WSL boot, and kill its children if startup hangs.
+set -- "$zommi_shell" "$zommi_flags" "$zommi_probe" "$@"
 if command -v timeout >/dev/null 2>&1; then
-  timeout -k 1 5 "$zommi_shell" "$zommi_flags" "$zommi_probe" "$@" </dev/null >"$zommi_output" 2>/dev/null || exit 1
-else
-  "$zommi_shell" "$zommi_flags" "$zommi_probe" "$@" </dev/null >"$zommi_output" 2>/dev/null || exit 1
+  set -- timeout -k 1 5 "$@"
 fi
+# WSL can attach a controlling terminal even with redirected stdin. Detach it
+# before timeout creates a process group, or interactive shells stop on SIGTTIN
+# while trying to become that terminal's foreground job.
+if command -v setsid >/dev/null 2>&1; then
+  set -- setsid --wait "$@"
+fi
+"$@" </dev/null >"$zommi_output" 2>/dev/null || exit 1
 [ "$(wc -c <"$zommi_output")" -le 262144 ] || exit 1
 grep -qx '__ZOMMI_RUNTIME_READY__' "$zommi_output" || exit 1
 grep '^__ZOMMI_RUNTIME_' "$zommi_output"

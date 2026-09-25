@@ -71,6 +71,24 @@ class WslDiscoveryTests(unittest.TestCase):
             self.assertIn('__ZOMMI_RUNTIME_PATH__' + name + '\t', result.stdout)
         self.assertNotIn('__ZOMMI_RUNTIME_PATH__not-executable', result.stdout)
 
+    def test_controlling_terminal_does_not_stop_interactive_shell_initialization(self):
+        import fcntl
+        import pty
+        import termios
+        master, slave = pty.openpty()
+        def terminal_session():
+            os.setsid()
+            fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+        try:
+            result = subprocess.run(['/bin/sh', str(PROBE), 'codex'], env=self.env,
+                                    stdin=slave, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    text=True, preexec_fn=terminal_session, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('__ZOMMI_RUNTIME_PATH__codex\t' + str(self.runtime / 'codex'), result.stdout)
+        finally:
+            os.close(slave)
+            os.close(master)
+
     def test_hung_or_early_exiting_shell_is_a_failed_probe_not_an_empty_catalog(self):
         self.rc.write_text('sleep 30\n')
         started = time.monotonic()
