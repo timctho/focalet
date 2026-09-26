@@ -294,6 +294,11 @@ class Session:
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait(timeout=4)
+        # D-Bus can activate the document portal outside our child process list.
+        # Unmount its private FUSE export before TemporaryDirectory removes it.
+        documents = self.root / "run/doc"
+        if os.path.ismount(documents):
+            self.run("fusermount3", "-u", documents)
 
 
 def desktop_status_without_gnome(session, helper):
@@ -541,6 +546,9 @@ def browser_acceptance(session, helper, browser, browser_host):
             "--force-renderer-accessibility",
             "--no-first-run",
             "--no-default-browser-check",
+            # This disposable profile has no credentials. Avoid GNOME Keyring's
+            # first-use modal, which correctly blocks desktop capture in CI.
+            "--password-store=basic",
             "--disable-background-networking",
             "--disable-component-update",
             "--disable-sync",
@@ -558,9 +566,10 @@ def browser_acceptance(session, helper, browser, browser_host):
     )
     time.sleep(0.5)
     capture = session.start("browser-capture", [helper, "--capture-host"], pipes=True)
-    frame = session.request(capture, "selectContent", authorize=True)["result"][
-        "frames"
-    ][0]
+    selected = session.request(capture, "selectContent", authorize=True)
+    assert selected["ok"], selected
+    assert selected["result"].get("frames"), selected
+    frame = selected["result"]["frames"][0]
     source = next(w for w in frame["windows"] if w.get("processId") == app.pid)
     b = source["bounds"]
     anchor = {"x": b["x"] + 100, "y": b["y"] + 350, "width": 8, "height": 8}
@@ -669,8 +678,14 @@ section:target{display:grid;grid-template-columns:1fr 1fr;gap:24px}.card{backgro
             ),
         },
     )
-    wait("floating HTML preview", report_path.exists)
-    report = json.loads(report_path.read_text())
+    def preview_report():
+        try:
+            return json.loads(report_path.read_text())
+        except (FileNotFoundError, json.JSONDecodeError):
+            # The app creates the file before its asynchronous write completes.
+            return None
+
+    report = wait("complete floating HTML preview report", preview_report)
     session.driver("Ready")
     time.sleep(0.5)
     assert report["status"] == "opened", report
