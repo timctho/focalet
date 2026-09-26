@@ -6,16 +6,16 @@ installation and account. You do not need a separate model API key in Zommi.
 
 ## 1. Install the app
 
-Download the newest published version from [Zommi Releases](https://github.com/timctho/zommi/releases).
-Choose the installer for your computer from that release's assets; older previews
-may only include Windows. Do not use GitHub's “Source code” archive as an installer.
+Download the [latest Zommi release](https://github.com/timctho/zommi/releases/latest).
+Choose the installer for your computer from that release's assets.
+Do not use GitHub's “Source code” archive as an installer.
 
 | Computer | Download | Install |
 | --- | --- | --- |
 | Windows 10/11, x64 | `Zommi-Setup-x64.exe` | Run the installer, then launch Zommi from Start |
-| Mac with Apple Silicon | `Zommi-macOS-arm64.dmg`, when available | Open the DMG; drag Zommi into Applications |
-| Mac with Intel | `Zommi-macOS-x64.dmg`, when available | Open the DMG; drag Zommi into Applications |
-| Ubuntu 24.04 LTS, x64 | `Zommi-Ubuntu-amd64.deb`, when listed in the release | `sudo apt install ./Zommi-Ubuntu-amd64.deb` |
+| Mac with Apple Silicon | `Zommi-macOS-arm64.dmg` | Open the DMG; drag Zommi into Applications |
+| Mac with Intel | `Zommi-macOS-x64.dmg` | Open the DMG; drag Zommi into Applications |
+| Ubuntu 24.04 LTS, x64 | `Zommi-Ubuntu-amd64.deb` | `sudo apt install ./Zommi-Ubuntu-amd64.deb` |
 
 Windows installs for your account without administrator access and includes
 runtime libraries. You do not need Rust, Flutter, Visual Studio or .NET to use
@@ -26,7 +26,7 @@ On macOS 12 or later, launch the app from **Applications**, then grant
 **Accessibility** and **Screen Recording** when requested. Restart Zommi after
 changing permissions if capture remains unavailable.
 
-Current preview installers are unsigned on Windows and not notarized on Mac.
+Windows installers are currently unsigned; Mac installers are not notarized.
 After checking the release source and checksum, Windows may require
 **More info → Run anyway**. On Mac, use
 **System Settings → Privacy & Security → Open Anyway** for a trusted download.
