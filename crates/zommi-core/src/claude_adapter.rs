@@ -77,6 +77,7 @@ struct Stream {
 #[derive(Default)]
 struct StreamState {
     exited: bool,
+    exit_error: Option<CodexError>,
     turn: Option<Turn>,
     approvals: HashMap<String, Value>,
     models: Vec<Value>,
@@ -794,12 +795,20 @@ impl Stream {
         .map_err(|e| error("runtime-exited", format!("Claude input closed: {e}")))
     }
     async fn control(&self, request: Value) -> Result<Value, CodexError> {
-        if self.state.lock().await.exited {
-            return Err(error("runtime-exited", "Claude is disconnected."));
-        }
         let id = Uuid::new_v4().to_string();
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().await.insert(id.clone(), tx);
+        {
+            // Register under the same lock that marks an exit, so a fast argv
+            // rejection cannot lose the pending initialize or its diagnostic.
+            let state = self.state.lock().await;
+            if state.exited {
+                return Err(state
+                    .exit_error
+                    .clone()
+                    .unwrap_or_else(|| error("runtime-exited", "Claude is disconnected.")));
+            }
+            self.pending.lock().await.insert(id.clone(), tx);
+        }
         let result = match self
             .write(&json!({"type":"control_request","request_id":id,"request":request}))
             .await
@@ -1051,9 +1060,11 @@ impl Stream {
         }
         state.exited = true;
         let diagnostic = sanitize_diagnostic(format!("{message}\n{}", state.stderr));
+        let failure = error(code, &diagnostic);
+        state.exit_error = Some(failure.clone());
         drop(state);
         for (_, tx) in std::mem::take(&mut *self.pending.lock().await) {
-            let _ = tx.send(Err(error(code, &diagnostic)));
+            let _ = tx.send(Err(failure.clone()));
         }
         self.finish("unknown", Some(&diagnostic)).await;
         self.emit(
