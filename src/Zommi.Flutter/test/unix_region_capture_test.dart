@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
@@ -84,7 +85,20 @@ class _SessionBackend implements UnixRegionBackend, UnixCaptureSession {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  test('Wayland accepts sparse one-level RGB rounding but rejects content changes', () async {
+  test('unchanged Wayland checkbox keeps context after a compositor redraw', () async {
+    // Captured from the synthetic GTK fixture before/after editor focus changes:
+    // 115 of 82,181 pixels differ by at most two RGB levels; geometry is equal.
+    Future<String> fixture(String name) async =>
+        'data:image/png;base64,${base64Encode(await File('test/fixtures/wayland/checkbox-$name.png').readAsBytes())}';
+    final before = await fixture('before');
+    final after = await fixture('after');
+    expect(await sameCapturedPixels(before, after), isFalse);
+    expect(
+      await sameCapturedPixels(before, after, allowRoundingNoise: true),
+      isTrue,
+    );
+  });
+  test('Wayland accepts sparse RGB rounding but rejects larger content changes', () async {
     Future<String> png(int count, int delta) async {
       final recorder = ui.PictureRecorder();
       final canvas = Canvas(recorder);
@@ -107,7 +121,7 @@ void main() {
     }
 
     final original = await png(0, 0);
-    final noise = await png(10, 1);
+    final noise = await png(10, 2);
     expect(await sameCapturedPixels(original, noise), isFalse);
     expect(
       await sameCapturedPixels(original, noise, allowRoundingNoise: true),
@@ -116,7 +130,7 @@ void main() {
     expect(
       await sameCapturedPixels(
         original,
-        await png(10, 2),
+        await png(10, 3),
         allowRoundingNoise: true,
       ),
       isFalse,

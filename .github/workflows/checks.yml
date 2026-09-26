@@ -64,6 +64,14 @@ jobs:
         run: /usr/bin/python3 scripts/accept-linux-wayland.py --package artifacts/zommi-linux-x64 --browser /usr/bin/google-chrome
       - name: Ensure checks did not rewrite committed files
         run: git diff --exit-code
+      - name: Save failed synthetic Wayland acceptance
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: wayland-failures-${{ github.sha }}
+          path: artifacts/wayland-acceptance/
+          if-no-files-found: ignore
+          retention-days: 3
       - name: Save failed UI comparisons
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

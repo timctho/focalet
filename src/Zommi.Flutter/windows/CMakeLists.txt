@@ -57,9 +57,9 @@ add_subdirectory("runner")
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
-# C++/WinRT otherwise selects experimental coroutines under C++17, which newer
-# MSVC releases reject. Use standard C++20 coroutines for the WebView plugin.
-target_compile_features(flutter_inappwebview_windows_plugin PRIVATE cxx_std_20)
+# Use standard coroutines without changing this plugin's C++17 language mode.
+# C++/WinRT otherwise selects experimental coroutines, rejected by newer MSVC.
+target_compile_options(flutter_inappwebview_windows_plugin PRIVATE /await:strict)
 
 
 # === Installation ===

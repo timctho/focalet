@@ -771,6 +771,9 @@ def ui_acceptance(session, package, fixture_app):
             **session.env,
             "XDG_CONFIG_HOME": str(config.parent),
             "ZOMMI_ACCEPTANCE_LOG": str(trace),
+            "ZOMMI_LINUX_CAPTURE_HOST": str(ROOT / "tests/fixtures/trace-wayland-capture.py"),
+            "ZOMMI_CAPTURE_TRACE_HELPER": str(package / "zommi-linux-capture"),
+            "ZOMMI_CAPTURE_TRACE_DIR": str(session.evidence / "capture"),
         },
     )
     ready = wait("packaged desktop readiness", lambda: events(trace, "desktop.ready"))[
