@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 import 'package:zommi_flutter/zommi_app.dart';
 
@@ -67,6 +68,58 @@ void main() {
     await tester.ensureVisible(button);
     await tester.tap(button);
     await tester.pumpAndSettle();
+  }
+
+  for (final (id, adapter, code, label, call) in [
+    (
+      'claude',
+      'claude-stream-json',
+      'runtime-update-required',
+      'Update Claude Code',
+      'update',
+    ),
+    (
+      'openclaw',
+      'openclaw-acp',
+      'gateway-unavailable',
+      'Open OpenClaw setup',
+      'signIn',
+    ),
+  ]) {
+    testWidgets(
+      '$id startup offers runtime setup and then connects without restarting the app',
+      (tester) async {
+        final target = RuntimeTarget(
+          id: 'runtime-$id',
+          runtimeId: id,
+          adapterId: adapter,
+          displayName: id,
+          protocolName: 'fixture',
+          executablePath: '/usr/bin/$id',
+          executionHost: const {'kind': 'wsl', 'name': 'Ubuntu'},
+          capabilityHints: RichFakeCore.capabilities,
+        );
+        final core = RichFakeCore()
+          ..discoveredTargets.clear()
+          ..discoveredTargets.add(target)
+          ..connectErrorCode = code
+          ..connectErrorMessage = 'Complete runtime setup, then retry.';
+        final desktop = FakeDesktopBridge();
+        final store = _Store();
+        await launch(tester, core, store, desktop);
+        await press(tester, 'setup-continue');
+        expect(store.saves, 0);
+        expect(find.text(label), findsWidgets);
+        await press(tester, 'setup-runtime-recovery');
+        expect(desktop.calls, contains('$call:${target.id}'));
+        expect(core.connectCount, 1);
+        core.connectErrorCode = null;
+        await press(tester, 'setup-continue');
+        expect(store.value.runtimeSetupCompleted, isTrue);
+        expect(core.activeTargetId, target.id);
+        expect(tester.takeException(), isNull);
+      },
+    );
   }
 
   testWidgets(

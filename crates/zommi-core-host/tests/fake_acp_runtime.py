@@ -36,6 +36,14 @@ def log(message):
 
 log({"launchArgs": sys.argv[1:], "fixturePid": os.getpid(), "permissionEnvironment": {key: os.environ.get(key) for key in ["OPENCODE_PERMISSION", "HERMES_YOLO_MODE"]}})
 
+failure_marker = os.environ.get("ZOMMI_FAKE_ACP_STARTUP_FAILURE")
+if failure_marker and os.path.isfile(failure_marker):
+    print("Zommi: preparing WSL transport.", file=sys.stderr)
+    print("Zommi: WSL transport ready; launching agent.", file=sys.stderr)
+    with open(failure_marker, encoding="utf-8") as failure:
+        print(failure.read(), file=sys.stderr, flush=True)
+    sys.exit(1)
+
 for line in sys.stdin:
     try:
         request = json.loads(line)

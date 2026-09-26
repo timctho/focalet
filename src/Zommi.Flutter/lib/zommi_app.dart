@@ -747,6 +747,15 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                 const SizedBox(width: 8),
                 if (_controller.connectionErrorTargetId != null ||
                     _controller.coreConnectionFailed) ...[
+                  if (_controller.runtimeRecoveryLabel case final label?)
+                    TextButton(
+                      key: const ValueKey('runtime-recovery-action'),
+                      onPressed:
+                          _controller.runtimeBusy || _controller.sessionBusy
+                          ? null
+                          : () => unawaited(_controller.openRuntimeRecovery()),
+                      child: Text(label),
+                    ),
                   TextButton(
                     key: const ValueKey('retry-connection'),
                     onPressed:
@@ -755,7 +764,8 @@ class _ZommiShellState extends State<ZommiShell> with WidgetsBindingObserver {
                         : () => unawaited(_controller.retryConnection()),
                     child: const Text('Retry'),
                   ),
-                  if (widget.core is CoreRecoveryBridge)
+                  if (widget.core is CoreRecoveryBridge &&
+                      _controller.runtimeRecoveryLabel == null)
                     IconButton(
                       key: const ValueKey('restart-connection'),
                       tooltip: 'Restart agent connections',
