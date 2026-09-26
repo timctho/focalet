@@ -816,12 +816,23 @@ def ui_acceptance(session, package, fixture_app):
             session.key(0xFF1B)
         else:
             x, y = origin["x"] + 36, origin["y"] + 70
+            editor_events = len(events(trace, "capture.editor.ready"))
             session.drag(point(x, y), point(x + 340, y + 240))
             # Hover every drawing/color/action control in the packaged app.
             # A tooltip failure formerly replaced the entire editor with white.
             from PIL import Image, ImageChops
 
-            controls = canvas["controls"]
+            # Drawing hides the floating toolbar, then moves it beside the new
+            # region. Wait for its rendered controls instead of clicking the
+            # coordinates recorded before the selection was drawn.
+            def rendered_controls():
+                latest = events(trace, "capture.editor.ready")[editor_events:]
+                if not latest:
+                    return None
+                controls = latest[-1]["controls"]
+                return controls if canvas["controls"].keys() <= controls.keys() else None
+
+            controls = wait("toolbar beside the selected region", rendered_controls)
             def control_point(name):
                 rect = controls[name]
                 return round(window["x"] + rect["x"] + rect["width"] / 2), round(window["y"] + rect["y"] + rect["height"] / 2)
@@ -829,9 +840,10 @@ def ui_acceptance(session, package, fixture_app):
             time.sleep(0.2)
             baseline = session.evidence / f"editor-before-hover-{index}.png"
             session.driver("Snapshot", baseline)
-            crop = (round(window["x"] + bounds["x"]), round(window["y"] + bounds["y"]),
-                    round(window["x"] + bounds["x"] + bounds["width"]),
-                    round(window["y"] + bounds["y"] + bounds["height"] * 0.6))
+            # The floating toolbar and its tooltips may cover the surrounding
+            # canvas. Compare the selected content, inset from its outline, so
+            # legitimate hover overlays cannot hide an all-white editor failure.
+            crop = (*point(x + 4, y + 4), *point(x + 336, y + 120))
             with Image.open(baseline) as image:
                 expected = image.convert("RGB").crop(crop)
             for tool_index, name in enumerate(controls):
