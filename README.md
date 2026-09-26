@@ -35,12 +35,12 @@ header. Sign in through your agent's own flow if needed.
 | Agent | Support |
 | --- | --- |
 | **Codex** | Chats, images, saved sessions, models, approvals and native skills |
+| **Claude Code** | Chats, images, models, tool approvals and session resume through stream-json |
 | **OpenCode** | Chats, images, saved sessions, models, approvals and advertised commands through ACP |
 | **Gemini CLI** | Chats, images, models, approvals and advertised commands through ACP; [resume limitations](docs/install.md#2-choose-the-agent-you-already-have) |
-| **Pi** | Chats, images, models and runtime commands through RPC |
 | **Hermes** | Chats and commands exposed by its ACP or Gateway profile |
 | **OpenClaw** | Chats and commands exposed by its ACP or local Gateway configuration |
-| **Claude Code** | Chats, images, models, tool approvals and session resume through stream-json |
+| **Pi** | Chats, images, models and runtime commands through RPC |
 
 ## See it in action
 

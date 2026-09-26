@@ -237,12 +237,14 @@ def check_windows():
             "document_preview",
             "document_preview_thumbnail",
             "runtime_environment",
+            "runtime_order",
             "capture_shortcut",
             "first_run_setup",
         )
     ]
     check_flutter(*tests)
     run(sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_claude_runtime.py", "-v")
+    run(sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_acp_startup.py", "-v")
     check_capture()
     run("pwsh", "-NoProfile", "-File", "scripts/test-windows-deployment-helpers.ps1")
 

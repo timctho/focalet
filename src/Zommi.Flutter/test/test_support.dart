@@ -906,6 +906,11 @@ class FakeDesktopBridge
   }
 
   @override
+  Future<void> openRuntimeUpdate(RuntimeTarget target) async {
+    calls.add('update:${target.id}');
+  }
+
+  @override
   Future<String?> selectRuntimeExecutable() async {
     calls.add('selectRuntimeExecutable');
     return nextRuntimeExecutable;

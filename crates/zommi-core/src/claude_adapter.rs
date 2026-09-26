@@ -22,7 +22,7 @@ use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::{ChildStdin, Command},
     sync::{Mutex, oneshot},
-    task::JoinHandle,
+    task::AbortHandle,
     time::{Duration, timeout},
 };
 use uuid::Uuid;
@@ -51,6 +51,7 @@ struct Inner {
     cwd: PathBuf,
     events: EventSender,
     sequence: AtomicU64,
+    include_partial_messages: AtomicBool,
     state: Mutex<AdapterState>,
     selection: Mutex<()>,
 }
@@ -70,7 +71,7 @@ struct Stream {
     stdin: Mutex<ChildStdin>,
     state: Mutex<StreamState>,
     pending: Mutex<HashMap<String, oneshot::Sender<Result<Value, CodexError>>>>,
-    tasks: Mutex<Vec<JoinHandle<()>>>,
+    tasks: Mutex<Vec<AbortHandle>>,
     operation: Mutex<()>,
 }
 #[derive(Default)]
@@ -108,6 +109,7 @@ impl ClaudeAdapter {
                 cwd,
                 events,
                 sequence: AtomicU64::new(0),
+                include_partial_messages: AtomicBool::new(true),
                 state: Mutex::new(AdapterState::default()),
                 selection: Mutex::new(()),
             }),
@@ -509,11 +511,53 @@ impl Inner {
         cwd: Option<&str>,
         full_access: bool,
     ) -> Result<Arc<Stream>, CodexError> {
+        let result = self.spawn_once(resume, cwd, full_access).await;
+        if let Err(failure) = &result
+            && self
+                .command
+                .args
+                .iter()
+                .any(|arg| arg == "--include-partial-messages")
+            && failure.message.lines().any(|line| {
+                line.contains("unknown option") && line.contains("--include-partial-messages")
+            })
+        {
+            // The CLI rejected its arguments before accepting a session or
+            // prompt. Only this optional streaming flag may be removed; the
+            // permission/control flags and any exact resume identity stay intact.
+            self.include_partial_messages
+                .store(false, Ordering::Release);
+            if resume.is_some() {
+                // Legacy CLIs such as 1.0.107 fork the UUID on --resume.
+                // Argument rejection happened before touching the saved chat.
+                return Err(error(
+                    "runtime-update-required",
+                    "Update Claude Code with `claude update` in the same runtime before reopening this chat. This older CLI cannot safely preserve the saved conversation ID. Your saved chat has not been changed.",
+                ));
+            }
+            return self.spawn_once(resume, cwd, full_access).await;
+        }
+        result
+    }
+
+    async fn spawn_once(
+        self: &Arc<Self>,
+        resume: Option<&str>,
+        cwd: Option<&str>,
+        full_access: bool,
+    ) -> Result<Arc<Stream>, CodexError> {
         let cwd = cwd.map(PathBuf::from).unwrap_or_else(|| self.cwd.clone());
         let id = resume
             .map(str::to_owned)
             .unwrap_or_else(|| Uuid::new_v4().to_string());
         let mut launch = self.command.clone();
+        // A resume always rechecks the optional flag so updating the CLI lets
+        // the same adapter recover without restarting other conversations.
+        if resume.is_none() && !self.include_partial_messages.load(Ordering::Acquire) {
+            launch
+                .args
+                .retain(|arg| arg != "--include-partial-messages");
+        }
         launch.full_access = full_access;
         if full_access {
             launch.enable_full_access(&self.target).map_err(|error| {
@@ -603,6 +647,7 @@ impl Inner {
             tasks: Mutex::new(Vec::new()),
             operation: Mutex::new(()),
         });
+        let (stderr_finished, mut stderr_done) = oneshot::channel::<()>();
         let weak = Arc::downgrade(&stream);
         let stdout_task = tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
@@ -625,12 +670,17 @@ impl Inner {
                         }
                     }
                     _ => {
+                        // stderr can arrive after stdout closes. Bound the
+                        // drain so a child that keeps a pipe open cannot leave
+                        // an active conversation waiting indefinitely.
+                        let _ = timeout(Duration::from_millis(500), &mut stderr_done).await;
                         if let Some(s) = weak.upgrade() {
-                            s.fail(
-                                "runtime-exited",
-                                "Claude output closed. Reconnect to resume.",
-                            )
-                            .await;
+                            let message = if s.events_enabled.load(Ordering::Acquire) {
+                                "Claude output closed. Reconnect to resume."
+                            } else {
+                                "Claude Code output closed during startup."
+                            };
+                            s.fail("runtime-exited", message).await;
                         }
                         break;
                     }
@@ -647,23 +697,52 @@ impl Inner {
                 let mut state = s.state.lock().await;
                 state.stderr = sanitize_diagnostic(format!("{}\n{line}", state.stderr));
             }
+            let _ = stderr_finished.send(());
         });
+        let stdout_abort = stdout_task.abort_handle();
+        let stderr_abort = stderr_task.abort_handle();
         let weak = Arc::downgrade(&stream);
         let wait_task = tokio::spawn(async move {
-            let _ = child.wait().await;
+            let status = child.wait().await;
             let _ = stdout_task.await;
             let _ = stderr_task.await;
             if let Some(s) = weak.upgrade() {
-                s.fail("runtime-exited", "Claude exited. Reconnect to resume.")
-                    .await;
+                let code = status
+                    .map(|status| status.to_string())
+                    .unwrap_or_else(|error| error.to_string());
+                let message = if s.events_enabled.load(Ordering::Acquire) {
+                    format!("Claude exited ({code}). Reconnect to resume.")
+                } else {
+                    format!("Claude Code exited during startup ({code}).")
+                };
+                s.fail("runtime-exited", &message).await;
             }
         });
-        stream.tasks.lock().await.push(wait_task);
+        stream
+            .tasks
+            .lock()
+            .await
+            .extend([stdout_abort, stderr_abort, wait_task.abort_handle()]);
         let info = match stream.control(json!({"subtype":"initialize"})).await {
             Ok(info) => info,
             Err(e) => {
                 stream.stop(&e.code, &e.message).await;
-                return Err(e);
+                return Err(
+                    if e.message
+                        .lines()
+                        .any(|line| line.contains("unknown option"))
+                    {
+                        error(
+                            "runtime-update-required",
+                            format!(
+                                "This Claude Code CLI does not support a required launch option. Run `claude update` in the same runtime, then retry. {}",
+                                e.message
+                            ),
+                        )
+                    } else {
+                        e
+                    },
+                );
             }
         };
         let mut state = stream.state.lock().await;
@@ -725,6 +804,14 @@ impl Stream {
             .write(&json!({"type":"control_request","request_id":id,"request":request}))
             .await
         {
+            Err(e) if e.code == "runtime-exited" => {
+                // A CLI can reject argv before the first write. Prefer the
+                // bounded stderr-backed exit diagnostic over a broken pipe.
+                match timeout(Duration::from_secs(1), rx).await {
+                    Ok(Ok(Err(failure))) => Err(failure),
+                    _ => Err(e),
+                }
+            }
             Err(e) => Err(e),
             Ok(()) => match timeout(CONTROL_TIMEOUT, rx).await {
                 Ok(Ok(value)) => value,

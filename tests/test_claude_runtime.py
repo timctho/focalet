@@ -120,6 +120,74 @@ class ClaudeRuntimeTests(unittest.TestCase):
         result = self.core.request('runtime.connect', {'runtimeTargetId': self.target['id'], 'cwd':str(self.path)}, ok=False)
         self.assertEqual(result['error']['code'], 'authentication-required')
 
+    def test_older_cli_retries_without_optional_partial_flag_and_keeps_permissions(self):
+        self.core.close()
+        self.env['ZOMMI_CLAUDE_ARGS_JSON'] = json.dumps([
+            str(FIXTURES / 'fake_claude_runtime.py'), '--include-partial-messages',
+            '--permission-prompt-tool', 'stdio'])
+        self.env['ZOMMI_FAKE_CLAUDE_REJECT_PARTIAL'] = '1'
+        self.core = self.start()
+        self.connect(fullAccess=True)
+        operation, _ = self.turn('one accepted prompt')
+        self.assertEqual(self.core.completed(operation)['payload']['status'], 'completed')
+        self.core.request('session.create', {'runtimeTargetId': self.target['id'], 'cwd': str(self.path)})
+        wire = [json.loads(line) for line in (self.path / 'wire.jsonl').read_text().splitlines()]
+        launches = [v for v in wire if v['type'] == 'fixture_launch']
+        self.assertEqual(len(launches), 3)
+        self.assertIn('--include-partial-messages', launches[0]['launchArgs'])
+        for launch in launches[1:]:
+            self.assertNotIn('--include-partial-messages', launch['launchArgs'])
+            self.assertIn('--permission-prompt-tool', launch['launchArgs'])
+        permissions = launches[1]['launchArgs']
+        self.assertEqual(permissions[permissions.index('--permission-mode') + 1], 'bypassPermissions')
+        self.assertEqual(sum(v['type'] == 'user' for v in wire), 1)
+
+    def test_required_flag_failure_keeps_stderr_and_does_not_remove_permissions(self):
+        self.core.close()
+        self.env['ZOMMI_FAKE_CLAUDE_STARTUP_ERROR'] = "error: unknown option '--permission-prompt-tool'"
+        self.core = self.start()
+        result = self.core.request('runtime.connect', {'runtimeTargetId': self.target['id'], 'cwd': str(self.path)}, ok=False)
+        self.assertEqual(result['error']['code'], 'runtime-update-required')
+        self.assertIn('--permission-prompt-tool', result['error']['message'])
+        self.assertIn('claude update', result['error']['message'])
+        launches = [json.loads(line) for line in (self.path / 'wire.jsonl').read_text().splitlines()]
+        self.assertEqual(sum(v['type'] == 'fixture_launch' for v in launches), 1)
+
+    def test_legacy_resume_requires_update_without_touching_saved_chat(self):
+        self.core.close()
+        self.env['ZOMMI_CLAUDE_ARGS_JSON'] = json.dumps([
+            str(FIXTURES / 'fake_claude_runtime.py'), '--include-partial-messages',
+            '--permission-prompt-tool', 'stdio'])
+        old_cli = self.path / 'old-cli'
+        old_cli.touch()
+        self.env['ZOMMI_FAKE_CLAUDE_REJECT_PARTIAL'] = str(old_cli)
+        self.core = self.start()
+        self.connect()
+        operation, _ = self.turn('crash-now')
+        self.assertEqual(self.core.completed(operation)['payload']['status'], 'unknown')
+        binding = (self.path / 'binding.json').read_bytes()
+        files = {p: p.read_bytes() for p in (self.path / 'sessions').glob('*.json')}
+        for restart in [False, True]:
+            if restart:
+                self.core.close()
+                self.core = self.start()
+            rejected = self.core.request('runtime.connect', dict(
+                runtimeTargetId=self.target['id'], preferredSessionId=self.identity['sessionId'],
+                cwd=str(self.path)), ok=False)
+            self.assertEqual(rejected['error']['code'], 'runtime-update-required')
+            self.assertEqual((self.path / 'binding.json').read_bytes(), binding)
+            self.assertEqual({p: p.read_bytes() for p in (self.path / 'sessions').glob('*.json')}, files)
+        launches = [json.loads(line) for line in (self.path / 'wire.jsonl').read_text().splitlines()]
+        resumes = [v for v in launches if v['type'] == 'fixture_launch' and '--resume' in v['launchArgs']]
+        self.assertEqual(len(resumes), 2, 'Only the rejected argv probe runs; no legacy resume fallback')
+        self.assertTrue(all('--include-partial-messages' in v['launchArgs'] for v in resumes))
+        old_cli.unlink()
+        self.connect(preferredSessionId=self.identity['sessionId'])
+        operation, _ = self.turn('recall-now')
+        self.assertEqual(self.core.completed(operation)['payload']['status'], 'completed')
+        self.assertTrue(any('crash-now' in e['payload'].get('text', '')
+                            for e in self.core.events if e['name'] == 'item.update'))
+
     def test_startup_timeout_does_not_poison_the_next_connection(self):
         store = self.path / 'sessions'
         store.mkdir()

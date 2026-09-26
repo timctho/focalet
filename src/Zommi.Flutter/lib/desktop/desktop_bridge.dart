@@ -195,6 +195,8 @@ abstract interface class DesktopBridge {
 
   Future<void> openRuntimeSignIn(RuntimeTarget target);
 
+  Future<void> openRuntimeUpdate(RuntimeTarget target);
+
   Future<String?> selectRuntimeExecutable();
 
   Future<String?> selectWorkspaceDirectory();
@@ -266,6 +268,9 @@ final class NoopDesktopBridge implements DesktopBridge {
 
   @override
   Future<void> openRuntimeSignIn(RuntimeTarget target) async {}
+
+  @override
+  Future<void> openRuntimeUpdate(RuntimeTarget target) async {}
 
   @override
   Future<String?> selectRuntimeExecutable() async => null;
@@ -1014,11 +1019,29 @@ final class FlutterDesktopBridge
         '${target.displayName} has no separate sign-in command.',
       );
     }
+    await _openRuntimeTerminal(target, signInArgs);
+  }
+
+  @override
+  Future<void> openRuntimeUpdate(RuntimeTarget target) async {
+    if (target.adapterId != 'claude-stream-json' ||
+        target.executablePath.isEmpty) {
+      throw StateError(
+        '${target.displayName} has no supported update command.',
+      );
+    }
+    await _openRuntimeTerminal(target, const ['update']);
+  }
+
+  Future<void> _openRuntimeTerminal(
+    RuntimeTarget target,
+    List<String> arguments,
+  ) async {
     if (Platform.isWindows) {
       final process = await Process.start('wt.exe', [
         '-w',
         'new',
-        ...windowsRuntimeSignInCommand(target, signInArgs),
+        ...windowsRuntimeSignInCommand(target, arguments),
       ], mode: ProcessStartMode.detached);
       unawaited(process.exitCode);
       return;
@@ -1026,7 +1049,7 @@ final class FlutterDesktopBridge
     if (Platform.isMacOS) {
       final command = [
         target.executablePath,
-        ...signInArgs,
+        ...arguments,
       ].map(_shellQuote).join(' ');
       final process = await Process.start('osascript', [
         '-e',
@@ -1038,7 +1061,12 @@ final class FlutterDesktopBridge
     final terminal = Platform.environment['TERMINAL']?.trim();
     final process = await Process.start(
       terminal?.isNotEmpty == true ? terminal! : 'x-terminal-emulator',
-      ['-e', target.executablePath, ...signInArgs],
+      [
+        '-e',
+        Platform.environment['SHELL'] ?? '/bin/bash',
+        '-lic',
+        'exec ${[target.executablePath, ...arguments].map(_shellQuote).join(' ')}',
+      ],
       mode: ProcessStartMode.detached,
     );
     unawaited(process.exitCode);

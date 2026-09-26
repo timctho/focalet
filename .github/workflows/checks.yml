@@ -57,7 +57,7 @@ jobs:
           node tests/runtime-clis/node_modules/@anthropic-ai/claude-code/install.cjs
       - name: Verify real agent CLIs without accounts or external network
         run: |
-          sudo --preserve-env=PATH unshare --net -- bash -c 'ip link set lo up; exec python3 scripts/verify-runtime-clis.py'
+          sudo --preserve-env=PATH unshare --net -- bash -c 'ip link set lo up; exec runuser -u "$SUDO_USER" --preserve-environment -- python3 scripts/verify-runtime-clis.py'
       - name: Compile and verify the Linux desktop package
         run: bash scripts/package-unix.sh linux
       - name: Verify GNOME Wayland capture, context and recovery
@@ -122,8 +122,10 @@ jobs:
           dotnet-version: 8.0.x
       - name: Check core, Flutter and macOS golden contracts
         run: python3 scripts/check.py --suite rust --suite flutter
-      - name: Verify Claude stream controls and recovery on macOS
-        run: python3 -m unittest discover -s tests -p test_claude_runtime.py -v
+      - name: Verify agent startup and recovery on macOS
+        run: |
+          python3 -m unittest discover -s tests -p test_claude_runtime.py -v
+          python3 -m unittest discover -s tests -p test_acp_startup.py -v
       - name: Test native macOS selection geometry
         run: |
           xcrun swiftc -swift-version 5 \

@@ -45,7 +45,7 @@ the broker:
 ```sh
 npm ci --prefix tests/runtime-clis --ignore-scripts --no-audit --no-fund
 node tests/runtime-clis/node_modules/@anthropic-ai/claude-code/install.cjs
-sudo --preserve-env=PATH unshare --net -- bash -c 'ip link set lo up; exec python3 scripts/verify-runtime-clis.py'
+sudo --preserve-env=PATH unshare --net -- bash -c 'ip link set lo up; exec runuser -u "$SUDO_USER" --preserve-environment -- python3 scripts/verify-runtime-clis.py'
 ```
 
 The runtime fixture tests cover failure recovery, cancellation and approval

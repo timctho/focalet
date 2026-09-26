@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
+import 'package:zommi_flutter/core/runtime_order.dart';
 import 'package:zommi_flutter/state/codex_status.dart';
 import 'package:zommi_flutter/desktop/artifact_loader.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
@@ -130,6 +131,7 @@ final class ZommiController extends ChangeNotifier {
   bool coreConnectionFailed = false;
   String? connectionErrorTargetId;
   String? connectionErrorSessionId;
+  (String targetId, String action)? _runtimeRecovery;
   bool _retryCreatesSession = false;
   bool initialized = false;
   bool starting = true;
@@ -434,7 +436,7 @@ final class ZommiController extends ChangeNotifier {
   bool get runtimeOverridesSupported => core is RuntimeConfigurationBridge;
 
   List<Map<String, Object?>> get runtimeOverrideAdapters =>
-      mapList(runtimeSettings['adapters']);
+      mapList(runtimeSettings['adapters'])..sort(compareRuntimeAdapters);
 
   List<Map<String, Object?>> get configurableRuntimeAdapters =>
       runtimeOverrideAdapters
@@ -1002,7 +1004,26 @@ final class ZommiController extends ChangeNotifier {
     Object error, {
     bool activateTarget = true,
   }) {
-    final message = error.toString();
+    final message = error is CoreProtocolException
+        ? error.message
+        : error.toString();
+    final target = _runtimeTarget(targetId);
+    _runtimeRecovery = switch ((error, target?.adapterId)) {
+      (
+        CoreProtocolException(code: 'runtime-update-required'),
+        'claude-stream-json',
+      ) =>
+        (targetId, 'update'),
+      (CoreProtocolException(code: 'gateway-unavailable'), 'openclaw-acp') => (
+        targetId,
+        'setup',
+      ),
+      _ => null,
+    };
+    if (_runtimeRecovery != null) {
+      _setStatus(message, warning: true);
+      return true;
+    }
     final authenticationRequired =
         error is CoreProtocolException &&
             error.code == 'authentication-required' ||
@@ -1038,6 +1059,35 @@ final class ZommiController extends ChangeNotifier {
       _setStatus('${runtime.displayName} sign-in opened in a terminal');
     } on Object catch (error) {
       _setStatus('Could not open sign-in · $error', warning: true);
+    }
+  }
+
+  String? get runtimeRecoveryLabel => switch (_runtimeRecovery?.$2) {
+    'update' => 'Update Claude Code',
+    'setup' => 'Open OpenClaw setup',
+    _ => null,
+  };
+
+  Future<void> openRuntimeRecovery() async {
+    final recovery = _runtimeRecovery;
+    if (recovery == null || runtimeBusy || sessionBusy) return;
+    final target = _runtimeTarget(recovery.$1);
+    if (target == null) return;
+    try {
+      if (recovery.$2 == 'update') {
+        await desktop.openRuntimeUpdate(target);
+      } else {
+        await desktop.openRuntimeSignIn(target);
+      }
+      _setStatus(
+        'Finish ${target.displayName} setup in the terminal, then retry the connection.',
+        warning: true,
+      );
+    } on Object catch (error) {
+      _setStatus(
+        'Could not open ${target.displayName} setup · $error',
+        warning: true,
+      );
     }
   }
 
@@ -3511,9 +3561,8 @@ final class ZommiController extends ChangeNotifier {
         aliases?[candidate.id] = selected.id;
       }
     }
-    return orderedKeys
-        .map((key) => selectedByKey[key]!)
-        .toList(growable: false);
+    return orderedKeys.map((key) => selectedByKey[key]!).toList(growable: false)
+      ..sort(compareRuntimeTargets);
   }
 
   void _rememberActiveSessionSettings() {
@@ -3689,6 +3738,7 @@ final class ZommiController extends ChangeNotifier {
   }
 
   void dismissStatusWarning() {
+    _runtimeRecovery = null;
     statusWarning = false;
     _notify();
   }
@@ -3752,6 +3802,7 @@ final class ZommiController extends ChangeNotifier {
   }
 
   void _setStatus(String value, {bool warning = false}) {
+    if (!warning) _runtimeRecovery = null;
     status = value;
     statusWarning = warning;
     _notify();

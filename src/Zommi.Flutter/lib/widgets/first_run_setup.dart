@@ -262,6 +262,18 @@ class _FirstRunSetupState extends State<FirstRunSetup> {
                           style: TextStyle(color: colors.error),
                         ),
                       ),
+                    if (controller.runtimeRecoveryLabel case final label?)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          key: const ValueKey('setup-runtime-recovery'),
+                          onPressed: busy
+                              ? null
+                              : controller.openRuntimeRecovery,
+                          icon: const Icon(Icons.open_in_new, size: 17),
+                          label: Text(label),
+                        ),
+                      ),
                     if (controller.desktop
                         case final CapturePermissionBridge permissions)
                       if (permissions.supportsCapturePermissions)

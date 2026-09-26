@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 import uuid
 
 args = sys.argv[1:]
@@ -10,6 +11,17 @@ session = args[args.index('--resume') + 1] if '--resume' in args else args[args.
 if log := os.environ.get('ZOMMI_FAKE_REQUEST_LOG'):
     with open(log, 'a', encoding='utf-8') as out:
         out.write(json.dumps({'type':'fixture_launch', 'launchArgs':args, 'sessionId':session}) + '\n')
+startup_error = os.environ.get('ZOMMI_FAKE_CLAUDE_STARTUP_ERROR')
+partial_mode = os.environ.get('ZOMMI_FAKE_CLAUDE_REJECT_PARTIAL')
+reject_partial = partial_mode == '1' or bool(partial_mode and Path(partial_mode).exists())
+if reject_partial and '--include-partial-messages' in args:
+    startup_error = "error: unknown option '--include-partial-messages'"
+if startup_error:
+    # A process may close stdout before its useful diagnostic reaches stderr.
+    os.close(sys.stdout.fileno())
+    time.sleep(.1)
+    print(startup_error, file=sys.stderr, flush=True)
+    sys.exit(1)
 store = Path(os.environ['ZOMMI_FAKE_CLAUDE_STORE'])
 store.mkdir(exist_ok=True)
 file = store / (session + '.json')
@@ -22,8 +34,9 @@ def emit(value):
 
 def finish(text='CLAUDE_OK', *, error=False):
     identity = str(uuid.uuid4())
-    emit({'type': 'stream_event', 'session_id': session, 'event': {'type': 'message_start', 'message': {'id': identity}}})
-    emit({'type': 'stream_event', 'session_id': session, 'event': {'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'text_delta', 'text': text}}})
+    if not reject_partial:
+        emit({'type': 'stream_event', 'session_id': session, 'event': {'type': 'message_start', 'message': {'id': identity}}})
+        emit({'type': 'stream_event', 'session_id': session, 'event': {'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'text_delta', 'text': text}}})
     emit({'type': 'assistant', 'session_id': session, 'message': {'id': identity, 'content': [{'type': 'text', 'text': text}]}})
     emit({'type': 'result', 'session_id': session, 'subtype': 'error_during_execution' if error else 'success', 'is_error': error, 'result': text, 'errors': ['fixture API failure'] if error else []})
 

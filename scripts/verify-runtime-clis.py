@@ -128,7 +128,8 @@ class RealCliTests(unittest.TestCase):
         return operation, receipt
 
     def reply(self, operation):
-        self.assertEqual(self.core.completed(operation)['payload']['status'], 'completed')
+        completion = self.core.completed(operation)['payload']
+        self.assertEqual(completion['status'], 'completed', completion)
         blocks = {}
         for e in self.core.events:
             if e['name'] == 'item.update' and e.get('clientOperationId') == operation and e['payload'].get('kind') == 'assistant':
@@ -205,7 +206,7 @@ class RealCliTests(unittest.TestCase):
         self.env.update(CLAUDE_CONFIG_DIR=str(self.path / 'claude'),
                         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC='1', DISABLE_AUTOUPDATER='1',
                         ANTHROPIC_API_KEY='fixture-not-a-real-key', ANTHROPIC_BASE_URL=f'http://127.0.0.1:{server.server_port}',
-                        ZOMMI_CLAUDE_COMMAND=str(PACKAGES / '.bin/claude'),
+                        ZOMMI_CLAUDE_COMMAND=str(package / 'bin/claude.exe'),
                         ZOMMI_CLAUDE_ARGS_JSON=json.dumps(['--print','--verbose','--input-format','stream-json','--output-format','stream-json',
                             '--include-partial-messages','--permission-prompt-tool','stdio','--setting-sources','','--strict-mcp-config','--mcp-config','{"mcpServers":{}}']))
         connection = self.connect('claude')
@@ -258,6 +259,59 @@ class RealCliTests(unittest.TestCase):
         op, _ = self.turn('request-tool')
         self.assertIn('TOOL_DONE', self.reply(op))
         self.assertFalse(any(e['name'] == 'approval.requested' for e in self.core.events))
+
+    def test_legacy_claude_controls_and_safe_resume_after_update(self):
+        package = PACKAGES / 'claude-code-legacy'
+        self.assertEqual(json.loads((package / 'package.json').read_text())['version'], '1.0.107')
+        server = ModelServer()
+        server.output_file = str(self.workspace / 'legacy-approved.txt')
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.env.update(CLAUDE_CONFIG_DIR=str(self.path / 'claude'),
+                        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC='1', DISABLE_AUTOUPDATER='1',
+                        ANTHROPIC_API_KEY='fixture-not-a-real-key', ANTHROPIC_BASE_URL=f'http://127.0.0.1:{server.server_port}',
+                        ZOMMI_CLAUDE_COMMAND=shutil.which('node'),
+                        ZOMMI_CLAUDE_ARGS_JSON=json.dumps([str(package / 'cli.js'),
+                            '--print','--verbose','--input-format','stream-json','--output-format','stream-json',
+                            '--include-partial-messages','--permission-prompt-tool','stdio']))
+        connection = self.connect('claude')
+        saved = connection['sessionId']
+        operation, _ = self.turn('synthetic-session-marker')
+        self.assertEqual(self.reply(operation), 'CLAUDE_REAL_CLI_OK')
+        operation, _ = self.turn('request-tool')
+        while not any(e['name'] == 'approval.requested' for e in self.core.events):
+            self.core.receive()
+        approval = next(e['payload']['approvalId'] for e in self.core.events if e['name'] == 'approval.requested')
+        self.assertFalse(Path(server.output_file).exists())
+        self.core.request('approval.resolve', dict(self.identity, approvalId=approval, optionId='allow_once'))
+        self.assertIn('TOOL_DONE', self.reply(operation))
+        self.assertEqual(Path(server.output_file).read_text(), 'synthetic tool output')
+        self.core.close()
+        saved_binding = (self.path / 'binding.json').read_bytes()
+        files = {p: p.read_bytes() for p in (self.path / 'claude').rglob('*.jsonl')}
+        self.assertTrue(files)
+        self.core = Core(self.env)
+        self.addCleanup(self.core.close)
+        self.core.request('core.initialize')
+        self.core.request('runtime.discover')
+        rejected = self.core.request('runtime.connect', {
+            'runtimeTargetId': self.target, 'cwd': str(self.workspace),
+            'preferredSessionId': saved}, ok=False)
+        self.assertEqual(rejected['error']['code'], 'runtime-update-required')
+        self.assertEqual((self.path / 'binding.json').read_bytes(), saved_binding)
+        self.assertEqual({p: p.read_bytes() for p in (self.path / 'claude').rglob('*.jsonl')}, files,
+                         'A legacy resume must not fork or modify saved conversations')
+        self.core.close()
+        self.env.update(
+            ZOMMI_CLAUDE_COMMAND=str(PACKAGES / '@anthropic-ai/claude-code/bin/claude.exe'),
+            ZOMMI_CLAUDE_ARGS_JSON=json.dumps([
+                '--print', '--verbose', '--input-format', 'stream-json', '--output-format', 'stream-json',
+                '--include-partial-messages', '--permission-prompt-tool', 'stdio',
+                '--setting-sources', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}']))
+        self.assertEqual(self.connect('claude', saved)['sessionId'], saved)
+        operation, _ = self.turn('recall-marker')
+        self.assertEqual(self.reply(operation), 'REMEMBERED')
 
 
 

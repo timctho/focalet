@@ -104,6 +104,12 @@ Zommi does not import unrelated terminal chats or export canonical history.
 Older terminal-compatibility chats have no native Claude session ID; start a new
 Claude chat after upgrading. Existing manually configured CLI paths are reused.
 
+Older Claude CLIs that reject `--include-partial-messages` can create chats with
+whole-message updates. Reopening those chats requires an updated CLI because
+older versions can change the conversation ID on resume. Choose **Update Claude
+Code**, finish `claude update` in that runtime's terminal, then **Retry**. Saved
+conversations stay unchanged when Zommi rejects an incompatible resume.
+
 Gemini CLI connects through [`gemini --acp`](https://geminicli.com/docs/cli/acp-mode/).
 With Node.js 20 or newer, install a recent version using
 `npm install -g @google/gemini-cli`, then follow the
@@ -127,6 +133,13 @@ model selection. Its models, tools, permissions and
 saved sessions remain in OpenCode. Images, saved-chat loading and commands use
 the capabilities advertised by that version; built-in `/undo` and `/redo` are
 currently unavailable through OpenCode ACP.
+
+OpenClaw ACP requires a reachable OpenClaw Gateway before it can connect. If
+Zommi reports a Gateway handshake failure, run `openclaw gateway status` in the
+same host and OS account as the selected runtime. Start a stopped local service
+with `openclaw gateway start`; for first-time setup, use **Open OpenClaw setup**.
+For a remote Gateway, check its configured URL and access. Once ready, choose
+**Retry** in Zommi. Other agents and saved chats remain available.
 
 ### Test Gemini CLI
 

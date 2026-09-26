@@ -1490,18 +1490,19 @@ impl Inner {
                     .map_or_else(|| "signal".into(), |value| value.to_string())
             })
             .unwrap_or_else(|error| error.to_string());
-        let message = sanitize_diagnostic(format!(
-            "ACP process exited with code {code}. {}",
-            state.stderr
-        ));
+        let failure = acp_exit_error(
+            &self.target.adapter_id,
+            state.protocol_version == 0,
+            &code,
+            &state.stderr,
+        );
+        let message = failure.message.clone();
         let active = std::mem::take(&mut state.active_turns);
         let operations = std::mem::take(&mut state.turn_operations);
         drop(state);
         let pending = std::mem::take(&mut *self.pending.lock().await);
         for (_, pending) in pending {
-            let _ = pending
-                .completion
-                .send(Err(adapter_error("runtime-exited", message.clone())));
+            let _ = pending.completion.send(Err(failure.clone()));
         }
         for (session_id, turn_id) in active {
             self.emit(
@@ -1821,6 +1822,42 @@ fn adapter_error(code: impl Into<String>, message: impl Into<String>) -> CodexEr
         message: sanitize_diagnostic(message.into()),
         retryable: false,
     }
+}
+
+fn acp_exit_error(adapter: &str, initializing: bool, code: &str, stderr: &str) -> CodexError {
+    let diagnostic = stderr
+        .lines()
+        .filter(|line| {
+            !line.starts_with("Zommi: preparing WSL transport.")
+                && !line.starts_with("Zommi: WSL transport ready; launching agent.")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let lower = diagnostic.to_lowercase();
+    if adapter == "openclaw-acp"
+        && initializing
+        && lower.contains("acp bridge failed")
+        && [
+            "handshake",
+            "econnrefused",
+            "gateway closed",
+            "gateway connection",
+            "event loop readiness timeout",
+        ]
+        .iter()
+        .any(|reason| lower.contains(reason))
+    {
+        return adapter_error(
+            "gateway-unavailable",
+            format!(
+                "OpenClaw ACP started, but could not connect to its Gateway. Run `openclaw gateway status` in the same runtime. Start a stopped local Gateway with `openclaw gateway start`, or check the configured remote Gateway URL and access. Then retry; other agents remain available.\n{diagnostic}"
+            ),
+        );
+    }
+    adapter_error(
+        "runtime-exited",
+        format!("ACP process exited with code {code}. {diagnostic}"),
+    )
 }
 
 fn short_id(value: &str) -> &str {
