@@ -19,6 +19,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/desktop/capture_permissions.dart';
+import 'package:zommi_flutter/desktop/browser_connections.dart';
 import 'package:zommi_flutter/desktop/gnome_integration.dart';
 import 'package:zommi_flutter/desktop/capture_shortcut.dart';
 import 'package:zommi_flutter/desktop/response_notifications.dart';
@@ -297,6 +298,7 @@ final class FlutterDesktopBridge
     implements
         DesktopBridge,
         BrowserCaptureSettings,
+        BrowserConnectionSettings,
         CaptureThemeSettings,
         CapturePermissionBridge,
         GnomeDesktopSettings,
@@ -439,6 +441,18 @@ final class FlutterDesktopBridge
       settings.setBrowserPageDetails(enabled);
     }
   }
+
+  @override
+  bool get supportsBrowserConnections =>
+      _captureProvider is BrowserConnectionSettings;
+
+  @override
+  Future<List<BrowserConnectionStatus>> browserConnections() =>
+      (_captureProvider as BrowserConnectionSettings).browserConnections();
+
+  @override
+  Future<BrowserConnectionStatus> reconnectBrowser(CaptureBrowser browser) =>
+      (_captureProvider as BrowserConnectionSettings).reconnectBrowser(browser);
 
   final CaptureProvider _captureProvider;
   @override

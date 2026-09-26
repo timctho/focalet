@@ -8,6 +8,8 @@ import 'package:zommi_flutter/widgets/gnome_integration_setup.dart';
 import 'package:zommi_flutter/desktop/capture_shortcut.dart';
 import 'package:zommi_flutter/widgets/capture_shortcut_setting.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
+import 'package:zommi_flutter/desktop/browser_connections.dart';
+import 'package:zommi_flutter/widgets/browser_connections_setting.dart';
 import 'package:zommi_flutter/state/zommi_controller.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
@@ -1263,6 +1265,13 @@ class AppSettingsPanel extends StatelessWidget {
                   onChanged: (enabled) => onChanged(
                     preferences.copyWith(browserPageDetails: enabled),
                   ),
+                ),
+              if (controller.desktop
+                  case final BrowserConnectionSettings settings
+                  when settings.supportsBrowserConnections)
+                BrowserConnectionsSetting(
+                  settings: settings,
+                  enabled: preferences.browserPageDetails,
                 ),
               const SizedBox(height: 14),
               const Text(

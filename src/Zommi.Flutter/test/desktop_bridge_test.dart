@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:zommi_flutter/core/core_bridge.dart';
 import 'package:zommi_flutter/desktop/desktop_bridge.dart';
+import 'package:zommi_flutter/desktop/browser_connections.dart';
 import 'package:zommi_flutter/state/zommi_models.dart';
 import 'package:zommi_flutter/theme/app_preferences.dart';
 
@@ -335,6 +336,43 @@ void main() {
       ]);
     },
   );
+  test('browser connection controls use the shared capture helper and preserve the chosen browser', () async {
+    final client = _FakeNativeCaptureClient(
+      onRequest: (method) async => method == 'browserConnections'
+          ? {
+              'browsers': [
+                {
+                  'browser': 'edge',
+                  'state': 'setup-required',
+                  'message': 'Enable access.',
+                },
+                {
+                  'browser': 'chrome',
+                  'state': 'connected',
+                  'message': 'Connected.',
+                },
+              ],
+            }
+          : {'browser': 'edge', 'state': 'connected', 'message': 'Connected.'},
+    );
+    for (final provider in <BrowserConnectionSettings>[
+      WindowsCaptureProvider(captureClient: client),
+      UnixCaptureProvider(browser: client),
+    ]) {
+      final statuses = await provider.browserConnections();
+      expect(statuses.map((status) => status.browser), CaptureBrowser.values);
+      final edge = await provider.reconnectBrowser(CaptureBrowser.edge);
+      expect(edge.state, 'connected');
+      expect(client.requests.last, 'reconnectBrowser');
+      expect(client.requestParameters.last, {
+        'browser': 'edge',
+        'browserPageDetails': true,
+      });
+      (provider as BrowserCaptureSettings).setBrowserPageDetails(false);
+      await provider.browserConnections();
+      expect(client.requestParameters.last['browserPageDetails'], isFalse);
+    }
+  });
   test('disabling webpage details reaches both native helpers for every capture gesture', () async {
     final ordinary = _FakeNativeCaptureClient(onRequest: (_) async => {});
     final selector = _FakeNativeCaptureClient(

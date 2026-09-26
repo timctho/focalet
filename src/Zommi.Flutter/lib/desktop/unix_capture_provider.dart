@@ -2,7 +2,10 @@ part of 'desktop_bridge.dart';
 
 /// A shared editor with native pixels/accessibility and the Windows DOM core.
 final class UnixCaptureProvider
-    implements CaptureProvider, BrowserCaptureSettings {
+    implements
+        CaptureProvider,
+        BrowserCaptureSettings,
+        BrowserConnectionSettings {
   UnixCaptureProvider({
     UnixRegionBackend? backend,
     NativeCaptureClient? browser,
@@ -19,6 +22,36 @@ final class UnixCaptureProvider
   final Future<List<SelectedRegion>> Function(List<CapturedDisplay>) _editor;
   final NativeCaptureClient _browser;
   bool _browserPageDetails = true;
+  @override
+  bool get supportsBrowserConnections => true;
+
+  @override
+  Future<List<BrowserConnectionStatus>> browserConnections() async {
+    final result = await _browser.request(
+      'browserConnections',
+      parameters: {'browserPageDetails': _browserPageDetails},
+    );
+    return [
+      for (final value in result['browsers']! as List)
+        BrowserConnectionStatus.fromJson(
+          Map<String, Object?>.from(value as Map),
+        ),
+    ];
+  }
+
+  @override
+  Future<BrowserConnectionStatus> reconnectBrowser(
+    CaptureBrowser browser,
+  ) async => BrowserConnectionStatus.fromJson(
+    await _browser.request(
+      'reconnectBrowser',
+      parameters: {
+        'browser': browser.name,
+        'browserPageDetails': _browserPageDetails,
+      },
+    ),
+  );
+
   bool _closed = false;
   @override
   bool get supportsBrowserPageDetails => true;

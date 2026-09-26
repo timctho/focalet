@@ -104,6 +104,23 @@ availability depends on that runtime's retention.
 
 ## Connecting a Chromium browser
 
+**App settings → Browser connections** shows Edge and Chrome separately. Both
+can remain connected; Zommi chooses the browser owning the selected window.
+Opening settings or refreshing status does not open a debugging connection or
+request browser permission. **Ready to connect** means a discovery endpoint was
+found, while **Connected** means the helper has an open connection whose browser
+process was verified. It does not guarantee that every page or crop exposes DOM
+content: each capture still validates its native window, tab and geometry.
+
+Use **Set up** for browser-specific instructions, then **Connect**. Chrome's
+`chrome://inspect/#remote-debugging` page enables remote debugging on versions
+that support it. Edge's setup links to Microsoft's DevTools Protocol guide;
+`--remote-debugging-port=0` requests an automatically assigned port and discovery
+file. Startup options require a new browser process; Zommi does not close an
+existing browser to apply them. Configure the profile containing the page you
+want to capture. **Reconnect** retries only the selected browser and clears its
+failed-connection cooldown. The other browser's connection remains available.
+
 Zommi discovers an existing `DevToolsActivePort` file in the standard Chrome,
 Edge and Brave user-data directories (plus Chromium on Ubuntu/macOS). The browser must already offer remote
 debugging and permit the connection. Zommi does not restart the browser or
@@ -113,6 +130,11 @@ port, launch Zommi with `ZOMMI_BROWSER_CDP_ENDPOINT=http://127.0.0.1:9222`
 endpoint is also accepted. Remote endpoints and credentials in URLs are
 rejected. An explicit endpoint is exclusive; failed binding does not try another
 profile. Automatic discovery only considers the selected browser family.
+Settings identifies when the single `ZOMMI_BROWSER_CDP_ENDPOINT` override is
+active. Remove that override from Zommi's launch environment and restart Zommi
+to restore automatic discovery for both browsers. A connection belonging to the
+other browser is reported explicitly and is not disconnected by its neighbor's
+Reconnect control.
 
 Text, content selection and image selection share one native helper and one
 browser connection per endpoint. Separate UI and accessibility workers keep the selector
@@ -176,6 +198,9 @@ again afterward along with window coverage. This avoids
 Chrome compositor screenshot commands and their visible surface changes. The
 PNG dimensions are retained in the image mapping. UIA fallback compares intersecting accessible elements and states
 on both sides of the image capture.
+If that fallback rejects a capture, its explanation retains the preceding
+browser-connection failure so missing DOM access is not hidden by the later
+accessibility mismatch.
 
 ## Coverage and limits
 
@@ -226,6 +251,13 @@ results. The packaged gate also counts browser WebSocket handshakes and target
 attachments across three fresh captures, checks that native crops issue no
 Chrome screenshot commands, and exercises delayed replies and declined connections. The browser observer is released after capture; a disconnected client
 also loses its browser observation lease after 30 seconds.
+
+The browser tests also verify passive status, simultaneous browser connections,
+reconnect isolation, disabled capture, failed authorization and cooldown reset.
+To check real Edge and Chrome process identities on Windows, set `ZOMMI_TEST_EDGE`
+to `msedge.exe` and run `tests/Zommi.Browser.Tests` with Chrome's executable,
+an evidence output directory, and `--connections-only`. This uses temporary
+headless browser profiles and does not change personal browser settings.
 
 For native bbox and UIA verification without launching the Zommi app, run
 `./scripts/accept-windows-bbox-context.ps1 -CaptureHost <path-to-Zommi.Capture.exe>`.

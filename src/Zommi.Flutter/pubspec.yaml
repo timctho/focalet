@@ -2,7 +2,7 @@ name: zommi_flutter
 description: Zommi's cross-platform floating UI.
 repository: https://github.com/timctho/zommi
 publish_to: 'none'
-version: 0.2.0+10
+version: 0.2.1+11
 
 environment:
   sdk: ^3.13.2

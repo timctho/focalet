@@ -35,6 +35,12 @@ try
         await Task.Delay(50, token);
     }
     var endpoint = new Uri($"ws://127.0.0.1:{port[0]}{port[1]}");
+    if (args.Contains("--connections-only"))
+    {
+        await BrowserConnectionAcceptance.VerifyAsync(executable, endpoint, browser.Id,
+            (ok, name) => { if (!ok) throw new InvalidOperationException(name); Console.WriteLine("PASS " + name); }, token);
+        return;
+    }
     using var driver = await CdpConnection.ConnectAsync(endpoint, token);
     string tab;
     while (true)
@@ -512,6 +518,7 @@ try
     await driver.CallAsync("Browser.setWindowBounds", new { windowId = capture.WindowId, bounds = new { width = 1000, height = 900 } }, null, token);
     await Evaluate("window.scrollTo(0, 0); true");
     await Task.Delay(100, token);
+    await BrowserConnectionAcceptance.VerifyAsync(executable, endpoint, browser.Id, (ok, name) => Check(ok, name), token);
     await using (var proxy = new CountingBrowserProxy(endpoint))
     {
         using var connections = new BrowserConnectionPool();
