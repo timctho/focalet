@@ -141,6 +141,14 @@ jobs:
         run: ./scripts/accept-windows-capture.ps1 -PackageDirectory artifacts/zommi-windows-x64 -NonVisualOnly
       - name: Ensure checks and builds did not rewrite source
         run: git diff --exit-code
+      - name: Save failed UI comparisons
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: golden-failures-${{ matrix.platform }}-${{ matrix.architecture }}-${{ github.sha }}
+          path: src/Zommi.Flutter/test/failures/*.png
+          if-no-files-found: ignore
+          retention-days: 3
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: installer-${{ matrix.platform }}-${{ matrix.architecture }}-${{ github.sha }}
