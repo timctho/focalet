@@ -420,6 +420,8 @@ mod tests {
             .unwrap();
         let approval = timeout(Duration::from_secs(5), async {
             let mut id = String::new();
+            let mut resolved = false;
+            let mut completed = false;
             while let Some(event) = received.recv().await {
                 if event.name == "approval.requested" {
                     id = event.payload["approvalId"].as_str().unwrap().to_owned();
@@ -427,10 +429,18 @@ mod tests {
                 if event.name == "approval.resolved" {
                     assert_eq!(event.payload["reason"], "expired");
                     assert_eq!(event.payload["approvalId"], id);
+                    resolved = true;
+                }
+                // The fixture can finish as soon as it reads the denial, before
+                // the writer finishes flushing and emits approval.resolved.
+                if event.name == "turn.completed" {
+                    completed = true;
+                }
+                if resolved && completed {
                     return id;
                 }
             }
-            panic!("Missing expiry event");
+            panic!("Missing expiry or turn completion event");
         })
         .await
         .unwrap();
@@ -442,17 +452,6 @@ mod tests {
                 .code,
             "approval-expired"
         );
-        // The fixture only finishes its turn after receiving the approval reply.
-        timeout(Duration::from_secs(5), async {
-            while let Some(event) = received.recv().await {
-                if event.name == "turn.completed" {
-                    return;
-                }
-            }
-            panic!("Missing turn completion");
-        })
-        .await
-        .unwrap();
         let log = std::fs::read_to_string(root.join("requests.jsonl")).unwrap();
         assert!(
             log.lines()
