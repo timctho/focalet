@@ -45,7 +45,9 @@ def windows_installer(package: Path, output: Path, manifest: dict, compiler: str
             windows_name = nsis_string(relative.replace("/", "\\"))
             parent = str(path.parent).replace("/", "\\")
             destination = "$INSTDIR" if parent == "." else "$INSTDIR\\" + nsis_string(parent)
-            install += [f'SetOutPath "{destination}"', f'File "{nsis_string((package / path).as_posix())}"']
+            # NSIS resolves input files on the build host. Its Windows path
+            # parser splits on backslashes, including for !include directives.
+            install += [f'SetOutPath "{destination}"', f'File "{nsis_string(str(package / path))}"']
             uninstall.append(f'Delete "$INSTDIR\\{windows_name}"')
             directories.update(parent.as_posix() for parent in path.parents if parent != Path("."))
         for directory in sorted(directories, key=lambda name: (name.count("/"), name), reverse=True):
@@ -53,13 +55,13 @@ def windows_installer(package: Path, output: Path, manifest: dict, compiler: str
         (temp / "install.nsh").write_text("\n".join(install) + "\n", encoding="utf-8")
         (temp / "uninstall.nsh").write_text("\n".join(uninstall) + "\n", encoding="utf-8")
         definitions = {
-            "OUTPUT_FILE": asset.as_posix(),
+            "OUTPUT_FILE": str(asset),
             "APP_VERSION": version,
             "APP_DISPLAY_VERSION": f"{version}+{manifest['gitCommit'][:8]}",
             "APP_ICON_RELATIVE": nsis_string(manifest.get("icon", "data/flutter_assets/windows/runner/resources/app_icon.ico").replace("/", "\\")),
-            "APP_ICON": (package / "data/flutter_assets/windows/runner/resources/app_icon.ico").as_posix(),
-            "INSTALL_FILES": (temp / "install.nsh").as_posix(),
-            "UNINSTALL_FILES": (temp / "uninstall.nsh").as_posix(),
+            "APP_ICON": str(package / "data/flutter_assets/windows/runner/resources/app_icon.ico"),
+            "INSTALL_FILES": str(temp / "install.nsh"),
+            "UNINSTALL_FILES": str(temp / "uninstall.nsh"),
         }
         prefix = "/" if platform.system() == "Windows" else "-"
         subprocess.run(

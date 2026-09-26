@@ -109,6 +109,16 @@ jobs:
         run: python scripts/check.py --suite windows
       - name: Compile and verify the Windows desktop package
         run: ./scripts/package-windows.ps1 -Runtime win-x64
+      - name: Compile and verify the Windows installer
+        shell: pwsh
+        run: |
+          $compiler = Join-Path ${env:ProgramFiles(x86)} 'NSIS/makensis.exe'
+          if (-not (Test-Path $compiler)) {
+            choco install nsis --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'NSIS installation failed' }
+          }
+          python scripts/build_installer.py artifacts/zommi-windows-x64 --expected-commit $env:GITHUB_SHA --output artifacts/installers --makensis $compiler
+          if ($LASTEXITCODE -ne 0) { throw 'Windows installer failed' }
       - name: Ensure checks did not rewrite committed files
         run: git diff --exit-code
       - name: Save failed UI comparisons
