@@ -17,6 +17,9 @@ def fixture(directory, version="3.0"):
     if gtk4:
         Gtk.init()
     Gtk.Settings.get_default().set_property("gtk-cursor-blink", False)
+    # Pixel-alignment assertions need static fixture widgets even while the
+    # sharing dialog gives focus back. Keep the real app/compositor animated.
+    Gtk.Settings.get_default().set_property("gtk-enable-animations", False)
     window = Gtk.Window(title="Zommi Wayland context probe")
     window.set_default_size(720, 400)
     fixed = Gtk.Fixed()
