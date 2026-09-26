@@ -93,7 +93,7 @@ internal static class CaptureNativeHost
                         continue;
                     }
                     Interlocked.Increment(ref pending);
-                    if (request.Method == "capture") captures.Enqueue(request);
+                    if (request.Method is "capture" or "browserConnections" or "reconnectBrowser") captures.Enqueue(request);
                     else { selections.Enqueue(request); Post(SelectNext); }
                 }
             }
@@ -180,6 +180,12 @@ internal static class CaptureNativeHost
                     platform = "windows",
                     version = typeof(CaptureNativeHost).Assembly.GetName().Version?.ToString() ?? "0.0.0",
                 };
+                return false;
+            case "browserConnections":
+            case "reconnectBrowser":
+                result = BrowserObservationBridge.ConnectionStatus(
+                    !(request.Params.ValueKind == JsonValueKind.Object && request.Params.TryGetProperty("browserPageDetails", out var enabled) && enabled.ValueKind == JsonValueKind.False),
+                    request.Method == "reconnectBrowser" ? request.Params.GetProperty("browser").GetString() ?? "" : null);
                 return false;
             case "capture":
             {

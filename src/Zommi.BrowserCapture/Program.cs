@@ -18,10 +18,12 @@ while (await Console.In.ReadLineAsync() is { } line)
         id = request.GetProperty("id").GetString();
         var method = request.GetProperty("method").GetString();
         shutdown = method == "shutdown";
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(18));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var result = method switch
         {
             "ping" => (object)new { ready = true },
+            "browserConnections" => await host.ConnectionStatusAsync(request.GetProperty("params"), timeout.Token),
+            "reconnectBrowser" => await host.ConnectionStatusAsync(request.GetProperty("params"), timeout.Token, reconnect: true),
             "observe" => await host.ObserveAsync(request.GetProperty("params"), timeout.Token),
             "confirm" => await host.ConfirmAsync(timeout.Token),
             "release" or "shutdown" => host.Release(),
@@ -132,31 +134,14 @@ sealed class UnixBrowserCapture : IDisposable
     private static bool WindowTitleMatches(string native, string page) => native == page ||
         new[] { " - ", " – ", " — " }.Any(separator => native.StartsWith(page + separator, StringComparison.Ordinal));
 
-    private static IEnumerable<Uri> Endpoints(string processName)
+    private static IEnumerable<Uri> Endpoints(string processName) => BrowserDiscovery.Endpoints(processName);
+
+    public async Task<object> ConnectionStatusAsync(JsonElement request, CancellationToken cancellation, bool reconnect = false)
     {
-        var configured = Environment.GetEnvironmentVariable("ZOMMI_BROWSER_CDP_ENDPOINT");
-        if (!string.IsNullOrWhiteSpace(configured))
-        {
-            if (Uri.TryCreate(configured, UriKind.Absolute, out var endpoint)) yield return endpoint;
-            yield break;
-        }
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var root = OperatingSystem.IsMacOS() ? Path.Combine(home, "Library/Application Support") :
-            Environment.GetEnvironmentVariable("XDG_CONFIG_HOME") ?? Path.Combine(home, ".config");
-        var process = processName.ToLowerInvariant();
-        var names = process.Contains("brave", StringComparison.Ordinal) ? new[] { "BraveSoftware/Brave-Browser" } :
-            process.Contains("edge", StringComparison.Ordinal) ? new[] { OperatingSystem.IsMacOS() ? "Microsoft Edge" : "microsoft-edge" } :
-            process.Contains("chromium", StringComparison.Ordinal) ? new[] { OperatingSystem.IsMacOS() ? "Chromium" : "chromium" } :
-            process.Contains("chrome", StringComparison.Ordinal) ? new[] { OperatingSystem.IsMacOS() ? "Google/Chrome" : "google-chrome" } : [];
-        foreach (var name in names)
-        {
-            string[] lines;
-            try { lines = File.ReadAllLines(Path.Combine(root, name, "DevToolsActivePort")); }
-            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { continue; }
-            if (lines.Length >= 2 && int.TryParse(lines[0], out var port) && port is > 0 and <= 65535 &&
-                lines[1].StartsWith("/devtools/browser/", StringComparison.Ordinal))
-                yield return new Uri($"ws://127.0.0.1:{port}{lines[1]}");
-        }
+        var enabled = !request.TryGetProperty("browserPageDetails", out var value) || value.ValueKind != JsonValueKind.False;
+        var manager = new BrowserConnections(pool);
+        if (reconnect) return await manager.ReconnectAsync(request.GetProperty("browser").GetString() ?? "", enabled, cancellation);
+        return new { browsers = await manager.StatusAsync(enabled) };
     }
     public void Dispose() { Release(); pool.Dispose(); }
 }

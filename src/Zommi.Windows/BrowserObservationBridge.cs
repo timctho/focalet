@@ -299,37 +299,20 @@ internal sealed class BrowserObservationBridge : IDisposable
         return documents.Length == 1 ? documents[0] : null;
     }
 
-    internal static IEnumerable<Uri> Endpoints(string processName)
+    internal static IEnumerable<Uri> Endpoints(string processName) => BrowserDiscovery.Endpoints(processName);
+
+    internal static object ConnectionStatus(bool enabled, string? reconnectBrowser = null)
     {
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        var configured = Environment.GetEnvironmentVariable("ZOMMI_BROWSER_CDP_ENDPOINT");
-        if (!string.IsNullOrWhiteSpace(configured))
+        SetPageDetailsEnabled(enabled);
+        BrowserConnectionPool connections;
+        lock (ConnectionSettings) connections = Connections;
+        var manager = new BrowserConnections(connections);
+        if (reconnectBrowser is not null)
         {
-            if (Uri.TryCreate(configured, UriKind.Absolute, out var explicitEndpoint)) yield return explicitEndpoint;
-            // An explicitly configured browser must never fall through to
-            // another profile and prompt for unrelated browser access.
-            yield break;
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            return manager.ReconnectAsync(reconnectBrowser, enabled, timeout.Token).GetAwaiter().GetResult();
         }
-        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var directories = processName switch
-        {
-            "chrome" => new[] { "Google/Chrome/User Data" },
-            "msedge" => ["Microsoft/Edge/User Data"],
-            "brave" => ["BraveSoftware/Brave-Browser/User Data"],
-            _ => [],
-        };
-        foreach (var relative in directories)
-        {
-            string[] lines;
-            try { lines = File.ReadAllLines(Path.Combine(local, relative, "DevToolsActivePort")); }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { continue; }
-            if (lines.Length >= 2 && int.TryParse(lines[0], out var port) && port is > 0 and <= 65535 &&
-                lines[1].StartsWith("/devtools/browser/", StringComparison.Ordinal))
-            {
-                var endpoint = new Uri($"ws://127.0.0.1:{port}{lines[1]}");
-                if (seen.Add(endpoint.AbsoluteUri)) yield return endpoint;
-            }
-        }
+        return new { browsers = manager.StatusAsync(enabled).GetAwaiter().GetResult() };
     }
 
     internal static bool IsUnavailable(Exception exception) => exception is OperationCanceledException or TimeoutException or IOException or

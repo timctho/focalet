@@ -45,6 +45,12 @@ internal static class PortableBrowserHost
             }
             var ping = await Request("ping");
             check(ping.GetProperty("result").GetProperty("ready").GetBoolean(), "Portable browser host starts without a desktop runtime dependency");
+            var connectionStatus = await Request("browserConnections", new { browserPageDetails = true });
+            check(connectionStatus.GetProperty("result").GetProperty("browsers").GetArrayLength() == 2,
+                "Portable helper reports separate Edge and Chrome connection states");
+            var disabledConnection = await Request("reconnectBrowser", new { browser = "chrome", browserPageDetails = false });
+            check(disabledConnection.GetProperty("result").GetProperty("state").GetString() == "disabled",
+                "Portable helper honors disabled details for reconnect requests");
             var observed = await Request("observe", Parameters(processId));
             check(observed.GetProperty("result").GetProperty("available").GetBoolean(), "Portable observer binds the native browser process and viewport");
             var oldOutside = await evaluate("document.querySelector('#outside').textContent");

@@ -67,7 +67,7 @@ internal static class RegionContextCapture
             if (NativeCaptureWindow.ForRegion(region) != window ||
                 NativeCaptureWindow.Title(window) != title || NativeCaptureWindow.Bounds(window) != windowBounds ||
                 JsonSerializer.Serialize(before) != JsonSerializer.Serialize(after))
-                return ImageOnly(region, "The window or its accessible content changed while the image was captured.", pixels, source);
+                return ImageOnly(region, string.Join(" ", new[] { browserLimitation, "The window or its accessible content changed while the image was captured." }.Where(value => value is not null)), pixels, source);
             var spatial = before.Cells.Count == 0 ? null : new RegionSpatialContext { Cells = before.Cells };
             if (before.Elements.Count == 0)
                 return ImageOnly(region, string.Join(" ", new[] { browserLimitation, "No accessible text or named object was exposed inside this region." }.Where(value => value is not null)), pixels, source, spatial);

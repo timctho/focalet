@@ -2,6 +2,7 @@ using Zommi.Capture;
 
 var tests = new (string Name, Action Body)[]
 {
+    ("Browser discovery keeps Edge and Chrome profiles separate", BrowserProfiles),
     ("Selection stays primary and sanitized", SelectionStaysPrimaryAndSanitized),
     ("Internal capture metadata stays hidden", InternalMetadataStaysHidden),
     ("Accessibility preview stays compact", AccessibilityPreviewStaysCompact),
@@ -376,4 +377,22 @@ static void True(bool condition, string message)
     {
         throw new InvalidOperationException(message);
     }
+}
+
+static void BrowserProfiles()
+{
+    True(BrowserDiscovery.IsLocalEndpoint(new Uri("http://127.0.0.1:9222")) &&
+        BrowserDiscovery.IsLocalEndpoint(new Uri("ws://[::1]:9223/devtools/browser/example")), "Local endpoints were rejected.");
+    True(!BrowserDiscovery.IsLocalEndpoint(new Uri("https://example.com")) &&
+        !BrowserDiscovery.IsLocalEndpoint(new Uri("ws://user:password@localhost:9222")) &&
+        !BrowserDiscovery.IsLocalEndpoint(new Uri("file:///tmp/browser")), "Invalid connection configuration was accepted.");
+    foreach (var platform in new[] { "windows", "macos", "linux" })
+    {
+        var edge = BrowserDiscovery.ProfileDirectory("edge", platform);
+        var chrome = BrowserDiscovery.ProfileDirectory("chrome", platform);
+        True(edge is not null && chrome is not null && edge != chrome, "Browser profiles overlap on " + platform);
+    }
+    True(BrowserDiscovery.Family("msedge.exe") == "edge" && BrowserDiscovery.Family("Microsoft Edge") == "edge", "Edge process identity was lost.");
+    True(BrowserDiscovery.Family("chrome.exe") == "chrome" && BrowserDiscovery.Family("Google Chrome") == "chrome", "Chrome process identity was lost.");
+    True(BrowserDiscovery.ProfileDirectory("unknown", "windows") is null && BrowserDiscovery.Family("firefox") is null, "Unknown browser received another browser's profile.");
 }

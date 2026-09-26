@@ -169,12 +169,46 @@ CaptureProvider platformCaptureProvider() =>
     Platform.isWindows ? WindowsCaptureProvider() : UnixCaptureProvider();
 
 final class WindowsCaptureProvider
-    implements CaptureProvider, BrowserCaptureSettings, CaptureThemeSettings {
+    implements
+        CaptureProvider,
+        BrowserCaptureSettings,
+        BrowserConnectionSettings,
+        CaptureThemeSettings {
   Map<String, int> _theme = const {};
   @override
   void setCaptureTheme(Map<String, int> colors) =>
       _theme = Map.unmodifiable(colors);
   bool _browserPageDetails = true;
+  @override
+  bool get supportsBrowserConnections => true;
+
+  @override
+  Future<List<BrowserConnectionStatus>> browserConnections() async {
+    final result = await _captureClient.request(
+      'browserConnections',
+      parameters: {'browserPageDetails': _browserPageDetails},
+    );
+    return [
+      for (final value in result['browsers']! as List)
+        BrowserConnectionStatus.fromJson(
+          Map<String, Object?>.from(value as Map),
+        ),
+    ];
+  }
+
+  @override
+  Future<BrowserConnectionStatus> reconnectBrowser(
+    CaptureBrowser browser,
+  ) async => BrowserConnectionStatus.fromJson(
+    await _captureClient.request(
+      'reconnectBrowser',
+      parameters: {
+        'browser': browser.name,
+        'browserPageDetails': _browserPageDetails,
+      },
+    ),
+  );
+
   @override
   bool get supportsBrowserPageDetails => true;
   @override
