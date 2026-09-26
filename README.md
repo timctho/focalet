@@ -13,10 +13,10 @@ available text, links and structure.
 
 | Platform | Architecture | Download |
 | --- | --- | --- |
-| Windows 10/11 | x64 | [Setup · preview.4](https://github.com/timctho/zommi/releases/download/v0.1.1-preview.4/Zommi-Setup-x64.exe) |
+| Windows 10/11 | x64 | [Setup · preview.5](https://github.com/timctho/zommi/releases/download/v0.1.1-preview.5/Zommi-Setup-x64.exe) |
 | macOS 12+ | Apple Silicon (M1 or later) | [Mac releases](https://github.com/timctho/zommi/releases) · `Zommi-macOS-arm64.dmg` planned for preview.5 |
 | macOS 12+ | Intel | [Mac releases](https://github.com/timctho/zommi/releases) · `Zommi-macOS-x64.dmg` planned for preview.5 |
-| Ubuntu 24.04 LTS · GNOME Wayland | x64 | [.deb · preview.4](https://github.com/timctho/zommi/releases/download/v0.1.1-preview.4/Zommi-Ubuntu-amd64.deb) |
+| Ubuntu 24.04 LTS · GNOME Wayland | x64 | [.deb · preview.5](https://github.com/timctho/zommi/releases/download/v0.1.1-preview.5/Zommi-Ubuntu-amd64.deb) |
 
 Mac installers will appear after the preview.5 release builds pass and publish.
 [All releases and checksums](https://github.com/timctho/zommi/releases)
