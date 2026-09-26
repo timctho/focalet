@@ -1529,20 +1529,28 @@ mod tests {
 
     #[test]
     fn discovery_produces_a_stable_native_codex_target() {
-        let root = std::env::temp_dir().join(format!("zommi-discovery-{}", std::process::id()));
+        let platform = std::env::consts::OS;
+        let root = std::env::temp_dir().join(format!("zommi-discovery-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&root).expect("create fixture directory");
-        let executable = root.join("codex");
+        let executable = root.join(if platform == "windows" {
+            "codex.exe"
+        } else {
+            "codex"
+        });
         fs::write(&executable, "fixture").expect("write fixture");
         let environment = HashMap::from([
             ("PATH".into(), root.to_string_lossy().into_owned()),
             ("HOME".into(), "/home/test".into()),
         ]);
-        let first = discover_runtime_targets_with(&environment, "linux");
-        let second = discover_runtime_targets_with(&environment, "linux");
+        // Native PATH syntax includes a Windows drive letter. Keep this probe
+        // on the host platform, without involving any installed WSL runtimes.
+        let first = super::discover_runtime_targets_with_status(&environment, platform, false).0;
+        let second = super::discover_runtime_targets_with_status(&environment, platform, false).0;
         assert_eq!(first, second);
         assert_eq!(first.len(), 1);
         assert_eq!(first[0].adapter_id, "codex-app-server");
-        assert_eq!(first[0].execution_host.id, "native:linux");
+        assert_eq!(first[0].execution_host.id, format!("native:{platform}"));
+        assert_eq!(first[0].executable_path, executable.to_string_lossy());
         let _ = fs::remove_dir_all(root);
     }
 

@@ -37,10 +37,10 @@ EXTERNAL SOURCES:
 SPEC CHECKSUMS:
   FlutterMacOS: c232990155153907050900a2e175c7773903ba4e
   HotKey: 400beb7caa29054ea8d864c96f5ba7e5b4852277
-  hotkey_manager_macos: a4317849af96d2430fa89944d3c58977ca089fbe
-  irondash_engine_context: 893c7d96d20ce361d7e996f39d360c4c2f9869ba
-  screen_capturer_macos: 229306903c56767a7c7d3a48167ba303e95c6d29
-  super_native_extensions: c2795d6d9aedf4a79fae25cb6160b71b50549189
+  hotkey_manager_macos: 1e2edb0c7ae4fe67108af44a9d3445de41404160
+  irondash_engine_context: da62996ee25616d2f01bbeb85dc115d813359478
+  screen_capturer_macos: e91a66e1eeefd5e4fe068bb1bffc053cc34b63b8
+  super_native_extensions: 85efee3a7495b46b04befcfc86ed12069264ebf3
 
 PODFILE CHECKSUM: 1e95c36afbfd1cb6423ceca4de7a8e1b256fb6ac
 

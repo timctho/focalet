@@ -289,7 +289,8 @@ Future<bool> sameCapturedPixels(
       );
       if (listEquals(pixelsA, pixelsB)) return true;
       if (!allowRoundingNoise || pixelsA.length != pixelsB.length) return false;
-      // GNOME can redraw an unchanged control with one-level RGB rounding.
+      // GNOME can redraw an unchanged checkbox with up to two RGB levels of
+      // rounding, including after the capture editor returns focus.
       // Accept only sparse rounding noise: never alpha, geometry, larger colour
       // changes or a changed area exceeding 0.25% (capped at 1024 pixels).
       final budget = math.min(1024, (a.width * a.height * .0025).floor());
@@ -299,7 +300,7 @@ Future<bool> sameCapturedPixels(
         var different = false;
         for (var channel = 0; channel < 3; channel++) {
           final delta = (pixelsA[i + channel] - pixelsB[i + channel]).abs();
-          if (delta > 1) return false;
+          if (delta > 2) return false;
           different |= delta != 0;
         }
         if (different && ++changed > budget) return false;

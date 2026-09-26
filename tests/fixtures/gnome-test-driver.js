@@ -6,7 +6,7 @@ import Shell from 'gi://Shell';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 const XML = `<node><interface name="com.zommi.TestDriver">
-  <method name="Ready"/><method name="Key"><arg type="u" direction="in"/><arg type="b" direction="in"/></method>
+  <method name="Ready"><arg type="s" direction="out"/></method><method name="Key"><arg type="u" direction="in"/><arg type="b" direction="in"/></method>
   <method name="Click"><arg type="i" direction="in"/><arg type="i" direction="in"/></method>
   <method name="Motion"><arg type="i" direction="in"/><arg type="i" direction="in"/></method>
   <method name="Button"><arg type="b" direction="in"/></method>
@@ -24,7 +24,10 @@ export default class Driver extends Extension {
         this.service.export(Gio.DBus.session, '/com/zommi/TestDriver');
         this.owner = Gio.bus_own_name_on_connection(Gio.DBus.session, 'com.zommi.TestDriver', Gio.BusNameOwnerFlags.NONE, null, null);
     }
-    Ready() { Main.overview.hide(); }
+    Ready() {
+        Main.overview.hide();
+        return JSON.stringify({keyboardReady: Main.actionMode === Shell.ActionMode.NORMAL});
+    }
     DisconnectIntegration() {
         const integration = Main.extensionManager.lookup('zommi@zommi').stateObj;
         integration._service.unexport();

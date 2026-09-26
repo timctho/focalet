@@ -64,6 +64,22 @@ jobs:
         run: /usr/bin/python3 scripts/accept-linux-wayland.py --package artifacts/zommi-linux-x64 --browser /usr/bin/google-chrome
       - name: Ensure checks did not rewrite committed files
         run: git diff --exit-code
+      - name: Save failed synthetic Wayland acceptance
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: wayland-failures-${{ github.sha }}
+          path: artifacts/wayland-acceptance/
+          if-no-files-found: ignore
+          retention-days: 3
+      - name: Save failed UI comparisons
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: golden-failures-linux-${{ github.sha }}
+          path: src/Zommi.Flutter/test/failures/*.png
+          if-no-files-found: ignore
+          retention-days: 3
 
   windows:
     name: Windows contracts
@@ -95,10 +111,26 @@ jobs:
         run: ./scripts/package-windows.ps1 -Runtime win-x64
       - name: Ensure checks did not rewrite committed files
         run: git diff --exit-code
+      - name: Save failed UI comparisons
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: golden-failures-windows-${{ github.sha }}
+          path: src/Zommi.Flutter/test/failures/*.png
+          if-no-files-found: ignore
+          retention-days: 3
 
   macos:
-    name: macOS contracts
-    runs-on: macos-15
+    name: macOS contracts (${{ matrix.architecture }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: arm64
+            os: macos-15
+          - architecture: x64
+            os: macos-15-intel
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     env:
       CARGO_BUILD_JOBS: '4'
@@ -139,6 +171,14 @@ jobs:
         run: bash scripts/package-unix.sh macos
       - name: Ensure checks did not rewrite committed files
         run: git diff --exit-code
+      - name: Save failed UI comparisons
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: golden-failures-macos-${{ matrix.architecture }}-${{ github.sha }}
+          path: src/Zommi.Flutter/test/failures/*.png
+          if-no-files-found: ignore
+          retention-days: 3
 
   required:
     name: PR checks passed

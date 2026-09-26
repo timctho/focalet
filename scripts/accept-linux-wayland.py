@@ -267,12 +267,17 @@ class Session:
 
     def key(self, key):
         self.driver("Key", key, "true")
+        # Let the compositor process the press before injecting its release.
+        time.sleep(0.05)
         self.driver("Key", key, "false")
 
     def shortcut(self):
         self.driver("Key", 0xFFE9, "true")
-        self.key(ord("a"))
-        self.driver("Key", 0xFFE9, "false")
+        try:
+            time.sleep(0.05)
+            self.key(ord("a"))
+        finally:
+            self.driver("Key", 0xFFE9, "false")
 
     def drag(self, start, end):
         self.driver("Motion", *start)
@@ -294,6 +299,11 @@ class Session:
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait(timeout=4)
+        # D-Bus can activate the document portal outside our child process list.
+        # Unmount its private FUSE export before TemporaryDirectory removes it.
+        documents = self.root / "run/doc"
+        if os.path.ismount(documents):
+            self.run("fusermount3", "-u", documents)
 
 
 def desktop_status_without_gnome(session, helper):
@@ -380,16 +390,23 @@ def native_acceptance(session, helper, toolkit="3.0"):
     time.sleep(0.5)
 
     def desktop_ready():
-        session.driver("Ready")
+        # Hiding the overview and restoring normal shortcut handling complete
+        # separately. Do not inject Alt+A into the overview's action mode.
+        input_ready = json.loads(session.driver("Ready")[0])
         status = json.loads(session.run(helper, "status").stdout)
         (session.evidence / "desktop-status.json").write_text(json.dumps(status))
-        return status["ready"]
+        (session.evidence / "input-ready.json").write_text(json.dumps(input_ready))
+        return status["ready"] and input_ready["keyboardReady"]
 
     wait("desktop ready after startup", desktop_ready)
     shortcuts = session.start("shortcuts", [helper, "shortcuts"], pipes=True)
     assert session.line(shortcuts, 8)["contextShortcut"]
     session.shortcut()
-    assert session.line(shortcuts, 5)["event"] == "activated"
+    activation = session.line(shortcuts, 5)
+    assert activation and activation.get("event") == "activated", {
+        "activation": activation,
+        "desktop": json.loads(session.run(helper, "status").stdout),
+    }
     # Capture must work even when a launcher reports the wrong session type.
     host = session.start("capture", [helper, "--capture-host"], pipes=True,
                          env={**session.env, "XDG_SESSION_TYPE": "tty"})
@@ -541,6 +558,9 @@ def browser_acceptance(session, helper, browser, browser_host):
             "--force-renderer-accessibility",
             "--no-first-run",
             "--no-default-browser-check",
+            # This disposable profile has no credentials. Avoid GNOME Keyring's
+            # first-use modal, which correctly blocks desktop capture in CI.
+            "--password-store=basic",
             "--disable-background-networking",
             "--disable-component-update",
             "--disable-sync",
@@ -558,9 +578,10 @@ def browser_acceptance(session, helper, browser, browser_host):
     )
     time.sleep(0.5)
     capture = session.start("browser-capture", [helper, "--capture-host"], pipes=True)
-    frame = session.request(capture, "selectContent", authorize=True)["result"][
-        "frames"
-    ][0]
+    selected = session.request(capture, "selectContent", authorize=True)
+    assert selected["ok"], selected
+    assert selected["result"].get("frames"), selected
+    frame = selected["result"]["frames"][0]
     source = next(w for w in frame["windows"] if w.get("processId") == app.pid)
     b = source["bounds"]
     anchor = {"x": b["x"] + 100, "y": b["y"] + 350, "width": 8, "height": 8}
@@ -669,8 +690,14 @@ section:target{display:grid;grid-template-columns:1fr 1fr;gap:24px}.card{backgro
             ),
         },
     )
-    wait("floating HTML preview", report_path.exists)
-    report = json.loads(report_path.read_text())
+    def preview_report():
+        try:
+            return json.loads(report_path.read_text())
+        except (FileNotFoundError, json.JSONDecodeError):
+            # The app creates the file before its asynchronous write completes.
+            return None
+
+    report = wait("complete floating HTML preview report", preview_report)
     session.driver("Ready")
     time.sleep(0.5)
     assert report["status"] == "opened", report
@@ -756,6 +783,9 @@ def ui_acceptance(session, package, fixture_app):
             **session.env,
             "XDG_CONFIG_HOME": str(config.parent),
             "ZOMMI_ACCEPTANCE_LOG": str(trace),
+            "ZOMMI_LINUX_CAPTURE_HOST": str(ROOT / "tests/fixtures/trace-wayland-capture.py"),
+            "ZOMMI_CAPTURE_TRACE_HELPER": str(package / "zommi-linux-capture"),
+            "ZOMMI_CAPTURE_TRACE_DIR": str(session.evidence / "capture"),
         },
     )
     ready = wait("packaged desktop readiness", lambda: events(trace, "desktop.ready"))[

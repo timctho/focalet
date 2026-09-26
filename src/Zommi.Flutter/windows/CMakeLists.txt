@@ -57,6 +57,10 @@ add_subdirectory("runner")
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
+# Use standard coroutines without changing this plugin's C++17 language mode.
+# C++/WinRT otherwise selects experimental coroutines, rejected by newer MSVC.
+target_compile_options(flutter_inappwebview_windows_plugin PRIVATE /await:strict)
+
 
 # === Installation ===
 # Support files are copied into place next to the executable, so that it can

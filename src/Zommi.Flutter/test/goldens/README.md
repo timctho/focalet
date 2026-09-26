@@ -1,8 +1,13 @@
-The root PNGs are the existing Linux baselines. `macos/` contains the macOS
-baselines captured with Flutter 3.47.2 on Apple Silicon. Text and icon edges
-rasterize differently on these hosts; both use exact pixel comparisons.
-`platformGoldenPath` selects `macos/` on macOS; other hosts keep using the root
-PNGs. The macOS CI job runs all four affected capture/UI test files.
+The root PNGs are the existing Linux baselines. `macos/` contains the shared
+macOS baselines captured with Flutter 3.47.2. Text and icon edges can rasterize
+differently across hosts and CPU architectures; comparisons remain pixel-exact.
+`platformGoldenPath` prefers a reviewed `macos/arm64/` or `macos/x64/` override
+when present, then uses the shared `macos/` image. Other hosts use the root PNGs.
+Both macOS CI jobs run the full Flutter suite.
+
+The Intel runtime setup panel has one icon-edge channel differing by one value
+from Apple Silicon. Its `macos/x64/` override preserves exact comparisons on both
+architectures. The command menu baseline is identical on both Mac architectures.
 
 From `src/Zommi.Flutter`, update on the matching OS with:
 
