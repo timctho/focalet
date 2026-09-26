@@ -16,7 +16,7 @@ private and is not uploaded by the publisher.
 
 | Trigger | Workflow / machine | Result |
 | --- | --- | --- |
-| Every PR, including forks; every push to `main`; manual dispatch | [PR checks](../.github/workflows/checks.yml), GitHub-hosted `ubuntu-24.04`, `windows-2025`, `macos-15` | Tests and a native release-mode package on each platform; no installer upload or published Release |
+| Every PR, including forks; every push to `main`; manual dispatch | [PR checks](../.github/workflows/checks.yml), GitHub-hosted `ubuntu-24.04`, `windows-2025`, `macos-15`, `macos-15-intel` | Tests and a native release-mode package on each platform and Mac architecture; no installer upload or published Release |
 | A release version change pushed to `main` | [Release workflow](../.github/workflows/release.yml), GitHub-hosted Windows, Ubuntu and both Mac architectures | Builds, checks and automatically publishes all four installers |
 | Manual dispatch of Build and publish release | Same release workflow, GitHub-hosted runners for the selected platforms | Builds installers and optionally publishes after every selected build passes |
 | Manual dispatch of Native acceptance | [Native acceptance](../.github/workflows/ci.yml); Ubuntu/Windows on opted-in self-hosted runners, Mac on GitHub-hosted runners | Native acceptance and optional package artifacts; Mac can create an installer in a draft release |

@@ -113,8 +113,16 @@ jobs:
           retention-days: 3
 
   macos:
-    name: macOS contracts
-    runs-on: macos-15
+    name: macOS contracts (${{ matrix.architecture }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: arm64
+            os: macos-15
+          - architecture: x64
+            os: macos-15-intel
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     env:
       CARGO_BUILD_JOBS: '4'
@@ -159,7 +167,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: golden-failures-macos-${{ github.sha }}
+          name: golden-failures-macos-${{ matrix.architecture }}-${{ github.sha }}
           path: src/Zommi.Flutter/test/failures/*.png
           if-no-files-found: ignore
           retention-days: 3
