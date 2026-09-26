@@ -16,7 +16,7 @@ import threading
 thread_id = os.environ.get("ZOMMI_FAKE_THREAD_ID", "thread-rust-flutter")
 fresh_thread_id = os.environ.get("ZOMMI_FAKE_FRESH_THREAD_ID", thread_id)
 turn_id = os.environ.get("ZOMMI_FAKE_TURN_ID", "turn-rust-flutter")
-request_log = os.environ.get("ZOMMI_FAKE_REQUEST_LOG")
+request_log = os.environ.get("ZOMMI_FAKE_CODEX_REQUEST_LOG") or os.environ.get("ZOMMI_FAKE_REQUEST_LOG")
 control = pathlib.Path(sys.argv[sys.argv.index("--control-dir") + 1]) if "--control-dir" in sys.argv else None
 if control:
     request_log = str(control / "requests.jsonl")

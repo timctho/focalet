@@ -94,7 +94,9 @@ void main() {
     );
     addTearDown(() => temporary.delete(recursive: true));
     final python = await _findPython();
-    final requestLog = File('${temporary.path}/requests.jsonl');
+    // Windows append writes from separate runtimes can overlap in one file.
+    final codexLog = File('${temporary.path}/codex-requests.jsonl');
+    final hermesLog = File('${temporary.path}/hermes-requests.jsonl');
     final bridge = ProcessCoreBridge(
       executablePath: File(
         '../../target/debug/zommi-core-host${Platform.isWindows ? '.exe' : ''}',
@@ -123,7 +125,8 @@ void main() {
         ]),
         'ZOMMI_CORE_STATE_PATH': '${temporary.path}/binding.json',
         'ZOMMI_RUNTIME_OVERRIDES_PATH': '${temporary.path}/overrides.json',
-        'ZOMMI_FAKE_REQUEST_LOG': requestLog.path,
+        'ZOMMI_FAKE_CODEX_REQUEST_LOG': codexLog.path,
+        'ZOMMI_FAKE_GATEWAY_REQUEST_LOG': hermesLog.path,
         'ZOMMI_FAKE_FRESH_THREAD_ID': 'created-codex-chat',
       },
     );
@@ -178,16 +181,21 @@ void main() {
     expect(controller.activeRuntime?.id, hermes.id, reason: controller.status);
     expect(controller.activeSessionId, hermesSession);
 
-    final requests = (await requestLog.readAsLines()).map(
+    final codexRequests = (await codexLog.readAsLines()).map(
+      (line) => jsonDecode(line) as Map,
+    );
+    final hermesRequests = (await hermesLog.readAsLines()).map(
       (line) => jsonDecode(line) as Map,
     );
     final codexPrompt =
-        requests.singleWhere((r) => r['method'] == 'turn/start')['params']
+        codexRequests.singleWhere((r) => r['method'] == 'turn/start')['params']
             as Map;
     expect(codexPrompt['threadId'], codexSession);
     expect(jsonEncode(codexPrompt), contains('Message for Codex'));
     final hermesPrompt =
-        requests.singleWhere((r) => r['method'] == 'prompt.submit')['params']
+        hermesRequests.singleWhere(
+              (r) => r['method'] == 'prompt.submit',
+            )['params']
             as Map;
     expect(jsonEncode(hermesPrompt), contains('Message for Hermes'));
   });

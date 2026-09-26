@@ -20,7 +20,7 @@ from urllib.parse import parse_qs, urlsplit
 
 
 GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-LOG_PATH = os.environ.get("ZOMMI_FAKE_REQUEST_LOG")
+LOG_PATH = os.environ.get("ZOMMI_FAKE_GATEWAY_REQUEST_LOG") or os.environ.get("ZOMMI_FAKE_REQUEST_LOG")
 UNIQUE_SESSIONS = os.environ.get("ZOMMI_FAKE_UNIQUE_SESSIONS") == "1"
 SESSION_STORE = Path(os.environ['ZOMMI_FAKE_GATEWAY_SESSIONS']) if os.environ.get('ZOMMI_FAKE_GATEWAY_SESSIONS') else None
 CREATED_SESSIONS = json.loads(SESSION_STORE.read_text()) if SESSION_STORE and SESSION_STORE.exists() else []
