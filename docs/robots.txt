@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://timctho.github.io/zommi/sitemap.xml

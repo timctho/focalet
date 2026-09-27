@@ -230,6 +230,9 @@ The current installer builder produces an unsigned Windows setup executable and
 a non-notarized Mac DMG. Operating systems may require
 explicit opening confirmation; document that in preview release notes.
 
+The [code signing policy](code-signing.md) records provider readiness and release
+approval requirements. SignPath approval and integration are still pending.
+
 For a normal distribution release, sign the Windows application and installer
 with Authenticode, and sign the Mac app with an Apple Developer ID, notarize and
 staple the distribution. Recompute installer hashes after signing. The existing

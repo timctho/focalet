@@ -3,11 +3,20 @@
   <img src="design/zommi-logo/exports/ocean/lockup-light.png" alt="Zommi" width="240">
 </picture>
 
-# Show your agent what you mean.
+# Zommi — visual context for AI agents
 
-**Select it. Ask. Keep going.** Zommi connects what you see on screen to your
-existing agent. Select a region, add a sketch if useful, and send the image with
-available text, links and structure.
+**Show your agent what you mean.** Zommi is an open-source desktop companion for
+Codex, Claude Code and other AI agents. Select and annotate screen regions, then
+share screenshots and available browser or accessibility context with your agent.
+
+[![CI](https://github.com/timctho/zommi/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/timctho/zommi/actions/workflows/checks.yml)
+[![Latest release](https://img.shields.io/github/v/release/timctho/zommi)](https://github.com/timctho/zommi/releases/latest)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
+
+[![Select and sketch a synthetic sheet, then ask the agent to build two quotes](docs/assets/social-card.png)](docs/demos/sheets.mp4)
+
+**Select. Attach. Ask.** The demo uses a synthetic sheet and a live agent response.
+[Watch the demo](docs/demos/sheets.mp4) · [Documentation](https://timctho.github.io/zommi/)
 
 ## Download
 
@@ -22,6 +31,10 @@ available text, links and structure.
 
 Uses your existing agent account. [Installation guide](docs/install.md) ·
 [Build from source](CONTRIBUTING.md)
+
+Connect your agent, press **Alt+A** (**⌥ A** on Mac), select a region, and review
+the attachment before sending. [Chrome and Edge setup](docs/guides/chrome-edge.md) ·
+[Claude Code guide](docs/guides/claude-code.md) · [Ubuntu Wayland guide](docs/guides/ubuntu-wayland.md)
 
 ## Connect your agent
 
@@ -107,7 +120,8 @@ Desktop Integration** in App settings for Alt+A and aligned app context.
 
 [Releases](https://github.com/timctho/zommi/releases) ·
 [Installation and permissions](docs/install.md) ·
-[Contributing](CONTRIBUTING.md)
+[Contributing](CONTRIBUTING.md) · [Privacy](docs/privacy.md) ·
+[Security](SECURITY.md) · [Code signing policy](docs/code-signing.md)
 
 ## License
 

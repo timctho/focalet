@@ -50,23 +50,30 @@ class ContributorChecksTests(unittest.TestCase):
         self.assertNotIn("self-hosted", raw)
         for name, job in workflow["jobs"].items():
             self.assertNotIn("permissions", job)
-            if name != "required":
-                self.assertNotIn("if", job, "A fork must not silently skip a platform")
+            if name in {"contracts", "windows", "macos"}:
+                self.assertEqual(job["needs"], "documentation")
+                self.assertEqual(job["if"], "needs.documentation.outputs.native_required == 'true'")
             for step in job["steps"]:
                 if "uses" in step:
                     self.assertRegex(step["uses"], r"^[\w-]+/[\w-]+@[0-9a-f]{40}$")
                     if step["uses"].startswith("actions/checkout@"):
                         self.assertEqual(step["with"]["persist-credentials"], "false")
         gate = workflow["jobs"]["required"]
-        self.assertEqual(set(gate["needs"]), {"contracts", "windows", "macos"})
+        self.assertEqual(set(gate["needs"]), {"documentation", "contracts", "windows", "macos"})
         self.assertEqual(gate["if"], "always()")
         command = gate["steps"][0]["run"]
-        for linux, windows, macos in itertools.product(
-            ["success", "failure", "skipped", "cancelled"], repeat=3
+        for docs, native, linux, windows, macos in itertools.product(
+            ["success", "failure", "skipped", "cancelled"],
+            ["true", "false", ""],
+            ["success", "failure", "skipped", "cancelled"],
+            ["success", "failure", "skipped", "cancelled"],
+            ["success", "failure", "skipped", "cancelled"],
         ):
             result = subprocess.run(
                 ["bash", "-c", command],
                 env={
+                    "DOCS_RESULT": docs,
+                    "NATIVE_REQUIRED": native,
                     "LINUX_RESULT": linux,
                     "WINDOWS_RESULT": windows,
                     "MACOS_RESULT": macos,
@@ -74,7 +81,9 @@ class ContributorChecksTests(unittest.TestCase):
                 capture_output=True,
             )
             self.assertEqual(
-                result.returncode == 0, linux == windows == macos == "success"
+                result.returncode == 0,
+                docs == "success" and ((native == "true" and linux == windows == macos == "success")
+                                       or (native == "false" and linux == windows == macos == "skipped"))
             )
 
     def test_native_release_workflow_is_explicitly_operator_invoked(self):

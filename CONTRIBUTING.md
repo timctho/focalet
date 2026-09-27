@@ -58,6 +58,12 @@ fixtures supply explicit commands; ordinary app launches still discover agents.
 
 ## Run checks
 
+For documentation changes, install `requirements-docs.txt` in your virtual
+environment and run `python scripts/check_docs.py`. This builds the searchable
+site with strict link and anchor validation. Preview it with `python -m mkdocs serve`.
+The site publishes the existing contributor and agent guides directly from their
+root files; edit those originals instead of generated site output.
+
 From the repository root on Ubuntu:
 
 ```sh
@@ -139,14 +145,23 @@ an unexplained regression.
 ## Pull requests
 
 The **PR checks** workflow runs for every PR, including forks, on disposable
-GitHub-hosted Linux, Windows and macOS runners. It uses read-only repository access,
+GitHub-hosted runners. Documentation and CI-policy checks always run. An explicit
+allowlist of Markdown and documentation media changes can skip native builds;
+source, dependency, workflow, build and unknown changes require Linux, Windows
+and both macOS architectures. It uses read-only repository access,
 no deployment secrets and pinned action revisions. It does not run fork code on
-maintainers' self-hosted machines. **PR checks passed** succeeds only when all three
-platform jobs succeed; a skipped or cancelled dependency fails the gate.
+maintainers' self-hosted machines. **PR checks passed** requires documentation to
+succeed and every applicable platform job to succeed. Native skips are accepted
+only when the scope job explicitly identified a documentation-only change.
+Unknown scope, failure and cancellation fail the gate. Rust and Flutter caches
+are separated by OS/toolchain; dependency lockfiles participate in cache keys.
 
 Repository maintainers should require **PR checks passed** in the `main` branch
 rules and require review for workflow changes. This file does not enable GitHub
 branch protection by itself.
+Release publication additionally verifies the latest main-push run of
+`checks.yml` for the exact source revision. The documentation deployment starts
+after successful main checks and uses that same revision.
 The **Native acceptance** workflow is manual and reserved for reviewed source.
 Do not dispatch unreviewed fork code onto a persistent runner.
 

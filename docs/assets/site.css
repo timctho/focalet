@@ -1,0 +1,14 @@
+:root { --bs-primary: #387da8; --bs-link-color: #286688; }
+[data-bs-theme="dark"] { --bs-link-color: #8fc9e8; --bs-link-hover-color: #c2e5f7; }
+[data-bs-theme="dark"] .btn-outline-primary { color: #8fc9e8; border-color: #8fc9e8; }
+body { font-size: 1.03rem; line-height: 1.7; }
+.navbar.bg-primary { background: #245c7b !important; }
+h1, h2, h3 { font-weight: 650; letter-spacing: -.025em; }
+h1 { margin-bottom: 1.1rem; }
+h2 { margin-top: 2rem; }
+.col-md-9 img { max-width: 100%; height: auto; border-radius: 12px; }
+.btn-primary { background: #286688; border-color: #286688; }
+.btn { margin: .25rem .45rem .5rem 0; }
+table { font-size: .94rem; }
+code { overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }

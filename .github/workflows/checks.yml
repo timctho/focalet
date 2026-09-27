@@ -15,7 +15,43 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  documentation:
+    name: Documentation and CI policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      native_required: ${{ steps.scope.outputs.native_required }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: requirements-docs.txt
+      - name: Select required checks
+        id: scope
+        run: python scripts/ci_scope.py
+      - name: Install documentation tools
+        run: python -m pip install -r requirements-docs.txt
+      - name: Check documentation and CI boundaries
+        run: |
+          python scripts/check_docs.py
+          python -m unittest discover -s tests -p test_ci_scope.py -v
+          python -m unittest discover -s tests -p test_contributor_checks.py -v
+      - name: Verify changed demo media
+        if: steps.scope.outputs.demos_changed == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install Pillow==11.3.0
+          python scripts/verify_demo_assets.py
+
   contracts:
+    needs: documentation
+    if: needs.documentation.outputs.native_required == 'true'
     name: Linux contracts
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -28,11 +64,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@283fb51ee3c8a49cd7c8ff30102f3fcf3cfbe0e1 # 1.93.0
         with:
           components: clippy,rustfmt
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: native-${{ runner.os }}-${{ runner.arch }}
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
           flutter-version: 3.47.2
-          cache: false
+          cache: true
+          cache-key: flutter-${{ runner.os }}-${{ runner.arch }}-3.47.2
+          pub-cache-key: pub-${{ runner.os }}-${{ runner.arch }}-3.47.2
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.13'
@@ -82,6 +124,8 @@ jobs:
           retention-days: 3
 
   windows:
+    needs: documentation
+    if: needs.documentation.outputs.native_required == 'true'
     name: Windows contracts
     runs-on: windows-2025
     timeout-minutes: 45
@@ -94,11 +138,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@283fb51ee3c8a49cd7c8ff30102f3fcf3cfbe0e1 # 1.93.0
         with:
           components: clippy,rustfmt
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: native-${{ runner.os }}-${{ runner.arch }}
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
           flutter-version: 3.47.2
-          cache: false
+          cache: true
+          cache-key: flutter-${{ runner.os }}-${{ runner.arch }}-3.47.2
+          pub-cache-key: pub-${{ runner.os }}-${{ runner.arch }}-3.47.2
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.13'
@@ -131,6 +181,8 @@ jobs:
           retention-days: 3
 
   macos:
+    needs: documentation
+    if: needs.documentation.outputs.native_required == 'true'
     name: macOS contracts (${{ matrix.architecture }})
     strategy:
       fail-fast: false
@@ -151,11 +203,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@283fb51ee3c8a49cd7c8ff30102f3fcf3cfbe0e1 # 1.93.0
         with:
           components: clippy,rustfmt
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: native-${{ runner.os }}-${{ runner.arch }}
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
           flutter-version: 3.47.2
-          cache: false
+          cache: true
+          cache-key: flutter-${{ runner.os }}-${{ runner.arch }}-3.47.2
+          pub-cache-key: pub-${{ runner.os }}-${{ runner.arch }}-3.47.2
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.13'
@@ -193,13 +251,23 @@ jobs:
   required:
     name: PR checks passed
     if: always()
-    needs: [contracts, windows, macos]
+    needs: [documentation, contracts, windows, macos]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
-      - name: Require every platform to pass
+      - name: Require documentation and every applicable platform to pass
         env:
+          DOCS_RESULT: ${{ needs.documentation.result }}
+          NATIVE_REQUIRED: ${{ needs.documentation.outputs.native_required }}
           LINUX_RESULT: ${{ needs.contracts.result }}
           WINDOWS_RESULT: ${{ needs.windows.result }}
           MACOS_RESULT: ${{ needs.macos.result }}
-        run: test "$LINUX_RESULT" = success && test "$WINDOWS_RESULT" = success && test "$MACOS_RESULT" = success
+        run: |
+          test "$DOCS_RESULT" = success || exit 1
+          if [ "$NATIVE_REQUIRED" = true ]; then
+            test "$LINUX_RESULT" = success && test "$WINDOWS_RESULT" = success && test "$MACOS_RESULT" = success
+          elif [ "$NATIVE_REQUIRED" = false ]; then
+            test "$LINUX_RESULT" = skipped && test "$WINDOWS_RESULT" = skipped && test "$MACOS_RESULT" = skipped
+          else
+            exit 1
+          fi
