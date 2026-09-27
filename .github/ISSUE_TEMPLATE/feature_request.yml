@@ -1,0 +1,17 @@
+name: Feature request
+description: Describe a task Zommi could support better.
+body:
+  - type: textarea
+    id: task
+    attributes:
+      label: What are you trying to do?
+      description: Describe the user task, platform and agent involved.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Explain the outcome and any current workaround.
+    validations:
+      required: true

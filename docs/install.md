@@ -212,7 +212,7 @@ A browser connection is optional. Without it, images and available accessibility
 context still work. On Windows, **Full webpage details** can enrich a selection
 with DOM text and links when a compatible browser authorizes the connection.
 Zommi does not restart or reconfigure your browser.
-[Browser setup and capture limitations](browser-context.md#connecting-a-browser).
+[Browser setup and capture limitations](browser-context.md#connecting-a-chromium-browser).
 
 ## Troubleshooting
 

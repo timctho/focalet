@@ -91,7 +91,15 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertNotIn("permissions", jobs["build"])
         self.assertEqual(set(jobs["release"]["needs"]), {"plan", "build"})
         self.assertNotIn("if", jobs["release"])
-        self.assertEqual(jobs["release"]["permissions"], {"contents": "write"})
+        self.assertEqual(jobs["release"]["permissions"], {"contents": "write", "actions": "read"})
+        steps = jobs["release"]["steps"]
+        gate_index = next(i for i, step in enumerate(steps) if "verify_ci_gate.py" in step.get("run", ""))
+        publish_index = next(i for i, step in enumerate(steps) if "release_workflow.py release" in step.get("run", ""))
+        self.assertLess(gate_index, publish_index)
+        gate = steps[gate_index]
+        self.assertEqual(gate["if"], "needs.plan.outputs.publish == 'true'")
+        self.assertIn('--repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA"', gate["run"])
+        self.assertEqual(gate["env"]["GH_TOKEN"], "${{ github.token }}")
         self.assertIn("needs.plan.outputs.tag", jobs["release"]["concurrency"]["group"])
         self.assertEqual(jobs["release"]["concurrency"]["cancel-in-progress"], "false")
         for field in ("platforms", "publish"):

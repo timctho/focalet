@@ -68,11 +68,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@283fb51ee3c8a49cd7c8ff30102f3fcf3cfbe0e1 # 1.93.0
         with:
           components: clippy,rustfmt
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: native-${{ runner.os }}-${{ runner.arch }}
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
           flutter-version: 3.47.2
-          cache: false
+          cache: true
+          cache-key: flutter-${{ runner.os }}-${{ runner.arch }}-3.47.2
+          pub-cache-key: pub-${{ runner.os }}-${{ runner.arch }}-3.47.2
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           dotnet-version: 8.0.x
@@ -175,13 +181,19 @@ jobs:
       RELEASE_PLATFORMS: ${{ needs.plan.outputs.platforms }}
       RELEASE_PUBLISH: ${{ needs.plan.outputs.publish }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 35
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      - name: Require successful main checks for the release revision
+        if: needs.plan.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/verify_ci_gate.py --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: installer-*-${{ github.sha }}

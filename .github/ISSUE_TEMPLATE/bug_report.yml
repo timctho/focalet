@@ -1,0 +1,47 @@
+name: Bug report
+description: Report a reproducible problem in Zommi.
+body:
+  - type: markdown
+    attributes:
+      value: "For security vulnerabilities, use private reporting under Security. Remove tokens, personal transcripts and sensitive screen content from diagnostics."
+  - type: input
+    id: version
+    attributes:
+      label: Zommi version
+      placeholder: 0.2.1
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Operating system and architecture
+      placeholder: Windows 11 x64 / macOS 15 arm64 / Ubuntu 24.04 GNOME Wayland x64
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Agent runtime and version
+      description: Include native, WSL or gateway connection mode when relevant.
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and connection status
+      description: For capture issues, include Chrome or Edge version, connection status, and the attachment's limitation message.
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics
+      description: Share only the relevant error text or a synthetic screenshot; do not upload your session catalog or personal browser profile.

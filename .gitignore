@@ -16,3 +16,6 @@ target/
 *.pem
 *.pfx
 *.p12
+
+# Generated documentation site
+/site/
