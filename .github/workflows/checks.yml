@@ -41,6 +41,7 @@ jobs:
           python scripts/check_docs.py
           python -m unittest discover -s tests -p test_ci_scope.py -v
           python -m unittest discover -s tests -p test_contributor_checks.py -v
+          python -m unittest discover -s tests -p test_release_workflow.py -v
       - name: Verify changed demo media
         if: steps.scope.outputs.demos_changed == 'true'
         run: |
