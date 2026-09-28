@@ -1,0 +1,14 @@
+[
+  {"month":"Jan","direct":18000,"partners":11000,"organic":8000},
+  {"month":"Feb","direct":27000,"partners":16000,"organic":12000},
+  {"month":"Mar","direct":21000,"partners":14000,"organic":9000},
+  {"month":"Apr","direct":35000,"partners":22000,"organic":15000},
+  {"month":"May","direct":29000,"partners":19000,"organic":14000},
+  {"month":"Jun","direct":42000,"partners":29000,"organic":20000},
+  {"month":"Jul","direct":36000,"partners":25000,"organic":18000},
+  {"month":"Aug","direct":47000,"partners":33000,"organic":22000},
+  {"month":"Sep","direct":40000,"partners":28000,"organic":21000},
+  {"month":"Oct","direct":55000,"partners":39000,"organic":28000},
+  {"month":"Nov","direct":51000,"partners":35000,"organic":26000},
+  {"month":"Dec","direct":63000,"partners":45000,"organic":32000}
+]

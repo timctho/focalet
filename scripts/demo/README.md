@@ -1,12 +1,14 @@
-# First-run setup and three demos
+# First-run setup and demos
 
-Use Amazon shopping, latency investigation and interactive Sheets editing, in
-that order. The difficult part is identifying the exact objects or context the
+Use the [frontend repair](frontend/README.md) as the main sample, followed by
+Amazon shopping, latency investigation and interactive Sheets editing.
+The difficult part is identifying the exact objects or context the
 user means. Keep gestures quick, prompts short and results readable. The [gallery](../../docs/demos/README.md)
 contains the reviewed recordings; this brief alone is not acceptance evidence.
 
 | Case | Context that is expensive to describe | User action | Payoff |
 | --- | --- | --- | --- |
+| Frontend | A chart redesign, its scope and the plotted values with element locations | Sketch stacked bars on the left and a trend line on the right | Agent rebuilds both charts while preserving the data and period controls |
 | Amazon | Three chosen products among similar listings, exact variants, and misleading dual-monitor labels | Three separate native rectangles, one per product | Agent checks each selected listing against an M1 Air's display limit |
 | Dashboard | Which latency spike, time buckets, metric definition and query | Select only the spike interval | Agent receives the full executed query and selected points, then investigates the database |
 | Sheets | Two groups spanning three tables, their destinations, and a crossed-out exception | Use Pen loops, connections and a cross-out in one native selection | Agent builds two linked quotes and only the connected quote recalculates |
