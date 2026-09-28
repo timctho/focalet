@@ -25,7 +25,10 @@ def main():
     )
     parser.add_argument(
         "--agent-executable",
-        help="Explicit real Codex CLI for an isolated native recording",
+        help="Explicit real Codex CLI for the recording",
+    )
+    parser.add_argument(
+        "--wsl-distribution", help="WSL distribution hosting --agent-executable"
     )
     parser.add_argument(
         "--browser-details",
@@ -34,6 +37,8 @@ def main():
     )
     parser.add_argument("--runtime-target-id", help="Use this exact discovered runtime")
     args = parser.parse_args()
+    if args.wsl_distribution and (os.name != "nt" or not args.agent_executable):
+        parser.error("--wsl-distribution requires Windows and --agent-executable")
     args.profile.mkdir(parents=True, exist_ok=False)
     settings = args.profile / ("Zommi" if os.name == "nt" else "config/zommi")
     settings.mkdir(parents=True)
@@ -54,7 +59,24 @@ def main():
         XDG_STATE_HOME=str(args.profile / "state"),
         XDG_CACHE_HOME=str(args.profile / "cache"),
     )
-    if args.agent_executable:
+    if args.wsl_distribution:
+        (args.profile / "overrides.json").write_text(
+            json.dumps([{
+                "id": "demo-codex",
+                "adapterId": "codex-app-server",
+                "executablePath": args.agent_executable,
+                "executionHost": {
+                    "id": "wsl:" + args.wsl_distribution.lower(),
+                    "kind": "wsl",
+                    "platform": "linux",
+                    "displayName": "WSL · " + args.wsl_distribution,
+                    "isDefault": False,
+                    "name": args.wsl_distribution,
+                },
+            }]),
+            encoding="utf-8",
+        )
+    elif args.agent_executable:
         environment.update(
             ZOMMI_CODEX_COMMAND=args.agent_executable,
             ZOMMI_RUNTIME_DISCOVERY_MODE="configured-only",
@@ -120,6 +142,12 @@ def main():
         ]
         if args.runtime_target_id:
             candidates = [t for t in candidates if t["id"] == args.runtime_target_id]
+        elif args.wsl_distribution:
+            candidates = [
+                t for t in candidates
+                if t["executionHost"].get("name") == args.wsl_distribution
+                and t["executablePath"] == args.agent_executable
+            ]
         elif os.name == "nt" and args.workspace.startswith("/"):
             candidates = [t for t in candidates if t["executionHost"]["kind"] == "wsl"]
         candidates.sort(key=lambda t: not t["executionHost"].get("isDefault"))
@@ -160,7 +188,7 @@ def main():
                         "XDG_CACHE_HOME",
                         *(
                             ["ZOMMI_CODEX_COMMAND", "ZOMMI_RUNTIME_DISCOVERY_MODE"]
-                            if args.agent_executable
+                            if args.agent_executable and not args.wsl_distribution
                             else []
                         ),
                     )

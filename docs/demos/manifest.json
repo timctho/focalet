@@ -1,7 +1,40 @@
 {
   "schemaVersion": 1,
-  "recordedAt": "2026-09-21",
+  "recordedAt": "2026-09-28",
   "recordings": [
+    {
+      "name": "frontend",
+      "buildCommit": "a4de0df6802c7b0383ce00fe1654de3665646a0d",
+      "platform": "windows",
+      "display": "windows-desktop",
+      "runtime": "Codex",
+      "response": "live",
+      "syntheticSource": true,
+      "sourceKind": "synthetic",
+      "audio": false,
+      "review": {
+        "ocrStatus": "no-matches",
+        "exportedFramesScanned": 871,
+        "visualReview": true
+      },
+      "assets": [
+        {
+          "file": "frontend.mp4",
+          "bytes": 930012,
+          "sha256": "5c991319e4c93ec417b31e2f05fab47c4ba4b51b283b5c6f47e503b6c054f944"
+        },
+        {
+          "file": "frontend-preview.webp",
+          "bytes": 225850,
+          "sha256": "75cc78fba47ed8211b691ffbe2cf4a64538948a1e9873eb47ad07883daa78d85"
+        },
+        {
+          "file": "frontend-poster.webp",
+          "bytes": 55416,
+          "sha256": "cd1a9ca4803e9b59c3825f697c6f7bcb13deb1693d0a71cb475d1132681b41a3"
+        }
+      ]
+    },
     {
       "name": "setup",
       "buildCommit": "d95625f3b77c69edce406bd6853942a3521bb074",

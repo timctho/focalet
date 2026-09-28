@@ -13,10 +13,13 @@ share screenshots and available browser or accessibility context with your agent
 [![Latest release](https://img.shields.io/github/v/release/timctho/zommi)](https://github.com/timctho/zommi/releases/latest)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
-[![Select and sketch a synthetic sheet, then ask the agent to build two quotes](docs/assets/social-card.png)](docs/demos/sheets.mp4)
+[![Sketch a stacked chart and trend line, then watch the agent rebuild them](docs/demos/frontend-preview.webp)](docs/demos/frontend.mp4)
 
-**Select. Attach. Ask.** The demo uses a synthetic sheet and a live agent response.
-[Watch the demo](docs/demos/sheets.mp4) · [Documentation](https://timctho.github.io/zommi/)
+**Redesign a chart with a sketch.** Turn one chart into a channel breakdown and trend.
+
+> Same six months: stacked channels left, revenue trend right.
+
+[Watch the frontend demo](docs/demos/frontend.mp4) · [Documentation](https://timctho.github.io/zommi/)
 
 ## Download
 

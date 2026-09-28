@@ -2,17 +2,19 @@
 param(
     [Parameter(Mandatory=$true)][string]$PackageDirectory,
     [Parameter(Mandatory=$true)][string]$OutputDirectory,
-    [ValidateSet('compare','error','dashboard','amazon','sheets')][string]$Scene='compare',
+    [ValidateSet('compare','error','dashboard','amazon','sheets','frontend')][string]$Scene='compare',
     [string]$Workspace='/tmp/zommi-demo-workspace',
     [string]$DashboardUrl='http://127.0.0.1:8765/',
     [string]$RuntimeTargetId,
+    [string]$AgentExecutable,
+    [string]$WslDistribution,
     [string]$BrowserEndpoint,
     [ValidateRange(60,3600)][int]$MaxDurationSeconds=1200,
     [switch]$Manual,
     [switch]$SendPrompt
 )
 $ErrorActionPreference='Stop'
-if($Scene -in @('amazon','sheets') -and (-not $Manual -or -not $BrowserEndpoint)){throw 'Amazon and Sheets require a prepared browser endpoint and manual recording control.'}
+if($Scene -in @('amazon','sheets','frontend') -and (-not $Manual -or -not $BrowserEndpoint)){throw 'This scene requires a prepared browser endpoint and manual recording control.'}
 if($BrowserEndpoint -and (-not $Manual -or ([Uri]$BrowserEndpoint).Scheme -notin @('http','ws') -or ([Uri]$BrowserEndpoint).Host -notin @('127.0.0.1','localhost'))){throw 'Manual browser capture requires an authorized loopback HTTP or WebSocket endpoint.'}
 $repository=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 . (Join-Path $repository 'scripts/accept-windows-capture.ps1') -PackageDirectory $PackageDirectory -HelpersOnly
@@ -35,8 +37,10 @@ $ownerSid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 if($LASTEXITCODE -ne 0){throw 'Could not restrict local recording evidence.'}
 $demoProfile=Join-Path $OutputDirectory 'profile'
 $prepareArguments=@((Join-Path $PSScriptRoot 'prepare.py'),'--package',$PackageDirectory,'--profile',$demoProfile,'--workspace',$Workspace)
-if($Scene -in @('dashboard','amazon','sheets')){$prepareArguments+='--browser-details'}
+if($Scene -in @('dashboard','amazon','sheets','frontend')){$prepareArguments+='--browser-details'}
 if($RuntimeTargetId){$prepareArguments+=@('--runtime-target-id',$RuntimeTargetId)}
+if($AgentExecutable){$prepareArguments+=@('--agent-executable',$AgentExecutable)}
+if($WslDistribution){$prepareArguments+=@('--wsl-distribution',$WslDistribution)}
 & python.exe @prepareArguments
 if($LASTEXITCODE -ne 0){throw 'Real-agent preparation failed.'}
 $environment=Get-Content (Join-Path $demoProfile 'demo-environment.json') -Raw|ConvertFrom-Json

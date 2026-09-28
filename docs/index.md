@@ -11,7 +11,14 @@ review the attachment, and ask your question with available text, links and stru
 [Download Zommi](https://github.com/timctho/zommi/releases/latest){ .btn .btn-primary }
 [Get started](install.md){ .btn .btn-outline-primary }
 
-[![Select a region, sketch your intent, and ask your agent](assets/social-card.png)](demos/sheets.mp4)
+<video controls autoplay muted loop playsinline preload="metadata" poster="demos/frontend-poster.webp" style="width: 100%; border-radius: 12px;" aria-label="Sketch a stacked chart and trend line, then watch the agent rebuild them">
+  <source src="demos/frontend.mp4" type="video/mp4">
+  <a href="demos/frontend.mp4">Watch the frontend demo</a>.
+</video>
+
+**Redesign a chart with a sketch.** Turn one chart into a channel breakdown and trend.
+
+> Same six months: stacked channels left, revenue trend right.
 
 ## Select. Attach. Ask.
 
