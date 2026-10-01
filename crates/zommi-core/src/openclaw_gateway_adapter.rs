@@ -466,6 +466,13 @@ impl OpenClawGatewayAdapter {
         let session_id = state.active_session_id.clone().ok_or_else(|| {
             gateway_error("runtime-failed", "OpenClaw Gateway has no active session.")
         })?;
+        let session = state
+            .sessions
+            .iter()
+            .find(|session| session["id"] == session_id);
+        let active_model = session.map(|session| {
+            encode_model_id(session["modelProvider"].as_str(), session["model"].as_str())
+        });
         Ok(json!({
             "runtimeTargetId": self.inner.target.id,
             "sessionId": session_id,
@@ -475,7 +482,11 @@ impl OpenClawGatewayAdapter {
             "models": state.models,
             "sessions": state.sessions,
             "history": {"thread": {"id": session_id, "turns": messages_to_turns(state.histories.get(&session_id).map(Vec::as_slice).unwrap_or_default())}},
-            "sessionMetadata": {"sessionKey": session_id}
+            "sessionMetadata": {
+                "sessionKey": session_id,
+                "activeModel": active_model,
+                "activeEffort": session.and_then(|session| session.get("thinkingLevel"))
+            }
         }))
     }
 
@@ -646,15 +657,15 @@ impl OpenClawGatewayAdapter {
                 "The requested session is not the exact active OpenClaw Gateway session.",
             ));
         }
-        let selected_model = self.selected_model(request.model).await;
-        if let Some(selected) = &selected_model {
-            let active_model = self.active_model_id().await;
-            if selected.get("id").and_then(Value::as_str) != Some(active_model.as_str()) {
-                return Err(gateway_error(
-                    "conflict",
-                    "OpenClaw changes models when a session is created. Start a new chat with the selected model.",
-                ));
-            }
+        let active_model = self.active_model_id().await;
+        let selected_model = self
+            .selected_model(request.model.filter(|model| *model != active_model))
+            .await?;
+        if selected_model.is_some() {
+            return Err(gateway_error(
+                "conflict",
+                "OpenClaw changes models when a session is created. Start a new chat with the selected model.",
+            ));
         }
         let attachments = input
             .images
@@ -978,6 +989,7 @@ impl OpenClawGatewayAdapter {
                     "updatedAt": session.get("updatedAt").or_else(|| session.get("lastActivityAt")).and_then(Value::as_i64).unwrap_or_default(),
                     "model": session.get("model"),
                     "modelProvider": session.get("modelProvider"),
+                    "thinkingLevel": session.get("thinkingLevel"),
                     "status": session.get("status"),
                     "lastRunId": session.get("lastRunId")
                 }))
@@ -1044,7 +1056,7 @@ impl OpenClawGatewayAdapter {
         effort: Option<&str>,
         full_access: bool,
     ) -> Result<(), CodexError> {
-        let selected = self.selected_model(model).await;
+        let selected = self.selected_model(model).await?;
         let mut params = json!({
             "label": format!("Zommi chat {}", &Uuid::new_v4().to_string()[..8])
         });
@@ -1052,9 +1064,14 @@ impl OpenClawGatewayAdapter {
             params["agentId"] = Value::String(agent_id.clone());
         }
         if let Some(selected) = selected
-            && let Some(model) = selected.get("rawModelId")
+            && let Some(model) = selected.get("rawModelId").and_then(Value::as_str)
         {
-            params["model"] = model.clone();
+            let provider = selected["provider"].as_str().unwrap_or_default();
+            params["model"] = Value::String(if provider.is_empty() {
+                model.to_owned()
+            } else {
+                format!("{provider}/{model}")
+            });
         }
         if let Some(effort) = effort {
             params["thinkingLevel"] = Value::String(effort.into());
@@ -1149,9 +1166,12 @@ impl OpenClawGatewayAdapter {
         Ok(())
     }
 
-    async fn selected_model(&self, model: Option<&str>) -> Option<Value> {
-        let model = model?;
-        self.inner
+    async fn selected_model(&self, model: Option<&str>) -> Result<Option<Value>, CodexError> {
+        let Some(model) = model.filter(|model| !model.is_empty()) else {
+            return Ok(None);
+        };
+        let selected = self
+            .inner
             .state
             .lock()
             .await
@@ -1161,7 +1181,11 @@ impl OpenClawGatewayAdapter {
                 candidate.get("id").and_then(Value::as_str) == Some(model)
                     || candidate.get("model").and_then(Value::as_str) == Some(model)
             })
-            .cloned()
+            .cloned();
+        selected.map(Some).ok_or_else(|| gateway_error(
+            "invalid-request",
+            "OpenClaw no longer advertises that model. Refresh agents and select an available model.",
+        ))
     }
 
     async fn active_model_id(&self) -> String {

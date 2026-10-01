@@ -48,12 +48,38 @@ void main() {
     expect(connection.sessionId, 'pi-session-a');
     expect(connection.runtimeVersion, '4.5.6');
     expect(connection.sessionMetadata['sessionFile'], '/sessions/a.jsonl');
+    expect(connection.sessionMetadata['activeModel'], 'openai/gpt-test');
+    expect(connection.sessionMetadata['activeEffort'], 'high');
     expect(connection.capabilities, contains('turn.steer.v1'));
+
+    await expectLater(
+      bridge.startTurn(
+        runtimeTargetId: target.id,
+        sessionId: connection.sessionId,
+        message: 'must not silently use another model',
+        model: 'provider/removed-model',
+      ),
+      throwsA(
+        isA<CoreProtocolException>().having(
+          (error) => error.code,
+          'code',
+          'invalid-request',
+        ),
+      ),
+    );
+    expect(
+      (await requestLog.readAsLines())
+          .map(jsonDecode)
+          .whereType<Map>()
+          .where((request) => request['type'] == 'prompt'),
+      isEmpty,
+    );
 
     final receipt = await bridge.startTurn(
       runtimeTargetId: target.id,
       sessionId: connection.sessionId,
       message: 'ask-question about selected value',
+      model: connection.sessionMetadata['activeModel'] as String,
       snapshots: const <Map<String, Object?>>[
         <String, Object?>{
           'surfaceKind': 'Window',

@@ -743,7 +743,7 @@ void main() {
     expect(find.text('Gateway · Linux'), findsOneWidget);
   });
 
-  testWidgets('Hermes model selector survives a runtime round trip', (
+  testWidgets('Hermes model selector clears an empty reconnect inventory', (
     tester,
   ) async {
     const hermes = RuntimeTarget(
@@ -780,7 +780,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('model-summary')), findsOneWidget);
-    expect(find.textContaining('Fixture Pro'), findsOneWidget);
+    expect(find.textContaining('Fixture Pro'), findsNothing);
   });
 
   testWidgets('maximized window stays maximized when shown again', (

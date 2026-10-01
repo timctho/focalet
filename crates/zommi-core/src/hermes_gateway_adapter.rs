@@ -145,6 +145,17 @@ struct State {
 }
 
 impl State {
+    fn set_models(&mut self, models: Vec<Value>) {
+        self.capabilities.retain(|capability| {
+            capability != "model.select.v1" && capability != "reasoning.select.v1"
+        });
+        if !models.is_empty() {
+            self.capabilities
+                .extend(["model.select.v1".into(), "reasoning.select.v1".into()]);
+        }
+        self.models = models;
+    }
+
     fn bind_session(&mut self, result: &Value, session_id: &str) -> Result<(), CodexError> {
         let runtime_session_id = result
             .get("session_id")
@@ -1273,7 +1284,7 @@ impl HermesGatewayAdapter {
         profile: Option<&str>,
         full_access: bool,
     ) -> Result<(), CodexError> {
-        let selected = self.selected_model(model).await;
+        let selected = self.selected_model(model).await?;
         let mut params = json!({"source": "zommi", "close_on_disconnect": false});
         if let Some(selected) = selected {
             if let Some(raw) = selected.get("rawModelId") {
@@ -1332,14 +1343,17 @@ impl HermesGatewayAdapter {
         };
         let value = self
             .inner
-            .request("model.options", json!({"session_id": session_id}))
+            .request(
+                "model.options",
+                json!({"session_id": session_id, "refresh": true}),
+            )
             .await?;
         let models = models_for_ui(&value);
         let mut state = self.inner.state.lock().await;
         state
             .model_catalogs
             .insert(profile, (Instant::now(), models.clone()));
-        state.models = models.clone();
+        state.set_models(models.clone());
         Ok(models)
     }
 
@@ -1353,7 +1367,8 @@ impl HermesGatewayAdapter {
             if let Some((updated, models)) = state.model_catalogs.get(&profile)
                 && updated.elapsed() < Duration::from_secs(300)
             {
-                state.models = models.clone();
+                let models = models.clone();
+                state.set_models(models);
                 return;
             }
             (
@@ -1372,14 +1387,11 @@ impl HermesGatewayAdapter {
                 state
                     .model_catalogs
                     .insert(profile, (Instant::now(), models.clone()));
-                state.models = models;
+                state.set_models(models);
             }
             Err(error) => {
                 let mut state = self.inner.state.lock().await;
-                state.models.clear();
-                state.capabilities.retain(|capability| {
-                    capability != "model.select.v1" && capability != "reasoning.select.v1"
-                });
+                state.set_models(Vec::new());
                 drop(state);
                 self.inner.emit_status(
                     &format!("Hermes model inventory unavailable: {}", error.message),
@@ -1391,19 +1403,37 @@ impl HermesGatewayAdapter {
         }
     }
 
-    async fn selected_model(&self, model: Option<&str>) -> Option<Value> {
-        let model = model?;
-        self.inner
-            .state
-            .lock()
-            .await
+    async fn selected_model(&self, model: Option<&str>) -> Result<Option<Value>, CodexError> {
+        let Some(model) = model.filter(|model| !model.is_empty()) else {
+            return Ok(None);
+        };
+        let state = self.inner.state.lock().await;
+        // Lazy session.create replies can omit provider, and a configured
+        // current model need not be listed in the picker. Preserve that exact
+        // session choice when creating another chat in the same profile.
+        let current_model = encode_model_id(
+            state.session_info["provider"].as_str(),
+            state.session_info["model"].as_str(),
+        );
+        if model == current_model || state.session_info["model"].as_str() == Some(model) {
+            return Ok(Some(json!({
+                "id": current_model,
+                "rawModelId": state.session_info["model"],
+                "provider": state.session_info["provider"],
+            })));
+        }
+        let selected = state
             .models
             .iter()
             .find(|candidate| {
                 candidate.get("id").and_then(Value::as_str) == Some(model)
                     || candidate.get("model").and_then(Value::as_str) == Some(model)
             })
-            .cloned()
+            .cloned();
+        selected.map(Some).ok_or_else(|| gateway_error(
+            "invalid-request",
+            "Hermes no longer advertises that model. Refresh agents and select an available model.",
+        ))
     }
 
     async fn apply_options(
@@ -1411,7 +1441,6 @@ impl HermesGatewayAdapter {
         model: Option<&str>,
         effort: Option<&str>,
     ) -> Result<(), CodexError> {
-        let selected = self.selected_model(model).await;
         let (runtime_session_id, current_model, current_effort) = {
             let state = self.inner.state.lock().await;
             (
@@ -1427,8 +1456,12 @@ impl HermesGatewayAdapter {
                     .map(str::to_owned),
             )
         };
-        if let Some(selected) = selected
-            && selected.get("id").and_then(Value::as_str) != Some(&current_model)
+        // The runtime can use a configured model that is absent from its picker.
+        // Leave that active model alone; validate explicit changes against inventory.
+        if let Some(selected) = self
+            .selected_model(model.filter(|model| *model != current_model))
+            .await?
+            && selected["id"] != current_model
         {
             let raw = selected
                 .get("rawModelId")

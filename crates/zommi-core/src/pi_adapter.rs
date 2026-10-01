@@ -366,8 +366,11 @@ impl PiAdapter {
             "models": state.models,
             "sessions": state.sessions.values().cloned().collect::<Vec<_>>(),
             "history": {"thread": {"id": session_id, "turns": messages_to_turns(&state.messages)}},
-            "sessionMetadata": state.runtime_state.get("sessionFile").and_then(Value::as_str)
-                .map(|session_file| json!({"sessionFile": session_file}))
+            "sessionMetadata": {
+                "sessionFile": state.runtime_state.get("sessionFile"),
+                "activeModel": state.runtime_state.get("model").and_then(pi_model_id),
+                "activeEffort": state.runtime_state.get("thinkingLevel")
+            }
         }))
     }
 
@@ -905,13 +908,7 @@ impl PiAdapter {
             .flatten()
             .filter_map(model_for_ui)
             .collect::<Vec<_>>();
-        let model_id = runtime_state.get("model").and_then(|model| {
-            Some(format!(
-                "{}/{}",
-                model.get("provider")?.as_str()?,
-                model.get("id")?.as_str()?
-            ))
-        });
+        let model_id = runtime_state.get("model").and_then(pi_model_id);
         let thinking_levels = model_id
             .as_deref()
             .and_then(|id| {
@@ -956,7 +953,17 @@ impl PiAdapter {
         model: Option<&str>,
         effort: Option<&str>,
     ) -> Result<(), CodexError> {
-        if let Some(model_id) = model {
+        let current_model = self
+            .inner
+            .state
+            .lock()
+            .await
+            .runtime_state
+            .get("model")
+            .and_then(pi_model_id);
+        if let Some(model_id) =
+            model.filter(|model| !model.is_empty() && Some(*model) != current_model.as_deref())
+        {
             let model = self
                 .inner
                 .state
@@ -980,6 +987,11 @@ impl PiAdapter {
                 self.inner.state.lock().await.runtime_state["model"] = json!({
                     "provider": model.get("provider"), "id": model.get("rawModelId")
                 });
+            } else {
+                return Err(pi_error(
+                    "invalid-request",
+                    "Pi no longer advertises that model. Refresh agents and select an available model.",
+                ));
             }
         }
         if let Some(effort) = effort {
@@ -1397,6 +1409,14 @@ async fn read_stderr(inner: Weak<Inner>, stderr: tokio::process::ChildStderr) {
             state.stderr.drain(..start);
         }
     }
+}
+
+fn pi_model_id(model: &Value) -> Option<String> {
+    Some(format!(
+        "{}/{}",
+        model.get("provider")?.as_str()?,
+        model.get("id")?.as_str()?
+    ))
 }
 
 fn model_for_ui(model: &Value) -> Option<Value> {
