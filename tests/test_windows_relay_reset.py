@@ -13,10 +13,13 @@ SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/stop-zommi-relays.ps1'
 class WindowsRelayResetTests(unittest.TestCase):
     def run_cleanup(self, directory, architecture):
         powershell = Path(os.environ['WINDIR']) / architecture / 'WindowsPowerShell/v1.0/powershell.exe'
+        # This is a functional cleanup test, including cold 32-bit PowerShell
+        # startup on hosted Windows runners. Keep it bounded without making
+        # the engine's first launch a 15-second performance assertion.
         return subprocess.run([
             str(powershell), '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
             '-File', str(SCRIPT), '-DataDirectory', str(directory),
-        ], capture_output=True, text=True, timeout=15)
+        ], capture_output=True, text=True, timeout=60)
 
     def test_missing_cache_and_stale_corrupt_record_need_no_wsl(self):
         for architecture in ('System32', 'SysWOW64'):
