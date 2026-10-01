@@ -124,13 +124,16 @@ Section "Uninstall"
     DetailPrint "Stopping Zommi background connections before reset..."
     ClearErrors
     StrCpy $0 4
-    ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\support\stop-zommi-relays.ps1" -DataDirectory "$LOCALAPPDATA\Zommi"' $0
+    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\support\stop-zommi-relays.ps1" -DataDirectory "$LOCALAPPDATA\Zommi"'
+    Pop $0
+    Pop $1
     ${If} ${Errors}
       StrCpy $0 4
     ${EndIf}
     ${If} $0 != 0
+      DetailPrint "$1"
       IfSilent +2
-      MessageBox MB_OK|MB_ICONSTOP "Could not stop a Zommi background connection. Close Zommi and retry uninstall. Your data was kept."
+      MessageBox MB_OK|MB_ICONSTOP "Could not stop a Zommi background connection. Close Zommi and retry uninstall. Your data was kept.$\r$\n$\r$\n$1"
       SetErrorLevel 4
       Abort
     ${EndIf}

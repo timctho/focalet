@@ -18,6 +18,18 @@ spec.loader.exec_module(checks)
 
 
 class ContributorChecksTests(unittest.TestCase):
+    def test_windows_suite_exercises_uninstall_powershell(self):
+        with patch.object(checks.os, 'name', 'nt'), \
+                patch.object(checks, 'check_rust'), \
+                patch.object(checks, 'check_flutter'), \
+                patch.object(checks, 'check_capture'), \
+                patch.object(checks, 'run') as run:
+            checks.check_windows()
+        run.assert_any_call(
+            sys.executable, '-m', 'unittest', 'discover', '-s', 'tests',
+            '-p', 'test_windows_relay_reset.py', '-v',
+        )
+
     def test_runner_isolates_real_runtime_configuration_and_personal_state(self):
         inherited = {
             "PATH": "/toolchains",
