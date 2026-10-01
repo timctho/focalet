@@ -48,6 +48,8 @@ void main() {
     expect(connection.sessionId, 'pi-session-a');
     expect(connection.runtimeVersion, '4.5.6');
     expect(connection.sessionMetadata['sessionFile'], '/sessions/a.jsonl');
+    expect(connection.sessionMetadata['activeModel'], 'openai/gpt-test');
+    expect(connection.sessionMetadata['activeEffort'], 'high');
     expect(connection.capabilities, contains('turn.steer.v1'));
 
     await expectLater(
@@ -77,6 +79,7 @@ void main() {
       runtimeTargetId: target.id,
       sessionId: connection.sessionId,
       message: 'ask-question about selected value',
+      model: connection.sessionMetadata['activeModel'] as String,
       snapshots: const <Map<String, Object?>>[
         <String, Object?>{
           'surfaceKind': 'Window',

@@ -80,6 +80,7 @@ void main() {
         final createRequest = (await _readRequests(requestLog))
             .lastWhere((request) => request['method'] == 'session.create');
         expect((createRequest['params'] as Map)['model'], 'gpt-test');
+        expect((createRequest['params'] as Map)['provider'], 'copilot');
         await expectLater(
           bridge.startTurn(
             runtimeTargetId: target.id,

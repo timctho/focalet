@@ -1411,13 +1411,13 @@ impl HermesGatewayAdapter {
         // Lazy session.create replies can omit provider, and a configured
         // current model need not be listed in the picker. Preserve that exact
         // session choice when creating another chat in the same profile.
-        if model
-            == encode_model_id(
-                state.session_info["provider"].as_str(),
-                state.session_info["model"].as_str(),
-            )
-        {
+        let current_model = encode_model_id(
+            state.session_info["provider"].as_str(),
+            state.session_info["model"].as_str(),
+        );
+        if model == current_model || state.session_info["model"].as_str() == Some(model) {
             return Ok(Some(json!({
+                "id": current_model,
                 "rawModelId": state.session_info["model"],
                 "provider": state.session_info["provider"],
             })));
@@ -1461,6 +1461,7 @@ impl HermesGatewayAdapter {
         if let Some(selected) = self
             .selected_model(model.filter(|model| *model != current_model))
             .await?
+            && selected["id"] != current_model
         {
             let raw = selected
                 .get("rawModelId")

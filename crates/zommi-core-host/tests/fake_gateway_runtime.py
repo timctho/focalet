@@ -261,6 +261,10 @@ def serve_hermes(connection: socket.socket) -> None:
             result = {"ok": True}
         if UNIQUE_SESSIONS and method == "session.list":
             result['sessions'] = [dict(result['sessions'][0], id=id) for id in CREATED_SESSIONS]
+        if method == "model.options" and params.get("refresh") and os.environ.get("ZOMMI_FAKE_HERMES_LAZY_INFO") == "1":
+            # Agent construction can fill in the provider after the first
+            # connection has already exposed a bare current model to the UI.
+            hermes_event(connection, "session.info", runtime_session_id, {"model": "gpt-test", "provider": "copilot"})
         send_ws(connection, {"jsonrpc": "2.0", "id": request.get("id"), "result": result})
 
         if method == "prompt.submit":
