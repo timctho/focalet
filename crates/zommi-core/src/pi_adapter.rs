@@ -956,7 +956,7 @@ impl PiAdapter {
         model: Option<&str>,
         effort: Option<&str>,
     ) -> Result<(), CodexError> {
-        if let Some(model_id) = model {
+        if let Some(model_id) = model.filter(|model| !model.is_empty()) {
             let model = self
                 .inner
                 .state
@@ -980,6 +980,11 @@ impl PiAdapter {
                 self.inner.state.lock().await.runtime_state["model"] = json!({
                     "provider": model.get("provider"), "id": model.get("rawModelId")
                 });
+            } else {
+                return Err(pi_error(
+                    "invalid-request",
+                    "Pi no longer advertises that model. Refresh agents and select an available model.",
+                ));
             }
         }
         if let Some(effort) = effort {

@@ -704,6 +704,11 @@ final class ZommiController extends ChangeNotifier {
                   (_runtimeCapabilities[target.id] ??= {}).add(
                     'model.select.v1',
                   );
+                } else {
+                  _runtimeCapabilities[target.id]?.removeAll({
+                    'model.select.v1',
+                    'reasoning.select.v1',
+                  });
                 }
                 if (activeRuntime?.id == target.id) {
                   models
@@ -1560,13 +1565,22 @@ final class ZommiController extends ChangeNotifier {
     for (final capability in [
       'session.rewind.v1',
       'session.rewind.prepare.v1',
+      'model.select.v1',
+      'reasoning.select.v1',
     ]) {
       if (!connection.capabilities.contains(capability)) {
         _runtimeCapabilities[connection.runtimeTargetId]!.remove(capability);
       }
     }
-    if (connection.models.isNotEmpty) {
-      _modelCatalogs[connection.runtimeTargetId] = List.of(connection.models);
+    // A connection describes this session/profile's inventory, including an
+    // empty result. Retaining the prior profile's options can send its model
+    // back to a provider that does not support it.
+    _modelCatalogs[connection.runtimeTargetId] = List.of(connection.models);
+    if (connection.models.isEmpty) {
+      _runtimeCapabilities[connection.runtimeTargetId]!.removeAll({
+        'model.select.v1',
+        'reasoning.select.v1',
+      });
     }
     _mergeSessions(connection.runtimeTargetId, connection.sessions);
     // Connections can carry cached summaries. Only an explicit catalog/list
@@ -2497,7 +2511,7 @@ final class ZommiController extends ChangeNotifier {
       return;
     }
     final previous = activeSessionSettings;
-    final selected = previous.copyWith(profile: profile);
+    final selected = previous.copyWith(profile: profile, model: '', effort: '');
     sessionSettingsBusy = true;
     _notify();
     try {
@@ -3602,8 +3616,8 @@ final class ZommiController extends ChangeNotifier {
         key,
         () => SessionSettings(
           workspace: session.cwd ?? '',
-          model: selectedModel,
-          effort: selectedEffort,
+          model: '',
+          effort: '',
           profile: session.profile ?? '',
         ),
       );
@@ -3625,8 +3639,10 @@ final class ZommiController extends ChangeNotifier {
     final sameRuntime = runtimeTargetId == activeRuntime?.id;
     return SessionSettings(
       workspace: summary?.cwd ?? (sameRuntime ? selectedWorkspace : ''),
-      model: sameRuntime ? selectedModel : '',
-      effort: sameRuntime ? selectedEffort : '',
+      model: _isActiveSession(runtimeTargetId, sessionId) ? selectedModel : '',
+      effort: _isActiveSession(runtimeTargetId, sessionId)
+          ? selectedEffort
+          : '',
       profile: summary?.profile ?? (sameRuntime ? selectedProfile : ''),
     );
   }

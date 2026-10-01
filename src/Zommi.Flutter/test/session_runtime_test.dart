@@ -39,6 +39,62 @@ RichFakeCore multiRuntimeCore() => RichFakeCore()
   ];
 
 void main() {
+  test('opening another saved chat uses its own model and effort', () async {
+    final core = multiRuntimeCore()
+      ..sessionsByRuntime['runtime-codex'] = [
+        {'id': 'session-1'},
+      ]
+      ..metadataBySession['runtime-codex\u0000session-2'] = {
+        'activeModel': 'fixture-mini',
+        'activeEffort': 'low',
+      };
+    final controller = ZommiController(
+      core: core,
+      desktop: FakeDesktopBridge(),
+    );
+    addTearDown(controller.close);
+    await controller.initialize();
+    expect(controller.selectedModel, 'fixture-pro');
+    core.sessionsByRuntime['runtime-codex'] = [
+      {'id': 'session-1'},
+      {'id': 'session-2'},
+    ];
+    await controller.refreshSessionCatalog(force: true);
+    await controller.switchSession('session-2');
+    expect(controller.selectedModel, 'fixture-mini');
+    expect(controller.selectedEffort, 'low');
+    await controller.switchSession('session-1');
+    expect(controller.selectedModel, 'fixture-pro');
+    expect(controller.selectedEffort, 'high');
+  });
+
+  test(
+    'changing Hermes profile inherits the new profile model and effort',
+    () async {
+      final core = multiRuntimeCore()
+        ..modelCatalogByRuntime[hermes.id] = RichFakeCore.models
+        ..metadataBySession['runtime-hermes\u0000hermes-coder-session'] = {
+          'activeModel': 'fixture-mini',
+          'activeEffort': 'low',
+          'profile': 'coder',
+        };
+      final controller = ZommiController(
+        core: core,
+        desktop: FakeDesktopBridge(),
+      );
+      addTearDown(controller.close);
+      await controller.initialize();
+      await controller.selectRuntime(hermes.id);
+      expect(controller.selectedModel, 'fixture-pro');
+      await controller.setProfile('coder');
+      expect(core.lastModel, isNull);
+      expect(core.lastEffort, isNull);
+      expect(controller.selectedModel, 'fixture-mini');
+      expect(controller.selectedEffort, 'low');
+      expect(controller.selectedProfile, 'coder');
+    },
+  );
+
   test(
     'sessions sort by recency across runtimes and timestamp formats',
     () async {

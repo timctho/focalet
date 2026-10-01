@@ -50,6 +50,29 @@ void main() {
     expect(connection.sessionMetadata['sessionFile'], '/sessions/a.jsonl');
     expect(connection.capabilities, contains('turn.steer.v1'));
 
+    await expectLater(
+      bridge.startTurn(
+        runtimeTargetId: target.id,
+        sessionId: connection.sessionId,
+        message: 'must not silently use another model',
+        model: 'provider/removed-model',
+      ),
+      throwsA(
+        isA<CoreProtocolException>().having(
+          (error) => error.code,
+          'code',
+          'invalid-request',
+        ),
+      ),
+    );
+    expect(
+      (await requestLog.readAsLines())
+          .map(jsonDecode)
+          .whereType<Map>()
+          .where((request) => request['type'] == 'prompt'),
+      isEmpty,
+    );
+
     final receipt = await bridge.startTurn(
       runtimeTargetId: target.id,
       sessionId: connection.sessionId,

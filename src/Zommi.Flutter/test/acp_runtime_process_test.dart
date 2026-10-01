@@ -78,11 +78,14 @@ void main() {
         connection.models.map((model) => model['id']),
         containsAll(['provider:model-a', 'provider:model-b']),
       );
+      final chosenModel = runtime == 'opencode'
+          ? 'provider:model-a'
+          : 'provider:model-b';
       final receipt = await bridge.startTurn(
         runtimeTargetId: target.id,
         sessionId: connection.sessionId,
         message: 'request-approval and inspect this',
-        model: 'provider:model-b',
+        model: chosenModel,
         snapshots: const <Map<String, Object?>>[
           <String, Object?>{
             'surfaceKind': 'Window',
@@ -173,6 +176,7 @@ void main() {
         runtimeTargetId: target.id,
         sessionId: connection.sessionId,
         message: 'hold-for-interrupt',
+        model: chosenModel,
         clientOperationId: 'client:rust-acp-interrupt',
       );
       await bridge.interruptTurn(
@@ -240,14 +244,15 @@ void main() {
         ),
         runtime != 'gemini',
       );
-      final modelChange = requests.singleWhere(
+      final modelChanges = requests.where(
         (request) =>
             request['method'] ==
             (runtime == 'opencode'
                 ? 'session/set_config_option'
                 : 'session/set_model'),
       );
-      expect(jsonEncode(modelChange), contains('provider:model-b'));
+      final modelChange = modelChanges.single;
+      expect(jsonEncode(modelChange), contains(chosenModel));
       if (runtime == 'opencode') {
         expect((modelChange['params'] as Map)['configId'], 'provider-model');
         expect(
@@ -274,6 +279,7 @@ void main() {
   }
 
   for (final (runtime, prepared) in [
+    ('hermes', false),
     ('opencode', false),
     ('opencode', true),
     ('gemini', false),
@@ -327,7 +333,7 @@ void main() {
         addTearDown(subscription.cancel);
         await bridge.initialize();
         final target = (await bridge.discoverRuntimeTargets()).targets
-            .singleWhere((t) => t.runtimeId == runtime);
+            .singleWhere((t) => t.adapterId == '$runtime-acp');
         if (prepared) {
           await bridge.prepareRuntime(runtimeTargetId: target.id);
           await writeModels(expanded: true);
@@ -392,6 +398,37 @@ void main() {
           (await bridge.connectRuntime(runtimeTargetId: target.id)).models
               .map((m) => m['id']),
           contains('provider:after-login'),
+        );
+        await writeModels(expanded: true);
+        await bridge.refreshRuntimeModels(runtimeTargetId: target.id);
+
+        await expectLater(
+          bridge.startTurn(
+            runtimeTargetId: target.id,
+            sessionId: connection.sessionId,
+            message: 'must not send with an unadvertised model',
+            model: 'provider:removed-model',
+          ),
+          throwsA(
+            isA<CoreProtocolException>().having(
+              (e) => e.message,
+              'message',
+              contains('model'),
+            ),
+          ),
+        );
+        final beforePrompt = (await requestLog.readAsLines())
+            .map(jsonDecode)
+            .whereType<Map>();
+        expect(
+          beforePrompt.where((r) => r['method'] == 'session/prompt'),
+          isEmpty,
+        );
+
+        await modelFile.writeAsString(jsonEncode({'models': []}));
+        expect(
+          await bridge.refreshRuntimeModels(runtimeTargetId: target.id),
+          isEmpty,
         );
         await writeModels(expanded: true);
         await bridge.refreshRuntimeModels(runtimeTargetId: target.id);

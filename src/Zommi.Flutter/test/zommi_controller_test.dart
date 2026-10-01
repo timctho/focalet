@@ -703,43 +703,46 @@ void main() {
     await controller.close();
   });
 
-  test('Hermes model catalog survives an empty reconnect response', () async {
-    const hermes = RuntimeTarget(
-      id: 'runtime-hermes',
-      runtimeId: 'hermes',
-      adapterId: 'hermes-gateway',
-      displayName: 'Hermes',
-      protocolName: 'Hermes Gateway',
-      executablePath: '/usr/bin/hermes',
-      executionHost: {
-        'id': 'native:linux',
-        'kind': 'native',
-        'displayName': 'Linux',
-      },
-      capabilityHints: RichFakeCore.capabilities,
-    );
-    final core = RichFakeCore()
-      ..historyCount = 0
-      ..activeTargetId = hermes.id
-      ..discoveredTargets.add(hermes)
-      ..modelCatalogByRuntime[hermes.id] = RichFakeCore.models;
-    final controller = ZommiController(
-      core: core,
-      desktop: FakeDesktopBridge(),
-    );
-    await controller.initialize();
-    expect(controller.activeRuntime?.id, hermes.id);
-    expect(controller.models, RichFakeCore.models);
-    expect(controller.modelSelectionSupported, isTrue);
+  test(
+    'Hermes empty reconnect inventory clears the previous catalog',
+    () async {
+      const hermes = RuntimeTarget(
+        id: 'runtime-hermes',
+        runtimeId: 'hermes',
+        adapterId: 'hermes-gateway',
+        displayName: 'Hermes',
+        protocolName: 'Hermes Gateway',
+        executablePath: '/usr/bin/hermes',
+        executionHost: {
+          'id': 'native:linux',
+          'kind': 'native',
+          'displayName': 'Linux',
+        },
+        capabilityHints: RichFakeCore.capabilities,
+      );
+      final core = RichFakeCore()
+        ..historyCount = 0
+        ..activeTargetId = hermes.id
+        ..discoveredTargets.add(hermes)
+        ..modelCatalogByRuntime[hermes.id] = RichFakeCore.models;
+      final controller = ZommiController(
+        core: core,
+        desktop: FakeDesktopBridge(),
+      );
+      await controller.initialize();
+      expect(controller.activeRuntime?.id, hermes.id);
+      expect(controller.models, RichFakeCore.models);
+      expect(controller.modelSelectionSupported, isTrue);
 
-    await controller.selectRuntime('runtime-pi');
-    core.modelCatalogByRuntime[hermes.id] = const [];
-    await controller.selectRuntime(hermes.id);
-    expect(controller.activeRuntime?.id, hermes.id);
-    expect(controller.models, RichFakeCore.models);
-    expect(controller.modelSelectionSupported, isTrue);
-    await controller.close();
-  });
+      await controller.selectRuntime('runtime-pi');
+      core.modelCatalogByRuntime[hermes.id] = const [];
+      await controller.selectRuntime(hermes.id);
+      expect(controller.activeRuntime?.id, hermes.id);
+      expect(controller.models, isEmpty);
+      expect(controller.modelSelectionSupported, isFalse);
+      await controller.close();
+    },
+  );
 
   test(
     'runtime round trip deduplicates replay and keeps later thinking',

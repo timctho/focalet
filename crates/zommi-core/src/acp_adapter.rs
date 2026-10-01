@@ -470,7 +470,7 @@ impl AcpAdapter {
 
     pub async fn model_inventory(&self) -> Option<Vec<Value>> {
         let state = self.inner.state.lock().await;
-        (!state.models.is_empty()).then(|| state.models.clone())
+        state.session_id.as_ref().map(|_| state.models.clone())
     }
 
     pub async fn is_running(&self) -> bool {
@@ -904,7 +904,23 @@ impl AcpAdapter {
 
     async fn set_model(&self, model: &str) -> Result<(), CodexError> {
         let session_id = self.active_session_id().await?;
-        let config_id = self.inner.state.lock().await.model_config_id.clone();
+        let config_id = {
+            let state = self.inner.state.lock().await;
+            if state.active_model.as_deref() == Some(model) {
+                return Ok(());
+            }
+            if !state
+                .models
+                .iter()
+                .any(|candidate| candidate["id"] == model)
+            {
+                return Err(adapter_error(
+                    "invalid-request",
+                    "This agent no longer advertises that model. Refresh agents and select an available model.",
+                ));
+            }
+            state.model_config_id.clone()
+        };
         let result = if let Some(config_id) = config_id {
             self.inner
                 .request(

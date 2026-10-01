@@ -93,6 +93,7 @@ class RichFakeCore
   String connectErrorMessage = 'Authentication required';
   final List<String> modelRefreshRequests = [];
   final Set<String> modelRefreshFailures = {};
+  final Map<String, Map<String, Object?>> metadataBySession = {};
   Future<void>? modelRefreshGate;
 
   @override
@@ -405,22 +406,24 @@ class RichFakeCore
                 'approval.resolve.v1',
               ]
             : capabilities,
-        sessionMetadata: activeTargetId == 'runtime-hermes'
-            ? const {
-                'activeModel': 'fixture-pro',
-                'activeEffort': 'high',
-                'cwd': '/workspace/hermes',
-                'profile': 'default',
-                'profiles': [
-                  {'name': 'default', 'model': 'fixture-pro'},
-                  {
-                    'name': 'coder',
-                    'model': 'fixture-pro',
-                    'description': 'Coding profile',
-                  },
-                ],
-              }
-            : const {'activeModel': 'fixture-pro', 'activeEffort': 'high'},
+        sessionMetadata:
+            metadataBySession['$activeTargetId\u0000$activeSessionId'] ??
+            (activeTargetId == 'runtime-hermes'
+                ? const {
+                    'activeModel': 'fixture-pro',
+                    'activeEffort': 'high',
+                    'cwd': '/workspace/hermes',
+                    'profile': 'default',
+                    'profiles': [
+                      {'name': 'default', 'model': 'fixture-pro'},
+                      {
+                        'name': 'coder',
+                        'model': 'fixture-pro',
+                        'description': 'Coding profile',
+                      },
+                    ],
+                  }
+                : const {'activeModel': 'fixture-pro', 'activeEffort': 'high'}),
       );
 
   List<Map<String, Object?>> _sessions() =>

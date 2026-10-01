@@ -10,6 +10,100 @@ import 'package:zommi_flutter/state/zommi_models.dart';
 import 'test_support.dart';
 
 void main() {
+  for (final initiallyUnavailable in [false, true]) {
+    test(
+      'Hermes refresh bypasses provider cache and restores model selection (unavailable=$initiallyUnavailable)',
+      () async {
+        final temporary = await Directory.systemTemp.createTemp(
+          'zommi-hermes-models-',
+        );
+        addTearDown(() => temporary.delete(recursive: true));
+        final modelFile = File('${temporary.path}/models.json');
+        if (initiallyUnavailable) {
+          await modelFile.writeAsString(jsonEncode({'fail': true}));
+        }
+        final requestLog = File('${temporary.path}/requests.jsonl');
+        final bridge = ProcessCoreBridge(
+          executablePath: _coreHostPath(),
+          environment: {
+            'ZOMMI_HERMES_COMMAND': await _findPython(),
+            'ZOMMI_HERMES_GATEWAY_ARGS_JSON': jsonEncode([
+              _fixturePath().path,
+              '--mode',
+              'hermes',
+            ]),
+            'ZOMMI_CORE_STATE_PATH': '${temporary.path}/binding.json',
+            'ZOMMI_FAKE_GATEWAY_MODEL_FILE': modelFile.path,
+            'ZOMMI_FAKE_HERMES_LAZY_INFO': '1',
+            'ZOMMI_FAKE_REQUEST_LOG': requestLog.path,
+          },
+        );
+        addTearDown(bridge.close);
+        await bridge.initialize();
+        final target = (await bridge.discoverRuntimeTargets()).targets
+            .singleWhere((target) => target.adapterId == 'hermes-gateway');
+        final connection = await bridge.connectRuntime(
+          runtimeTargetId: target.id,
+          cwd: temporary.path,
+        );
+        await modelFile.writeAsString(
+          jsonEncode({
+            'requireRefresh': true,
+            'providers': [
+              {
+                'slug': 'copilot',
+                'models': ['gpt-test', 'after-login'],
+              },
+              {
+                'slug': 'custom',
+                'models': ['after-login'],
+              },
+            ],
+          }),
+        );
+        final models = await bridge.refreshRuntimeModels(
+          runtimeTargetId: target.id,
+        );
+        expect(
+          models!.map((model) => model['id']),
+          containsAll(['copilot::after-login', 'custom::after-login']),
+        );
+        final refreshed = await bridge.connectRuntime(
+          runtimeTargetId: target.id,
+        );
+        expect(refreshed.sessionId, connection.sessionId);
+        expect(refreshed.capabilities, contains('model.select.v1'));
+        await bridge.createSession(
+          runtimeTargetId: target.id,
+          model: connection.sessionMetadata['activeModel'] as String,
+        );
+        final createRequest = (await _readRequests(requestLog))
+            .lastWhere((request) => request['method'] == 'session.create');
+        expect((createRequest['params'] as Map)['model'], 'gpt-test');
+        await expectLater(
+          bridge.startTurn(
+            runtimeTargetId: target.id,
+            sessionId: connection.sessionId,
+            message: 'must not be submitted using another model',
+            model: 'copilot::removed-model',
+          ),
+          throwsA(
+            isA<CoreProtocolException>().having(
+              (error) => error.message,
+              'message',
+              contains('model'),
+            ),
+          ),
+        );
+        expect(
+          (await _readRequests(requestLog))
+              .where((request) => request['method'] == 'prompt.submit'),
+          isEmpty,
+        );
+      },
+    );
+  }
+
   for (final switchWhileRunning in [false, true]) {
     test(
       'Hermes preserves reply order when switching ${switchWhileRunning ? 'during' : 'after'} a turn',
@@ -495,7 +589,7 @@ void main() {
         sessionId: moved.sessionId,
         cwd: coderWorkspace.path,
         profile: 'coder',
-        model: 'copilot/gpt-test',
+        model: 'copilot::gpt-test',
         effort: 'medium',
       );
       expect(switched.sessionId, 'hermes-coder-session');
@@ -570,6 +664,35 @@ void main() {
       expect(connection.protocolVersion, 4);
       expect(connection.runtimeVersion, '2026.8.1');
       expect(connection.capabilities, contains('operation.idempotency.v1'));
+
+      final created = await bridge.createSession(
+        runtimeTargetId: target.id,
+        model: 'custom::gpt-test',
+      );
+      expect(created.sessionMetadata['activeModel'], 'custom::gpt-test');
+      final createRequest = (await _readRequests(requestLog))
+          .lastWhere((request) => request['method'] == 'sessions.create');
+      expect((createRequest['params'] as Map)['model'], 'custom/gpt-test');
+      await expectLater(
+        bridge.startTurn(
+          runtimeTargetId: target.id,
+          sessionId: created.sessionId,
+          message: 'must not silently use the active model',
+          model: 'custom::removed-model',
+        ),
+        throwsA(
+          isA<CoreProtocolException>().having(
+            (error) => error.code,
+            'code',
+            'invalid-request',
+          ),
+        ),
+      );
+      expect(
+        (await _readRequests(requestLog))
+            .where((request) => request['method'] == 'chat.send'),
+        isEmpty,
+      );
 
       final approval = bridge.events.firstWhere(
         (event) => event.name == 'approval.requested',

@@ -216,6 +216,17 @@ Zommi does not restart or reconfigure your browser.
 
 ## Troubleshooting
 
+If an agent reports **model not found** or **model not supported**, first confirm
+the selected host, account and profile match the agent that works in your
+terminal. Choose **New agent → Refresh agents**, then select a model advertised
+by that runtime. A listed model can still be rejected by its provider because of
+account access or a stale upstream catalog.
+
+Hermes ACP and Gateway use Hermes's own provider configuration. Switching a
+Gateway profile starts a chat with that profile's model and reasoning defaults.
+For OpenClaw Gateway, choose the model before creating a new chat; an existing
+chat keeps its runtime model. Zommi preserves the provider with the model choice.
+
 | Symptom | Next step |
 | --- | --- |
 | No agents found | Verify the CLI works in the same Windows/WSL/Mac environment; scan again or configure its executable |

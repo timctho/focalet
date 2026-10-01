@@ -193,6 +193,8 @@ def serve_hermes(connection: socket.socket) -> None:
                     "profile_name": profile,
                 },
             }
+            if os.environ.get("ZOMMI_FAKE_HERMES_LAZY_INFO") == "1":
+                result["info"].pop("provider")
         elif method == "session.resume":
             profile = str(params.get("profile") or "default")
             result = {
@@ -226,6 +228,15 @@ def serve_hermes(connection: socket.socket) -> None:
                     }
                 ]
             }
+            model_file = os.environ.get("ZOMMI_FAKE_GATEWAY_MODEL_FILE")
+            if model_file and os.path.exists(model_file):
+                with open(model_file, encoding="utf-8") as handle:
+                    inventory = json.load(handle)
+                if inventory.get("fail"):
+                    send_ws(connection, {"jsonrpc": "2.0", "id": request["id"], "error": {"code": 5033, "message": "Fixture inventory unavailable"}})
+                    continue
+                if not inventory.get("requireRefresh") or params.get("refresh"):
+                    result = inventory
         elif method == "commands.catalog":
             result = {"pairs":[["/inspect", "Inspect project"], ["/skill-test", "A skill"], ["/quit", "Exit"], ["/quick", "Quick alias"]], "categories":[{"name":"User commands", "pairs":[["/quick", "Quick alias"]]}], "skills":{"/skill-test":{}}, "canon":{}}
         elif method == "slash.exec":
@@ -365,6 +376,7 @@ def openclaw_event(connection: socket.socket, event: str, payload: dict[str, Any
 
 def serve_openclaw(connection: socket.socket) -> None:
     active_key = "agent:main:zommi-rust"
+    active_provider, active_model = "copilot", "gpt-test"
     run_counter = 0
     active_run = ""
     pending_interactions = {"approval": False, "question": False}
@@ -414,12 +426,16 @@ def serve_openclaw(connection: socket.socket) -> None:
                         "key": active_key,
                         "derivedTitle": "Saved OpenClaw chat",
                         "updatedAt": 12,
-                        "model": "gpt-test",
-                        "modelProvider": "copilot",
+                        "model": active_model,
+                        "modelProvider": active_provider,
                     }
                 ]
             }
         elif method == "sessions.create":
+            if params.get("model"):
+                reference = params["model"]
+                # Unqualified IDs resolve against the configured default provider.
+                active_provider, active_model = reference.split("/", 1) if "/" in reference else ("copilot", reference)
             if UNIQUE_SESSIONS:
                 active_key = "agent:main:" + str(uuid.uuid4())
                 remember_session(active_key)
@@ -434,7 +450,8 @@ def serve_openclaw(connection: socket.socket) -> None:
         elif method == "models.list":
             result = {
                 "models": [
-                    {"id": "gpt-test", "name": "GPT Test", "provider": "copilot"}
+                    {"id": "gpt-test", "name": "GPT Test", "provider": "copilot"},
+                    {"id": "gpt-test", "name": "Custom GPT Test", "provider": "custom"}
                 ]
             }
         elif method == "commands.list":
