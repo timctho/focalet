@@ -248,6 +248,12 @@ your settings. Automated uninstall can request the same reset with
 Reset also stops Zommi's background WSL connections so they cannot recreate
 the deleted cache. Other WSL processes and distributions are left running.
 
+If an older uninstaller repeatedly reports **Could not stop a Zommi background
+connection**, quit Zommi from the tray and install **v0.2.2 or later** over the
+same installation first. This replaces the old uninstaller and cleanup helpers;
+then retry uninstall with the reset option selected. Installing the update does
+not require uninstalling the older version first.
+
 If a pinned Windows shortcut still shows the previous logo after updating,
 unpin it and pin Zommi again from the refreshed Start menu shortcut.
 

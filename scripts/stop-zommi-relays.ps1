@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param([Parameter(Mandatory=$true)][string]$DataDirectory)
 $ErrorActionPreference='Stop'
+$stage = 'reading Zommi connection records'
+$script:wslFailure = ''
 
 function Quote-NativeArgument([string]$Value) {
     # wsl.exe treats a quoted leading option as a command for the default shell.
@@ -26,6 +28,7 @@ function Invoke-Wsl([string[]]$Arguments, [string]$InputText='') {
     $start.StandardErrorEncoding = New-Object Text.UTF8Encoding($false)
     $process = New-Object Diagnostics.Process
     $process.StartInfo = $start
+    $script:wslFailure = ''
     try {
         if (-not $process.Start()) { throw 'Could not start WSL cleanup.' }
         $stdout = $process.StandardOutput.ReadToEndAsync()
@@ -34,9 +37,13 @@ function Invoke-Wsl([string[]]$Arguments, [string]$InputText='') {
         $process.StandardInput.Close()
         if (-not $process.WaitForExit(15000)) {
             $process.Kill()
+            $script:wslFailure = ' WSL cleanup timed out after 15 seconds.'
             throw 'WSL cleanup timed out.'
         }
-        if ($process.ExitCode -ne 0) { throw 'Could not verify and stop the Zommi WSL connection.' }
+        if ($process.ExitCode -ne 0) {
+            $script:wslFailure = ' WSL exit code: ' + $process.ExitCode + '.'
+            throw 'Could not verify and stop the Zommi WSL connection.'
+        }
         return $stdout.Result.Trim()
     } finally { $process.Dispose() }
 }
@@ -55,12 +62,14 @@ try {
     foreach ($file in $endpoints) { $snapshots[$file.FullName] = [IO.File]::ReadAllText($file.FullName) }
     Start-Sleep -Milliseconds 1200
     foreach ($file in $endpoints) {
+        $stage = 'reading Zommi connection records'
         $before = $snapshots[$file.FullName]
         if (-not (Test-Path -LiteralPath $file.FullName)) { continue }
         $current = [IO.File]::ReadAllText($file.FullName)
         # Inactive distributions need not be started just to delete stale data.
         # This also allows a corrupt, inactive cache record to be removed.
         if ($before -eq $current) { continue }
+        $stage = 'validating an active connection record'
         $endpoint = $current | ConvertFrom-Json
         if ($endpoint.schemaVersion -ne 1 -or [long]$endpoint.pid -le 1 -or
             [string]::IsNullOrWhiteSpace($endpoint.distribution) -or
@@ -68,8 +77,11 @@ try {
             throw 'The live Zommi WSL connection record is invalid.'
         }
         $distribution = [string]$endpoint.distribution
+        $stage = 'resolving the connection path in WSL'
         $linuxPath = Invoke-Wsl -Arguments @('-d', $distribution, '-e', '/usr/bin/wslpath', '-u', $file.FullName)
+        $stage = 'verifying and stopping the owned WSL relay'
         Invoke-Wsl -Arguments @('-d', $distribution, '-e', '/bin/sh', '-s', '--', [string]$endpoint.pid, $linuxPath) -InputText $script | Out-Null
+        $stage = 'checking that the connection stopped writing data'
         $stopped = [IO.File]::ReadAllText($file.FullName) | ConvertFrom-Json
         Start-Sleep -Milliseconds 1200
         $after = [IO.File]::ReadAllText($file.FullName) | ConvertFrom-Json
@@ -77,7 +89,8 @@ try {
     }
     exit 0
 } catch {
-    # Never print endpoint contents (they contain the private relay token).
-    [Console]::Error.WriteLine('Could not stop a Zommi WSL connection. Close Zommi and retry uninstall. Your data was kept.')
+    # Only fixed stage labels and a numeric exit code are safe to display.
+    # JSON errors, endpoint contents and raw WSL output can contain relay tokens.
+    [Console]::Error.WriteLine("Could not stop a Zommi WSL connection while $stage.$script:wslFailure Close Zommi and retry uninstall. Your data was kept.")
     exit 4
 }
