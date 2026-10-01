@@ -889,7 +889,7 @@ void main() {
         requests
             .where((request) => request['method'] == 'sessions.create')
             .length,
-        1,
+        2, // Initial connection and the explicit provider/model selection.
       );
       final create = requests.firstWhere(
         (request) => request['method'] == 'sessions.create',
