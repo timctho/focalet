@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Net;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Zommi.Capture;
 
@@ -10,6 +12,13 @@ public sealed record CaptureClipboardItem(byte[] Png, int Width, int Height,
 /// <summary>Alternative representations of one ordered batch, not competing image/text items.</summary>
 public sealed record CaptureClipboardBatch(string Text, string Html, string Rtf)
 {
+    public IReadOnlyList<CaptureClipboardItem> Items { get; init; } = [];
+    private static readonly JsonSerializerOptions MetadataOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
+
     public static CaptureClipboardBatch Create(IReadOnlyList<CaptureClipboardItem> items)
     {
         if (items.Count is < 1 or > 8) throw new ArgumentException("Select between one and eight regions.", nameof(items));
@@ -30,6 +39,8 @@ public sealed record CaptureClipboardBatch(string Text, string Html, string Rtf)
             var label = $"[{(char)('A' + index)}] {item.Width} × {item.Height} pixels";
             var context = item.Snapshot is { } snapshot ? ContextPreviewFormatter.Format(snapshot)
                 : $"No text was available for this region. {item.Limitation ?? "Only the selected image was captured."}";
+            if (item.Snapshot is { } metadata)
+                context += "\nCaptured metadata (JSON):\n" + JsonSerializer.Serialize(metadata, MetadataOptions);
             var section = label + "\n" + context;
             text.AppendLine().AppendLine(section);
             html.Append("<section><pre style=\"white-space:pre-wrap\">").Append(WebUtility.HtmlEncode(section))
@@ -45,7 +56,7 @@ public sealed record CaptureClipboardBatch(string Text, string Html, string Rtf)
         rtf.Append('}');
         var plain = text.ToString().Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd()
             .Replace("\n", "\r\n", StringComparison.Ordinal);
-        return new(plain, WindowsHtml(html.ToString()), rtf.ToString());
+        return new(plain, WindowsHtml(html.ToString()), rtf.ToString()) { Items = items.ToArray() };
     }
 
     private static string WindowsHtml(string fragment)

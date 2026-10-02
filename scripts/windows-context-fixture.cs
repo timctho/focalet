@@ -106,6 +106,20 @@ public sealed class ZommiContextFixture : IDisposable
         }));
     }
 
+    public void EnableHoverText()
+    {
+        form.Invoke(new Action(() => {
+            foreach (Control parent in form.Controls)
+                foreach (Control child in parent.Controls)
+                    if (child is Label) {
+                        var label = child;
+                        var original = label.Text;
+                        label.MouseEnter += (sender, args) => { label.Text = "Pointer hover changed this line"; };
+                        label.MouseLeave += (sender, args) => { label.Text = original; };
+                    }
+        }));
+    }
+
     public void Raise()
     {
         form.Invoke(new Action(() => {

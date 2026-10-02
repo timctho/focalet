@@ -9,6 +9,8 @@ internal static class ScreenCapture
 {
     private const uint SourceCopy = 0x00CC0020;
 
+    internal static void FlushDesktop() => _ = DwmFlush();
+
     public static byte[] CapturePng(Rectangle screenArea, int maximumDimension = int.MaxValue)
     {
         if (screenArea.Width <= 0 || screenArea.Height <= 0)
@@ -101,6 +103,9 @@ internal static class ScreenCapture
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern nint GetDC(nint window);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmFlush();
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern int ReleaseDC(nint window, nint deviceContext);

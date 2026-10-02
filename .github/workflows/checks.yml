@@ -159,6 +159,8 @@ jobs:
           dotnet-version: 8.0.x
       - name: Verify standalone capture batch paste on native editors
         run: dotnet run --project tests/Zommi.Windows.Tests --configuration Release -- --paste-acceptance
+      - name: Verify capture source context after selection and hover
+        run: ./scripts/accept-windows-annotations.ps1 -CaptureHost ./src/Zommi.Windows/bin/Release/net8.0-windows10.0.19041.0/Zommi.Capture.exe -OutputDirectory ./artifacts/capture-annotations
       - name: Check Windows process, path, SQLite and capture contracts
         run: python scripts/check.py --suite windows
       - name: Build standalone capture tool
@@ -170,6 +172,8 @@ jobs:
           path: |
             artifacts/zommi-capture-tool-win-x64.zip
             artifacts/capture-paste-acceptance.png
+            artifacts/capture-native-clipboard.png
+            artifacts/capture-browser-paste.png
           if-no-files-found: error
           retention-days: 7
       - name: Compile and verify the Windows desktop package

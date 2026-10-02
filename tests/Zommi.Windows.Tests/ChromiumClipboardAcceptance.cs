@@ -1,0 +1,125 @@
+using System.Diagnostics;
+using System.Text.Json;
+using Zommi.Capture;
+using Zommi.Windows;
+
+internal static class ChromiumClipboardAcceptance
+{
+    public static async Task RunAsync(CaptureClipboardBatch batch)
+    {
+        var executable = Environment.GetEnvironmentVariable("ZOMMI_TEST_CHROMIUM") ?? new[]
+        {
+            @"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            @"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        }.FirstOrDefault(File.Exists) ?? throw new InvalidOperationException("Chromium is required for native clipboard acceptance.");
+        var temporary = Path.Combine(Path.GetTempPath(), "zommi-clipboard-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temporary);
+        var fixture = Path.Combine(temporary, "fixture.html");
+        File.WriteAllText(fixture, """
+            <!doctype html><meta charset="utf-8"><title>Zommi clipboard fixture</title>
+            <style>body{font:16px sans-serif;margin:24px}textarea{width:90%;height:180px}#chat{border:1px solid;padding:12px;margin:12px 0;min-height:30px}img{border:1px solid #bbb}</style>
+            <h2>Native image paste (chat-style handler)</h2>
+            <div id="chat" contenteditable="true">image-before image-after</div><img id="preview">
+            <h2>Plain text fallback (same clipboard)</h2><textarea id="plain">text-before text-after</textarea>
+            <script>
+            window.enterCount=0; window.imageResult=null;
+            document.addEventListener('keydown',e=>{if(e.key==='Enter')enterCount++});
+            chat.addEventListener('paste',async e=>{
+              const file=Array.from(e.clipboardData.items).find(i=>i.type.startsWith('image/'))?.getAsFile();
+              if(!file)return; e.preventDefault();
+              const image=await createImageBitmap(file), canvas=document.createElement('canvas');
+              canvas.width=image.width;canvas.height=image.height;const ctx=canvas.getContext('2d');ctx.drawImage(image,0,0);
+              const pixel=(x,y)=>Array.from(ctx.getImageData(x,y,1,1).data);
+              window.imageResult={width:image.width,height:image.height,a:pixel(50,50),b:pixel(50,150)};
+              preview.src=URL.createObjectURL(file);
+            });
+            </script>
+            """);
+        var start = new ProcessStartInfo(executable) { UseShellExecute = false };
+        foreach (var argument in new[] { "--no-first-run", "--no-default-browser-check", "--disable-background-networking",
+            "--disable-sync", "--remote-debugging-port=0", "--window-size=1050,900", "--user-data-dir=" + Path.Combine(temporary, "profile"), new Uri(fixture).AbsoluteUri })
+            start.ArgumentList.Add(argument);
+        using var browser = Process.Start(start) ?? throw new InvalidOperationException("Could not start isolated Chromium.");
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        var token = deadline.Token;
+        try
+        {
+            string[] port;
+            while (true)
+            {
+                try
+                {
+                    port = File.ReadAllLines(Path.Combine(temporary, "profile", "DevToolsActivePort"));
+                    if (port.Length >= 2) break;
+                }
+                catch (IOException) { }
+                await Task.Delay(50, token);
+            }
+            using var driver = await CdpConnection.ConnectAsync(new Uri($"ws://127.0.0.1:{port[0]}{port[1]}"), token);
+            string tab;
+            while (true)
+            {
+                var targets = await driver.CallAsync("Target.getTargets", null, null, token);
+                var candidate = targets.GetProperty("targetInfos").EnumerateArray().FirstOrDefault(target =>
+                    target.GetProperty("title").GetString() == "Zommi clipboard fixture");
+                if (candidate.ValueKind != JsonValueKind.Undefined) { tab = candidate.GetProperty("targetId").GetString()!; break; }
+                await Task.Delay(50, token);
+            }
+            var attached = await driver.CallAsync("Target.attachToTarget", new { targetId = tab, flatten = true }, null, token);
+            var session = attached.GetProperty("sessionId").GetString()!;
+            async Task<JsonElement> Evaluate(string expression)
+            {
+                var result = await driver.CallAsync("Runtime.evaluate", new { expression, returnByValue = true }, session, token);
+                return result.GetProperty("result").GetProperty("value").Clone();
+            }
+            await driver.CallAsync("Page.bringToFront", null, session, token);
+            while (true)
+            {
+                browser.Refresh();
+                if (browser.MainWindowHandle != 0) break;
+                await Task.Delay(50, token);
+            }
+            NativeCaptureWindow.Activate(browser.MainWindowHandle);
+            await Evaluate("chat.focus(); true");
+            await Task.Delay(200, token);
+            var target = CapturePasteTarget.Remember() ?? throw new InvalidOperationException("Browser input not focused.");
+            if (target.Window != browser.MainWindowHandle) throw new InvalidOperationException("Unexpected browser destination.");
+            var sequence = CapturePasteTarget.GetClipboardSequenceNumber();
+            if (!target.Paste(sequence)) throw new InvalidOperationException("Chromium image paste not dispatched.");
+            JsonElement actual;
+            while (true)
+            {
+                actual = await Evaluate("imageResult");
+                if (actual.ValueKind != JsonValueKind.Null) break;
+                await Task.Delay(50, token);
+            }
+            if (actual.GetProperty("width").GetInt32() != 100 || actual.GetProperty("height").GetInt32() != 176 ||
+                !actual.GetProperty("a").EnumerateArray().Select(value => value.GetInt32()).SequenceEqual([255, 127, 80, 255]) ||
+                !actual.GetProperty("b").EnumerateArray().Select(value => value.GetInt32()).SequenceEqual([0, 0, 255, 255]))
+                throw new InvalidOperationException("Browser image handler lost selected pixels: " + actual);
+            await Evaluate("plain.focus();plain.setSelectionRange(12,12);true");
+            await Task.Delay(100, token);
+            var textTarget = CapturePasteTarget.Remember() ?? throw new InvalidOperationException("Browser text input not focused.");
+            if (!textTarget.Paste(sequence)) throw new InvalidOperationException("Browser text paste not dispatched.");
+            var expected = ("text-before " + batch.Text + "text-after").Replace("\r", "", StringComparison.Ordinal);
+            while ((await Evaluate("plain.value")).GetString() != expected) await Task.Delay(50, token);
+            if ((await Evaluate("enterCount")).GetInt32() != 0 ||
+                (await Evaluate("chat.textContent")).GetString() != "image-before image-after")
+                throw new InvalidOperationException("Image paste submitted or replaced the original draft.");
+            var screenshot = await driver.CallAsync("Page.captureScreenshot", new { format = "png" }, session, token);
+            File.WriteAllBytes("artifacts/capture-browser-paste.png", Convert.FromBase64String(screenshot.GetProperty("data").GetString()!));
+            Console.WriteLine("PASS Chromium native image event contains every region; text fallback and existing draft survive.");
+        }
+        finally
+        {
+            if (!browser.HasExited) browser.Kill(entireProcessTree: true);
+            await browser.WaitForExitAsync();
+            for (var attempt = 0; attempt < 20; attempt++)
+            {
+                try { Directory.Delete(temporary, true); break; }
+                catch (IOException) { await Task.Delay(100); }
+                catch (UnauthorizedAccessException) { await Task.Delay(100); }
+            }
+        }
+    }
+}

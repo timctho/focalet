@@ -20,6 +20,7 @@ var tests = new (string Name, Action Body)[]
     ("Annotation undo and redo stay scoped to a region and retain immutable strokes", AnnotationHistory),
     ("Annotation budgets and invalid drawing data are rejected", AnnotationLimits),
     ("Clipboard text retains every region in order when images are unavailable", ClipboardTextFallback),
+    ("Clipboard context retains provider IDs, geometry and false states", ClipboardMetadata),
     ("Clipboard HTML preserves Unicode byte boundaries and escapes captured markup", ClipboardHtml),
     ("Clipboard batches reject overflow without silently dropping selections", ClipboardBatchLimits),
 };
@@ -76,6 +77,26 @@ static void ClipboardHtml()
     Contains(System.Net.WebUtility.HtmlDecode(fragment), "你好 🖼"); Contains(fragment, "&lt;script&gt;");
     True(!fragment.Contains("<script>", StringComparison.Ordinal), "Captured text became executable HTML.");
     Contains(batch.Text, text); Contains(batch.Rtf, @"\{literal\}"); Contains(batch.Rtf, @"\\");
+}
+
+static void ClipboardMetadata()
+{
+    var item = ClipboardItem("Source text");
+    var element = item.Snapshot!.RegionContext!.Elements[0] with
+    {
+        ParentId = "parent", NativeIds = new Dictionary<string, string> { ["uiaAutomationId"] = "source-control" },
+        Bounds = new(-20, 30, 120, 80), State = new() { Enabled = false, Selected = false, Editable = false },
+    };
+    item = item with { Snapshot = item.Snapshot with { RegionContext = new() { Elements = [element] },
+        Source = new() { Provider = "windows-uia-region", NativeWindowId = "123", DocumentId = "document-fixture" } } };
+    var batch = CaptureClipboardBatch.Create([item]);
+    var json = batch.Text.Split("Captured metadata (JSON):\r\n", StringSplitOptions.None)[1];
+    using var parsed = System.Text.Json.JsonDocument.Parse(json);
+    var actual = parsed.RootElement.GetProperty("regionContext").GetProperty("elements")[0];
+    True(actual.GetProperty("nativeIds").GetProperty("uiaAutomationId").GetString() == "source-control", "Provider ID missing.");
+    True(actual.GetProperty("bounds").GetProperty("x").GetInt32() == -20, "Intersection geometry lost.");
+    True(!actual.GetProperty("state").GetProperty("selected").GetBoolean(), "False state omitted.");
+    True(parsed.RootElement.GetProperty("source").GetProperty("documentId").GetString() == "document-fixture", "Source identity missing.");
 }
 
 static void ClipboardBatchLimits()

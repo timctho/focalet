@@ -303,13 +303,23 @@ internal static class CaptureNativeHost
 
     internal static SelectedBatch SelectBatch(uint returnProcessId, CaptureTheme theme, string confirmLabel = "Attach")
     {
+        var sourceFocus = CapturePasteTarget.Remember();
+        var sourcePointer = Cursor.Position;
         using var desktop = ScreenCapture.CaptureBitmap(SystemInformation.VirtualScreen);
         using var selector = new ContentSelectionForm(returnProcessId, desktop, theme: theme, confirmLabel: confirmLabel);
         if (selector.ShowDialog() != DialogResult.OK || selector.Selections.Count == 0)
             return new([], selector.ErrorMessage);
+        var selections = selector.Selections;
+        selector.Dispose();
+        // The selector changes activation and leaves the pointer over its last
+        // toolbar/drag position. Restore the observed surface before comparing
+        // its pixels; a new hover highlight is not a document mutation.
+        sourceFocus?.Restore();
+        Cursor.Position = sourcePointer;
         Application.DoEvents();
-        Thread.Sleep(80);
-        return CompleteSelections(selector.Selections);
+        Thread.Sleep(120);
+        ScreenCapture.FlushDesktop();
+        return CompleteSelections(selections);
     }
 
     private static object CaptureSelections(IReadOnlyList<ContentSelection> selections) => BatchResult(CompleteSelections(selections));

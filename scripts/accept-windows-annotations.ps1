@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([Parameter(Mandatory=$true)][string]$CaptureHost, [Parameter(Mandatory=$true)][string]$OutputDirectory)
+param([Parameter(Mandatory=$true)][string]$CaptureHost, [Parameter(Mandatory=$true)][string]$OutputDirectory, [switch]$HoverOnly)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'accept-windows-capture.ps1') -PackageDirectory (Split-Path $CaptureHost) -HelpersOnly
 Add-Type -AssemblyName System.Windows.Forms
@@ -39,10 +39,14 @@ function Assert-ColoredPixels($Item, [string]$Color) {
     } finally { $image.Dispose(); $stream.Dispose() }
 }
 $results = @()
-foreach ($case in @('tools','multiple-regions','changed-source','cancel','image-selector')) {
+foreach ($case in $(if ($HoverOnly) { @('hover-source') } else { @('tools','multiple-regions','hover-source','changed-source','cancel','image-selector') })) {
     $fixture = [ZommiContextFixture]::new()
     try {
         $fixture.ExpandForAnnotations()
+        if ($case -eq 'hover-source') {
+            $fixture.EnableHoverText()
+            [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(120,120) | Out-Null
+        }
         $fixture.Raise()
         Start-Sleep -Milliseconds 200
         $readyMs = 0
@@ -97,7 +101,11 @@ foreach ($case in @('tools','multiple-regions','changed-source','cancel','image-
                     $bitmap.Save((Join-Path $OutputDirectory 'toolbar-native.png'),[Drawing.Imaging.ImageFormat]::Png)
                 } finally { $graphics.Dispose(); $bitmap.Dispose() }
             }
-            if ($case -eq 'cancel') { [ZommiWindowsAcceptanceNative]::CancelSelection($selector) | Out-Null }
+            if ($case -eq 'hover-source') {
+                [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(210,215) | Out-Null
+                [ZommiWindowsAcceptanceNative]::ConfirmSelection($selector)
+            }
+            elseif ($case -eq 'cancel') { [ZommiWindowsAcceptanceNative]::CancelSelection($selector) | Out-Null }
             else { Click-Tool $selector 'Attach' }
         }
         if ($case -eq 'cancel') {
@@ -126,6 +134,6 @@ foreach ($case in @('tools','multiple-regions','changed-source','cancel','image-
         Write-Host "annotations-${case}: ok"
     } finally { $fixture.Dispose() }
 }
-$evidence = @{captureHelper=$CaptureHost;sha256=(Get-FileHash $CaptureHost -Algorithm SHA256).Hash.ToLowerInvariant();implementationSha256=(Get-FileHash ([IO.Path]::ChangeExtension($CaptureHost,'.dll')) -Algorithm SHA256).Hash.ToLowerInvariant();cases=$results;cancelVerified=$true}
+$evidence = @{captureHelper=$CaptureHost;sha256=(Get-FileHash $CaptureHost -Algorithm SHA256).Hash.ToLowerInvariant();implementationSha256=(Get-FileHash ([IO.Path]::ChangeExtension($CaptureHost,'.dll')) -Algorithm SHA256).Hash.ToLowerInvariant();cases=$results;cancelVerified=(-not $HoverOnly)}
 [IO.File]::WriteAllText((Join-Path $OutputDirectory 'result.json'),($evidence | ConvertTo-Json -Depth 12))
 $evidence | ConvertTo-Json -Depth 12

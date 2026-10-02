@@ -6,6 +6,7 @@ namespace Zommi.Windows;
 /// <summary>Remembers a destination before the selector takes keyboard focus.</summary>
 internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessId, long ProcessStarted)
 {
+    public string Description => NativeCaptureWindow.Title(Window);
     public static CapturePasteTarget? Remember()
     {
         var window = GetForegroundWindow();
@@ -44,7 +45,9 @@ internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessI
         finally { if (attached) AttachThreadInput(current, thread, false); }
     }
 
-    public static bool ModifiersReleased => new[] { 0x10, 0x11, 0x12, 0x5B, 0x5C }
+    // Also wait for the selector's confirmation key, so holding Enter cannot
+    // continue repeating into the destination after focus is restored.
+    public static bool ModifiersReleased => new[] { 0x0D, 0x10, 0x11, 0x12, 0x5B, 0x5C }
         .All(key => (GetAsyncKeyState(key) & 0x8000) == 0);
 
     public bool Paste(uint clipboardSequence)

@@ -27,7 +27,7 @@ internal static class ClipboardAcceptance
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
-        using var form = new Form { Text = "Zommi paste acceptance fixture", Size = new Size(700, 700), TopMost = true };
+        using var form = new Form { Text = "Zommi paste acceptance fixture", Size = new Size(1000, 900), TopMost = true };
         using var text = new TextBox { Multiline = true, Dock = DockStyle.Top, Height = 200, Text = "draft-before draft-after" };
         using var rich = new RichTextBox { Dock = DockStyle.Fill, Text = "rich-before rich-after" };
         form.Controls.Add(rich); form.Controls.Add(text);
@@ -45,6 +45,10 @@ internal static class ClipboardAcceptance
                 text.Focus(); text.Select("draft-before ".Length, 0);
                 await Task.Delay(150);
                 var target = CapturePasteTarget.Remember() ?? throw new InvalidOperationException("Fixture input was not focused.");
+                // The paste destination is retained before switching to a source
+                // window, rather than being overwritten when capture starts.
+                using var source = new Form { Text = "Separate capture source", Size = new Size(300, 200), TopMost = true };
+                source.Show(); source.Activate(); await Task.Delay(100);
                 using (var overlay = new Form { Text = "Synthetic capture overlay", TopMost = true })
                 {
                     overlay.Show(); overlay.Activate(); await Task.Delay(100);
@@ -53,6 +57,13 @@ internal static class ClipboardAcceptance
                 if (!target.Restore()) throw new InvalidOperationException("Original editor focus was not restored.");
                 Clipboard.SetDataObject(CapturePasteTool.ClipboardData(batch, false), true);
                 ownedSequence = CapturePasteTarget.GetClipboardSequenceNumber();
+                using var nativePng = (MemoryStream?)Clipboard.GetData("PNG") ?? throw new InvalidOperationException("Native PNG missing from system clipboard.");
+                using var nativeImage = new Bitmap(nativePng);
+                if (nativeImage.Size != new Size(100, 176) || nativeImage.GetPixel(50, 50).ToArgb() != Color.Coral.ToArgb() ||
+                    nativeImage.GetPixel(50, 150).ToArgb() != Color.Blue.ToArgb())
+                    throw new InvalidOperationException("Native image paste would drop or resize a selected region.");
+                Directory.CreateDirectory("artifacts");
+                File.WriteAllBytes("artifacts/capture-native-clipboard.png", nativePng.ToArray());
                 if (!target.Paste(ownedSequence)) throw new InvalidOperationException("Paste was not dispatched to the fixture.");
                 await Task.Delay(250);
                 var expected = "draft-before " + batch.Text + "draft-after";
@@ -79,6 +90,10 @@ internal static class ClipboardAcceptance
                 await Task.Delay(1000);
                 Directory.CreateDirectory("artifacts");
                 File.WriteAllBytes("artifacts/capture-paste-acceptance.png", ScreenCapture.CapturePng(form.Bounds));
+                form.TopMost = false;
+                source.Close();
+                await ChromiumClipboardAcceptance.RunAsync(batch);
+                if (!richTarget.Restore()) throw new InvalidOperationException("Rich editor was not restored after browser acceptance.");
                 Clipboard.SetText("replacement fixture");
                 if (richTarget.Paste(ownedSequence)) throw new InvalidOperationException("Changed clipboard was pasted.");
                 ownedSequence = CapturePasteTarget.GetClipboardSequenceNumber();
