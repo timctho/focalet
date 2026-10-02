@@ -145,7 +145,7 @@ internal static class ChromiumClipboardAcceptance
             if (target.Window != browser.MainWindowHandle) throw new InvalidOperationException("Unexpected browser destination.");
             await FocusInput("plain");
             if (await target.IsInputCurrentAsync()) throw new InvalidOperationException("A different browser input accepted the saved editor identity.");
-            if (!await target.RestoreInputAsync()) throw new InvalidOperationException("Could not restore the previous browser input/caret.");
+            if (!await target.RestoreInputAsync()) throw new InvalidOperationException("Could not restore the previous browser input/caret: " + target.RestoreFailure);
             stage = "sequential native image and text paste";
             var result = await CapturePasteSequence.PasteAsync(batch, target, false);
             if (result.StoppedBecause is not null || result.StepsSent != 4)

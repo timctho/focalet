@@ -12,6 +12,7 @@ internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessI
 {
     private AutomationElement? InputElement { get; init; }
     private ITextRange? Selection { get; init; }
+    internal string? RestoreFailure { get; private set; }
     public string Description => NativeCaptureWindow.Title(Window);
     public static CapturePasteTarget? Remember()
     {
@@ -56,18 +57,26 @@ internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessI
 
     public async Task<bool> RestoreInputAsync()
     {
-        if (!Restore()) return false;
+        RestoreFailure = null;
+        if (!Restore()) { RestoreFailure = "The native window/control could not be restored."; return false; }
         if (InputElement is null) return true;
         return await Task.Run(() =>
         {
             try
             {
                 InputElement.Focus();
-                if (!IsCurrent() || !InputElement.Properties.HasKeyboardFocus.ValueOrDefault) return false;
+                // Chromium applies the accessibility focus action asynchronously.
+                // Keep the UI pumping while waiting for the actual editor identity.
+                var wait = Stopwatch.StartNew();
+                while (IsCurrent() && !InputElement.Properties.HasKeyboardFocus.ValueOrDefault && wait.ElapsedMilliseconds < 1500)
+                    Thread.Sleep(25);
+                if (!IsCurrent() || !InputElement.Properties.HasKeyboardFocus.ValueOrDefault)
+                { RestoreFailure = "The accessible editor did not acquire keyboard focus."; return false; }
                 Selection?.Select();
                 return IsCurrent() && InputElement.Properties.HasKeyboardFocus.ValueOrDefault;
             }
-            catch (Exception error) when (error is not OutOfMemoryException) { return false; }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            { RestoreFailure = error.GetType().Name + ": " + error.Message; return false; }
         });
     }
 
