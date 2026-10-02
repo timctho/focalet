@@ -1,10 +1,14 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using Zommi.Capture;
 using Zommi.Windows;
 
 internal static class ChromiumClipboardAcceptance
 {
+    [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] private static extern void mouse_event(uint flags, uint x, uint y, uint data, nuint extra);
+
     public static async Task RunAsync(CaptureClipboardBatch batch)
     {
         var executable = Environment.GetEnvironmentVariable("ZOMMI_TEST_CHROMIUM") ?? new[]
@@ -77,6 +81,19 @@ internal static class ChromiumClipboardAcceptance
                 var result = await driver.CallAsync("Runtime.evaluate", new { expression, returnByValue = true }, session, token);
                 return result.GetProperty("result").GetProperty("value").Clone();
             }
+            async Task ClickInput(string id)
+            {
+                var location = await Evaluate($"(()=>{{const r=document.getElementById('{id}').getBoundingClientRect();return {{x:r.left+r.width/2,y:r.top+r.height/2,width:innerWidth,height:innerHeight}}}})()");
+                var views = NativeCaptureWindow.RenderViewBounds(browser.MainWindowHandle);
+                var viewport = views.Single();
+                var x = viewport.X + location.GetProperty("x").GetDouble() * viewport.Width / location.GetProperty("width").GetDouble();
+                var y = viewport.Y + location.GetProperty("y").GetDouble() * viewport.Height / location.GetProperty("height").GetDouble();
+                if (!SetCursorPos((int)x, (int)y)) throw new InvalidOperationException("Could not point at the fixture input.");
+                mouse_event(2, 0, 0, 0, 0); mouse_event(4, 0, 0, 0, 0);
+                await Task.Delay(150, token);
+                if (!(await Evaluate($"document.hasFocus() && document.activeElement.id === '{id}'")).GetBoolean())
+                    throw new InvalidOperationException("Native click did not focus the fixture input.");
+            }
             await driver.CallAsync("Page.bringToFront", null, session, token);
             stage = "find browser window";
             while (true)
@@ -86,8 +103,7 @@ internal static class ChromiumClipboardAcceptance
                 await Task.Delay(50, token);
             }
             NativeCaptureWindow.Activate(browser.MainWindowHandle);
-            await Evaluate("chat.focus(); true");
-            await Task.Delay(200, token);
+            await ClickInput("chat");
             var target = CapturePasteTarget.Remember() ?? throw new InvalidOperationException("Browser input not focused.");
             if (target.Window != browser.MainWindowHandle) throw new InvalidOperationException("Unexpected browser destination.");
             var sequence = CapturePasteTarget.GetClipboardSequenceNumber();
@@ -106,7 +122,8 @@ internal static class ChromiumClipboardAcceptance
                 !actual.GetProperty("b").EnumerateArray().Select(value => value.GetInt32()).SequenceEqual([0, 0, 255, 255]))
                 throw new InvalidOperationException("Browser image handler lost selected pixels: " + actual);
             Console.WriteLine("Chromium clipboard: both image regions received.");
-            await Evaluate("plain.focus();plain.setSelectionRange(12,12);true");
+            await ClickInput("plain");
+            await Evaluate("plain.setSelectionRange(12,12);true");
             await Task.Delay(100, token);
             var textTarget = CapturePasteTarget.Remember() ?? throw new InvalidOperationException("Browser text input not focused.");
             if (!textTarget.Paste(sequence)) throw new InvalidOperationException("Browser text paste not dispatched.");
