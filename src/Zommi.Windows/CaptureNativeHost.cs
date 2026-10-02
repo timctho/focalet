@@ -295,18 +295,35 @@ internal static class CaptureNativeHost
 
     private static object SelectContent(uint returnProcessId, CaptureTheme theme)
     {
-        using var desktop = ScreenCapture.CaptureBitmap(SystemInformation.VirtualScreen);
-        using var selector = new ContentSelectionForm(returnProcessId, desktop, theme: theme);
-        if (selector.ShowDialog() != DialogResult.OK || selector.Selections.Count == 0)
-            return new { Cancelled = true, selector.ErrorMessage };
-        Application.DoEvents();
-        Thread.Sleep(80);
-        return CaptureSelections(selector.Selections);
+        var selected = SelectBatch(returnProcessId, theme);
+        return BatchResult(selected);
     }
 
-    private static object CaptureSelections(IReadOnlyList<ContentSelection> selections)
+    internal sealed record SelectedBatch(IReadOnlyList<RegionSelectionResult> Regions, string? ErrorMessage = null);
+
+    internal static SelectedBatch SelectBatch(uint returnProcessId, CaptureTheme theme, string confirmLabel = "Attach")
     {
-        var results = new List<object>();
+        using var desktop = ScreenCapture.CaptureBitmap(SystemInformation.VirtualScreen);
+        using var selector = new ContentSelectionForm(returnProcessId, desktop, theme: theme, confirmLabel: confirmLabel);
+        if (selector.ShowDialog() != DialogResult.OK || selector.Selections.Count == 0)
+            return new([], selector.ErrorMessage);
+        Application.DoEvents();
+        Thread.Sleep(80);
+        return CompleteSelections(selector.Selections);
+    }
+
+    private static object CaptureSelections(IReadOnlyList<ContentSelection> selections) => BatchResult(CompleteSelections(selections));
+
+    private static object BatchResult(SelectedBatch batch)
+    {
+        if (batch.Regions.Count == 0) return new { Cancelled = true, batch.ErrorMessage };
+        var results = batch.Regions.Select(ImageResult).ToArray();
+        return results.Length == 1 ? results[0] : new { Cancelled = false, Selections = results };
+    }
+
+    private static SelectedBatch CompleteSelections(IReadOnlyList<ContentSelection> selections)
+    {
+        var results = new List<RegionSelectionResult>();
         foreach (var selected in selections)
         {
             bool Matches() => NativeCaptureWindow.Bounds(selected.Window) == selected.WindowBounds &&
@@ -314,18 +331,18 @@ internal static class CaptureNativeHost
                 NativeCaptureWindow.ProcessId(selected.Window) == selected.ProcessId;
             if (selected.Window != 0)
             {
-                if (!Matches()) return new { Cancelled = true, ErrorMessage = "The selected window changed. Select the content again." };
+                if (!Matches()) return new([], "The selected window changed. Select the content again.");
                 var actualWindow = NativeCaptureWindow.ForRegion(selected.Region);
                 if (!Matches() || actualWindow != selected.Window)
                 {
                     if (Environment.GetEnvironmentVariable("ZOMMI_CAPTURE_DIAGNOSTICS") == "1")
                         Console.Error.WriteLine($"Selection mismatch: expected={selected.Window}, actual={actualWindow}, identityMatches={Matches()}, region={selected.Region}, queuedBounds={selected.WindowBounds}, currentBounds={NativeCaptureWindow.Bounds(selected.Window)}");
-                    return new { Cancelled = true, ErrorMessage = "The selected window changed or is covered. Select the content again." };
+                    return new([], "The selected window changed or is covered. Select the content again.");
                 }
             }
-            results.Add(ImageResult(AnnotatedCapture.Complete(selected, RegionContextCapture.Capture(selected.Region))));
+            results.Add(AnnotatedCapture.Complete(selected, RegionContextCapture.Capture(selected.Region)));
         }
-        return results.Count == 1 ? results[0] : new { Cancelled = false, Selections = results };
+        return new(results);
     }
 
     private static object SelectContext(ForegroundContextCapture capture, uint returnProcessId)

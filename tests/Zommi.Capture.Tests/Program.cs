@@ -1,4 +1,6 @@
 using Zommi.Capture;
+using System.Text;
+using System.Text.RegularExpressions;
 
 var tests = new (string Name, Action Body)[]
 {
@@ -17,6 +19,9 @@ var tests = new (string Name, Action Body)[]
     ("Region previews retain state and partial metadata without ambient selection", RegionPreview),
     ("Annotation undo and redo stay scoped to a region and retain immutable strokes", AnnotationHistory),
     ("Annotation budgets and invalid drawing data are rejected", AnnotationLimits),
+    ("Clipboard text retains every region in order when images are unavailable", ClipboardTextFallback),
+    ("Clipboard HTML preserves Unicode byte boundaries and escapes captured markup", ClipboardHtml),
+    ("Clipboard batches reject overflow without silently dropping selections", ClipboardBatchLimits),
 };
 
 var failures = new List<string>();
@@ -36,6 +41,53 @@ foreach (var test in tests)
 
 Console.WriteLine($"{tests.Length - failures.Count}/{tests.Length} capture contracts passed");
 return failures.Count == 0 ? 0 : 1;
+
+static CaptureClipboardItem ClipboardItem(string text) => new([1, 2, 3], 100, 80,
+    Snapshot() with { RegionContext = new CapturedRegionContext
+    {
+        Elements = [new CapturedElement { Id = "fixture", Provider = "test", Role = "Text", Text = text,
+            Bounds = new(0, 0, 100, 80), VisibleBounds = new(0, 0, 100, 80), Relation = "inside" }],
+    } });
+
+static void ClipboardTextFallback()
+{
+    var batch = CaptureClipboardBatch.Create([ClipboardItem("第一個 selection"), ClipboardItem("second {literal} \\ path"),
+        new([4], 20, 10, null, "The source changed; newer text was omitted.")]);
+    Contains(batch.Text, "3 selected regions");
+    Contains(batch.Text, "第一個 selection"); Contains(batch.Text, "second {literal} \\ path");
+    Contains(batch.Text, "The source changed; newer text was omitted.");
+    True(batch.Text.IndexOf("[A]", StringComparison.Ordinal) < batch.Text.IndexOf("[B]", StringComparison.Ordinal) &&
+        batch.Text.IndexOf("[B]", StringComparison.Ordinal) < batch.Text.IndexOf("[C]", StringComparison.Ordinal), "Regions were reordered.");
+    True(!batch.Text.Contains("base64", StringComparison.Ordinal) && !batch.Text.Contains("data:image", StringComparison.Ordinal), "Image bytes leaked into text fallback.");
+    True(Regex.Matches(batch.Html, "<img ").Count == 3 && Regex.Matches(batch.Rtf, @"\\pict").Count == 3, "The rich batch lost images.");
+}
+
+static void ClipboardHtml()
+{
+    var text = "你好 🖼 <script>alert('x')</script> & \\ {literal}";
+    var batch = CaptureClipboardBatch.Create([ClipboardItem(text)]);
+    var bytes = Encoding.UTF8.GetBytes(batch.Html);
+    int Offset(string key) => int.Parse(Regex.Match(batch.Html, key + @":(\d+)").Groups[1].Value,
+        System.Globalization.CultureInfo.InvariantCulture);
+    True(Offset("EndHTML") == bytes.Length, "HTML length counts characters instead of UTF-8 bytes.");
+    var fragment = Encoding.UTF8.GetString(bytes[Offset("StartFragment")..Offset("EndFragment")]);
+    True(fragment.StartsWith("<div>", StringComparison.Ordinal) && fragment.EndsWith("</div>", StringComparison.Ordinal), "Fragment boundaries are invalid.");
+    Contains(System.Net.WebUtility.HtmlDecode(fragment), "你好 🖼"); Contains(fragment, "&lt;script&gt;");
+    True(!fragment.Contains("<script>", StringComparison.Ordinal), "Captured text became executable HTML.");
+    Contains(batch.Text, text); Contains(batch.Rtf, @"\{literal\}"); Contains(batch.Rtf, @"\\");
+}
+
+static void ClipboardBatchLimits()
+{
+    var eight = Enumerable.Range(0, 8).Select(index => ClipboardItem($"item-{index}")).ToArray();
+    Contains(CaptureClipboardBatch.Create(eight).Text, "[H]");
+    foreach (var invalid in new[] { Array.Empty<CaptureClipboardItem>(), eight.Append(ClipboardItem("ninth")).ToArray() })
+    {
+        var rejected = false;
+        try { CaptureClipboardBatch.Create(invalid); } catch (ArgumentException) { rejected = true; }
+        True(rejected, "Invalid batch size was silently accepted.");
+    }
+}
 
 static void AnnotationHistory()
 {

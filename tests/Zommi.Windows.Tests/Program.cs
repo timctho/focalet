@@ -3,6 +3,8 @@ using System.Text.Json;
 using Zommi.Capture;
 using Zommi.Windows;
 
+if (args.Contains("--paste-acceptance", StringComparer.Ordinal)) return ClipboardAcceptance.Run();
+
 var tests = new (string Name, Action Run)[]
 {
     ("All drawing tools change exported pixels without changing image geometry", AllToolsRender),
@@ -11,6 +13,7 @@ var tests = new (string Name, Action Run)[]
     ("Changed source drops live metadata and preserves the frozen annotated image", FrozenFallback),
     ("Unmarked images preserve their original bytes", Unmarked),
     ("Capture palette uses the requested theme and rejects malformed colors", ThemePalette),
+    ("Native rich text imports every image and Unicode context in one batch", ClipboardRichImport),
 };
 var failed = 0;
 foreach (var test in tests)
@@ -19,6 +22,37 @@ foreach (var test in tests)
     catch (Exception error) { failed++; Console.Error.WriteLine($"FAIL {test.Name}: {error}"); }
 }
 return failed == 0 ? 0 : 1;
+
+static void ClipboardRichImport()
+{
+    Exception? failure = null;
+    var thread = new Thread(() =>
+    {
+        try
+        {
+            var batch = CaptureClipboardBatch.Create([
+                new(Image(Color.Coral), 100, 80, Captured(Image(Color.Coral)).Snapshot),
+                new(Image(Color.Blue), 100, 80, Captured(Image(Color.Blue)).Snapshot! with { WindowTitle = "中文 🖼 {B} \\ second" }),
+            ]);
+            var data = CapturePasteTool.ClipboardData(batch, false);
+            Assert((string?)data.GetData(System.Windows.Forms.DataFormats.UnicodeText, false) == batch.Text, "Rich export dropped text fallback.");
+            Assert(!data.GetDataPresent(System.Windows.Forms.DataFormats.Bitmap, false), "A standalone image could replace the rest of the batch.");
+            using var editor = new System.Windows.Forms.RichTextBox { Text = "before after" };
+            editor.Select(7, 0);
+            editor.SelectedRtf = (string)data.GetData(System.Windows.Forms.DataFormats.Rtf, false)!;
+            Assert(editor.Text.StartsWith("before ", StringComparison.Ordinal) && editor.Text.EndsWith("after", StringComparison.Ordinal), "Rich paste replaced the draft.");
+            Assert(editor.Text.Contains("[A]", StringComparison.Ordinal) && editor.Text.Contains("[B]", StringComparison.Ordinal) &&
+                editor.Text.Contains("中文 🖼 {B} \\ second", StringComparison.Ordinal), "Native rich text lost a region or Unicode text.");
+            Assert(System.Text.RegularExpressions.Regex.Matches(editor.Rtf ?? "", @"\\pict").Count == 2, "Native rich text did not retain both images.");
+            var plain = CapturePasteTool.ClipboardData(batch, true);
+            Assert(plain.GetFormats(false).SequenceEqual([System.Windows.Forms.DataFormats.UnicodeText]), "Text-only mode included competing formats.");
+        }
+        catch (Exception error) { failure = error; }
+    });
+    thread.SetApartmentState(ApartmentState.STA);
+    thread.Start(); thread.Join();
+    if (failure is not null) throw failure;
+}
 
 static void ThemePalette()
 {

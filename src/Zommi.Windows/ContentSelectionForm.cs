@@ -18,6 +18,7 @@ internal class ContentSelectionForm : PointSelectionForm
     private readonly CaptureToolbar toolbar;
     private readonly CaptureTheme theme;
     private readonly int maximumSelections;
+    private readonly string confirmLabel;
     private readonly float scale;
     private Point? anchor;
     private Rectangle dragged;
@@ -29,17 +30,19 @@ internal class ContentSelectionForm : PointSelectionForm
     private readonly List<AnnotationPoint> points = [];
     private ImageAnnotation? pendingStroke;
 
-    public ContentSelectionForm(uint returnProcessId, Bitmap capturedDesktop, int maximumSelections = 8, CaptureTheme? theme = null) : base(returnProcessId)
+    public ContentSelectionForm(uint returnProcessId, Bitmap capturedDesktop, int maximumSelections = 8, CaptureTheme? theme = null,
+        string confirmLabel = "Attach") : base(returnProcessId)
     {
         Text = "Zommi content selection";
         this.maximumSelections = maximumSelections;
+        this.confirmLabel = confirmLabel;
         AutoScaleMode = AutoScaleMode.None;
         Opacity = 1;
         frozenAt = DateTimeOffset.UtcNow;
         desktop = capturedDesktop;
         scale = Math.Max(1, DeviceDpi / 96f);
         this.theme = theme ?? CaptureTheme.Default;
-        toolbar = new CaptureToolbar(scale, this.theme);
+        toolbar = new CaptureToolbar(scale, this.theme, confirmLabel);
         toolbar.Invoked += InvokeTool;
         Controls.Add(toolbar);
         UpdateToolbar(reposition: true);
@@ -99,7 +102,7 @@ internal class ContentSelectionForm : PointSelectionForm
         var status = Active is { } active
             ? active.Drawing.Strokes.Count >= AnnotationDocument.MaximumStrokes
                 ? "Drawing limit · Undo a mark to continue"
-                : $"{(char)('A' + activeIndex)} · {active.Selection.Region.Width} × {active.Selection.Region.Height} · Draw, then attach"
+                : $"{(char)('A' + activeIndex)} · {active.Selection.Region.Width} × {active.Selection.Region.Height} · Draw, then {confirmLabel.ToLowerInvariant()}"
             : "Drag to select · Ctrl for more";
         toolbar.UpdateState(tool, color, widthIndex, entries.Count, maximumSelections,
             Active?.Drawing.CanUndo ?? false, Active?.Drawing.CanRedo ?? false, status);

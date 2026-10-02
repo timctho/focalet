@@ -11,7 +11,7 @@ internal sealed class CaptureToolbar : Panel
     private readonly float scale;
     public event Action<string>? Invoked;
 
-    public CaptureToolbar(float scale, CaptureTheme theme)
+    public CaptureToolbar(float scale, CaptureTheme theme, string confirmLabel = "Attach")
     {
         this.theme = theme;
         this.scale = scale;
@@ -31,7 +31,7 @@ internal sealed class CaptureToolbar : Panel
             x += 40;
             if (id is "highlighter") x += 10;
         }
-        Add("attach", "Attach (Enter)", new Rectangle(S(394), S(10), S(104), S(36)), "Attach");
+        Add("attach", $"{confirmLabel} (Enter)", new Rectangle(S(394), S(10), S(104), S(36)), confirmLabel);
         Add("cancel", "Cancel (Esc)", new Rectangle(S(506), S(10), S(36), S(36)));
         var colors = new[] { ("#FF686B", "Coral"), ("#FFD166", "Amber"), ("#A6E3BA", "Mint"), ("#70B8FF", "Blue"), ("#FFFFFF", "White") };
         for (var i = 0; i < colors.Length; i++)
