@@ -71,6 +71,9 @@ foreach ($case in $(if ($HoverOnly) { @('hover-source') } else { @('tools','mult
             Click-Tool $selector 'Pen'
             Click-Tool $selector 'Coral'
             [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,190,210,310,234)
+            $strokeReady = [Diagnostics.Stopwatch]::StartNew()
+            while (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Undo') -and $strokeReady.ElapsedMilliseconds -lt 1000) { Start-Sleep -Milliseconds 10 }
+            if (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Undo')) { throw "The first annotation stroke was not recorded: $case" }
             if ($case -eq 'tools') {
                 Click-Tool $selector 'Arrow'
                 [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,320,210,425,250)
@@ -118,7 +121,7 @@ foreach ($case in $(if ($HoverOnly) { @('hover-source') } else { @('tools','mult
             for ($i=0; $i -lt $items.Count; $i++) {
                 $item = $items[$i]
                 $expected = if ($case -eq 'tools') { 5 } else { 1 }
-                if ($item.snapshot.imageAnnotations.strokeCount -ne $expected -or $item.snapshot.imageAnnotations.source -ne 'user' -or -not $item.snapshot.imageAnnotations.bakedIntoImage) { throw "Missing or wrong annotation provenance: $case" }
+                if ($item.snapshot.imageAnnotations.strokeCount -ne $expected -or $item.snapshot.imageAnnotations.source -ne 'user' -or -not $item.snapshot.imageAnnotations.bakedIntoImage) { throw "Missing or wrong annotation provenance: $case; expected=$expected; actual=$($item.snapshot.imageAnnotations | ConvertTo-Json -Compress)" }
                 $color = if ($i -eq 0) { 'coral' } else { 'blue' }
                 $pixels = Assert-ColoredPixels $item $color
                 $bytes = [Convert]::FromBase64String($item.dataUrl.Substring($item.dataUrl.IndexOf(',')+1))
