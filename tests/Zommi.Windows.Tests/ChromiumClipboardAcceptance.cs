@@ -8,8 +8,11 @@ internal static class ChromiumClipboardAcceptance
 {
     [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] private static extern void mouse_event(uint flags, uint x, uint y, uint data, nuint extra);
+    [DllImport("user32.dll")] private static extern bool SetWindowPos(nint window, nint after, int x, int y, int width, int height, uint flags);
+    [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(nint window, int attribute, out int value, int size);
 
-    public static async Task RunAsync(CaptureClipboardBatch batch)
+    public static async Task RunAsync(CaptureClipboardBatch batch, bool focusOnly = false)
     {
         var executable = Environment.GetEnvironmentVariable("ZOMMI_TEST_CHROMIUM") ?? new[]
         {
@@ -83,11 +86,13 @@ internal static class ChromiumClipboardAcceptance
             }
             async Task ClickInput(string id)
             {
-                var location = await Evaluate($"(()=>{{const r=document.getElementById('{id}').getBoundingClientRect();return {{x:r.left+r.width/2,y:r.top+r.height/2,width:innerWidth,height:innerHeight}}}})()");
+                var location = await Evaluate($"(()=>{{const r=document.getElementById('{id}').getBoundingClientRect();return {{x:r.left+r.width/2,y:r.top+r.height/2,width:innerWidth,height:innerHeight,screenX,screenY,outerWidth,outerHeight,devicePixelRatio,hasFocus:document.hasFocus()}}}})()");
                 var views = NativeCaptureWindow.RenderViewBounds(browser.MainWindowHandle);
+                Console.WriteLine($"Chromium native window: {browser.MainWindowTitle}; bounds={NativeCaptureWindow.Bounds(browser.MainWindowHandle)}; views={string.Join(';', views)}; page={location}");
                 var viewport = views.Single();
                 var x = viewport.X + location.GetProperty("x").GetDouble() * viewport.Width / location.GetProperty("width").GetDouble();
                 var y = viewport.Y + location.GetProperty("y").GetDouble() * viewport.Height / location.GetProperty("height").GetDouble();
+                Console.WriteLine($"Chromium fixture click: viewport={viewport}; page={location}; screen={x},{y}");
                 if (!SetCursorPos((int)x, (int)y)) throw new InvalidOperationException("Could not point at the fixture input.");
                 mouse_event(2, 0, 0, 0, 0); mouse_event(4, 0, 0, 0, 0);
                 await Task.Delay(150, token);
@@ -102,8 +107,19 @@ internal static class ChromiumClipboardAcceptance
                 if (browser.MainWindowHandle != 0) break;
                 await Task.Delay(50, token);
             }
-            NativeCaptureWindow.Activate(browser.MainWindowHandle);
+            // Keep the synthetic receiver above the preceding WinForms fixture.
+            // Browser DOM focus alone does not move the native window in z-order.
+            SetWindowPos(browser.MainWindowHandle, new nint(-1), 0, 0, 0, 0, 0x0043);
+            var browserWindow = new CapturePasteTarget(browser.MainWindowHandle, browser.MainWindowHandle,
+                (uint)browser.Id, browser.StartTime.ToUniversalTime().Ticks);
+            _ = browserWindow.Restore(); // Chrome redirects focus to its renderer child.
+            await Task.Delay(250, token);
+            DwmGetWindowAttribute(browser.MainWindowHandle, 14, out var cloaked, sizeof(int));
+            Console.WriteLine($"Chromium native focus: expected={browser.MainWindowHandle}; foreground={GetForegroundWindow()}; cloaked={cloaked}");
+            if (GetForegroundWindow() != browser.MainWindowHandle)
+                throw new InvalidOperationException("Could not activate the synthetic browser window.");
             await ClickInput("chat");
+            if (focusOnly) { Console.WriteLine("PASS Chromium native input focus (clipboard untouched)."); return; }
             var target = CapturePasteTarget.Remember() ?? throw new InvalidOperationException("Browser input not focused.");
             if (target.Window != browser.MainWindowHandle) throw new InvalidOperationException("Unexpected browser destination.");
             var sequence = CapturePasteTarget.GetClipboardSequenceNumber();
@@ -153,6 +169,11 @@ internal static class ChromiumClipboardAcceptance
                     Console.WriteLine("Chromium fixture diagnostics: " + state);
                     var screenshot = await driver.CallAsync("Page.captureScreenshot", new { format = "png" }, session, diagnostics.Token);
                     File.WriteAllBytes("artifacts/capture-browser-failure.png", Convert.FromBase64String(screenshot.GetProperty("data").GetString()!));
+                    if (Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true")
+                    {
+                        var bounds = NativeCaptureWindow.Bounds(browser.MainWindowHandle);
+                        File.WriteAllBytes("artifacts/capture-browser-desktop-failure.png", ScreenCapture.CapturePng(new((int)bounds.X, (int)bounds.Y, (int)bounds.Width, (int)bounds.Height)));
+                    }
                 }
                 catch (Exception diagnosticError) { Console.WriteLine("Could not read fixture diagnostics: " + diagnosticError.Message); }
             }

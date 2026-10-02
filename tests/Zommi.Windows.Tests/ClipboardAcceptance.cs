@@ -7,22 +7,25 @@ internal static class ClipboardAcceptance
 {
     // Explicit desktop acceptance: uses only synthetic editors and clipboard content.
     // Run on a disposable CI desktop, not against an agent's actual draft.
-    public static int Run()
+    public static int Run(bool focusOnly = false)
     {
+        var previousTarget = focusOnly ? CapturePasteTarget.Remember() : null;
+        var previousPointer = Cursor.Position;
         Exception? failure = null;
         var thread = new Thread(() =>
         {
-            try { Exercise(); }
+            try { Exercise(focusOnly); }
             catch (Exception error) { failure = error; }
         });
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start(); thread.Join();
+        if (focusOnly) { previousTarget?.Restore(); Cursor.Position = previousPointer; }
         if (failure is not null) { Console.Error.WriteLine(failure); return 1; }
-        Console.WriteLine("PASS One paste preserves all regions, plain-text fallback, rich images, draft and focus; no Enter is sent.");
+        if (!focusOnly) Console.WriteLine("PASS One paste preserves all regions, plain-text fallback, rich images, draft and focus; no Enter is sent.");
         return 0;
     }
 
-    private static void Exercise()
+    private static void Exercise(bool focusOnly)
     {
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
@@ -42,6 +45,12 @@ internal static class ClipboardAcceptance
             {
                 var items = new[] { Item("FIRST 中文 🖼", Color.Coral), Item("SECOND {B} \\ literal", Color.Blue) };
                 var batch = CaptureClipboardBatch.Create(items);
+                if (focusOnly)
+                {
+                    form.Hide();
+                    await ChromiumClipboardAcceptance.RunAsync(batch, focusOnly: true);
+                    return;
+                }
                 text.Focus(); text.Select("draft-before ".Length, 0);
                 await Task.Delay(150);
                 var target = CapturePasteTarget.Remember() ?? throw new InvalidOperationException("Fixture input was not focused.");

@@ -4,6 +4,7 @@ using Zommi.Capture;
 using Zommi.Windows;
 
 if (args.Contains("--paste-acceptance", StringComparer.Ordinal)) return ClipboardAcceptance.Run();
+if (args.Contains("--browser-focus-acceptance", StringComparer.Ordinal)) return ClipboardAcceptance.Run(focusOnly: true);
 
 var tests = new (string Name, Action Run)[]
 {
