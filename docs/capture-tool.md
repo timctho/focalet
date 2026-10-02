@@ -114,8 +114,9 @@ Checks cover automatic input tracking across a source-window switch, browser
 editor/caret restoration, separate image/text event order, two original-sized
 images, text fallback, draft preservation, no Enter, and stopping after changed
 focus or clipboard. The routing regression seeds a real browser input, switches through an opaque
-custom chat and a fresh Windows console host, and verifies that paste reaches
-those inputs while the old browser draft stays unchanged. Unit tests also replay
+custom chat and a fresh Windows console host, then back to a read-only browser
+Group inside an ARIA dialog. It verifies that paste reaches those inputs while
+the old browser draft stays unchanged. Unit tests also replay
 the observed Windows Terminal `Text`/`TermControl` identity and stale-provider
 replies. Actual ChatGPT app acceptance remains separate from the custom fixture.
 The Chromium receiver chooses text first, reproducing the

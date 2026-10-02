@@ -8,7 +8,7 @@ internal static class ForegroundRoutingAcceptance
 {
     // Called with an earlier, real Chromium input focused. That browser must
     // not remain the destination after visiting a custom chat or console.
-    public static async Task RunAsync(CaptureClipboardBatch batch, Func<Task> focusBrowser)
+    public static async Task RunAsync(CaptureClipboardBatch batch, Func<Task> focusBrowser, Func<Task> focusBrowserSource)
     {
         await focusBrowser();
         using var tracker = new CaptureInputTracker(includeOwnProcess: true);
@@ -24,9 +24,7 @@ internal static class ForegroundRoutingAcceptance
             throw new InvalidOperationException("Direct capture in a custom input selected the earlier browser.");
         tracker.Resume();
         await Task.Delay(100);
-        using var source = new Form { Text = "Synthetic capture source", Size = new Size(320, 200), TopMost = true };
-        source.Controls.Add(new Button { Text = "Read-only source", Dock = DockStyle.Fill });
-        source.Show(); source.Activate(); source.Controls[0].Focus();
+        await focusBrowserSource();
         var target = await tracker.PauseAsync();
         if (target?.Window != chat.Handle || target.Focus != input.Handle)
             throw new InvalidOperationException("A non-Edit custom chat was forgotten after switching to the source.");
@@ -34,11 +32,11 @@ internal static class ForegroundRoutingAcceptance
         var result = await CapturePasteSequence.PasteAsync(batch, target, textOnly: true);
         if (result.StoppedBecause is not null || input.Draft != "chat-before " + string.Concat(batch.TextParts) + "chat-after" || input.EnterCount != 0)
             throw new InvalidOperationException("Custom chat paste changed its draft/caret or sent Enter: " + result);
-        source.Close(); chat.Close();
+        chat.Close();
         await focusBrowser();
         tracker.Resume();
         await Task.Delay(200);
-        await ConsoleRoutingAcceptance.RunAsync(tracker);
+        await ConsoleRoutingAcceptance.RunAsync(tracker, focusBrowserSource);
         Console.WriteLine("PASS Foreground routing returns to custom non-Edit chat and the real Windows console, never the earlier browser.");
     }
 

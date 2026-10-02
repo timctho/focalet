@@ -26,6 +26,9 @@ internal static class ChromiumClipboardAcceptance
             <h2>Separate images and matching context</h2>
             <textarea id="chat" aria-label="Zommi fixture image input">image-before image-after</textarea><div id="previews"></div>
             <h2>Text fallback</h2><textarea id="plain" aria-label="Zommi fixture text input">text-before text-after</textarea>
+            <div role="dialog" aria-label="Zommi fixture source dialog">
+              <div id="source" role="group" tabindex="0" aria-label="Zommi fixture source panel">Read-only browser source panel</div>
+            </div>
             <script>
             window.enterCount=0; window.imageResult=[]; window.pasteDiagnostics=[]; window.order=[];
             document.addEventListener('paste',e=>pasteDiagnostics.push({target:e.target.id,types:Array.from(e.clipboardData.types),textLength:e.clipboardData.getData('text/plain').length}),true);
@@ -93,7 +96,10 @@ internal static class ChromiumClipboardAcceptance
                     ConnectionTimeout = TimeSpan.FromSeconds(2), TransactionTimeout = TimeSpan.FromSeconds(2),
                 };
                 var root = automation.FromHandle(browser.MainWindowHandle);
-                var name = id == "chat" ? "Zommi fixture image input" : "Zommi fixture text input";
+                var name = id switch
+                {
+                    "chat" => "Zommi fixture image input", "source" => "Zommi fixture source panel", _ => "Zommi fixture text input",
+                };
                 var exposed = Stopwatch.StartNew();
                 FlaUI.Core.AutomationElements.AutomationElement? input;
                 while ((input = root.FindFirstDescendant(automation.ConditionFactory.ByName(name))) is null)
@@ -101,6 +107,8 @@ internal static class ChromiumClipboardAcceptance
                     if (exposed.ElapsedMilliseconds > 5000) throw new InvalidOperationException("Native accessibility input was not exposed: " + id);
                     await Task.Delay(50, token);
                 }
+                if (id == "source" && input.Properties.ControlType.ValueOrDefault != FlaUI.Core.Definitions.ControlType.Group)
+                    throw new InvalidOperationException("The synthetic source must expose the browser Group that previously stole the destination.");
                 input.Focus();
                 var focused = Stopwatch.StartNew();
                 while (!(await Evaluate($"document.hasFocus() && document.activeElement.id === '{id}'")).GetBoolean())
@@ -177,7 +185,13 @@ internal static class ChromiumClipboardAcceptance
                 throw new InvalidOperationException("Paste sent Enter.");
             stage = "routing after an earlier browser input";
             var unchangedBrowserDraft = (await Evaluate("chat.value")).GetString();
-            await ForegroundRoutingAcceptance.RunAsync(batch, () => FocusInput("chat"));
+            async Task FocusBrowser(string id)
+            {
+                if (!(browserWindow with { Focus = 0 }).Restore()) throw new InvalidOperationException("Could not activate the browser fixture source.");
+                await FocusInput(id);
+                if (GetForegroundWindow() != browser.MainWindowHandle) throw new InvalidOperationException("The source browser did not become the actual foreground window.");
+            }
+            await ForegroundRoutingAcceptance.RunAsync(batch, () => FocusBrowser("chat"), () => FocusBrowser("source"));
             if ((await Evaluate("chat.value")).GetString() != unchangedBrowserDraft)
                 throw new InvalidOperationException("A console/custom-chat capture was pasted into the earlier browser.");
             var screenshot = await driver.CallAsync("Page.captureScreenshot", new { format = "png" }, session, token);

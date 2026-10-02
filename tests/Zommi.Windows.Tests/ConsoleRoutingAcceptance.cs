@@ -30,7 +30,7 @@ internal static class ConsoleRoutingAcceptance
         return 0;
     }
 
-    public static async Task RunAsync(CaptureInputTracker tracker)
+    public static async Task RunAsync(CaptureInputTracker tracker, Func<Task> focusBrowserSource)
     {
         var temporary = Path.Combine(Path.GetTempPath(), "zommi-console-input-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(temporary);
@@ -72,12 +72,9 @@ internal static class ConsoleRoutingAcceptance
             if (direct?.Window != window) throw new InvalidOperationException("Capture invoked in a console chose the earlier browser.");
             tracker.Resume();
             await Task.Delay(100);
-            using var source = new Form { Text = "Source after console", Size = new System.Drawing.Size(320, 200) };
-            source.Controls.Add(new Button { Text = "Source content", Dock = DockStyle.Fill });
-            source.Show(); source.Activate(); source.Controls[0].Focus();
+            await focusBrowserSource();
             var target = await tracker.PauseAsync();
             if (target?.Window != window) throw new InvalidOperationException("Switching to the source lost the console destination.");
-            source.Hide();
             if (!await target.RestoreInputAsync()) throw new InvalidOperationException("Console input restore failed: " + target.RestoreFailure);
             const string marker = "zommi-console-paste-fixture";
             Clipboard.SetText(marker);

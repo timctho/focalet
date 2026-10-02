@@ -64,6 +64,7 @@ internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessI
             // A read-only editor is never an automatic destination. Ordinary
             // source documents/buttons may return to the immediately prior app.
             if (type == ControlType.Edit && readOnly == true) kind = CaptureInputKind.Protected;
+            if (kind == CaptureInputKind.Unknown && HasReadOnlyDocumentParent(automation, element)) kind = CaptureInputKind.NonInput;
             return new(target, kind);
         }
         ITextRange? selection = null;
@@ -77,6 +78,31 @@ internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessI
 
     internal static bool IsTerminalControl(string windowClass, string? inputClass) =>
         windowClass == "ConsoleWindowClass" || inputClass == "TermControl";
+
+    private static bool HasReadOnlyDocumentParent(UIA3Automation automation, AutomationElement element)
+    {
+        // Browser pages can focus an ARIA Group/container with no Value or Edit
+        // pattern. Its nearest Document distinguishes a source page from an
+        // opaque native input; inspect only roles and read-only state, no text.
+        var walker = automation.TreeWalkerFactory.GetControlViewWalker();
+        for (var depth = 0; depth < 16; depth++)
+        {
+            var parent = walker.GetParent(element);
+            if (parent is null) return false;
+            element = parent;
+            if (element.Properties.ControlType.ValueOrDefault == ControlType.Document)
+            {
+                var value = element.Patterns.Value.PatternOrDefault;
+                if (value is not null) return value.IsReadOnly.ValueOrDefault;
+                return element.Patterns.Text.PatternOrDefault?.DocumentRange.GetAttributeValue(automation.TextAttributeLibrary.IsReadOnly) is true;
+            }
+            // ARIA dialogs can expose virtual Window nodes inside a document.
+            // Only a native window ends this document search.
+            if (element.Properties.ControlType.ValueOrDefault == ControlType.Window &&
+                element.Properties.NativeWindowHandle.ValueOrDefault != 0) return false;
+        }
+        return false;
+    }
 
     internal static bool IsShellSurface(nint window) => WindowClass(window) is
         "Shell_TrayWnd" or "Shell_SecondaryTrayWnd" or "Progman" or "WorkerW" or "MultitaskingViewFrame" or "ForegroundStaging";
