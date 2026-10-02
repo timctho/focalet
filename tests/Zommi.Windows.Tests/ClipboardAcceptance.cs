@@ -68,6 +68,8 @@ internal static class ClipboardAcceptance
                     System.Text.RegularExpressions.Regex.Matches(rich.Rtf ?? "", @"\\pict").Count != 2)
                     throw new InvalidOperationException("One rich paste did not preserve two images, their text and the existing draft.");
                 if (enterCount != 0) throw new InvalidOperationException("Paste sent Enter.");
+                Directory.CreateDirectory("artifacts");
+                File.WriteAllBytes("artifacts/capture-paste-acceptance.png", ScreenCapture.CapturePng(form.Bounds));
                 Clipboard.SetText("replacement fixture");
                 if (richTarget.Paste(ownedSequence)) throw new InvalidOperationException("Changed clipboard was pasted.");
                 ownedSequence = CapturePasteTarget.GetClipboardSequenceNumber();

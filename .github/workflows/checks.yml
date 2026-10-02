@@ -163,6 +163,15 @@ jobs:
         run: dotnet run --project tests/Zommi.Windows.Tests --configuration Release -- --paste-acceptance
       - name: Build standalone capture tool
         run: ./scripts/package-capture-tool.ps1
+      - name: Retain capture tool prototype and paste acceptance
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: capture-tool-windows-${{ github.sha }}
+          path: |
+            artifacts/zommi-capture-tool-win-x64.zip
+            artifacts/capture-paste-acceptance.png
+          if-no-files-found: error
+          retention-days: 7
       - name: Compile and verify the Windows desktop package
         run: ./scripts/package-windows.ps1 -Runtime win-x64
       - name: Compile and verify the Windows installer
