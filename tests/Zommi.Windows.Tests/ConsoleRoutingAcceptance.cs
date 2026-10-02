@@ -8,8 +8,9 @@ internal static class ConsoleRoutingAcceptance
 {
     public static int Receive(string directory)
     {
-        Console.Title = "Zommi isolated console input";
-        File.WriteAllText(Path.Combine(directory, "ready.tmp"), GetConsoleWindow().ToInt64().ToString(System.Globalization.CultureInfo.InvariantCulture));
+        var title = "Zommi console " + Path.GetFileName(directory);
+        Console.Title = title;
+        File.WriteAllText(Path.Combine(directory, "ready.tmp"), JsonSerializer.Serialize(new { window = GetConsoleWindow().ToInt64(), title }));
         File.Move(Path.Combine(directory, "ready.tmp"), Path.Combine(directory, "ready"));
         var received = new System.Text.StringBuilder();
         var deadline = Stopwatch.StartNew();
@@ -46,7 +47,22 @@ internal static class ConsoleRoutingAcceptance
         try
         {
             await ForegroundRoutingAcceptance.WaitFor(() => File.Exists(Path.Combine(temporary, "ready")), "The console fixture did not start.", 15000);
-            var window = new nint(long.Parse(File.ReadAllText(Path.Combine(temporary, "ready")), System.Globalization.CultureInfo.InvariantCulture));
+            using var ready = JsonDocument.Parse(File.ReadAllText(Path.Combine(temporary, "ready")));
+            var nativeWindow = new nint(ready.RootElement.GetProperty("window").GetInt64());
+            var title = ready.RootElement.GetProperty("title").GetString()!;
+            nint window = 0;
+            // GetConsoleWindow is a hidden compatibility HWND when Windows
+            // delegates the visible console to Windows Terminal. Find only our
+            // unique synthetic title, and wait for the UI before activating it.
+            await ForegroundRoutingAcceptance.WaitFor(() =>
+            {
+                var named = FindWindow(null, title);
+                window = named != 0 && IsWindowVisible(named) ? named : IsWindowVisible(nativeWindow) ? nativeWindow : 0;
+                return window != 0;
+            }, $"No visible console fixture window appeared (native HWND {nativeWindow}).");
+            SetWindowPos(window, new nint(-1), 0, 0, 0, 0, 0x0043);
+            await Task.Delay(150);
+            Console.WriteLine($"Console fixture window: native={nativeWindow}; visible={window}; foreground={GetForegroundWindow()}");
             GetWindowThreadProcessId(window, out var processId);
             using var owner = Process.GetProcessById((int)processId);
             var consoleWindow = new CapturePasteTarget(window, 0, processId, owner.StartTime.ToUniversalTime().Ticks);
@@ -85,5 +101,9 @@ internal static class ConsoleRoutingAcceptance
     }
 
     [DllImport("kernel32.dll")] private static extern nint GetConsoleWindow();
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern nint FindWindow(string? className, string title);
+    [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
+    [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern bool SetWindowPos(nint window, nint after, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint window, out uint process);
 }
