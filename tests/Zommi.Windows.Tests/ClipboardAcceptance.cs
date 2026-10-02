@@ -70,6 +70,13 @@ internal static class ClipboardAcceptance
                     System.Text.RegularExpressions.Regex.Matches(rich.Rtf ?? "", @"\\pict").Count != 2)
                     throw new InvalidOperationException("One rich paste did not preserve two images, their text and the existing draft.");
                 if (enterCount != 0) throw new InvalidOperationException("Paste sent Enter.");
+                // Native edits can update their document before the hosted desktop
+                // compositor paints it. Show the start of both documents and allow
+                // that frame to render before recording visible acceptance evidence.
+                text.Select(0, 0); text.ScrollToCaret();
+                rich.Select(0, 0); rich.ScrollToCaret();
+                form.Refresh();
+                await Task.Delay(1000);
                 Directory.CreateDirectory("artifacts");
                 File.WriteAllBytes("artifacts/capture-paste-acceptance.png", ScreenCapture.CapturePng(form.Bounds));
                 Clipboard.SetText("replacement fixture");
