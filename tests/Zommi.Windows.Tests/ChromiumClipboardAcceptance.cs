@@ -24,8 +24,8 @@ internal static class ChromiumClipboardAcceptance
             <!doctype html><meta charset="utf-8"><title>Zommi clipboard fixture</title>
             <style>body{font:16px sans-serif;margin:24px}textarea{width:90%;height:180px}#chat{border:1px solid;padding:12px;margin:12px 0;min-height:30px}img{border:1px solid #bbb}</style>
             <h2>Native image paste (chat-style handler)</h2>
-            <div id="chat" contenteditable="true">image-before image-after</div><img id="preview">
-            <h2>Plain text fallback (same clipboard)</h2><textarea id="plain">text-before text-after</textarea>
+            <div id="chat" contenteditable="true" aria-label="Zommi fixture image input">image-before image-after</div><img id="preview">
+            <h2>Plain text fallback (same clipboard)</h2><textarea id="plain" aria-label="Zommi fixture text input">text-before text-after</textarea>
             <script>
             window.enterCount=0; window.imageResult=null; window.pasteDiagnostics=[];
             document.addEventListener('paste',e=>pasteDiagnostics.push({target:e.target.id,types:Array.from(e.clipboardData.types),items:Array.from(e.clipboardData.items).map(i=>({kind:i.kind,type:i.type})),textLength:e.clipboardData.getData('text/plain').length}),true);
@@ -43,7 +43,7 @@ internal static class ChromiumClipboardAcceptance
             """);
         var start = new ProcessStartInfo(executable) { UseShellExecute = false };
         foreach (var argument in new[] { "--no-first-run", "--no-default-browser-check", "--disable-background-networking",
-            "--disable-sync", "--remote-debugging-port=0", "--window-size=1050,900", "--user-data-dir=" + Path.Combine(temporary, "profile"), new Uri(fixture).AbsoluteUri })
+            "--disable-sync", "--force-renderer-accessibility", "--remote-debugging-port=0", "--window-size=1050,900", "--user-data-dir=" + Path.Combine(temporary, "profile"), new Uri(fixture).AbsoluteUri })
             start.ArgumentList.Add(argument);
         using var browser = Process.Start(start) ?? throw new InvalidOperationException("Could not start isolated Chromium.");
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(45));
@@ -82,20 +82,21 @@ internal static class ChromiumClipboardAcceptance
                 var result = await driver.CallAsync("Runtime.evaluate", new { expression, returnByValue = true }, session, token);
                 return result.GetProperty("result").GetProperty("value").Clone();
             }
-            async Task ClickInput(string id)
+            async Task FocusInput(string id)
             {
-                var location = await Evaluate($"(()=>{{const r=document.getElementById('{id}').getBoundingClientRect();return {{x:r.left+r.width/2,y:r.top+r.height/2,width:innerWidth,height:innerHeight,screenX,screenY,outerWidth,outerHeight,devicePixelRatio,hasFocus:document.hasFocus()}}}})()");
-                var views = NativeCaptureWindow.RenderViewBounds(browser.MainWindowHandle);
-                Console.WriteLine($"Chromium native window: {browser.MainWindowTitle}; bounds={NativeCaptureWindow.Bounds(browser.MainWindowHandle)}; views={string.Join(';', views)}; page={location}");
-                var viewport = views.Single();
-                var x = viewport.X + location.GetProperty("x").GetDouble() * viewport.Width / location.GetProperty("width").GetDouble();
-                var y = viewport.Y + location.GetProperty("y").GetDouble() * viewport.Height / location.GetProperty("height").GetDouble();
-                Console.WriteLine($"Chromium fixture click: viewport={viewport}; page={location}; screen={x},{y}");
-                FlaUI.Core.Input.Mouse.Click(new((int)x, (int)y), FlaUI.Core.Input.MouseButton.Left);
+                using var automation = new FlaUI.UIA3.UIA3Automation
+                {
+                    ConnectionTimeout = TimeSpan.FromSeconds(2), TransactionTimeout = TimeSpan.FromSeconds(2),
+                };
+                var root = automation.FromHandle(browser.MainWindowHandle);
+                var name = id == "chat" ? "Zommi fixture image input" : "Zommi fixture text input";
+                var input = root.FindFirstDescendant(automation.ConditionFactory.ByName(name))
+                    ?? throw new InvalidOperationException("Native accessibility input was not exposed: " + id);
+                input.Focus();
                 var focused = Stopwatch.StartNew();
                 while (!(await Evaluate($"document.hasFocus() && document.activeElement.id === '{id}'")).GetBoolean())
                 {
-                    if (focused.ElapsedMilliseconds > 2000) throw new InvalidOperationException("Native click did not focus the fixture input.");
+                    if (focused.ElapsedMilliseconds > 2000) throw new InvalidOperationException("Native accessibility did not focus the fixture input.");
                     await Task.Delay(25, token);
                 }
             }
@@ -118,7 +119,7 @@ internal static class ChromiumClipboardAcceptance
             Console.WriteLine($"Chromium native focus: expected={browser.MainWindowHandle}; foreground={GetForegroundWindow()}; cloaked={cloaked}");
             if (GetForegroundWindow() != browser.MainWindowHandle)
                 throw new InvalidOperationException("Could not activate the synthetic browser window.");
-            await ClickInput("chat");
+            await FocusInput("chat");
             if (focusOnly) { Console.WriteLine("PASS Chromium native input focus (clipboard untouched)."); return; }
             var target = CapturePasteTarget.Remember() ?? throw new InvalidOperationException("Browser input not focused.");
             if (target.Window != browser.MainWindowHandle) throw new InvalidOperationException("Unexpected browser destination.");
@@ -138,7 +139,7 @@ internal static class ChromiumClipboardAcceptance
                 !actual.GetProperty("b").EnumerateArray().Select(value => value.GetInt32()).SequenceEqual([0, 0, 255, 255]))
                 throw new InvalidOperationException("Browser image handler lost selected pixels: " + actual);
             Console.WriteLine("Chromium clipboard: both image regions received.");
-            await ClickInput("plain");
+            await FocusInput("plain");
             await Evaluate("plain.setSelectionRange(12,12);true");
             await Task.Delay(100, token);
             var textTarget = CapturePasteTarget.Remember() ?? throw new InvalidOperationException("Browser text input not focused.");
