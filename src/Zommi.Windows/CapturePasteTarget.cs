@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
@@ -15,34 +16,75 @@ internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessI
     internal string? RestoreFailure { get; private set; }
     public string Description => NativeCaptureWindow.Title(Window);
     public static CapturePasteTarget? Remember()
+        => RememberWindow() is { Focus: not 0 } target ? target : null;
+
+    internal static CapturePasteTarget? RememberWindow()
     {
         var window = GetForegroundWindow();
         var thread = GetWindowThreadProcessId(window, out var process);
         var info = new GuiThreadInfo { Size = (uint)Marshal.SizeOf<GuiThreadInfo>() };
-        if (window == 0 || thread == 0 || !GetGUIThreadInfo(thread, ref info) || info.Focus == 0) return null;
+        if (window == 0 || thread == 0) return null;
+        // WinUI/terminal windows can own keyboard focus without a native child
+        // HWND. Their accessible input is resolved independently below.
+        _ = GetGUIThreadInfo(thread, ref info);
         var started = ProcessStart(process);
         return started is null ? null : new(window, info.Focus, process, started.Value);
     }
 
     // Called on the tracker's MTA worker. Inspect identity/editability only:
     // never read input values, document text, passwords or screen pixels.
-    internal static CapturePasteTarget? RememberInput(UIA3Automation automation, int excludedProcess)
+    internal static CaptureInputObservation ObserveInput(UIA3Automation automation, CapturePasteTarget target)
     {
-        var target = Remember();
-        if (target is null || target.ProcessId == excludedProcess) return null;
+        CaptureInputObservation Unknown() => new(target, CaptureInputKind.Unknown);
+        if (!target.IsCurrent()) return Unknown();
         var element = automation.FocusedElement();
-        if (element is null || element.Properties.IsPassword.ValueOrDefault ||
-            !element.Properties.IsEnabled.ValueOrDefault || !element.Properties.HasKeyboardFocus.ValueOrDefault) return null;
+        if (element is null || !element.Properties.HasKeyboardFocus.ValueOrDefault) return Unknown();
+        if (element.Properties.IsPassword.ValueOrDefault || !element.Properties.IsEnabled.ValueOrDefault)
+            return new(target, CaptureInputKind.Protected);
         var type = element.Properties.ControlType.ValueOrDefault;
+        var terminal = IsTerminalControl(WindowClass(target.Window), element.Properties.ClassName.ValueOrDefault);
         var value = element.Patterns.Value.PatternOrDefault;
-        if (value?.IsReadOnly.ValueOrDefault == true) return null;
-        if (type != ControlType.Edit && !(value is not null && !value.IsReadOnly.ValueOrDefault)) return null;
+        var text = element.Patterns.Text.PatternOrDefault;
+        bool? readOnly = value?.IsReadOnly.ValueOrDefault;
+        if (readOnly is null && text is not null)
+        {
+            var attribute = text.DocumentRange.GetAttributeValue(automation.TextAttributeLibrary.IsReadOnly);
+            if (attribute is bool flag) readOnly = flag;
+        }
+        var editable = terminal || (readOnly != true && (type == ControlType.Edit || readOnly == false));
+        if (!editable)
+        {
+            var kind = (readOnly == true && type is ControlType.Document or ControlType.Text) || type is ControlType.Button or ControlType.Hyperlink or ControlType.List or
+                ControlType.ListItem or ControlType.Menu or ControlType.MenuItem or ControlType.Tree or ControlType.TreeItem
+                ? CaptureInputKind.NonInput : CaptureInputKind.Unknown;
+            // A read-only editor is never an automatic destination. Ordinary
+            // source documents/buttons may return to the immediately prior app.
+            if (type == ControlType.Edit && readOnly == true) kind = CaptureInputKind.Protected;
+            return new(target, kind);
+        }
         ITextRange? selection = null;
-        try { selection = element.Patterns.Text.PatternOrDefault?.GetSelection().FirstOrDefault()?.Clone(); }
+        // Terminal TextPattern selections refer to rendered output, not its
+        // command-line caret; selecting one can put the console in selection mode.
+        try { if (!terminal) selection = text?.GetSelection().FirstOrDefault()?.Clone(); }
         catch (Exception error) when (error is not OutOfMemoryException) { /* Some terminal editors expose no text range. */ }
-        if (!target.IsCurrent() || !element.Properties.HasKeyboardFocus.ValueOrDefault) return null;
-        return target with { InputElement = element, Selection = selection };
+        if (!target.IsCurrent() || !element.Properties.HasKeyboardFocus.ValueOrDefault) return Unknown();
+        return new(target with { InputElement = element, Selection = selection }, CaptureInputKind.Input);
     }
+
+    internal static bool IsTerminalControl(string windowClass, string? inputClass) =>
+        windowClass == "ConsoleWindowClass" || inputClass == "TermControl";
+
+    internal static bool IsShellSurface(nint window) => WindowClass(window) is
+        "Shell_TrayWnd" or "Shell_SecondaryTrayWnd" or "Progman" or "WorkerW" or "MultitaskingViewFrame" or "ForegroundStaging";
+
+    private static string WindowClass(nint window)
+    {
+        var text = new StringBuilder(256);
+        GetClassName(window, text, text.Capacity);
+        return text.ToString();
+    }
+
+    internal bool ContainsWindow(nint window) => window == Window || GetAncestor(window, 2) == Window;
 
     public async Task<bool> IsInputCurrentAsync()
     {
@@ -64,7 +106,7 @@ internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessI
         {
             try
             {
-                InputElement.Focus();
+                if (!InputElement.Properties.HasKeyboardFocus.ValueOrDefault) InputElement.Focus();
                 // Chromium applies the accessibility focus action asynchronously.
                 // Keep the UI pumping while waiting for the actual editor identity.
                 var wait = Stopwatch.StartNew();
@@ -80,13 +122,14 @@ internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessI
         });
     }
 
-    private bool Exists() => IsWindow(Window) && IsWindow(Focus) &&
-        WindowProcess(Window) == ProcessId && WindowProcess(Focus) == ProcessId &&
+    private bool Exists() => IsWindow(Window) && (Focus == 0 || (IsWindow(Focus) && GetAncestor(Focus, 2) == Window)) &&
+        WindowProcess(Window) == ProcessId &&
         ProcessStart(ProcessId) == ProcessStarted;
 
     public bool IsCurrent()
     {
         if (!Exists() || GetForegroundWindow() != Window) return false;
+        if (Focus == 0) return true; // UIA identity is checked separately when available.
         var info = new GuiThreadInfo { Size = (uint)Marshal.SizeOf<GuiThreadInfo>() };
         return GetGUIThreadInfo(GetWindowThreadProcessId(Window, out _), ref info) && info.Focus == Focus;
     }
@@ -102,7 +145,7 @@ internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessI
             if (IsIconic(Window)) ShowWindow(Window, 9);
             SetForegroundWindow(Window);
             if (GetForegroundWindow() != Window) return false;
-            SetFocus(Focus);
+            if (Focus != 0) SetFocus(Focus);
             return IsCurrent();
         }
         finally { if (attached) AttachThreadInput(current, thread, false); }
@@ -166,6 +209,8 @@ internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessI
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint window, out uint process);
     [DllImport("user32.dll")] private static extern bool GetGUIThreadInfo(uint thread, ref GuiThreadInfo info);
     [DllImport("user32.dll")] private static extern bool IsWindow(nint window);
+    [DllImport("user32.dll")] private static extern nint GetAncestor(nint window, uint flags);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(nint window, StringBuilder text, int count);
     [DllImport("user32.dll")] private static extern bool IsIconic(nint window);
     [DllImport("user32.dll")] private static extern bool ShowWindow(nint window, int command);
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(nint window);

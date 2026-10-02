@@ -3,6 +3,7 @@ using System.Text.Json;
 using Zommi.Capture;
 using Zommi.Windows;
 
+if (args.Length == 2 && args[0] == "--console-receiver") return ConsoleRoutingAcceptance.Receive(args[1]);
 if (args.Contains("--paste-acceptance", StringComparer.Ordinal)) return ClipboardAcceptance.Run();
 if (args.Contains("--browser-focus-acceptance", StringComparer.Ordinal)) return ClipboardAcceptance.Run(focusOnly: true);
 
@@ -16,6 +17,7 @@ var tests = new (string Name, Action Run)[]
     ("Capture palette uses the requested theme and rejects malformed colors", ThemePalette),
     ("Native rich text imports every image and Unicode context in one batch", ClipboardRichImport),
     ("Each native clipboard image retains selected pixels without merging or scaling", ClipboardNativeImage),
+    ("Foreground routing never reuses a stale browser for an unsupported input", ForegroundRouting),
 };
 var failed = 0;
 foreach (var test in tests)
@@ -24,6 +26,42 @@ foreach (var test in tests)
     catch (Exception error) { failed++; Console.Error.WriteLine($"FAIL {test.Name}: {error}"); }
 }
 return failed == 0 ? 0 : 1;
+
+static void ForegroundRouting()
+{
+    var browser = new CapturePasteTarget(101, 102, 1, 1);
+    var console = new CapturePasteTarget(201, 0, 2, 2);
+    var customChat = new CapturePasteTarget(301, 302, 3, 3);
+    var source = new CapturePasteTarget(401, 402, 4, 4);
+    foreach (var unsupported in new[] { console, customChat })
+    {
+        var history = new CaptureInputHistory();
+        var browserRevision = history.ObserveWindow(browser);
+        history.ObserveInput(browserRevision, new(browser, CaptureInputKind.Input));
+        history.ObserveWindow(unsupported);
+        Assert(history.Destination == unsupported, "Direct capture used the earlier browser when the new app lacked an Edit pattern.");
+        history.ObserveInput(browserRevision, new(browser, CaptureInputKind.Input));
+        Assert(history.Destination == unsupported, "A late browser provider result overwrote the actual foreground app.");
+        var sourceRevision = history.ObserveWindow(source);
+        history.ObserveInput(sourceRevision, new(source, CaptureInputKind.NonInput));
+        Assert(history.Destination == unsupported, "Switching to a capture source forgot the last app's native focus bookmark.");
+        var third = source with { Window = 501, Focus = 502 };
+        var thirdRevision = history.ObserveWindow(third);
+        history.ObserveInput(thirdRevision, new(third, CaptureInputKind.NonInput));
+        Assert(history.Destination is null, "Routing searched back past the immediately previous non-input window.");
+    }
+    var focused = new CaptureInputHistory();
+    var revision = focused.ObserveWindow(browser);
+    focused.ObserveInput(revision, new(browser, CaptureInputKind.Input));
+    var changedFocus = browser with { Focus = 103 };
+    focused.ObserveWindow(changedFocus, focusChanged: true);
+    focused.ObserveInput(revision, new(browser, CaptureInputKind.Input));
+    Assert(focused.Destination == changedFocus, "A stale control was restored inside the same native window.");
+    focused.ObserveInput(focused.Revision, new(changedFocus, CaptureInputKind.Protected));
+    Assert(focused.Destination is null, "A protected input fell back to a different editor.");
+    Assert(CapturePasteTarget.IsTerminalControl("CASCADIA_HOSTING_WINDOW_CLASS", "TermControl"), "Observed Windows Terminal Text/TermControl input was rejected.");
+    Assert(CapturePasteTarget.IsTerminalControl("ConsoleWindowClass", ""), "Classic console input was rejected.");
+}
 
 static void ClipboardRichImport()
 {

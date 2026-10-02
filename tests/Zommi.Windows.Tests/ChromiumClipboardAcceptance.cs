@@ -50,7 +50,7 @@ internal static class ChromiumClipboardAcceptance
             "--disable-sync", "--force-renderer-accessibility", "--remote-debugging-port=0", "--window-size=1050,900", "--user-data-dir=" + Path.Combine(temporary, "profile"), new Uri(fixture).AbsoluteUri })
             start.ArgumentList.Add(argument);
         using var browser = Process.Start(start) ?? throw new InvalidOperationException("Could not start isolated Chromium.");
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         var token = deadline.Token;
         var stage = "browser startup";
         CdpConnection? driver = null;
@@ -141,7 +141,7 @@ internal static class ChromiumClipboardAcceptance
             // within the same native renderer HWND. Restore the exact UIA editor.
             await Evaluate("chat.setSelectionRange(13,13);true");
             await Task.Delay(350, token);
-            var target = tracker.Pause() ?? throw new InvalidOperationException("Browser input not focused.");
+            var target = await tracker.PauseAsync() ?? throw new InvalidOperationException("Browser input not focused.");
             if (target.Window != browser.MainWindowHandle) throw new InvalidOperationException("Unexpected browser destination.");
             await FocusInput("plain");
             if (await target.IsInputCurrentAsync()) throw new InvalidOperationException("A different browser input accepted the saved editor identity.");
@@ -175,6 +175,11 @@ internal static class ChromiumClipboardAcceptance
                 throw new InvalidOperationException("Plain browser input lost its text fallback: " + result);
             if ((await Evaluate("enterCount")).GetInt32() != 0)
                 throw new InvalidOperationException("Paste sent Enter.");
+            stage = "routing after an earlier browser input";
+            var unchangedBrowserDraft = (await Evaluate("chat.value")).GetString();
+            await ForegroundRoutingAcceptance.RunAsync(batch, () => FocusInput("chat"));
+            if ((await Evaluate("chat.value")).GetString() != unchangedBrowserDraft)
+                throw new InvalidOperationException("A console/custom-chat capture was pasted into the earlier browser.");
             var screenshot = await driver.CallAsync("Page.captureScreenshot", new { format = "png" }, session, token);
             File.WriteAllBytes("artifacts/capture-browser-paste.png", Convert.FromBase64String(screenshot.GetProperty("data").GetString()!));
             Console.WriteLine("PASS Chromium receives image A, text A, image B, text B; automatic focus/caret restoration and text fallback preserve drafts.");

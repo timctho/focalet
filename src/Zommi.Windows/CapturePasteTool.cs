@@ -54,7 +54,7 @@ public static class CapturePasteTool
 
         public CaptureContext()
         {
-            hotkey = new HotkeyWindow(CaptureToDestination);
+            hotkey = new HotkeyWindow(() => Capture(toDestination: true));
             inputs = new CaptureInputTracker();
             menu = new ContextMenuStrip();
             destinationStatus = new ToolStripMenuItem("Destination: last used input (automatic)") { Enabled = false };
@@ -67,7 +67,7 @@ public static class CapturePasteTool
                 destinationStatus.Text = "Destination: focus an input first";
             });
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("Capture to clipboard", null, (_, _) => Capture(null));
+            menu.Items.Add("Capture to clipboard", null, (_, _) => Capture(toDestination: false));
             menu.Items.Add("Copy last batch", null, (_, _) => CopyLast());
             menu.Items.Add("Copy text", null, (_, _) => CopyLast(forceText: true));
             textOnly = new ToolStripMenuItem("Text only") { CheckOnClick = true };
@@ -81,25 +81,20 @@ public static class CapturePasteTool
             Notify("Ready", "Your last input is remembered automatically. Switch to the source, then Alt+A to capture and paste back.");
         }
 
-        private void CaptureToDestination()
-        {
-            if (busy) return;
-            Capture(inputs.Pause());
-        }
-
-        private async void Capture(CapturePasteTarget? target)
+        private async void Capture(bool toDestination)
         {
             if (busy) return;
             busy = true;
             inputs.Pause();
             try
             {
+                var target = toDestination ? await inputs.PauseAsync() : null;
                 var release = Stopwatch.StartNew();
                 while (!CapturePasteTarget.ModifiersReleased && release.ElapsedMilliseconds < 2000) await Task.Delay(25);
                 if (!CapturePasteTarget.ModifiersReleased) return;
                 ScreenCapture.FlushDesktop();
                 var selected = CaptureNativeHost.SelectBatch(target?.ProcessId ?? 0, CaptureTheme.Default,
-                    target is null ? "Copy" : "Paste");
+                    target is null ? "Copy" : "Paste", target?.Description);
                 if (selected.Regions.Count == 0)
                 {
                     if (target is not null) await target.RestoreInputAsync();

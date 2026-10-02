@@ -301,12 +301,12 @@ internal static class CaptureNativeHost
 
     internal sealed record SelectedBatch(IReadOnlyList<RegionSelectionResult> Regions, string? ErrorMessage = null);
 
-    internal static SelectedBatch SelectBatch(uint returnProcessId, CaptureTheme theme, string confirmLabel = "Attach")
+    internal static SelectedBatch SelectBatch(uint returnProcessId, CaptureTheme theme, string confirmLabel = "Attach", string? destinationName = null)
     {
-        var sourceFocus = CapturePasteTarget.Remember();
+        var sourceFocus = CapturePasteTarget.RememberWindow();
         var sourcePointer = Cursor.Position;
         using var desktop = ScreenCapture.CaptureBitmap(SystemInformation.VirtualScreen);
-        using var selector = new ContentSelectionForm(returnProcessId, desktop, theme: theme, confirmLabel: confirmLabel);
+        using var selector = new ContentSelectionForm(returnProcessId, desktop, theme: theme, confirmLabel: confirmLabel, destinationName: destinationName);
         if (selector.ShowDialog() != DialogResult.OK || selector.Selections.Count == 0)
             return new([], selector.ErrorMessage);
         var selections = selector.Selections;

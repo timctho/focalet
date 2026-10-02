@@ -18,7 +18,8 @@ is unsigned and Windows may require opening confirmation.
 
 1. Quit the full Zommi app or another tool using Alt+A. Open the capture tool.
 2. Use the destination input normally. Zommi automatically remembers the most
-   recent editable input and its caret when exposed by Windows accessibility.
+   recent foreground window and native focus, with the input/caret when exposed
+   by Windows accessibility.
 3. Switch to the source window and press **Alt+A**. Drag a rectangle, then use
    **Add region**, **S**, or **Ctrl-drag** for additional regions, up to eight.
    Annotate any region.
@@ -27,21 +28,30 @@ is unsigned and Windows may require opening confirmation.
    Each image keeps its original pixels and dimensions. Images are never merged.
    Zommi does not inject Enter into the destination.
 
-There is no destination hotkey. Focusing another editable input updates the
-bookmark; switching to a page, button, or other non-editor retains the previous
-input. The tray shows the destination and has **Clear destination**. The bookmark
-exists only while the tool runs, so use your input once after starting it.
-Password and read-only fields are excluded. Tracking reads control identity and
-selection ranges, not input values, document contents, or screenshots.
+There is no destination hotkey. With an input focused, Alt+A uses that window.
+After switching from an input to a read-only source page/button, it returns to
+the immediately previous window. Every foreground visit has its own native
+bookmark, including console and custom chat inputs without a UIA `Edit` or
+`ValuePattern`; late accessibility replies cannot replace a newer window's
+bookmark. It does not search older windows for a previously recognized browser.
+The selector displays **Paste to: window title** before confirmation, and the
+tray also shows the destination and offers **Clear destination**.
 
-The bookmark includes the accessible editor inside the window, so separate
-browser inputs sharing one native window are distinguished. Where the provider
-supports text ranges, Zommi restores the saved caret/selection; other editors
-retain their own caret when refocused. This is a Windows input bookmark, not an
-agent session identity. Changing chats in the same input can change its draft.
-Closed/replaced processes or unavailable editors are not rebound silently. If
-Windows cannot expose an editable input, **Capture to clipboard** and manual
-paste remain available.
+Bookmarks exist only while the tool runs, so use your input once after starting
+it. Known password and read-only editors are excluded. Tracking reads control
+identity and selection ranges, not input values, document text, or screenshots.
+Accessibility enhances the native bookmark: browsers retain editor identity
+inside a shared native window, and supported editors restore their saved caret.
+Custom inputs keep the app's own caret when refocused. Classic console and
+Windows Terminal inputs are accepted without requiring a native child HWND or
+an `Edit` role. Their rendered-output selection is never restored as an input
+caret, which could put the terminal in selection mode.
+
+A native bookmark is not an agent session identity. Without an accessible editor,
+Zommi can restore the window/native control but cannot identify a chat or tab
+inside it. Changing chats in the same input can change its draft. Closed/replaced
+processes are not rebound silently. If the destination cannot be restored,
+**Copy text** and **Copy last batch** remain available for manual recovery.
 
 ## Images and text
 
@@ -103,7 +113,12 @@ It uses synthetic native plain/rich inputs and a disposable Chromium profile.
 Checks cover automatic input tracking across a source-window switch, browser
 editor/caret restoration, separate image/text event order, two original-sized
 images, text fallback, draft preservation, no Enter, and stopping after changed
-focus or clipboard. The Chromium receiver chooses text first, reproducing the
+focus or clipboard. The routing regression seeds a real browser input, switches through an opaque
+custom chat and a fresh Windows console host, and verifies that paste reaches
+those inputs while the old browser draft stays unchanged. Unit tests also replay
+the observed Windows Terminal `Text`/`TermControl` identity and stale-provider
+replies. Actual ChatGPT app acceptance remains separate from the custom fixture.
+The Chromium receiver chooses text first, reproducing the
 previous missing-image failure when both formats were offered together. These
 fixtures verify OS/browser behavior, not a particular agent client's composer.
 The test replaces the clipboard and should not run on a personal desktop.

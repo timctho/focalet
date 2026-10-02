@@ -62,7 +62,7 @@ internal static class ClipboardAcceptance
                 using var source = new Form { Text = "Separate capture source", Size = new Size(300, 200), TopMost = true };
                 source.Controls.Add(new Button { Text = "Read-only source button", Dock = DockStyle.Fill });
                 source.Show(); source.Activate(); await Task.Delay(400);
-                var target = tracker.Pause() ?? throw new InvalidOperationException("Previous input was forgotten after switching windows.");
+                var target = await tracker.PauseAsync() ?? throw new InvalidOperationException("Previous input was forgotten after switching windows.");
                 if (target.Focus != text.Handle) throw new InvalidOperationException("A source button replaced the input bookmark.");
                 using (var overlay = new Form { Text = "Synthetic capture overlay", TopMost = true })
                 {

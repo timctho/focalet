@@ -31,7 +31,7 @@ internal class ContentSelectionForm : PointSelectionForm
     private ImageAnnotation? pendingStroke;
 
     public ContentSelectionForm(uint returnProcessId, Bitmap capturedDesktop, int maximumSelections = 8, CaptureTheme? theme = null,
-        string confirmLabel = "Attach") : base(returnProcessId)
+        string confirmLabel = "Attach", string? destinationName = null) : base(returnProcessId)
     {
         Text = "Zommi content selection";
         this.maximumSelections = maximumSelections;
@@ -42,7 +42,7 @@ internal class ContentSelectionForm : PointSelectionForm
         desktop = capturedDesktop;
         scale = Math.Max(1, DeviceDpi / 96f);
         this.theme = theme ?? CaptureTheme.Default;
-        toolbar = new CaptureToolbar(scale, this.theme, confirmLabel);
+        toolbar = new CaptureToolbar(scale, this.theme, confirmLabel, destinationName);
         toolbar.Invoked += InvokeTool;
         Controls.Add(toolbar);
         UpdateToolbar(reposition: true);
