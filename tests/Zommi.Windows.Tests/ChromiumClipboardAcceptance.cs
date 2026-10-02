@@ -22,7 +22,8 @@ internal static class ChromiumClipboardAcceptance
             <div id="chat" contenteditable="true">image-before image-after</div><img id="preview">
             <h2>Plain text fallback (same clipboard)</h2><textarea id="plain">text-before text-after</textarea>
             <script>
-            window.enterCount=0; window.imageResult=null;
+            window.enterCount=0; window.imageResult=null; window.pasteDiagnostics=[];
+            document.addEventListener('paste',e=>pasteDiagnostics.push({target:e.target.id,types:Array.from(e.clipboardData.types),items:Array.from(e.clipboardData.items).map(i=>({kind:i.kind,type:i.type})),textLength:e.clipboardData.getData('text/plain').length}),true);
             document.addEventListener('keydown',e=>{if(e.key==='Enter')enterCount++});
             chat.addEventListener('paste',async e=>{
               const file=Array.from(e.clipboardData.items).find(i=>i.type.startsWith('image/'))?.getAsFile();
@@ -42,6 +43,9 @@ internal static class ChromiumClipboardAcceptance
         using var browser = Process.Start(start) ?? throw new InvalidOperationException("Could not start isolated Chromium.");
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(45));
         var token = deadline.Token;
+        var stage = "browser startup";
+        CdpConnection? driver = null;
+        string? session = null;
         try
         {
             string[] port;
@@ -55,7 +59,8 @@ internal static class ChromiumClipboardAcceptance
                 catch (IOException) { }
                 await Task.Delay(50, token);
             }
-            using var driver = await CdpConnection.ConnectAsync(new Uri($"ws://127.0.0.1:{port[0]}{port[1]}"), token);
+            driver = await CdpConnection.ConnectAsync(new Uri($"ws://127.0.0.1:{port[0]}{port[1]}"), token);
+            stage = "find fixture tab";
             string tab;
             while (true)
             {
@@ -66,13 +71,14 @@ internal static class ChromiumClipboardAcceptance
                 await Task.Delay(50, token);
             }
             var attached = await driver.CallAsync("Target.attachToTarget", new { targetId = tab, flatten = true }, null, token);
-            var session = attached.GetProperty("sessionId").GetString()!;
+            session = attached.GetProperty("sessionId").GetString()!;
             async Task<JsonElement> Evaluate(string expression)
             {
                 var result = await driver.CallAsync("Runtime.evaluate", new { expression, returnByValue = true }, session, token);
                 return result.GetProperty("result").GetProperty("value").Clone();
             }
             await driver.CallAsync("Page.bringToFront", null, session, token);
+            stage = "find browser window";
             while (true)
             {
                 browser.Refresh();
@@ -86,6 +92,8 @@ internal static class ChromiumClipboardAcceptance
             if (target.Window != browser.MainWindowHandle) throw new InvalidOperationException("Unexpected browser destination.");
             var sequence = CapturePasteTarget.GetClipboardSequenceNumber();
             if (!target.Paste(sequence)) throw new InvalidOperationException("Chromium image paste not dispatched.");
+            stage = "read native image paste event";
+            Console.WriteLine("Chromium clipboard: native paste dispatched.");
             JsonElement actual;
             while (true)
             {
@@ -97,12 +105,19 @@ internal static class ChromiumClipboardAcceptance
                 !actual.GetProperty("a").EnumerateArray().Select(value => value.GetInt32()).SequenceEqual([255, 127, 80, 255]) ||
                 !actual.GetProperty("b").EnumerateArray().Select(value => value.GetInt32()).SequenceEqual([0, 0, 255, 255]))
                 throw new InvalidOperationException("Browser image handler lost selected pixels: " + actual);
+            Console.WriteLine("Chromium clipboard: both image regions received.");
             await Evaluate("plain.focus();plain.setSelectionRange(12,12);true");
             await Task.Delay(100, token);
             var textTarget = CapturePasteTarget.Remember() ?? throw new InvalidOperationException("Browser text input not focused.");
             if (!textTarget.Paste(sequence)) throw new InvalidOperationException("Browser text paste not dispatched.");
             var expected = ("text-before " + batch.Text + "text-after").Replace("\r", "", StringComparison.Ordinal);
-            while ((await Evaluate("plain.value")).GetString() != expected) await Task.Delay(50, token);
+            stage = "read plain text paste";
+            var actualText = "";
+            while ((actualText = (await Evaluate("plain.value")).GetString()) != expected)
+            {
+                stage = $"read plain text paste (expected {expected.Length} characters, received {actualText?.Length})";
+                await Task.Delay(50, token);
+            }
             if ((await Evaluate("enterCount")).GetInt32() != 0 ||
                 (await Evaluate("chat.textContent")).GetString() != "image-before image-after")
                 throw new InvalidOperationException("Image paste submitted or replaced the original draft.");
@@ -110,8 +125,25 @@ internal static class ChromiumClipboardAcceptance
             File.WriteAllBytes("artifacts/capture-browser-paste.png", Convert.FromBase64String(screenshot.GetProperty("data").GetString()!));
             Console.WriteLine("PASS Chromium native image event contains every region; text fallback and existing draft survive.");
         }
+        catch (Exception error)
+        {
+            if (driver is not null && session is not null)
+            {
+                using var diagnostics = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                try
+                {
+                    var state = await driver.CallAsync("Runtime.evaluate", new { expression = "JSON.stringify({pasteDiagnostics,imageResult,active:document.activeElement.id,plain:plain.value})", returnByValue = true }, session, diagnostics.Token);
+                    Console.WriteLine("Chromium fixture diagnostics: " + state);
+                    var screenshot = await driver.CallAsync("Page.captureScreenshot", new { format = "png" }, session, diagnostics.Token);
+                    File.WriteAllBytes("artifacts/capture-browser-failure.png", Convert.FromBase64String(screenshot.GetProperty("data").GetString()!));
+                }
+                catch (Exception diagnosticError) { Console.WriteLine("Could not read fixture diagnostics: " + diagnosticError.Message); }
+            }
+            throw new InvalidOperationException("Chromium clipboard acceptance failed at " + stage, error);
+        }
         finally
         {
+            driver?.Dispose();
             if (!browser.HasExited) browser.Kill(entireProcessTree: true);
             await browser.WaitForExitAsync();
             for (var attempt = 0; attempt < 20; attempt++)

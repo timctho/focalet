@@ -103,7 +103,7 @@ internal static class ClipboardAcceptance
         };
         Application.Run(form);
         if (ownedSequence != 0 && CapturePasteTarget.GetClipboardSequenceNumber() == ownedSequence) Clipboard.Clear();
-        if (failure is not null) throw failure;
+        if (failure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
     }
 
     private static CaptureClipboardItem Item(string label, Color color)
