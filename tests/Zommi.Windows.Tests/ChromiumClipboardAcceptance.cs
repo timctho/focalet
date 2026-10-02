@@ -90,8 +90,13 @@ internal static class ChromiumClipboardAcceptance
                 };
                 var root = automation.FromHandle(browser.MainWindowHandle);
                 var name = id == "chat" ? "Zommi fixture image input" : "Zommi fixture text input";
-                var input = root.FindFirstDescendant(automation.ConditionFactory.ByName(name))
-                    ?? throw new InvalidOperationException("Native accessibility input was not exposed: " + id);
+                var exposed = Stopwatch.StartNew();
+                FlaUI.Core.AutomationElements.AutomationElement? input;
+                while ((input = root.FindFirstDescendant(automation.ConditionFactory.ByName(name))) is null)
+                {
+                    if (exposed.ElapsedMilliseconds > 5000) throw new InvalidOperationException("Native accessibility input was not exposed: " + id);
+                    await Task.Delay(50, token);
+                }
                 input.Focus();
                 var focused = Stopwatch.StartNew();
                 while (!(await Evaluate($"document.hasFocus() && document.activeElement.id === '{id}'")).GetBoolean())
