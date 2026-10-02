@@ -6,8 +6,6 @@ using Zommi.Windows;
 
 internal static class ChromiumClipboardAcceptance
 {
-    [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
-    [DllImport("user32.dll")] private static extern void mouse_event(uint flags, uint x, uint y, uint data, nuint extra);
     [DllImport("user32.dll")] private static extern bool SetWindowPos(nint window, nint after, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
     [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(nint window, int attribute, out int value, int size);
@@ -93,11 +91,13 @@ internal static class ChromiumClipboardAcceptance
                 var x = viewport.X + location.GetProperty("x").GetDouble() * viewport.Width / location.GetProperty("width").GetDouble();
                 var y = viewport.Y + location.GetProperty("y").GetDouble() * viewport.Height / location.GetProperty("height").GetDouble();
                 Console.WriteLine($"Chromium fixture click: viewport={viewport}; page={location}; screen={x},{y}");
-                if (!SetCursorPos((int)x, (int)y)) throw new InvalidOperationException("Could not point at the fixture input.");
-                mouse_event(2, 0, 0, 0, 0); mouse_event(4, 0, 0, 0, 0);
-                await Task.Delay(150, token);
-                if (!(await Evaluate($"document.hasFocus() && document.activeElement.id === '{id}'")).GetBoolean())
-                    throw new InvalidOperationException("Native click did not focus the fixture input.");
+                FlaUI.Core.Input.Mouse.Click(new((int)x, (int)y), FlaUI.Core.Input.MouseButton.Left);
+                var focused = Stopwatch.StartNew();
+                while (!(await Evaluate($"document.hasFocus() && document.activeElement.id === '{id}'")).GetBoolean())
+                {
+                    if (focused.ElapsedMilliseconds > 2000) throw new InvalidOperationException("Native click did not focus the fixture input.");
+                    await Task.Delay(25, token);
+                }
             }
             await driver.CallAsync("Page.bringToFront", null, session, token);
             stage = "find browser window";

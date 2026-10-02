@@ -12,7 +12,15 @@ using System;
 using System.Runtime.InteropServices;
 public static class ZommiAnnotationInput {
     [DllImport("user32.dll")] private static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
-    public static void Control(bool down) { keybd_event(0x11, 0, down ? 0u : 2u, UIntPtr.Zero); System.Threading.Thread.Sleep(40); }
+    [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
+    public static void Control(bool down) {
+        keybd_event(0x11, 0, down ? 0u : 2u, UIntPtr.Zero);
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        while (((GetAsyncKeyState(0x11) & 0x8000) != 0) != down) {
+            if (watch.ElapsedMilliseconds > 2000) throw new InvalidOperationException("Synthetic Ctrl state did not settle.");
+            System.Threading.Thread.Sleep(10);
+        }
+    }
 }
 '@
 Assert-DesktopCaptureSurface
