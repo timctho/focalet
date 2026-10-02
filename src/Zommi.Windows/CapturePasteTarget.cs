@@ -39,6 +39,10 @@ internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessI
         if (!target.IsCurrent()) return Unknown();
         var element = automation.FocusedElement();
         if (element is null || !element.Properties.HasKeyboardFocus.ValueOrDefault) return Unknown();
+        var elementProcess = element.Properties.ProcessId.ValueOrDefault;
+        var elementWindow = element.Properties.NativeWindowHandle.ValueOrDefault;
+        if ((elementProcess != target.ProcessId && (target.Focus == 0 || elementProcess != WindowProcess(target.Focus))) ||
+            (elementWindow != 0 && !target.ContainsWindow(elementWindow))) return Unknown();
         if (element.Properties.IsPassword.ValueOrDefault || !element.Properties.IsEnabled.ValueOrDefault)
             return new(target, CaptureInputKind.Protected);
         var type = element.Properties.ControlType.ValueOrDefault;

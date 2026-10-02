@@ -33,12 +33,13 @@ internal static class ConsoleRoutingAcceptance
     {
         var temporary = Path.Combine(Path.GetTempPath(), "zommi-console-input-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(temporary);
-        var start = new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "conhost.exe")) { UseShellExecute = false };
-        // Explicit conhost owns a fresh console; there is no shell interpreter,
-        // personal profile or command execution in this receiver.
-        start.ArgumentList.Add(Environment.ProcessPath!);
-        if (string.Equals(Path.GetFileNameWithoutExtension(Environment.ProcessPath), "dotnet", StringComparison.OrdinalIgnoreCase))
-            start.ArgumentList.Add(typeof(ConsoleRoutingAcceptance).Assembly.Location);
+        // ShellExecute starts the console-subsystem dotnet host in its own
+        // console instead of inheriting the CI runner's redirected handles.
+        // There is no command interpreter or personal profile in this receiver.
+        var runtime = new DirectoryInfo(System.Runtime.InteropServices.RuntimeEnvironment.GetRuntimeDirectory());
+        var dotnet = Path.Combine(runtime.Parent!.Parent!.Parent!.FullName, "dotnet.exe");
+        var start = new ProcessStartInfo(dotnet) { UseShellExecute = true };
+        start.ArgumentList.Add(typeof(ConsoleRoutingAcceptance).Assembly.Location);
         start.ArgumentList.Add("--console-receiver");
         start.ArgumentList.Add(temporary);
         using var host = Process.Start(start) ?? throw new InvalidOperationException("Could not start the isolated console host.");
