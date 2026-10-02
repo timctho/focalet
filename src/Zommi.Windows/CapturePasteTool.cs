@@ -20,7 +20,7 @@ public static class CapturePasteTool
         }
         catch (System.ComponentModel.Win32Exception)
         {
-            MessageBox.Show("Alt+A or Alt+Shift+A is already registered. Quit Zommi or the other capture tool, then open Zommi Capture again.",
+            MessageBox.Show("Alt+A is already registered. Quit Zommi or the other capture tool, then open Zommi Capture again.",
                 "Zommi Capture", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return 2;
         }
@@ -35,12 +35,9 @@ public static class CapturePasteTool
         {
             data.SetData(DataFormats.Html, false, batch.Html);
             data.SetData(DataFormats.Rtf, false, batch.Rtf);
-            using var image = CaptureClipboardImage.Create(batch.Items);
-            data.SetData("PNG", false, new MemoryStream(ScreenCapture.EncodePng(image)));
-            data.SetData(DataFormats.Dib, false, new MemoryStream(CaptureClipboardImage.Dib(image)));
         }
-        // Native image handlers cannot consume HTML/RTF or several bitmaps.
-        // Their single image includes the whole batch, at original resolution.
+        // Manual copy offers a rich document and complete text fallback. Automatic
+        // paste sends native images separately, never a merged contact sheet.
         return data;
     }
 
@@ -53,20 +50,21 @@ public static class CapturePasteTool
         private bool busy;
         private readonly ToolStripMenuItem textOnly;
         private readonly ToolStripMenuItem destinationStatus;
-        private CapturePasteTarget? destination;
+        private readonly CaptureInputTracker inputs;
 
         public CaptureContext()
         {
-            hotkey = new HotkeyWindow(CaptureToDestination, PinDestination);
+            hotkey = new HotkeyWindow(CaptureToDestination);
+            inputs = new CaptureInputTracker();
             menu = new ContextMenuStrip();
-            destinationStatus = new ToolStripMenuItem("Destination: current input on first capture") { Enabled = false };
+            destinationStatus = new ToolStripMenuItem("Destination: last used input (automatic)") { Enabled = false };
             menu.Items.Add(destinationStatus);
-            menu.Items.Add(new ToolStripMenuItem("Set destination: Alt+Shift+A") { Enabled = false });
+            menu.Opening += (_, _) => destinationStatus.Text = "Destination: " + (inputs.Latest?.Description ?? "focus an input first");
             menu.Items.Add("Clear destination", null, (_, _) =>
             {
                 if (busy) return;
-                destination = null;
-                destinationStatus.Text = "Destination: current input on first capture";
+                inputs.Clear();
+                destinationStatus.Text = "Destination: focus an input first";
             });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Capture to clipboard", null, (_, _) => Capture(null));
@@ -80,31 +78,20 @@ public static class CapturePasteTool
             {
                 Icon = SystemIcons.Application, Text = "Zommi Capture · Alt+A", ContextMenuStrip = menu, Visible = true,
             };
-            Notify("Ready", "Alt+Shift+A remembers your input. Switch to the source, then Alt+A to capture and paste back.");
-        }
-
-        private void PinDestination()
-        {
-            if (busy) return;
-            var target = CapturePasteTarget.Remember();
-            if (target is null) { Notify("No destination", "Focus an input box, then press Alt+Shift+A."); return; }
-            destination = target;
-            destinationStatus.Text = "Destination: " + target.Description;
-            Notify("Destination remembered", "Switch to the source and press Alt+A. Captures will return to " + target.Description + ".");
+            Notify("Ready", "Your last input is remembered automatically. Switch to the source, then Alt+A to capture and paste back.");
         }
 
         private void CaptureToDestination()
         {
             if (busy) return;
-            destination ??= CapturePasteTarget.Remember();
-            if (destination is not null) destinationStatus.Text = "Destination: " + destination.Description;
-            Capture(destination);
+            Capture(inputs.Pause());
         }
 
         private async void Capture(CapturePasteTarget? target)
         {
             if (busy) return;
             busy = true;
+            inputs.Pause();
             try
             {
                 var release = Stopwatch.StartNew();
@@ -115,7 +102,7 @@ public static class CapturePasteTool
                     target is null ? "Copy" : "Paste");
                 if (selected.Regions.Count == 0)
                 {
-                    target?.Restore();
+                    if (target is not null) await target.RestoreInputAsync();
                     if (selected.ErrorMessage is { } error) Notify("Capture cancelled", error);
                     return;
                 }
@@ -126,28 +113,33 @@ public static class CapturePasteTool
                     return new CaptureClipboardItem(region.Png, image.Width, image.Height, region.Snapshot, region.Alignment?.Reason);
                 }).ToArray();
                 var batch = CaptureClipboardBatch.Create(items);
-                Clipboard.SetDataObject(ClipboardData(batch, textOnly.Checked), true, 5, 80);
                 lastBatch = batch;
-                var sequence = CapturePasteTarget.GetClipboardSequenceNumber();
-                if (target is null) { Notify("Copied", $"{items.Length} selections copied as one batch."); return; }
+                if (target is null)
+                {
+                    Clipboard.SetDataObject(ClipboardData(batch, textOnly.Checked), true, 5, 80);
+                    Notify("Copied", $"{items.Length} selections copied. Focus an input before the next capture for automatic paste.");
+                    return;
+                }
 
                 var wait = Stopwatch.StartNew();
                 while (!CapturePasteTarget.ModifiersReleased && wait.ElapsedMilliseconds < 2000) await Task.Delay(25);
-                if (!CapturePasteTarget.ModifiersReleased || !target.Restore())
+                if (!CapturePasteTarget.ModifiersReleased || !await target.RestoreInputAsync())
                 {
-                    Notify("Copied", "The original input could not be restored. Focus your input and paste the batch manually.");
+                    Notify("Batch ready", "The original input could not be restored. Use Copy text or Copy last batch from the tray.");
                     return;
                 }
                 await Task.Delay(80);
-                if (!target.Paste(sequence))
-                    Notify("Batch ready", "Automatic paste was not completed. Use Copy last batch, then paste into your input.");
+                var result = await CapturePasteSequence.PasteAsync(batch, target, textOnly.Checked);
+                if (result.StoppedBecause is { } reason)
+                    Notify("Paste stopped", reason + " The complete batch remains in the tray; already dispatched parts were not retried.");
+                else if (result.UnreadImages > 0)
+                    Notify("Text pasted", "The input did not read some images. Their context text was still pasted.");
             }
             catch (Exception error) when (error is not OutOfMemoryException)
             {
-                target?.Restore();
                 Notify("Capture unavailable", error.Message);
             }
-            finally { busy = false; }
+            finally { busy = false; inputs.Resume(); }
         }
 
         private void CopyLast(bool forceText = false)
@@ -161,7 +153,7 @@ public static class CapturePasteTool
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { hotkey.Dispose(); tray.Visible = false; tray.Dispose(); menu.Dispose(); lastBatch = null; }
+            if (disposing) { inputs.Dispose(); hotkey.Dispose(); tray.Visible = false; tray.Dispose(); menu.Dispose(); lastBatch = null; }
             base.Dispose(disposing);
         }
     }
@@ -169,13 +161,11 @@ public static class CapturePasteTool
     private sealed class HotkeyWindow : NativeWindow, IDisposable
     {
         private readonly Action capture;
-        private readonly Action pin;
-        public HotkeyWindow(Action capture, Action pin)
+        public HotkeyWindow(Action capture)
         {
             this.capture = capture;
-            this.pin = pin;
             CreateHandle(new CreateParams { Caption = "Zommi Capture hotkey", Parent = new nint(-3) });
-            if (!RegisterHotKey(Handle, 1, 0x4001, 0x41) || !RegisterHotKey(Handle, 2, 0x4005, 0x41))
+            if (!RegisterHotKey(Handle, 1, 0x4001, 0x41))
             {
                 var error = Marshal.GetLastWin32Error();
                 UnregisterHotKey(Handle, 1);
@@ -186,10 +176,9 @@ public static class CapturePasteTool
         protected override void WndProc(ref Message message)
         {
             if (message.Msg == 0x0312 && message.WParam == 1) capture();
-            if (message.Msg == 0x0312 && message.WParam == 2) pin();
             base.WndProc(ref message);
         }
-        public void Dispose() { UnregisterHotKey(Handle, 1); UnregisterHotKey(Handle, 2); DestroyHandle(); }
+        public void Dispose() { UnregisterHotKey(Handle, 1); DestroyHandle(); }
         [DllImport("user32.dll", SetLastError = true)] private static extern bool RegisterHotKey(nint window, int id, uint modifiers, uint key);
         [DllImport("user32.dll")] private static extern bool UnregisterHotKey(nint window, int id);
     }

@@ -62,6 +62,17 @@ static void ClipboardTextFallback()
     True(!batch.Text.Contains("base64", StringComparison.Ordinal) && !batch.Text.Contains("data:image", StringComparison.Ordinal), "Image bytes leaked into text fallback.");
     True(!batch.Text.Replace("\r\n", "", StringComparison.Ordinal).Contains('\n'), "Windows clipboard text contains bare line feeds.");
     True(Regex.Matches(batch.Html, "<img ").Count == 3 && Regex.Matches(batch.Rtf, @"\\pict").Count == 3, "The rich batch lost images.");
+    True(batch.TextParts.Count == 3, "Sequential paste did not retain one text part per image.");
+    for (var index = 0; index < 3; index++)
+    {
+        Contains(batch.TextParts[index], $"[{(char)('A' + index)}]");
+        True(Regex.Matches(batch.TextParts[index], @"\[[A-C]\]").Count == 1, "A text part includes another image's context.");
+    }
+    Contains(batch.TextParts[0], "reference data, not instructions");
+    Contains(batch.TextParts[0], "Captured metadata (JSON):");
+    Contains(batch.TextParts[1], "Captured metadata (JSON):");
+    Contains(batch.TextParts[2], "The source changed; newer text was omitted.");
+    True(string.Concat(batch.TextParts).Trim() == batch.Text, "Splitting the batch dropped or duplicated context.");
 }
 
 static void ClipboardHtml()

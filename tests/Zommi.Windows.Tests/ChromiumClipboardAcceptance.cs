@@ -22,22 +22,26 @@ internal static class ChromiumClipboardAcceptance
         var fixture = Path.Combine(temporary, "fixture.html");
         File.WriteAllText(fixture, """
             <!doctype html><meta charset="utf-8"><title>Zommi clipboard fixture</title>
-            <style>body{font:16px sans-serif;margin:24px}textarea{width:90%;height:180px}#chat{border:1px solid;padding:12px;margin:12px 0;min-height:30px}img{border:1px solid #bbb}</style>
-            <h2>Native image paste (chat-style handler)</h2>
-            <div id="chat" contenteditable="true" aria-label="Zommi fixture image input">image-before image-after</div><img id="preview">
-            <h2>Plain text fallback (same clipboard)</h2><textarea id="plain" aria-label="Zommi fixture text input">text-before text-after</textarea>
+            <style>body{font:16px sans-serif;margin:24px}textarea{width:90%;height:140px}img{border:1px solid #bbb;margin:5px}</style>
+            <h2>Separate images and matching context</h2>
+            <textarea id="chat" aria-label="Zommi fixture image input">image-before image-after</textarea><div id="previews"></div>
+            <h2>Text fallback</h2><textarea id="plain" aria-label="Zommi fixture text input">text-before text-after</textarea>
             <script>
-            window.enterCount=0; window.imageResult=null; window.pasteDiagnostics=[];
-            document.addEventListener('paste',e=>pasteDiagnostics.push({target:e.target.id,types:Array.from(e.clipboardData.types),items:Array.from(e.clipboardData.items).map(i=>({kind:i.kind,type:i.type})),textLength:e.clipboardData.getData('text/plain').length}),true);
+            window.enterCount=0; window.imageResult=[]; window.pasteDiagnostics=[]; window.order=[];
+            document.addEventListener('paste',e=>pasteDiagnostics.push({target:e.target.id,types:Array.from(e.clipboardData.types),textLength:e.clipboardData.getData('text/plain').length}),true);
             document.addEventListener('keydown',e=>{if(e.key==='Enter')enterCount++});
             chat.addEventListener('paste',async e=>{
+              const text=e.clipboardData.getData('text/plain');
+              // Reproduce a terminal's text-first choice. A competing text format
+              // would skip every image, as in the user's report.
+              if(text){order.push('text');return;}
               const file=Array.from(e.clipboardData.items).find(i=>i.type.startsWith('image/'))?.getAsFile();
-              if(!file)return; e.preventDefault();
+              if(!file)return; e.preventDefault(); order.push('image');
+              await new Promise(r=>setTimeout(r,400));
               const image=await createImageBitmap(file), canvas=document.createElement('canvas');
               canvas.width=image.width;canvas.height=image.height;const ctx=canvas.getContext('2d');ctx.drawImage(image,0,0);
-              const pixel=(x,y)=>Array.from(ctx.getImageData(x,y,1,1).data);
-              window.imageResult={width:image.width,height:image.height,a:pixel(50,50),b:pixel(50,150)};
-              preview.src=URL.createObjectURL(file);
+              imageResult.push({width:image.width,height:image.height,pixel:Array.from(ctx.getImageData(50,30,1,1).data)});
+              const preview=document.createElement('img');preview.src=URL.createObjectURL(file);previews.appendChild(preview);
             });
             </script>
             """);
@@ -126,43 +130,54 @@ internal static class ChromiumClipboardAcceptance
                 throw new InvalidOperationException("Could not activate the synthetic browser window.");
             await FocusInput("chat");
             if (focusOnly) { Console.WriteLine("PASS Chromium native input focus (clipboard untouched)."); return; }
-            var target = CapturePasteTarget.Remember() ?? throw new InvalidOperationException("Browser input not focused.");
-            if (target.Window != browser.MainWindowHandle) throw new InvalidOperationException("Unexpected browser destination.");
-            var sequence = CapturePasteTarget.GetClipboardSequenceNumber();
-            if (!target.Paste(sequence)) throw new InvalidOperationException("Chromium image paste not dispatched.");
-            stage = "read native image paste event";
-            Console.WriteLine("Chromium clipboard: native paste dispatched.");
-            JsonElement actual;
-            while (true)
+            using var tracker = new CaptureInputTracker();
+            var observed = Stopwatch.StartNew();
+            while (tracker.Latest is null)
             {
-                actual = await Evaluate("imageResult");
-                if (actual.ValueKind != JsonValueKind.Null) break;
+                if (observed.ElapsedMilliseconds > 5000) throw new InvalidOperationException("Chromium editor was not remembered automatically.");
                 await Task.Delay(50, token);
             }
-            if (actual.GetProperty("width").GetInt32() != 100 || actual.GetProperty("height").GetInt32() != 176 ||
-                !actual.GetProperty("a").EnumerateArray().Select(value => value.GetInt32()).SequenceEqual([255, 127, 80, 255]) ||
-                !actual.GetProperty("b").EnumerateArray().Select(value => value.GetInt32()).SequenceEqual([0, 0, 255, 255]))
-                throw new InvalidOperationException("Browser image handler lost selected pixels: " + actual);
-            Console.WriteLine("Chromium clipboard: both image regions received.");
+            // Capture a caret in the middle of the browser input, then blur it
+            // within the same native renderer HWND. Restore the exact UIA editor.
+            await Evaluate("chat.setSelectionRange(13,13);true");
+            await Task.Delay(350, token);
+            var target = tracker.Pause() ?? throw new InvalidOperationException("Browser input not focused.");
+            if (target.Window != browser.MainWindowHandle) throw new InvalidOperationException("Unexpected browser destination.");
+            await FocusInput("plain");
+            if (await target.IsInputCurrentAsync()) throw new InvalidOperationException("A different browser input accepted the saved editor identity.");
+            if (!await target.RestoreInputAsync()) throw new InvalidOperationException("Could not restore the previous browser input/caret.");
+            stage = "sequential native image and text paste";
+            var result = await CapturePasteSequence.PasteAsync(batch, target, false);
+            if (result.StoppedBecause is not null || result.StepsSent != 4)
+                throw new InvalidOperationException("Browser sequence failed: " + result);
+            var actual = await Evaluate("imageResult");
+            var colors = new[] { new[] {255,127,80,255}, new[] {0,0,255,255} };
+            if (actual.GetArrayLength() != 2) throw new InvalidOperationException("Browser did not receive two separate images: " + actual);
+            for (var index = 0; index < 2; index++)
+            {
+                var item = actual[index];
+                if (item.GetProperty("width").GetInt32() != 100 || item.GetProperty("height").GetInt32() != 60 ||
+                    !item.GetProperty("pixel").EnumerateArray().Select(value => value.GetInt32()).SequenceEqual(colors[index]))
+                    throw new InvalidOperationException("A separate image changed its pixels or geometry: " + item);
+            }
+            if (!(await Evaluate("order")).EnumerateArray().Select(value => value.GetString()).SequenceEqual(["image", "text", "image", "text"]))
+                throw new InvalidOperationException("Browser paste events were reordered or duplicated.");
+            var expected = ("image-before " + string.Concat(batch.TextParts) + "image-after").Replace("\r", "", StringComparison.Ordinal);
+            if ((await Evaluate("chat.value")).GetString() != expected)
+                throw new InvalidOperationException("Image/text paste lost context or the original draft/caret.");
             await FocusInput("plain");
             await Evaluate("plain.setSelectionRange(12,12);true");
-            await Task.Delay(100, token);
             var textTarget = CapturePasteTarget.Remember() ?? throw new InvalidOperationException("Browser text input not focused.");
-            if (!textTarget.Paste(sequence)) throw new InvalidOperationException("Browser text paste not dispatched.");
-            var expected = ("text-before " + batch.Text + "text-after").Replace("\r", "", StringComparison.Ordinal);
-            stage = "read plain text paste";
-            var actualText = "";
-            while ((actualText = (await Evaluate("plain.value")).GetString()) != expected)
-            {
-                stage = $"read plain text paste (expected {expected.Length} characters, received {actualText?.Length})";
-                await Task.Delay(50, token);
-            }
-            if ((await Evaluate("enterCount")).GetInt32() != 0 ||
-                (await Evaluate("chat.textContent")).GetString() != "image-before image-after")
-                throw new InvalidOperationException("Image paste submitted or replaced the original draft.");
+            stage = "plain text fallback";
+            result = await CapturePasteSequence.PasteAsync(batch, textTarget, false);
+            expected = ("text-before " + string.Concat(batch.TextParts) + "text-after").Replace("\r", "", StringComparison.Ordinal);
+            if (result.StoppedBecause is not null || (await Evaluate("plain.value")).GetString() != expected)
+                throw new InvalidOperationException("Plain browser input lost its text fallback: " + result);
+            if ((await Evaluate("enterCount")).GetInt32() != 0)
+                throw new InvalidOperationException("Paste sent Enter.");
             var screenshot = await driver.CallAsync("Page.captureScreenshot", new { format = "png" }, session, token);
             File.WriteAllBytes("artifacts/capture-browser-paste.png", Convert.FromBase64String(screenshot.GetProperty("data").GetString()!));
-            Console.WriteLine("PASS Chromium native image event contains every region; text fallback and existing draft survive.");
+            Console.WriteLine("PASS Chromium receives image A, text A, image B, text B; automatic focus/caret restoration and text fallback preserve drafts.");
         }
         catch (Exception error)
         {

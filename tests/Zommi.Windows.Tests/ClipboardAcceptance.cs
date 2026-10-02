@@ -21,7 +21,7 @@ internal static class ClipboardAcceptance
         thread.Start(); thread.Join();
         if (focusOnly) { previousTarget?.Restore(); Cursor.Position = previousPointer; }
         if (failure is not null) { Console.Error.WriteLine(failure); return 1; }
-        if (!focusOnly) Console.WriteLine("PASS One paste preserves all regions, plain-text fallback, rich images, draft and focus; no Enter is sent.");
+        if (!focusOnly) Console.WriteLine("PASS Sequential paste preserves separate images, context, automatic input bookmark and draft; interruption stops and no Enter is sent.");
         return 0;
     }
 
@@ -51,44 +51,50 @@ internal static class ClipboardAcceptance
                     await ChromiumClipboardAcceptance.RunAsync(batch, focusOnly: true);
                     return;
                 }
+                using var tracker = new CaptureInputTracker(includeOwnProcess: true);
                 text.Focus(); text.Select("draft-before ".Length, 0);
-                await Task.Delay(150);
-                var target = CapturePasteTarget.Remember() ?? throw new InvalidOperationException("Fixture input was not focused.");
-                // The paste destination is retained before switching to a source
-                // window, rather than being overwritten when capture starts.
+                var deadline = System.Diagnostics.Stopwatch.StartNew();
+                while (tracker.Latest?.Focus != text.Handle)
+                {
+                    if (deadline.ElapsedMilliseconds > 5000) throw new InvalidOperationException("Editable input was not remembered automatically.");
+                    await Task.Delay(50);
+                }
                 using var source = new Form { Text = "Separate capture source", Size = new Size(300, 200), TopMost = true };
-                source.Show(); source.Activate(); await Task.Delay(100);
+                source.Controls.Add(new Button { Text = "Read-only source button", Dock = DockStyle.Fill });
+                source.Show(); source.Activate(); await Task.Delay(400);
+                var target = tracker.Pause() ?? throw new InvalidOperationException("Previous input was forgotten after switching windows.");
+                if (target.Focus != text.Handle) throw new InvalidOperationException("A source button replaced the input bookmark.");
                 using (var overlay = new Form { Text = "Synthetic capture overlay", TopMost = true })
                 {
                     overlay.Show(); overlay.Activate(); await Task.Delay(100);
                     overlay.Close();
                 }
-                if (!target.Restore()) throw new InvalidOperationException("Original editor focus was not restored.");
-                Clipboard.SetDataObject(CapturePasteTool.ClipboardData(batch, false), true);
+                if (!await target.RestoreInputAsync()) throw new InvalidOperationException("Original editor/caret was not restored.");
+                var result = await CapturePasteSequence.PasteAsync(batch, target, false);
                 ownedSequence = CapturePasteTarget.GetClipboardSequenceNumber();
-                using var nativePng = (MemoryStream?)Clipboard.GetData("PNG") ?? throw new InvalidOperationException("Native PNG missing from system clipboard.");
-                using var nativeImage = new Bitmap(nativePng);
-                if (nativeImage.Size != new Size(100, 176) || nativeImage.GetPixel(50, 50).ToArgb() != Color.Coral.ToArgb() ||
-                    nativeImage.GetPixel(50, 150).ToArgb() != Color.Blue.ToArgb())
-                    throw new InvalidOperationException("Native image paste would drop or resize a selected region.");
-                Directory.CreateDirectory("artifacts");
-                File.WriteAllBytes("artifacts/capture-native-clipboard.png", nativePng.ToArray());
-                if (!target.Paste(ownedSequence)) throw new InvalidOperationException("Paste was not dispatched to the fixture.");
-                await Task.Delay(250);
-                var expected = "draft-before " + batch.Text + "draft-after";
+                if (result.StoppedBecause is not null || result.StepsSent != 4)
+                    throw new InvalidOperationException("Plain editor sequence failed: " + result);
+                var expected = "draft-before " + string.Concat(batch.TextParts) + "draft-after";
                 if (text.Text.Replace("\r", "", StringComparison.Ordinal) != expected.Replace("\r", "", StringComparison.Ordinal))
-                    throw new InvalidOperationException("Plain editor did not receive the whole batch at the original caret. " +
-                        $"Expected fixture: {System.Text.Json.JsonSerializer.Serialize(expected)}; actual fixture: {System.Text.Json.JsonSerializer.Serialize(text.Text)}");
+                    throw new InvalidOperationException("Plain editor lost context or the original caret: " + System.Text.Json.JsonSerializer.Serialize(text.Text));
 
                 rich.Focus(); rich.Select("rich-before ".Length, 0); await Task.Delay(100);
                 var richTarget = CapturePasteTarget.Remember() ?? throw new InvalidOperationException("Rich editor was not focused.");
                 if (target.Paste(ownedSequence)) throw new InvalidOperationException("Changed focus accepted a stale destination.");
-                if (!richTarget.Paste(ownedSequence)) throw new InvalidOperationException("Rich paste was not dispatched.");
-                await Task.Delay(250);
+                result = await CapturePasteSequence.PasteAsync(batch, richTarget, false);
+                if (result.StoppedBecause is not null || result.StepsSent != 4)
+                    throw new InvalidOperationException("Rich editor sequence failed: " + result);
                 if (!rich.Text.StartsWith("rich-before ", StringComparison.Ordinal) || !rich.Text.EndsWith("rich-after", StringComparison.Ordinal) ||
                     !rich.Text.Contains("FIRST 中文 🖼", StringComparison.Ordinal) || !rich.Text.Contains("SECOND {B} \\ literal", StringComparison.Ordinal) ||
                     System.Text.RegularExpressions.Regex.Matches(rich.Rtf ?? "", @"\\pict").Count != 2)
-                    throw new InvalidOperationException("One rich paste did not preserve two images, their text and the existing draft.");
+                    throw new InvalidOperationException("Sequential rich paste did not preserve two images, their text and the draft.");
+                var rtf = rich.Rtf!;
+                var firstPicture = rtf.IndexOf(@"\pict", StringComparison.Ordinal);
+                var firstText = rtf.IndexOf("[A]", StringComparison.Ordinal);
+                var secondPicture = rtf.IndexOf(@"\pict", firstPicture + 5, StringComparison.Ordinal);
+                var secondText = rtf.IndexOf("[B]", StringComparison.Ordinal);
+                if (!(firstPicture < firstText && firstText < secondPicture && secondPicture < secondText))
+                    throw new InvalidOperationException("Rich editor changed image/text ordering.");
                 if (enterCount != 0) throw new InvalidOperationException("Paste sent Enter.");
                 // Native edits can update their document before the hosted desktop
                 // compositor paints it. Show the start of both documents and allow
@@ -103,8 +109,19 @@ internal static class ClipboardAcceptance
                 source.Close();
                 await ChromiumClipboardAcceptance.RunAsync(batch);
                 if (!richTarget.Restore()) throw new InvalidOperationException("Rich editor was not restored after browser acceptance.");
-                Clipboard.SetText("replacement fixture");
-                if (richTarget.Paste(ownedSequence)) throw new InvalidOperationException("Changed clipboard was pasted.");
+                using var interrupt = new System.Windows.Forms.Timer { Interval = 150 };
+                interrupt.Tick += (_, _) => { interrupt.Stop(); text.Focus(); };
+                interrupt.Start();
+                result = await CapturePasteSequence.PasteAsync(batch, richTarget, false);
+                if (result.StoppedBecause is null || result.StepsSent != 1)
+                    throw new InvalidOperationException("Sequence continued after focus changed: " + result);
+                using var replace = new System.Windows.Forms.Timer { Interval = 150 };
+                replace.Tick += (_, _) => { replace.Stop(); Clipboard.SetText("replacement fixture"); };
+                replace.Start();
+                var textTarget = CapturePasteTarget.Remember() ?? throw new InvalidOperationException("Text fixture lost focus.");
+                result = await CapturePasteSequence.PasteAsync(batch, textTarget, false);
+                if (result.StoppedBecause is null || result.StepsSent != 1 || Clipboard.GetText() != "replacement fixture")
+                    throw new InvalidOperationException("Sequence overwrote an intervening clipboard change: " + result);
                 ownedSequence = CapturePasteTarget.GetClipboardSequenceNumber();
             }
             catch (Exception error) { failure = error; }

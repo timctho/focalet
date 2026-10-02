@@ -1,11 +1,17 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using FlaUI.Core;
+using FlaUI.Core.AutomationElements;
+using FlaUI.Core.Definitions;
+using FlaUI.UIA3;
 
 namespace Zommi.Windows;
 
 /// <summary>Remembers a destination before the selector takes keyboard focus.</summary>
 internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessId, long ProcessStarted)
 {
+    private AutomationElement? InputElement { get; init; }
+    private ITextRange? Selection { get; init; }
     public string Description => NativeCaptureWindow.Title(Window);
     public static CapturePasteTarget? Remember()
     {
@@ -15,6 +21,54 @@ internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessI
         if (window == 0 || thread == 0 || !GetGUIThreadInfo(thread, ref info) || info.Focus == 0) return null;
         var started = ProcessStart(process);
         return started is null ? null : new(window, info.Focus, process, started.Value);
+    }
+
+    // Called on the tracker's MTA worker. Inspect identity/editability only:
+    // never read input values, document text, passwords or screen pixels.
+    internal static CapturePasteTarget? RememberInput(UIA3Automation automation, int excludedProcess)
+    {
+        var target = Remember();
+        if (target is null || target.ProcessId == excludedProcess) return null;
+        var element = automation.FocusedElement();
+        if (element is null || element.Properties.IsPassword.ValueOrDefault ||
+            !element.Properties.IsEnabled.ValueOrDefault || !element.Properties.HasKeyboardFocus.ValueOrDefault) return null;
+        var type = element.Properties.ControlType.ValueOrDefault;
+        var value = element.Patterns.Value.PatternOrDefault;
+        if (value?.IsReadOnly.ValueOrDefault == true) return null;
+        if (type != ControlType.Edit && !(value is not null && !value.IsReadOnly.ValueOrDefault)) return null;
+        ITextRange? selection = null;
+        try { selection = element.Patterns.Text.PatternOrDefault?.GetSelection().FirstOrDefault()?.Clone(); }
+        catch (Exception error) when (error is not OutOfMemoryException) { /* Some terminal editors expose no text range. */ }
+        if (!target.IsCurrent() || !element.Properties.HasKeyboardFocus.ValueOrDefault) return null;
+        return target with { InputElement = element, Selection = selection };
+    }
+
+    public async Task<bool> IsInputCurrentAsync()
+    {
+        if (!IsCurrent()) return false;
+        if (InputElement is null) return true;
+        return await Task.Run(() =>
+        {
+            try { return InputElement.Properties.HasKeyboardFocus.ValueOrDefault && IsCurrent(); }
+            catch (Exception error) when (error is not OutOfMemoryException) { return false; }
+        });
+    }
+
+    public async Task<bool> RestoreInputAsync()
+    {
+        if (!Restore()) return false;
+        if (InputElement is null) return true;
+        return await Task.Run(() =>
+        {
+            try
+            {
+                InputElement.Focus();
+                if (!IsCurrent() || !InputElement.Properties.HasKeyboardFocus.ValueOrDefault) return false;
+                Selection?.Select();
+                return IsCurrent() && InputElement.Properties.HasKeyboardFocus.ValueOrDefault;
+            }
+            catch (Exception error) when (error is not OutOfMemoryException) { return false; }
+        });
     }
 
     private bool Exists() => IsWindow(Window) && IsWindow(Focus) &&
@@ -50,9 +104,10 @@ internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessI
     public static bool ModifiersReleased => new[] { 0x0D, 0x10, 0x11, 0x12, 0x5B, 0x5C }
         .All(key => (GetAsyncKeyState(key) & 0x8000) == 0);
 
-    public bool Paste(uint clipboardSequence)
+    public bool Paste(uint clipboardSequence, nint clipboardOwner = 0)
     {
-        if (!ModifiersReleased || !IsCurrent() || GetClipboardSequenceNumber() != clipboardSequence) return false;
+        if (!ModifiersReleased || !IsCurrent() || GetClipboardSequenceNumber() != clipboardSequence ||
+            (clipboardOwner != 0 && GetClipboardOwner() != clipboardOwner)) return false;
         var keys = new[] { Key(0x11), Key(0x56), Key(0x56, true), Key(0x11, true) };
         var sent = SendInput((uint)keys.Length, keys, Marshal.SizeOf<Input>());
         if (sent > 0 && sent < keys.Length)
@@ -97,6 +152,7 @@ internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessI
     private struct MouseInput { public int X, Y; public uint Data, Flags, Time; public nuint Extra; }
 
     [DllImport("user32.dll")] internal static extern uint GetClipboardSequenceNumber();
+    [DllImport("user32.dll")] private static extern nint GetClipboardOwner();
     [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint window, out uint process);
     [DllImport("user32.dll")] private static extern bool GetGUIThreadInfo(uint thread, ref GuiThreadInfo info);

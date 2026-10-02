@@ -15,7 +15,7 @@ var tests = new (string Name, Action Run)[]
     ("Unmarked images preserve their original bytes", Unmarked),
     ("Capture palette uses the requested theme and rejects malformed colors", ThemePalette),
     ("Native rich text imports every image and Unicode context in one batch", ClipboardRichImport),
-    ("Native clipboard image retains all selected pixels in order without scaling", ClipboardNativeImage),
+    ("Each native clipboard image retains selected pixels without merging or scaling", ClipboardNativeImage),
 };
 var failed = 0;
 foreach (var test in tests)
@@ -39,7 +39,7 @@ static void ClipboardRichImport()
             var data = CapturePasteTool.ClipboardData(batch, false);
             Assert((string?)data.GetData(System.Windows.Forms.DataFormats.UnicodeText, false) == batch.Text, "Rich export dropped text fallback.");
             Assert(!data.GetDataPresent(System.Windows.Forms.DataFormats.Bitmap, false), "A standalone image could replace the rest of the batch.");
-            Assert(data.GetDataPresent("PNG", false) && data.GetDataPresent(System.Windows.Forms.DataFormats.Dib, false), "Native chat clipboard formats are missing.");
+            Assert(!data.GetDataPresent("PNG", false) && !data.GetDataPresent(System.Windows.Forms.DataFormats.Dib, false), "Manual batch copy must not merge the images.");
             using var editor = new System.Windows.Forms.RichTextBox { Text = "before after" };
             editor.Select(7, 0);
             editor.SelectedRtf = (string)data.GetData(System.Windows.Forms.DataFormats.Rtf, false)!;
@@ -60,18 +60,17 @@ static void ClipboardRichImport()
 static void ClipboardNativeImage()
 {
     var items = new[] { new CaptureClipboardItem(Image(Color.Coral), 100, 80, null), new CaptureClipboardItem(Image(Color.Blue), 100, 80, null) };
-    using var batch = CaptureClipboardImage.Create(items);
-    Assert(batch.Size == new Size(100, 216), "Contact sheet changed source dimensions.");
+    using var first = CaptureClipboardImage.Create(items[0]);
+    using var second = CaptureClipboardImage.Create(items[1]);
+    Assert(first.Size == new Size(100, 80) && second.Size == first.Size, "Individual image dimensions changed.");
     for (var y = 0; y < 80; y++)
         for (var x = 0; x < 100; x++)
         {
-            Assert(batch.GetPixel(x, y + 28).ToArgb() == Color.Coral.ToArgb(), "First region pixels changed.");
-            Assert(batch.GetPixel(x, y + 136).ToArgb() == Color.Blue.ToArgb(), "Second region pixels changed.");
+            Assert(first.GetPixel(x, y).ToArgb() == Color.Coral.ToArgb(), "First region pixels changed.");
+            Assert(second.GetPixel(x, y).ToArgb() == Color.Blue.ToArgb(), "Second region pixels changed.");
         }
-    using var single = CaptureClipboardImage.Create([items[0]]);
-    Assert(single.Size == new Size(100, 80) && single.GetPixel(0, 0).ToArgb() == Color.Coral.ToArgb(), "Single image was resized or labelled.");
     var rejected = false;
-    try { using var oversized = CaptureClipboardImage.Create([items[0] with { Width = 32768 }]); }
+    try { using var oversized = CaptureClipboardImage.Create(items[0] with { Width = 32768 }); }
     catch (ArgumentException) { rejected = true; }
     Assert(rejected, "Unsafe native bitmap dimensions were accepted.");
 }
