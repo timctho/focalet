@@ -43,7 +43,9 @@ public sealed record CaptureClipboardBatch(string Text, string Html, string Rtf)
         }
         html.Append("</div>");
         rtf.Append('}');
-        return new(text.ToString().TrimEnd(), WindowsHtml(html.ToString()), rtf.ToString());
+        var plain = text.ToString().Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd()
+            .Replace("\n", "\r\n", StringComparison.Ordinal);
+        return new(plain, WindowsHtml(html.ToString()), rtf.ToString());
     }
 
     private static string WindowsHtml(string fragment)

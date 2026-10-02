@@ -55,8 +55,10 @@ internal static class ClipboardAcceptance
                 ownedSequence = CapturePasteTarget.GetClipboardSequenceNumber();
                 if (!target.Paste(ownedSequence)) throw new InvalidOperationException("Paste was not dispatched to the fixture.");
                 await Task.Delay(250);
-                if (text.Text.Replace("\r", "", StringComparison.Ordinal) != "draft-before " + batch.Text + "draft-after")
-                    throw new InvalidOperationException("Plain editor did not receive the whole batch at the original caret.");
+                var expected = "draft-before " + batch.Text + "draft-after";
+                if (text.Text.Replace("\r", "", StringComparison.Ordinal) != expected.Replace("\r", "", StringComparison.Ordinal))
+                    throw new InvalidOperationException("Plain editor did not receive the whole batch at the original caret. " +
+                        $"Expected fixture: {System.Text.Json.JsonSerializer.Serialize(expected)}; actual fixture: {System.Text.Json.JsonSerializer.Serialize(text.Text)}");
 
                 rich.Focus(); rich.Select("rich-before ".Length, 0); await Task.Delay(100);
                 var richTarget = CapturePasteTarget.Remember() ?? throw new InvalidOperationException("Rich editor was not focused.");

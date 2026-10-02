@@ -157,10 +157,10 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           dotnet-version: 8.0.x
-      - name: Check Windows process, path, SQLite and capture contracts
-        run: python scripts/check.py --suite windows
       - name: Verify standalone capture batch paste on native editors
         run: dotnet run --project tests/Zommi.Windows.Tests --configuration Release -- --paste-acceptance
+      - name: Check Windows process, path, SQLite and capture contracts
+        run: python scripts/check.py --suite windows
       - name: Build standalone capture tool
         run: ./scripts/package-capture-tool.ps1
       - name: Retain capture tool prototype and paste acceptance

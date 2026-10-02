@@ -59,6 +59,7 @@ static void ClipboardTextFallback()
     True(batch.Text.IndexOf("[A]", StringComparison.Ordinal) < batch.Text.IndexOf("[B]", StringComparison.Ordinal) &&
         batch.Text.IndexOf("[B]", StringComparison.Ordinal) < batch.Text.IndexOf("[C]", StringComparison.Ordinal), "Regions were reordered.");
     True(!batch.Text.Contains("base64", StringComparison.Ordinal) && !batch.Text.Contains("data:image", StringComparison.Ordinal), "Image bytes leaked into text fallback.");
+    True(!batch.Text.Replace("\r\n", "", StringComparison.Ordinal).Contains('\n'), "Windows clipboard text contains bare line feeds.");
     True(Regex.Matches(batch.Html, "<img ").Count == 3 && Regex.Matches(batch.Rtf, @"\\pict").Count == 3, "The rich batch lost images.");
 }
 
