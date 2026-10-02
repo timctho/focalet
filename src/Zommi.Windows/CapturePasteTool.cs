@@ -88,10 +88,10 @@ public static class CapturePasteTool
             inputs.Pause();
             try
             {
-                var target = toDestination ? await inputs.PauseAsync() : null;
                 var release = Stopwatch.StartNew();
                 while (!CapturePasteTarget.ModifiersReleased && release.ElapsedMilliseconds < 2000) await Task.Delay(25);
                 if (!CapturePasteTarget.ModifiersReleased) return;
+                var target = toDestination ? await inputs.PauseAsync() : null;
                 ScreenCapture.FlushDesktop();
                 var selected = CaptureNativeHost.SelectBatch(target?.ProcessId ?? 0, CaptureTheme.Default,
                     target is null ? "Copy" : "Paste", target?.Description);
