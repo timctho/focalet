@@ -63,6 +63,23 @@ foreach ($case in $(if ($HoverOnly) { @('hover-source') } else { @('tools','mult
             param($process)
             $title = if ($case -eq 'image-selector') { 'Zommi image selection' } else { 'Zommi content selection' }
             $selector = Wait-ForWindow -ProcessId $process.Id -Title $title
+            # HWND/title creation precedes the borderless selector's final layout.
+            # Starting then offsets the first point by the temporary caption/frame.
+            $shown = [Diagnostics.Stopwatch]::StartNew()
+            $stableBounds = $null
+            while ($true) {
+                $windowBounds = [ZommiWindowsAcceptanceNative]::PhysicalBounds($selector) -join ','
+                $clientBounds = [ZommiWindowsAcceptanceNative]::PhysicalClientBounds($selector) -join ','
+                $ready = [ZommiWindowsAcceptanceNative]::Visible($selector) -and
+                    [ZommiWindowsAcceptanceNative]::Foreground($selector) -and
+                    [ZommiWindowsAcceptanceNative]::TopMost($selector) -and
+                    [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Cancel') -and
+                    $windowBounds -eq $clientBounds
+                if ($ready -and $stableBounds -eq $clientBounds) { break }
+                if ($shown.ElapsedMilliseconds -gt 5000) { throw 'The borderless capture selector did not finish showing.' }
+                $stableBounds = if ($ready) { $clientBounds } else { $null }
+                Start-Sleep -Milliseconds 50
+            }
             if ($case -eq 'multiple-regions') {
                 [ZommiAnnotationInput]::Control($true)
                 try {
