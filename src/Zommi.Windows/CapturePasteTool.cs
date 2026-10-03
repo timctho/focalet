@@ -148,9 +148,6 @@ public static class CapturePasteTool
                 var result = await CapturePasteSequence.PasteAsync(batch, target, textOnly.Checked, slowerImages.Checked);
                 if (result.StoppedBecause is { } reason)
                     Notify("Paste stopped", reason + " Alt+A pastes the whole batch again; Copy text is also available.");
-                else if (result.UnreadImages > 0)
-                    Notify("Context pasted", "Some images were not read by this input. Their context text was still pasted. Try Slower image paste if this app supports images.");
-                else Notify("Batch pasted", "Alt+A pastes this batch again. Shift+Alt+A captures a new batch.");
             }
             catch (Exception error) when (error is not OutOfMemoryException) { Notify("Paste unavailable", error.Message); }
             finally { busy = false; }

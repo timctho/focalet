@@ -169,6 +169,7 @@ jobs:
             artifacts/capture-native-clipboard.png
             artifacts/capture-browser-paste.png
             artifacts/capture-electron-*.png
+            artifacts/capture-annotations/toolbar-*.png
           if-no-files-found: error
           retention-days: 7
       - uses: dtolnay/rust-toolchain@283fb51ee3c8a49cd7c8ff30102f3fcf3cfbe0e1 # 1.93.0

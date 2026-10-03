@@ -47,6 +47,12 @@ public static class ZommiWindowsAcceptanceNative
 
     public static bool NamedButtonEnabled(IntPtr parent, string name) => FindEnabledButton(parent, name) != IntPtr.Zero;
 
+    public static int[] NamedButtonContainerBounds(IntPtr parent, string name)
+    {
+        var button = FindEnabledButton(parent, name);
+        return button == IntPtr.Zero ? new int[0] : PhysicalBounds(GetParent(button));
+    }
+
     public static bool ClickNamedButton(IntPtr parent, string name)
     {
         var found = FindEnabledButton(parent, name);
@@ -87,6 +93,9 @@ public static class ZommiWindowsAcceptanceNative
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetWindow(IntPtr window, uint command);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetParent(IntPtr window);
 
     [DllImport("user32.dll")]
     private static extern bool IsIconic(IntPtr window);

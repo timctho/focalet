@@ -20,10 +20,13 @@ is unsigned and Windows may require opening confirmation.
 2. In the source window, press **Shift+Alt+A**. Drag a rectangle, then use
    **Add region**, **S**, or **Ctrl-drag** for more regions, up to eight.
    Annotate any region and choose **Done** (or Enter).
+   While Ctrl is held, the drawing toolbar stays hidden so it cannot block another
+   region. Release Ctrl to show it beside the latest selected region.
 3. Switch to the destination app and click its input at the intended caret.
 4. Press **Alt+A** to paste **image A → context A → image B → context B**.
    Each image keeps its original pixels and dimensions. Images are never merged,
    and Zommi does not inject Enter into the destination.
+   Completed pastes finish without a notification, including text fallback.
 
 Capture only prepares a batch in memory. It does not choose a destination,
 change the clipboard or paste. There is no background input tracking or remembered

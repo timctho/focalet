@@ -42,10 +42,12 @@ internal static class CaptureHotkeyAcceptance
         var enters = 0;
         destination.KeyPreview = true;
         destination.KeyDown += (_, args) => { if (args.KeyCode == Keys.Enter) enters++; };
+        notices.Clear();
         SendHotkey(capture: false);
         await ForegroundRoutingAcceptance.WaitFor(() => context.Busy, "Paste did not start.");
         SendHotkey(capture: false); // A press while busy must not queue another batch.
-        await ForegroundRoutingAcceptance.WaitFor(() => notices.Contains("Batch pasted") && !context.Busy, "Alt+A did not paste the pending batch.", 20000);
+        await ForegroundRoutingAcceptance.WaitFor(() => Count(rich.Rtf!, @"\pict") == 2 && !context.Busy, "Alt+A did not paste the pending batch.", 20000);
+        if (notices.Count != 0) throw new InvalidOperationException("Successful paste displayed a notification.");
         // RichEdit represents each pasted image as a space in Text and strips
         // a clipboard part's final paragraph break. Verify complete context
         // sections and original draft around those native object boundaries.
@@ -74,14 +76,16 @@ internal static class CaptureHotkeyAcceptance
             throw new InvalidOperationException("Hotkey paste lost image/context order or queued a busy invocation.");
         notices.Clear();
         SendHotkey(capture: false);
-        await ForegroundRoutingAcceptance.WaitFor(() => notices.Contains("Batch pasted") && !context.Busy, "A deliberate Alt+A did not paste the same batch again.", 20000);
+        await ForegroundRoutingAcceptance.WaitFor(() => Count(rich.Rtf!, @"\pict") == 4 && !context.Busy, "A deliberate Alt+A did not paste the same batch again.", 20000);
+        if (notices.Count != 0) throw new InvalidOperationException("Repeated paste displayed a notification.");
         if (!context.HasBatch || Count(rich.Rtf!, @"\pict") != 4 || Count(rich.Text, "[A]") != 2 || Count(rich.Text, "[B]") != 2)
             throw new InvalidOperationException("Repeating paste did not insert exactly one more batch.");
         rtf = rich.Rtf!;
         source.Activate(); previous.Focus(); previous.Select(4, 0);
         notices.Clear();
         SendHotkey(capture: false);
-        await ForegroundRoutingAcceptance.WaitFor(() => notices.Contains("Batch pasted") && !context.Busy, "Repeating paste at a different input did not finish.", 20000);
+        await ForegroundRoutingAcceptance.WaitFor(() => Count(previous.Rtf!, @"\pict") == 2 && !context.Busy, "Repeating paste at a different input did not finish.", 20000);
+        if (notices.Count != 0) throw new InvalidOperationException("Paste at a different input displayed a notification.");
         if (rich.Rtf != rtf || Count(previous.Rtf!, @"\pict") != 2 ||
             !previous.Text.StartsWith("old ", StringComparison.Ordinal) || !previous.Text.EndsWith("destination stays unchanged", StringComparison.Ordinal))
             throw new InvalidOperationException("Repeated paste reused the previous destination or changed the new caret.");
@@ -106,7 +110,7 @@ internal static class CaptureHotkeyAcceptance
         if (!context.HasBatch || previous.Rtf != interrupted || Clipboard.GetText() != "interrupted hotkey fixture")
             throw new InvalidOperationException("Interrupted paste resumed automatically or discarded the batch.");
         if (enters != 0 || captured != 2) throw new InvalidOperationException("Repeated paste sent Enter or captured again.");
-        Console.WriteLine("PASS Shift+Alt+A captures without clipboard changes; deliberate Alt+A repeats at the current input; busy presses do not queue; cancellation and interruption retain the batch without automatic retries.");
+        Console.WriteLine("PASS Shift+Alt+A captures without clipboard changes; deliberate Alt+A repeats silently at the current input; busy presses do not queue; cancellation and interruption retain the batch without automatic retries.");
     }
 
     private static int Count(string value, string part) => value.Split(part, StringSplitOptions.None).Length - 1;

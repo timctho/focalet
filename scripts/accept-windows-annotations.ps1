@@ -28,6 +28,25 @@ New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 function Click-Tool([IntPtr]$Window, [string]$Name) {
     if (-not [ZommiWindowsAcceptanceNative]::ClickNamedButton($Window,$Name)) { throw "Drawing tool unavailable: $Name" }
 }
+function Assert-ToolbarNearCrop([IntPtr]$Window, [int]$Bottom) {
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        $bounds = [ZommiWindowsAcceptanceNative]::NamedButtonContainerBounds($Window,'Pen')
+        if ($bounds.Length -eq 4 -and [Math]::Abs($bounds[0] - 175) -le 64 -and
+            $bounds[1] -gt $Bottom -and $bounds[1] -le $Bottom + 64) { return }
+        Start-Sleep -Milliseconds 10
+    } while ($watch.ElapsedMilliseconds -lt 1000)
+    throw "Drawing toolbar did not follow the selected crop after Ctrl release: cropBottom=$Bottom toolbar=$($bounds -join ',')"
+}
+function Save-Toolbar([string]$Name) {
+    Start-Sleep -Milliseconds 150
+    $bitmap = [Drawing.Bitmap]::new(900,600)
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $graphics.CopyFromScreen(140,140,0,0,$bitmap.Size)
+        $bitmap.Save((Join-Path $OutputDirectory "toolbar-$Name.png"),[Drawing.Imaging.ImageFormat]::Png)
+    } finally { $graphics.Dispose(); $bitmap.Dispose() }
+}
 function Assert-ColoredPixels($Item, [string]$Color) {
     $bytes = [Convert]::FromBase64String($Item.dataUrl.Substring($Item.dataUrl.IndexOf(',')+1))
     $stream = [IO.MemoryStream]::new($bytes)
@@ -47,7 +66,8 @@ function Assert-ColoredPixels($Item, [string]$Color) {
     } finally { $image.Dispose(); $stream.Dispose() }
 }
 $results = @()
-foreach ($case in $(if ($HoverOnly) { @('hover-source') } else { @('tools','multiple-regions','hover-source','changed-source','cancel','image-selector') })) {
+foreach ($case in $(if ($HoverOnly) { @('hover-source') } else { @('tools','multiple-regions','ctrl-release','hover-source','changed-source','cancel','image-selector') })) {
+    $multiple = $case -in @('multiple-regions','ctrl-release')
     $fixture = [ZommiContextFixture]::new()
     try {
         $fixture.ExpandForAnnotations()
@@ -80,10 +100,17 @@ foreach ($case in $(if ($HoverOnly) { @('hover-source') } else { @('tools','mult
                 $stableBounds = if ($ready) { $clientBounds } else { $null }
                 Start-Sleep -Milliseconds 50
             }
-            if ($case -eq 'multiple-regions') {
+            if ($multiple) {
                 [ZommiAnnotationInput]::Control($true)
                 try {
                     [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,175,195,535,245)
+                    if ($case -eq 'ctrl-release') {
+                        [ZommiAnnotationInput]::Control($false)
+                        Assert-ToolbarNearCrop $selector 245
+                        [ZommiAnnotationInput]::Control($true)
+                    }
+                    # This next crop overlaps the previous crop's toolbar position.
+                    # Ctrl must make that area available for continuous selection.
                     [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,175,270,535,315)
                 } finally { [ZommiAnnotationInput]::Control($false) }
             } else {
@@ -93,6 +120,7 @@ foreach ($case in $(if ($HoverOnly) { @('hover-source') } else { @('tools','mult
             while (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Attach') -and $watch.ElapsedMilliseconds -lt 1000) { Start-Sleep -Milliseconds 10 }
             $script:annotationReadyMs = $watch.ElapsedMilliseconds
             if (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Attach')) { throw 'Selection did not stay open with its drawing toolbar.' }
+            if ($multiple) { Assert-ToolbarNearCrop $selector 315; Save-Toolbar $case }
             Click-Tool $selector 'Pen'
             Click-Tool $selector 'Coral'
             [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,190,210,310,234)
@@ -112,7 +140,7 @@ foreach ($case in $(if ($HoverOnly) { @('hover-source') } else { @('tools','mult
                 Click-Tool $selector 'Undo'
                 Click-Tool $selector 'Redo'
             }
-            if ($case -eq 'multiple-regions') {
+            if ($multiple) {
                 Click-Tool $selector 'Arrow'
                 Click-Tool $selector 'Blue'
                 [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,190,280,445,302)
@@ -120,15 +148,7 @@ foreach ($case in $(if ($HoverOnly) { @('hover-source') } else { @('tools','mult
                 Click-Tool $selector 'Redo'
             }
             if ($case -eq 'changed-source') { $fixture.ChangeVisibleText() }
-            if ($case -eq 'tools') {
-                Start-Sleep -Milliseconds 150
-                $bitmap = [Drawing.Bitmap]::new(900,600)
-                $graphics = [Drawing.Graphics]::FromImage($bitmap)
-                try {
-                    $graphics.CopyFromScreen(140,140,0,0,$bitmap.Size)
-                    $bitmap.Save((Join-Path $OutputDirectory 'toolbar-native.png'),[Drawing.Imaging.ImageFormat]::Png)
-                } finally { $graphics.Dispose(); $bitmap.Dispose() }
-            }
+            if ($case -eq 'tools') { Save-Toolbar 'native' }
             if ($case -eq 'hover-source') {
                 [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(210,215) | Out-Null
                 [ZommiWindowsAcceptanceNative]::ConfirmSelection($selector)
@@ -140,8 +160,8 @@ foreach ($case in $(if ($HoverOnly) { @('hover-source') } else { @('tools','mult
             if (-not $result.cancelled -or $result.dataUrl -or $result.selections) { throw 'Cancel leaked annotated attachments.' }
         } else {
             if ($result.cancelled) { throw "Annotation capture cancelled: $($result.errorMessage)" }
-            $items = if ($case -eq 'multiple-regions') { @($result.selections) } else { @($result) }
-            $expectedItems = if ($case -eq 'multiple-regions') { 2 } else { 1 }
+            $items = if ($multiple) { @($result.selections) } else { @($result) }
+            $expectedItems = if ($multiple) { 2 } else { 1 }
             if ($items.Count -ne $expectedItems) { throw 'Annotation region association changed.' }
             for ($i=0; $i -lt $items.Count; $i++) {
                 $item = $items[$i]
