@@ -47,7 +47,8 @@ internal static class CaptureHotkeyAcceptance
         var expected = "before " + string.Concat(batch.TextParts) + "after";
         if (rich.Text.Replace("\r", "").Replace("\ufffc", "") != expected.Replace("\r", "") || enters != 0 ||
             previous.Text != "old destination stays unchanged" || context.HasPendingBatch)
-            throw new InvalidOperationException("Explicit paste used the earlier input, lost context/caret, or sent Enter.");
+            throw new InvalidOperationException("Explicit paste used the earlier input, lost context/caret, or sent Enter: " +
+                System.Text.Json.JsonSerializer.Serialize(new { actual = rich.Text, expected, enters, previous = previous.Text, context.HasPendingBatch }));
         var rtf = rich.Rtf!;
         var a = rtf.IndexOf(@"\pict", StringComparison.Ordinal);
         var aText = rtf.IndexOf("[A]", StringComparison.Ordinal);
