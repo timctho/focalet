@@ -1,0 +1,39 @@
+<!doctype html><meta charset="utf-8"><title>Zommi Electron clipboard fixture</title>
+<style>body{font:16px sans-serif;margin:24px}textarea{width:95%;height:220px}img{margin:8px;border:1px solid #aaa}</style>
+<h1>Native Electron image and context</h1>
+<textarea id="input" aria-label="Electron fixture input">draft-before draft-after</textarea><div id="images"></div>
+<script>
+const input = document.getElementById('input');
+function text(value) {
+  input.setRangeText(value, input.selectionStart, input.selectionEnd, 'end');
+  fixture.result({ kind: 'text', value, draft: input.value });
+}
+async function image() {
+  try {
+    const result = await fixture.image();
+    const img = document.createElement('img'); img.src = result.dataUrl;
+    await img.decode(); document.getElementById('images').appendChild(img);
+    const canvas = document.createElement('canvas'); canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0);
+    fixture.result({ kind: 'image', width: img.naturalWidth, height: img.naturalHeight,
+      pixel: Array.from(ctx.getImageData(50, 30, 1, 1).data), draft: input.value });
+  } catch (error) { fixture.result({ kind: 'error', error: error.message }); }
+}
+(async () => {
+  const mode = await fixture.mode();
+  input.addEventListener('keydown', async event => {
+    if (event.key === 'Enter') fixture.enter();
+    if (mode !== 'terminal' || !event.ctrlKey || event.key.toLowerCase() !== 'v') return;
+    event.preventDefault();
+    const value = await fixture.text();
+    if (value) text(value); else await image();
+  });
+  input.addEventListener('paste', async event => {
+    event.preventDefault();
+    if (mode === 'terminal') return;
+    const file = Array.from(event.clipboardData.items).find(item => item.type.startsWith('image/'));
+    if (file) await image(); else text(event.clipboardData.getData('text/plain'));
+  });
+  input.focus(); input.setSelectionRange(13, 13); fixture.ready();
+})();
+</script>
