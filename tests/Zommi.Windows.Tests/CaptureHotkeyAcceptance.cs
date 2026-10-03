@@ -18,7 +18,7 @@ internal static class CaptureHotkeyAcceptance
                 new Rectangle(0, 0, item.Width, item.Height), item.Png, item.Snapshot)).ToArray());
         }, (title, _) => notices.Add(title), includeOwnProcess: true);
         using var source = new Form { Text = "Explicit capture source", Size = new Size(400, 200), TopMost = true };
-        using var previous = new TextBox { Text = "old destination stays unchanged", Dock = DockStyle.Fill };
+        using var previous = new RichTextBox { Text = "old destination stays unchanged", Dock = DockStyle.Fill };
         source.Controls.Add(previous);
         source.Show(); source.Activate(); previous.Focus();
         Clipboard.SetText("clipboard before capture");
@@ -27,13 +27,13 @@ internal static class CaptureHotkeyAcceptance
         await ForegroundRoutingAcceptance.WaitFor(() => notices.Contains("No capture ready"), "Alt+A without a batch did not report its state.");
         if (captured != 0) throw new InvalidOperationException("Alt+A captured instead of pasting.");
         SendHotkey(capture: true);
-        await ForegroundRoutingAcceptance.WaitFor(() => context.HasPendingBatch && !context.Busy, "Shift+Alt+A did not prepare the capture.");
+        await ForegroundRoutingAcceptance.WaitFor(() => context.HasBatch && !context.Busy, "Shift+Alt+A did not prepare the capture.");
         if (captured != 1 || sequence != CapturePasteTarget.GetClipboardSequenceNumber())
             throw new InvalidOperationException("Capture pasted or replaced the clipboard before choosing an input.");
         cancelCapture = true;
         SendHotkey(capture: true);
         await ForegroundRoutingAcceptance.WaitFor(() => captured == 2 && !context.Busy, "Second capture did not finish.");
-        if (!context.HasPendingBatch || sequence != CapturePasteTarget.GetClipboardSequenceNumber())
+        if (!context.HasBatch || sequence != CapturePasteTarget.GetClipboardSequenceNumber())
             throw new InvalidOperationException("Cancelling capture discarded the pending batch or clipboard.");
         using var destination = new Form { Text = "Explicit paste destination", Size = new Size(700, 600), TopMost = true };
         using var rich = new RichTextBox { Text = "before after", Dock = DockStyle.Fill };
@@ -43,6 +43,8 @@ internal static class CaptureHotkeyAcceptance
         destination.KeyPreview = true;
         destination.KeyDown += (_, args) => { if (args.KeyCode == Keys.Enter) enters++; };
         SendHotkey(capture: false);
+        await ForegroundRoutingAcceptance.WaitFor(() => context.Busy, "Paste did not start.");
+        SendHotkey(capture: false); // A press while busy must not queue another batch.
         await ForegroundRoutingAcceptance.WaitFor(() => notices.Contains("Batch pasted") && !context.Busy, "Alt+A did not paste the pending batch.", 20000);
         // RichEdit represents each pasted image as a space in Text and strips
         // a clipboard part's final paragraph break. Verify complete context
@@ -60,21 +62,54 @@ internal static class CaptureHotkeyAcceptance
         completeContext &= contextStart <= actual.Length - "after".Length &&
             string.IsNullOrWhiteSpace(actual[contextStart..Math.Max(contextStart, actual.Length - "after".Length)]);
         if (!completeContext || enters != 0 ||
-            previous.Text != "old destination stays unchanged" || context.HasPendingBatch)
+            previous.Text != "old destination stays unchanged" || !context.HasBatch)
             throw new InvalidOperationException("Explicit paste used the earlier input, lost context/caret, or sent Enter: " +
-                System.Text.Json.JsonSerializer.Serialize(new { actual, enters, previous = previous.Text, context.HasPendingBatch }));
+                System.Text.Json.JsonSerializer.Serialize(new { actual, enters, previous = previous.Text, context.HasBatch }));
         var rtf = rich.Rtf!;
         var a = rtf.IndexOf(@"\pict", StringComparison.Ordinal);
         var aText = rtf.IndexOf("[A]", StringComparison.Ordinal);
         var b = rtf.IndexOf(@"\pict", a + 5, StringComparison.Ordinal);
         var bText = rtf.IndexOf("[B]", StringComparison.Ordinal);
-        if (!(a >= 0 && a < aText && aText < b && b < bText)) throw new InvalidOperationException("Hotkey paste lost image/context order.");
+        if (!(a >= 0 && a < aText && aText < b && b < bText) || Count(rtf, @"\pict") != 2)
+            throw new InvalidOperationException("Hotkey paste lost image/context order or queued a busy invocation.");
         notices.Clear();
         SendHotkey(capture: false);
-        await ForegroundRoutingAcceptance.WaitFor(() => notices.Contains("No capture ready"), "A repeated Alt+A replayed a finished batch.");
-        if (rich.Rtf != rtf) throw new InvalidOperationException("A completed batch was replayed.");
-        Console.WriteLine("PASS Shift+Alt+A captures without clipboard changes; Alt+A pastes ordered images/context at the current input once; cancellation retains the batch.");
+        await ForegroundRoutingAcceptance.WaitFor(() => notices.Contains("Batch pasted") && !context.Busy, "A deliberate Alt+A did not paste the same batch again.", 20000);
+        if (!context.HasBatch || Count(rich.Rtf!, @"\pict") != 4 || Count(rich.Text, "[A]") != 2 || Count(rich.Text, "[B]") != 2)
+            throw new InvalidOperationException("Repeating paste did not insert exactly one more batch.");
+        rtf = rich.Rtf!;
+        source.Activate(); previous.Focus(); previous.Select(4, 0);
+        notices.Clear();
+        SendHotkey(capture: false);
+        await ForegroundRoutingAcceptance.WaitFor(() => notices.Contains("Batch pasted") && !context.Busy, "Repeating paste at a different input did not finish.", 20000);
+        if (rich.Rtf != rtf || Count(previous.Rtf!, @"\pict") != 2 ||
+            !previous.Text.StartsWith("old ", StringComparison.Ordinal) || !previous.Text.EndsWith("destination stays unchanged", StringComparison.Ordinal))
+            throw new InvalidOperationException("Repeated paste reused the previous destination or changed the new caret.");
+        foreach (var part in batch.TextParts)
+            if (!previous.Text.Replace("\r", "").Contains(part.Replace("\r", "").TrimEnd('\n'), StringComparison.Ordinal))
+                throw new InvalidOperationException("Repeated paste lost complete context at the new input.");
+
+        // An interrupted attempt retains the batch, but never resumes on its own.
+        notices.Clear();
+        var picturesBeforeInterruption = Count(previous.Rtf!, @"\pict");
+        using var replace = new System.Windows.Forms.Timer { Interval = 25 };
+        replace.Tick += (_, _) =>
+        {
+            if (Count(previous.Rtf!, @"\pict") == picturesBeforeInterruption) return;
+            replace.Stop(); Clipboard.SetText("interrupted hotkey fixture");
+        };
+        replace.Start();
+        SendHotkey(capture: false);
+        await ForegroundRoutingAcceptance.WaitFor(() => notices.Contains("Paste stopped") && !context.Busy, "Interrupted hotkey paste did not stop.");
+        var interrupted = previous.Rtf;
+        await Task.Delay(700);
+        if (!context.HasBatch || previous.Rtf != interrupted || Clipboard.GetText() != "interrupted hotkey fixture")
+            throw new InvalidOperationException("Interrupted paste resumed automatically or discarded the batch.");
+        if (enters != 0 || captured != 2) throw new InvalidOperationException("Repeated paste sent Enter or captured again.");
+        Console.WriteLine("PASS Shift+Alt+A captures without clipboard changes; deliberate Alt+A repeats at the current input; busy presses do not queue; cancellation and interruption retain the batch without automatic retries.");
     }
+
+    private static int Count(string value, string part) => value.Split(part, StringSplitOptions.None).Length - 1;
 
     private static void SendHotkey(bool capture)
     {

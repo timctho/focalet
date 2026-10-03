@@ -12,11 +12,15 @@ internal static class ElectronClipboardAcceptance
         var electron = Path.Combine(fixture, "node_modules/electron/dist/electron.exe");
         if (!File.Exists(electron)) throw new InvalidOperationException("Install the locked tests/clipboard-electron dependencies first.");
         foreach (var mode in new[] { "terminal", "native-chat" })
+        foreach (var slowerImages in new[] { false, true })
         {
+            var pace = slowerImages ? "slower" : "fast";
             var temporary = Path.Combine(Path.GetTempPath(), "zommi-electron-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(temporary);
             var start = new ProcessStartInfo(electron) { UseShellExecute = false };
-            foreach (var argument in new[] { Path.Combine(fixture, "main.cjs"), temporary, mode }) start.ArgumentList.Add(argument);
+            // Keep the delayed double-read regression in the compatibility profile,
+            // and exercise the default profile with ordinary asynchronous IPC reads.
+            foreach (var argument in new[] { Path.Combine(fixture, "main.cjs"), temporary, mode, slowerImages ? "1500" : "100" }) start.ArgumentList.Add(argument);
             start.Environment.Remove("ELECTRON_RUN_AS_NODE");
             using var process = Process.Start(start) ?? throw new InvalidOperationException("Electron fixture did not start.");
             try
@@ -32,14 +36,16 @@ internal static class ElectronClipboardAcceptance
                 input.Focus();
                 await ForegroundRoutingAcceptance.WaitFor(() => input.Properties.HasKeyboardFocus.ValueOrDefault, "Electron input did not acquire focus.");
                 target = CapturePasteTarget.RememberWindow() ?? throw new InvalidOperationException("Electron input was not current.");
-                var result = await CapturePasteSequence.PasteAsync(batch, target, false);
+                var elapsed = Stopwatch.StartNew();
+                var result = await CapturePasteSequence.PasteAsync(batch, target, false, slowerImages);
+                elapsed.Stop();
                 if (result.StoppedBecause is not null) throw new InvalidOperationException("Electron sequence stopped: " + result);
                 await Task.Delay(1800);
                 var json = File.ReadAllText(Path.Combine(temporary, "result.json"));
                 using var document = JsonDocument.Parse(json);
                 var events = document.RootElement.GetProperty("events").EnumerateArray().ToArray();
-                Console.WriteLine($"Electron {mode}: " + JsonSerializer.Serialize(new {
-                    events = events.Select(e => e.GetProperty("kind").GetString()), diagnostics = document.RootElement.GetProperty("diagnostics") }));
+                Console.WriteLine($"Electron {mode} {pace}: " + JsonSerializer.Serialize(new {
+                    elapsedMs = elapsed.ElapsedMilliseconds, events = events.Select(e => e.GetProperty("kind").GetString()), diagnostics = document.RootElement.GetProperty("diagnostics") }));
                 if (!events.Select(e => e.GetProperty("kind").GetString()).SequenceEqual(new[] { "image", "text", "image", "text" }))
                     throw new InvalidOperationException($"Electron {mode} did not display image A, context A, image B, context B in order.");
                 for (var index = 0; index < batch.Items.Count; index++)
@@ -54,6 +60,9 @@ internal static class ElectronClipboardAcceptance
                         throw new InvalidOperationException("Electron native clipboard changed image geometry/pixels.");
                     if (events[index * 2 + 1].GetProperty("value").GetString() != batch.TextParts[index])
                         throw new InvalidOperationException("Electron native clipboard lost region context.");
+                    var contextDelay = events[index * 2 + 1].GetProperty("receivedAt").GetInt64() - picture.GetProperty("receivedAt").GetInt64();
+                    if (!slowerImages && contextDelay >= 2000)
+                        throw new InvalidOperationException($"Fast image paste retained an unnecessary long delay: {contextDelay} ms.");
                 }
                 if (document.RootElement.GetProperty("enters").GetInt32() != 0 ||
                     events[^1].GetProperty("draft").GetString() != ("draft-before " + string.Concat(batch.TextParts) + "draft-after").Replace("\r\n", "\n"))
@@ -61,8 +70,8 @@ internal static class ElectronClipboardAcceptance
                 await Task.Delay(200);
                 Directory.CreateDirectory("artifacts");
                 var bounds = automation.FromHandle(window).BoundingRectangle;
-                File.WriteAllBytes($"artifacts/capture-electron-{mode}.png", ScreenCapture.CapturePng(bounds));
-                Console.WriteLine($"PASS Electron {mode} native readImage retains both images through asynchronous preview/save and ordered context.");
+                File.WriteAllBytes($"artifacts/capture-electron-{mode}-{pace}.png", ScreenCapture.CapturePng(bounds));
+                Console.WriteLine($"PASS Electron {mode} {pace} native readImage retains both images through asynchronous preview/save and ordered context.");
             }
             finally
             {

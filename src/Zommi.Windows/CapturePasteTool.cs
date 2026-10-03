@@ -50,12 +50,12 @@ public static class CapturePasteTool
         private readonly Action<string, string>? report;
         private readonly bool includeOwnProcess;
         private CaptureClipboardBatch? lastBatch;
-        private CaptureClipboardBatch? pendingBatch;
         private bool busy;
         private readonly ToolStripMenuItem textOnly;
+        private readonly ToolStripMenuItem slowerImages;
         private readonly ToolStripMenuItem batchStatus;
         internal bool Busy => busy;
-        internal bool HasPendingBatch => pendingBatch is not null;
+        internal bool HasBatch => lastBatch is not null;
 
         public CaptureContext(Func<CaptureNativeHost.SelectedBatch>? select = null, Action<string, string>? report = null, bool includeOwnProcess = false)
         {
@@ -66,13 +66,15 @@ public static class CapturePasteTool
             menu = new ContextMenuStrip();
             batchStatus = new ToolStripMenuItem("No capture ready") { Enabled = false };
             menu.Items.Add(batchStatus);
-            menu.Opening += (_, _) => batchStatus.Text = pendingBatch is { } batch
+            menu.Opening += (_, _) => batchStatus.Text = lastBatch is { } batch
                 ? $"{batch.Items.Count} regions ready · Alt+A to paste" : "No capture ready";
             menu.Items.Add("Capture · Shift+Alt+A", null, (_, _) => Capture());
             menu.Items.Add("Copy last batch", null, (_, _) => CopyLast());
             menu.Items.Add("Copy text", null, (_, _) => CopyLast(forceText: true));
             textOnly = new ToolStripMenuItem("Text only") { CheckOnClick = true };
             menu.Items.Add(textOnly);
+            slowerImages = new ToolStripMenuItem("Slower image paste") { CheckOnClick = true };
+            menu.Items.Add(slowerImages);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Quit", null, (_, _) => { if (!busy) ExitThread(); });
             tray = new NotifyIcon
@@ -110,7 +112,7 @@ public static class CapturePasteTool
                     return new CaptureClipboardItem(region.Png, image.Width, image.Height, region.Snapshot, region.Alignment?.Reason);
                 }).ToArray();
                 // Capturing never chooses a destination or replaces the clipboard.
-                lastBatch = pendingBatch = CaptureClipboardBatch.Create(items);
+                lastBatch = CaptureClipboardBatch.Create(items);
                 Notify("Capture ready", $"{items.Length} regions ready. Click the input you want, then press Alt+A to paste.");
             }
             catch (Exception error) when (error is not OutOfMemoryException) { Notify("Capture unavailable", error.Message); }
@@ -120,9 +122,9 @@ public static class CapturePasteTool
         private async void Paste()
         {
             if (busy) return;
-            if (pendingBatch is not { } batch)
+            if (lastBatch is not { } batch)
             {
-                Notify("No capture ready", "Press Shift+Alt+A to capture first. Copy last batch and Copy text are available for manual recovery.");
+                Notify("No capture ready", "Press Shift+Alt+A to capture first.");
                 return;
             }
             // Snapshot only this invocation's focus. Never restore or search older windows.
@@ -141,14 +143,14 @@ public static class CapturePasteTool
                 { Notify("Paste cancelled", "The selected input is protected or read-only."); return; }
                 target = observation.Target;
                 if (!await target.IsInputCurrentAsync()) return;
-                // A second press must not replay a completed or uncertain partial batch.
-                pendingBatch = null;
-                var result = await CapturePasteSequence.PasteAsync(batch, target, textOnly.Checked);
+                // Retain the capture for another deliberate Alt+A at its current
+                // destination. Busy invocations are ignored, never queued or retried.
+                var result = await CapturePasteSequence.PasteAsync(batch, target, textOnly.Checked, slowerImages.Checked);
                 if (result.StoppedBecause is { } reason)
-                    Notify("Paste stopped", reason + " Use Copy text or Copy last batch for manual recovery.");
+                    Notify("Paste stopped", reason + " Alt+A pastes the whole batch again; Copy text is also available.");
                 else if (result.UnreadImages > 0)
-                    Notify("Context pasted", "Some images were not read by this input. Their context text was still pasted.");
-                else Notify("Batch pasted", "Image and context steps finished. Shift+Alt+A to capture again.");
+                    Notify("Context pasted", "Some images were not read by this input. Their context text was still pasted. Try Slower image paste if this app supports images.");
+                else Notify("Batch pasted", "Alt+A pastes this batch again. Shift+Alt+A captures a new batch.");
             }
             catch (Exception error) when (error is not OutOfMemoryException) { Notify("Paste unavailable", error.Message); }
             finally { busy = false; }
@@ -169,7 +171,7 @@ public static class CapturePasteTool
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { hotkey.Dispose(); tray.Visible = false; tray.Dispose(); menu.Dispose(); lastBatch = pendingBatch = null; }
+            if (disposing) { hotkey.Dispose(); tray.Visible = false; tray.Dispose(); menu.Dispose(); lastBatch = null; }
             base.Dispose(disposing);
         }
     }

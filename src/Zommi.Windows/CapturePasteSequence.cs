@@ -10,7 +10,7 @@ internal sealed record CapturePasteResult(int StepsSent, int UnreadImages, strin
 /// <summary>Separate image and text pastes so a receiver never has to choose between them.</summary>
 internal static class CapturePasteSequence
 {
-    public static async Task<CapturePasteResult> PasteAsync(CaptureClipboardBatch batch, CapturePasteTarget target, bool textOnly)
+    public static async Task<CapturePasteResult> PasteAsync(CaptureClipboardBatch batch, CapturePasteTarget target, bool textOnly, bool slowerImages = false)
     {
         using var clipboard = new PasteClipboard();
         var sent = 0;
@@ -33,16 +33,19 @@ internal static class CapturePasteSequence
 
                 // A DOM preview/thumbnail can read first; Electron may then read
                 // the image again through main-process IPC to save/attach it.
-                // Keep the full image window even if the preview already read it.
-                // A read is still not an attachment/upload completion receipt.
+                // Use a short settling window by default; slower receivers can
+                // opt into the longer preview/save compatibility window.
+                // Neither a read nor a timeout is an attachment completion receipt.
+                var minimumWait = image ? (slowerImages ? 3000 : 500) : 150;
+                var settleAfterRead = image ? (slowerImages ? 600 : 200) : 75;
                 var wait = Stopwatch.StartNew();
                 while (wait.ElapsedMilliseconds < (image ? 5000 : 3000))
                 {
                     await Task.Delay(50);
                     if (!clipboard.OwnsClipboard || !target.IsCurrent() || !CapturePasteTarget.ModifiersReleased)
                         return new(sent, unreadImages, "Focus, keys or clipboard changed during paste.");
-                    if (clipboard.Read && wait.ElapsedMilliseconds >= (image ? 3000 : 300) &&
-                        clipboard.MillisecondsSinceRead >= (image ? 600 : 150)) break;
+                    if (clipboard.Read && wait.ElapsedMilliseconds >= minimumWait &&
+                        clipboard.MillisecondsSinceRead >= settleAfterRead) break;
                 }
                 if (clipboard.Failure is { } failure) return new(sent, unreadImages, failure);
                 if (!clipboard.Read)

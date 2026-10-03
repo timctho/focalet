@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const directory = process.argv[2];
 const mode = process.argv[3];
+const imageReadDelay = Number(process.argv[4] ?? 1500);
 app.setPath('userData', path.join(directory, 'profile'));
 app.commandLine.appendSwitch('disable-background-networking');
 app.commandLine.appendSwitch('force-renderer-accessibility');
@@ -19,14 +20,15 @@ ipcMain.handle('image', async () => {
   const preview = clipboard.readImage();
   diagnostics.push({ phase: 'preview', empty: preview.isEmpty(), formats: clipboard.availableFormats() });
   save();
-  await new Promise(resolve => setTimeout(resolve, 1500));
+  await new Promise(resolve => setTimeout(resolve, imageReadDelay));
   const image = clipboard.readImage();
   diagnostics.push({ phase: 'save', empty: image.isEmpty(), formats: clipboard.availableFormats() });
   save();
   if (image.isEmpty()) throw new Error('Electron readImage lost the image between preview and save');
+  if (!preview.toPNG().equals(image.toPNG())) throw new Error('Electron preview and save read different images');
   return { dataUrl: image.toDataURL(), size: image.getSize() };
 });
-ipcMain.on('result', (_event, value) => { events.push(value); save(); });
+ipcMain.on('result', (_event, value) => { events.push({ ...value, receivedAt: Date.now() }); save(); });
 ipcMain.on('enter', () => { enters++; save(); });
 ipcMain.on('ready', () => {
   fs.writeFileSync(path.join(directory, 'ready'), JSON.stringify({ window: window.getNativeWindowHandle().readBigUInt64LE().toString(), mode }));
