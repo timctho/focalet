@@ -109,6 +109,7 @@ internal static class ClipboardAcceptance
                 source.Close();
                 await ChromiumClipboardAcceptance.RunAsync(batch);
                 await ElectronClipboardAcceptance.RunAsync(batch);
+                await CaptureHotkeyAcceptance.RunAsync(batch);
                 if (!richTarget.Restore()) throw new InvalidOperationException("Rich editor was not restored after browser acceptance.");
                 using var interrupt = new System.Windows.Forms.Timer { Interval = 150 };
                 interrupt.Tick += (_, _) => { interrupt.Stop(); text.Focus(); };

@@ -36,9 +36,10 @@ internal static class ElectronClipboardAcceptance
                 if (result.StoppedBecause is not null) throw new InvalidOperationException("Electron sequence stopped: " + result);
                 await Task.Delay(1800);
                 var json = File.ReadAllText(Path.Combine(temporary, "result.json"));
-                Console.WriteLine($"Electron {mode} result: {json}");
                 using var document = JsonDocument.Parse(json);
                 var events = document.RootElement.GetProperty("events").EnumerateArray().ToArray();
+                Console.WriteLine($"Electron {mode}: " + JsonSerializer.Serialize(new {
+                    events = events.Select(e => e.GetProperty("kind").GetString()), diagnostics = document.RootElement.GetProperty("diagnostics") }));
                 if (!events.Select(e => e.GetProperty("kind").GetString()).SequenceEqual(new[] { "image", "text", "image", "text" }))
                     throw new InvalidOperationException($"Electron {mode} did not display image A, context A, image B, context B in order.");
                 for (var index = 0; index < batch.Items.Count; index++)
@@ -55,7 +56,7 @@ internal static class ElectronClipboardAcceptance
                         throw new InvalidOperationException("Electron native clipboard lost region context.");
                 }
                 if (document.RootElement.GetProperty("enters").GetInt32() != 0 ||
-                    events[^1].GetProperty("draft").GetString() != "draft-before " + string.Concat(batch.TextParts) + "draft-after")
+                    events[^1].GetProperty("draft").GetString() != ("draft-before " + string.Concat(batch.TextParts) + "draft-after").Replace("\r\n", "\n"))
                     throw new InvalidOperationException("Electron paste changed the draft/caret or sent Enter.");
                 await Task.Delay(200);
                 Directory.CreateDirectory("artifacts");
@@ -65,9 +66,18 @@ internal static class ElectronClipboardAcceptance
             }
             finally
             {
-                if (!process.HasExited) process.Kill(entireProcessTree: true);
+                if (!process.HasExited)
+                {
+                    process.CloseMainWindow();
+                    try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)); }
+                    catch (TimeoutException) { process.Kill(entireProcessTree: true); }
+                }
                 await process.WaitForExitAsync();
-                Directory.Delete(temporary, recursive: true);
+                for (var attempt = 0; attempt < 20; attempt++)
+                {
+                    try { Directory.Delete(temporary, recursive: true); break; }
+                    catch (IOException) when (attempt < 19) { await Task.Delay(250); }
+                }
             }
         }
     }

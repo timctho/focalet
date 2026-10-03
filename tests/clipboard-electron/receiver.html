@@ -5,7 +5,7 @@
 <script>
 const input = document.getElementById('input');
 function text(value) {
-  input.setRangeText(value, input.selectionStart, input.selectionEnd, 'end');
+  input.setRangeText(value.replaceAll('\r\n', '\n'), input.selectionStart, input.selectionEnd, 'end');
   fixture.result({ kind: 'text', value, draft: input.value });
 }
 async function image() {

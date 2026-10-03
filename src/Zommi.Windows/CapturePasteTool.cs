@@ -48,6 +48,7 @@ public static class CapturePasteTool
         private readonly ContextMenuStrip menu;
         private readonly Func<CaptureNativeHost.SelectedBatch> select;
         private readonly Action<string, string>? report;
+        private readonly bool includeOwnProcess;
         private CaptureClipboardBatch? lastBatch;
         private CaptureClipboardBatch? pendingBatch;
         private bool busy;
@@ -56,10 +57,11 @@ public static class CapturePasteTool
         internal bool Busy => busy;
         internal bool HasPendingBatch => pendingBatch is not null;
 
-        public CaptureContext(Func<CaptureNativeHost.SelectedBatch>? select = null, Action<string, string>? report = null)
+        public CaptureContext(Func<CaptureNativeHost.SelectedBatch>? select = null, Action<string, string>? report = null, bool includeOwnProcess = false)
         {
             this.select = select ?? (() => CaptureNativeHost.SelectBatch(0, CaptureTheme.Default, "Done"));
             this.report = report;
+            this.includeOwnProcess = includeOwnProcess;
             hotkey = new HotkeyWindow(Capture, Paste);
             menu = new ContextMenuStrip();
             batchStatus = new ToolStripMenuItem("No capture ready") { Enabled = false };
@@ -128,7 +130,7 @@ public static class CapturePasteTool
             busy = true;
             try
             {
-                if (target is null || target.ProcessId == Environment.ProcessId || !await WaitForKeys() || !target.IsCurrent())
+                if (target is null || (!includeOwnProcess && target.ProcessId == Environment.ProcessId) || !await WaitForKeys() || !target.IsCurrent())
                 { Notify("Paste cancelled", "Focus the destination input and press Alt+A again."); return; }
                 using var automation = new FlaUI.UIA3.UIA3Automation
                 {
