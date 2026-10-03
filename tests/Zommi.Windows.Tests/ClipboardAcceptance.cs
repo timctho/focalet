@@ -21,7 +21,7 @@ internal static class ClipboardAcceptance
         thread.Start(); thread.Join();
         if (focusOnly) { previousTarget?.Restore(); Cursor.Position = previousPointer; }
         if (failure is not null) { Console.Error.WriteLine(failure); return 1; }
-        if (!focusOnly) Console.WriteLine("PASS Sequential paste preserves separate images, context, automatic input bookmark and draft; interruption stops and no Enter is sent.");
+        if (!focusOnly) Console.WriteLine("PASS Sequential paste preserves separate images, context, explicit input and draft; interruption stops and no Enter is sent.");
         return 0;
     }
 
@@ -51,25 +51,8 @@ internal static class ClipboardAcceptance
                     await ChromiumClipboardAcceptance.RunAsync(batch, focusOnly: true);
                     return;
                 }
-                using var tracker = new CaptureInputTracker(includeOwnProcess: true);
                 text.Focus(); text.Select("draft-before ".Length, 0);
-                var deadline = System.Diagnostics.Stopwatch.StartNew();
-                while (tracker.Latest?.Focus != text.Handle)
-                {
-                    if (deadline.ElapsedMilliseconds > 5000) throw new InvalidOperationException("Editable input was not remembered automatically.");
-                    await Task.Delay(50);
-                }
-                using var source = new Form { Text = "Separate capture source", Size = new Size(300, 200), TopMost = true };
-                source.Controls.Add(new Button { Text = "Read-only source button", Dock = DockStyle.Fill });
-                source.Show(); source.Activate(); await Task.Delay(400);
-                var target = await tracker.PauseAsync() ?? throw new InvalidOperationException("Previous input was forgotten after switching windows.");
-                if (target.Focus != text.Handle) throw new InvalidOperationException("A source button replaced the input bookmark.");
-                using (var overlay = new Form { Text = "Synthetic capture overlay", TopMost = true })
-                {
-                    overlay.Show(); overlay.Activate(); await Task.Delay(100);
-                    overlay.Close();
-                }
-                if (!await target.RestoreInputAsync()) throw new InvalidOperationException("Original editor/caret was not restored.");
+                var target = CapturePasteTarget.RememberWindow() ?? throw new InvalidOperationException("Text fixture was not focused.");
                 var result = await CapturePasteSequence.PasteAsync(batch, target, false);
                 ownedSequence = CapturePasteTarget.GetClipboardSequenceNumber();
                 if (result.StoppedBecause is not null || result.StepsSent != 4)
@@ -106,7 +89,6 @@ internal static class ClipboardAcceptance
                 Directory.CreateDirectory("artifacts");
                 File.WriteAllBytes("artifacts/capture-paste-acceptance.png", ScreenCapture.CapturePng(form.Bounds));
                 form.TopMost = false;
-                source.Close();
                 await ChromiumClipboardAcceptance.RunAsync(batch);
                 await ElectronClipboardAcceptance.RunAsync(batch);
                 await CaptureHotkeyAcceptance.RunAsync(batch);

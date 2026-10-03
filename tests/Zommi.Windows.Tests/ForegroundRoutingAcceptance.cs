@@ -8,36 +8,24 @@ internal static class ForegroundRoutingAcceptance
 {
     // Called with an earlier, real Chromium input focused. That browser must
     // not remain the destination after visiting a custom chat or console.
-    public static async Task RunAsync(CaptureClipboardBatch batch, Func<Task> focusBrowser, Func<Task> focusBrowserSource)
+    public static async Task RunAsync(CaptureClipboardBatch batch, Func<Task> focusBrowserSource)
     {
-        await focusBrowser();
-        using var tracker = new CaptureInputTracker(includeOwnProcess: true);
-        var browser = await tracker.PauseAsync() ?? throw new InvalidOperationException("Could not bookmark the earlier browser.");
-        tracker.Resume();
+        await focusBrowserSource();
         using var chat = new Form { Text = "Synthetic custom chat", Size = new Size(650, 450), TopMost = true };
         using var input = new OpaqueInput { Dock = DockStyle.Fill };
         chat.Controls.Add(input);
         chat.Show(); chat.Activate(); input.Focus();
         await WaitFor(() => input.Focused, "Custom chat did not acquire native focus.");
-        var direct = await tracker.PauseAsync();
-        if (direct?.Window != chat.Handle || direct.Focus != input.Handle)
-            throw new InvalidOperationException("Direct capture in a custom input selected the earlier browser.");
-        tracker.Resume();
-        await Task.Delay(100);
-        await focusBrowserSource();
-        var target = await tracker.PauseAsync();
+        var target = CapturePasteTarget.RememberWindow();
         if (target?.Window != chat.Handle || target.Focus != input.Handle)
-            throw new InvalidOperationException("A non-Edit custom chat was forgotten after switching to the source.");
-        if (!await target.RestoreInputAsync()) throw new InvalidOperationException("Custom chat focus could not be restored.");
+            throw new InvalidOperationException("Explicit custom input paste selected the earlier browser.");
         var result = await CapturePasteSequence.PasteAsync(batch, target, textOnly: true);
         if (result.StoppedBecause is not null || input.Draft != "chat-before " + string.Concat(batch.TextParts) + "chat-after" || input.EnterCount != 0)
             throw new InvalidOperationException("Custom chat paste changed its draft/caret or sent Enter: " + result);
         chat.Close();
-        await focusBrowser();
-        tracker.Resume();
-        await Task.Delay(200);
-        await ConsoleRoutingAcceptance.RunAsync(tracker, focusBrowserSource);
-        Console.WriteLine("PASS Foreground routing returns to custom non-Edit chat and the real Windows console, never the earlier browser.");
+        await focusBrowserSource();
+        await ConsoleRoutingAcceptance.RunAsync();
+        Console.WriteLine("PASS Explicit paste uses the focused custom input or Windows console, never an earlier browser.");
     }
 
     internal static async Task WaitFor(Func<bool> predicate, string failure, int milliseconds = 5000)

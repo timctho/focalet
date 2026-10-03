@@ -8,12 +8,13 @@ using FlaUI.UIA3;
 
 namespace Zommi.Windows;
 
-/// <summary>Remembers a destination before the selector takes keyboard focus.</summary>
+internal enum CaptureInputKind { Unknown, Input, Protected }
+internal sealed record CaptureInputObservation(CapturePasteTarget Target, CaptureInputKind Kind);
+
+/// <summary>Identity of the input focused when the user invokes paste.</summary>
 internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessId, long ProcessStarted)
 {
     private AutomationElement? InputElement { get; init; }
-    private ITextRange? Selection { get; init; }
-    internal string? RestoreFailure { get; private set; }
     public string Description => NativeCaptureWindow.Title(Window);
     public static CapturePasteTarget? Remember()
         => RememberWindow() is { Focus: not 0 } target ? target : null;
@@ -31,7 +32,7 @@ internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessI
         return started is null ? null : new(window, info.Focus, process, started.Value);
     }
 
-    // Called on the tracker's MTA worker. Inspect identity/editability only:
+    // Called only on paste invocation. Inspect identity/editability only:
     // never read input values, document text, passwords or screen pixels.
     internal static CaptureInputObservation ObserveInput(UIA3Automation automation, CapturePasteTarget target)
     {
@@ -55,57 +56,16 @@ internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessI
             var attribute = text.DocumentRange.GetAttributeValue(automation.TextAttributeLibrary.IsReadOnly);
             if (attribute is bool flag) readOnly = flag;
         }
-        var editable = terminal || (readOnly != true && (type == ControlType.Edit || readOnly == false));
-        if (!editable)
-        {
-            var kind = (readOnly == true && type is ControlType.Document or ControlType.Text) || type is ControlType.Button or ControlType.Hyperlink or ControlType.List or
-                ControlType.ListItem or ControlType.Menu or ControlType.MenuItem or ControlType.Tree or ControlType.TreeItem
-                ? CaptureInputKind.NonInput : CaptureInputKind.Unknown;
-            // A read-only editor is never an automatic destination. Ordinary
-            // source documents/buttons may return to the immediately prior app.
-            if (type == ControlType.Edit && readOnly == true) kind = CaptureInputKind.Protected;
-            if (kind == CaptureInputKind.Unknown && HasReadOnlyDocumentParent(automation, element)) kind = CaptureInputKind.NonInput;
-            return new(target, kind);
-        }
-        ITextRange? selection = null;
-        // Terminal TextPattern selections refer to rendered output, not its
-        // command-line caret; selecting one can put the console in selection mode.
-        try { if (!terminal) selection = text?.GetSelection().FirstOrDefault()?.Clone(); }
-        catch (Exception error) when (error is not OutOfMemoryException) { /* Some terminal editors expose no text range. */ }
+        if (!terminal && type == ControlType.Edit && readOnly == true)
+            return new(target, CaptureInputKind.Protected);
         if (!target.IsCurrent() || !element.Properties.HasKeyboardFocus.ValueOrDefault) return Unknown();
-        return new(target with { InputElement = element, Selection = selection }, CaptureInputKind.Input);
+        // The user already chose the caret. Keep identity for interruption checks,
+        // without selecting UIA output ranges or moving focus.
+        return new(target with { InputElement = element }, CaptureInputKind.Input);
     }
 
     internal static bool IsTerminalControl(string windowClass, string? inputClass) =>
         windowClass == "ConsoleWindowClass" || inputClass == "TermControl";
-
-    private static bool HasReadOnlyDocumentParent(UIA3Automation automation, AutomationElement element)
-    {
-        // Browser pages can focus an ARIA Group/container with no Value or Edit
-        // pattern. Its nearest Document distinguishes a source page from an
-        // opaque native input; inspect only roles and read-only state, no text.
-        var walker = automation.TreeWalkerFactory.GetControlViewWalker();
-        for (var depth = 0; depth < 16; depth++)
-        {
-            var parent = walker.GetParent(element);
-            if (parent is null) return false;
-            element = parent;
-            if (element.Properties.ControlType.ValueOrDefault == ControlType.Document)
-            {
-                var value = element.Patterns.Value.PatternOrDefault;
-                if (value is not null) return value.IsReadOnly.ValueOrDefault;
-                return element.Patterns.Text.PatternOrDefault?.DocumentRange.GetAttributeValue(automation.TextAttributeLibrary.IsReadOnly) is true;
-            }
-            // ARIA dialogs can expose virtual Window nodes inside a document.
-            // Only a native window ends this document search.
-            if (element.Properties.ControlType.ValueOrDefault == ControlType.Window &&
-                element.Properties.NativeWindowHandle.ValueOrDefault != 0) return false;
-        }
-        return false;
-    }
-
-    internal static bool IsShellSurface(nint window) => WindowClass(window) is
-        "Shell_TrayWnd" or "Shell_SecondaryTrayWnd" or "Progman" or "WorkerW" or "MultitaskingViewFrame" or "ForegroundStaging";
 
     private static string WindowClass(nint window)
     {
@@ -124,31 +84,6 @@ internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessI
         {
             try { return InputElement.Properties.HasKeyboardFocus.ValueOrDefault && IsCurrent(); }
             catch (Exception error) when (error is not OutOfMemoryException) { return false; }
-        });
-    }
-
-    public async Task<bool> RestoreInputAsync()
-    {
-        RestoreFailure = null;
-        if (!Restore()) { RestoreFailure = "The native window/control could not be restored."; return false; }
-        if (InputElement is null) return true;
-        return await Task.Run(() =>
-        {
-            try
-            {
-                if (!InputElement.Properties.HasKeyboardFocus.ValueOrDefault) InputElement.Focus();
-                // Chromium applies the accessibility focus action asynchronously.
-                // Keep the UI pumping while waiting for the actual editor identity.
-                var wait = Stopwatch.StartNew();
-                while (IsCurrent() && !InputElement.Properties.HasKeyboardFocus.ValueOrDefault && wait.ElapsedMilliseconds < 1500)
-                    Thread.Sleep(25);
-                if (!IsCurrent() || !InputElement.Properties.HasKeyboardFocus.ValueOrDefault)
-                { RestoreFailure = "The accessible editor did not acquire keyboard focus."; return false; }
-                Selection?.Select();
-                return IsCurrent() && InputElement.Properties.HasKeyboardFocus.ValueOrDefault;
-            }
-            catch (Exception error) when (error is not OutOfMemoryException)
-            { RestoreFailure = error.GetType().Name + ": " + error.Message; return false; }
         });
     }
 

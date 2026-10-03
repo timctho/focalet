@@ -30,7 +30,7 @@ internal static class ConsoleRoutingAcceptance
         return 0;
     }
 
-    public static async Task RunAsync(CaptureInputTracker tracker, Func<Task> focusBrowserSource)
+    public static async Task RunAsync()
     {
         var temporary = Path.Combine(Path.GetTempPath(), "zommi-console-input-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(temporary);
@@ -68,14 +68,8 @@ internal static class ConsoleRoutingAcceptance
             var consoleWindow = new CapturePasteTarget(window, 0, processId, owner.StartTime.ToUniversalTime().Ticks);
             if (!consoleWindow.Restore()) throw new InvalidOperationException("Could not activate the isolated console window.");
             await Task.Delay(200);
-            var direct = await tracker.PauseAsync();
-            if (direct?.Window != window) throw new InvalidOperationException("Capture invoked in a console chose the earlier browser.");
-            tracker.Resume();
-            await Task.Delay(100);
-            await focusBrowserSource();
-            var target = await tracker.PauseAsync();
-            if (target?.Window != window) throw new InvalidOperationException("Switching to the source lost the console destination.");
-            if (!await target.RestoreInputAsync()) throw new InvalidOperationException("Console input restore failed: " + target.RestoreFailure);
+            var target = CapturePasteTarget.RememberWindow();
+            if (target?.Window != window) throw new InvalidOperationException("Explicit console paste chose the earlier browser.");
             const string marker = "zommi-console-paste-fixture";
             Clipboard.SetText(marker);
             if (!target.Paste(CapturePasteTarget.GetClipboardSequenceNumber())) throw new InvalidOperationException("Console paste was not dispatched.");

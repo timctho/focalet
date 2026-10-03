@@ -55,9 +55,10 @@ A first clipboard read alone does not establish that this second read completed.
 The receiving app controls attachment placement and multiline text insertion;
 client-specific attachment/upload completion remains separate from clipboard reads.
 
-The tool waits for clipboard data reads and leaves time for asynchronous image
-readers before publishing the next step. A clipboard read does not prove that an
-app attached/uploaded an image. Images that are not read within three seconds
+The tool keeps each image on the clipboard for at least three seconds after
+dispatch, including when a preview has already read it, before publishing context.
+Later first reads get additional settling time, up to five seconds. A clipboard
+read does not prove that an app attached/uploaded an image. Images unread after five seconds
 are skipped, while their context text is still pasted. If text is not read, or
 focus, modifiers or clipboard ownership changes, remaining steps stop. Already
 dispatched steps are never retried automatically. **Text only** in the tray skips

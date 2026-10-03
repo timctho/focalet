@@ -138,22 +138,20 @@ internal static class ChromiumClipboardAcceptance
                 throw new InvalidOperationException("Could not activate the synthetic browser window.");
             await FocusInput("chat");
             if (focusOnly) { Console.WriteLine("PASS Chromium native input focus (clipboard untouched)."); return; }
-            using var tracker = new CaptureInputTracker();
-            var observed = Stopwatch.StartNew();
-            while (tracker.Latest is null)
+            using var inputAutomation = new FlaUI.UIA3.UIA3Automation
             {
-                if (observed.ElapsedMilliseconds > 5000) throw new InvalidOperationException("Chromium editor was not remembered automatically.");
-                await Task.Delay(50, token);
-            }
-            // Capture a caret in the middle of the browser input, then blur it
-            // within the same native renderer HWND. Restore the exact UIA editor.
+                ConnectionTimeout = TimeSpan.FromSeconds(2), TransactionTimeout = TimeSpan.FromSeconds(2),
+            };
             await Evaluate("chat.setSelectionRange(13,13);true");
-            await Task.Delay(350, token);
-            var target = await tracker.PauseAsync() ?? throw new InvalidOperationException("Browser input not focused.");
-            if (target.Window != browser.MainWindowHandle) throw new InvalidOperationException("Unexpected browser destination.");
+            var target = CapturePasteTarget.RememberWindow() ?? throw new InvalidOperationException("Browser input not focused.");
+            target = CapturePasteTarget.ObserveInput(inputAutomation, target).Target;
             await FocusInput("plain");
             if (await target.IsInputCurrentAsync()) throw new InvalidOperationException("A different browser input accepted the saved editor identity.");
-            if (!await target.RestoreInputAsync()) throw new InvalidOperationException("Could not restore the previous browser input/caret: " + target.RestoreFailure);
+            // The user selects the input and caret before invoking paste.
+            await FocusInput("chat");
+            await Evaluate("chat.setSelectionRange(13,13);true");
+            target = CapturePasteTarget.RememberWindow() ?? throw new InvalidOperationException("Browser input not focused.");
+            target = CapturePasteTarget.ObserveInput(inputAutomation, target).Target;
             stage = "sequential native image and text paste";
             var result = await CapturePasteSequence.PasteAsync(batch, target, false);
             if (result.StoppedBecause is not null || result.StepsSent != 4)
@@ -191,12 +189,12 @@ internal static class ChromiumClipboardAcceptance
                 await FocusInput(id);
                 if (GetForegroundWindow() != browser.MainWindowHandle) throw new InvalidOperationException("The source browser did not become the actual foreground window.");
             }
-            await ForegroundRoutingAcceptance.RunAsync(batch, () => FocusBrowser("chat"), () => FocusBrowser("source"));
+            await ForegroundRoutingAcceptance.RunAsync(batch, () => FocusBrowser("source"));
             if ((await Evaluate("chat.value")).GetString() != unchangedBrowserDraft)
                 throw new InvalidOperationException("A console/custom-chat capture was pasted into the earlier browser.");
             var screenshot = await driver.CallAsync("Page.captureScreenshot", new { format = "png" }, session, token);
             File.WriteAllBytes("artifacts/capture-browser-paste.png", Convert.FromBase64String(screenshot.GetProperty("data").GetString()!));
-            Console.WriteLine("PASS Chromium receives image A, text A, image B, text B; automatic focus/caret restoration and text fallback preserve drafts.");
+            Console.WriteLine("PASS Chromium receives image A, text A, image B, text B; current input/caret and text fallback preserve drafts.");
         }
         catch (Exception error)
         {

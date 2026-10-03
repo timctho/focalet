@@ -31,16 +31,17 @@ internal static class CapturePasteSequence
                     return new(sent, unreadImages, "Paste could not be dispatched. It will not be retried.");
                 sent++;
 
-                // Delayed rendering tells us when bytes have been requested. Keep
-                // them available for asynchronous native/IPC readers as well. This
-                // is a clipboard-read receipt, not an attachment/upload receipt.
+                // A DOM preview/thumbnail can read first; Electron may then read
+                // the image again through main-process IPC to save/attach it.
+                // Keep the full image window even if the preview already read it.
+                // A read is still not an attachment/upload completion receipt.
                 var wait = Stopwatch.StartNew();
-                while (wait.ElapsedMilliseconds < 3000)
+                while (wait.ElapsedMilliseconds < (image ? 5000 : 3000))
                 {
                     await Task.Delay(50);
                     if (!clipboard.OwnsClipboard || !target.IsCurrent() || !CapturePasteTarget.ModifiersReleased)
                         return new(sent, unreadImages, "Focus, keys or clipboard changed during paste.");
-                    if (clipboard.Read && wait.ElapsedMilliseconds >= (image ? 1000 : 200) &&
+                    if (clipboard.Read && wait.ElapsedMilliseconds >= (image ? 3000 : 300) &&
                         clipboard.MillisecondsSinceRead >= (image ? 600 : 150)) break;
                 }
                 if (clipboard.Failure is { } failure) return new(sent, unreadImages, failure);
