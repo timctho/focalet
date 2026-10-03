@@ -104,12 +104,12 @@ internal class ContentSelectionForm : PointSelectionForm
                 else if (Active is not null) tool = action;
                 break;
         }
-        UpdateToolbar(reposition: action is "delete" or "select");
+        UpdateToolbar(reposition: action is "delete" or "select", choosingRegion: action == "select");
         Invalidate();
         Focus();
     }
 
-    private void UpdateToolbar(bool reposition = false)
+    private void UpdateToolbar(bool reposition = false, bool choosingRegion = false)
     {
         var status = Active is { } active
             ? active.Drawing.Strokes.Count >= AnnotationDocument.MaximumStrokes
@@ -124,7 +124,9 @@ internal class ContentSelectionForm : PointSelectionForm
         Cursor = Cursors.Cross;
         if (reposition)
         {
-            var region = Active?.Selection.Region;
+            // Explicit Add region/S still moves the toolbar away for the next
+            // drag. A completed Ctrl crop anchors it to that crop instead.
+            var region = choosingRegion ? null : Active?.Selection.Region;
             var screen = Screen.FromPoint(region is { } selected ? new Point(selected.Left + selected.Width / 2, selected.Top + selected.Height / 2) : Cursor.Position);
             var available = screen.WorkingArea;
             var margin = (int)(12 * scale);
