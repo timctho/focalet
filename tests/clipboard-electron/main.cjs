@@ -31,7 +31,10 @@ ipcMain.handle('image', async () => {
 ipcMain.on('result', (_event, value) => { events.push({ ...value, receivedAt: Date.now() }); save(); });
 ipcMain.on('enter', () => { enters++; save(); });
 ipcMain.on('ready', () => {
-  fs.writeFileSync(path.join(directory, 'ready'), JSON.stringify({ window: window.getNativeWindowHandle().readBigUInt64LE().toString(), mode }));
+  // File existence is the reader's readiness signal. Publish only after the
+  // writer has closed the file, so Windows readers cannot race an open handle.
+  fs.writeFileSync(path.join(directory, 'ready.tmp'), JSON.stringify({ window: window.getNativeWindowHandle().readBigUInt64LE().toString(), mode }));
+  fs.renameSync(path.join(directory, 'ready.tmp'), path.join(directory, 'ready'));
 });
 ipcMain.handle('mode', () => mode);
 app.whenReady().then(async () => {
