@@ -44,11 +44,25 @@ internal static class CaptureHotkeyAcceptance
         destination.KeyDown += (_, args) => { if (args.KeyCode == Keys.Enter) enters++; };
         SendHotkey(capture: false);
         await ForegroundRoutingAcceptance.WaitFor(() => notices.Contains("Batch pasted") && !context.Busy, "Alt+A did not paste the pending batch.", 20000);
-        var expected = "before " + string.Concat(batch.TextParts) + "after";
-        if (rich.Text.Replace("\r", "").Replace("\ufffc", "") != expected.Replace("\r", "") || enters != 0 ||
+        // RichEdit represents each pasted image as a space in Text and strips
+        // a clipboard part's final paragraph break. Verify complete context
+        // sections and original draft around those native object boundaries.
+        var actual = rich.Text.Replace("\r", "");
+        var contextStart = "before ".Length;
+        var completeContext = actual.StartsWith("before ", StringComparison.Ordinal) && actual.EndsWith("after", StringComparison.Ordinal);
+        foreach (var part in batch.TextParts)
+        {
+            var content = part.Replace("\r", "").TrimEnd('\n');
+            var index = actual.IndexOf(content, contextStart, StringComparison.Ordinal);
+            if (index < 0 || !string.IsNullOrWhiteSpace(actual[contextStart..index])) { completeContext = false; break; }
+            contextStart = index + content.Length;
+        }
+        completeContext &= contextStart <= actual.Length - "after".Length &&
+            string.IsNullOrWhiteSpace(actual[contextStart..Math.Max(contextStart, actual.Length - "after".Length)]);
+        if (!completeContext || enters != 0 ||
             previous.Text != "old destination stays unchanged" || context.HasPendingBatch)
             throw new InvalidOperationException("Explicit paste used the earlier input, lost context/caret, or sent Enter: " +
-                System.Text.Json.JsonSerializer.Serialize(new { actual = rich.Text, expected, enters, previous = previous.Text, context.HasPendingBatch }));
+                System.Text.Json.JsonSerializer.Serialize(new { actual, enters, previous = previous.Text, context.HasPendingBatch }));
         var rtf = rich.Rtf!;
         var a = rtf.IndexOf(@"\pict", StringComparison.Ordinal);
         var aText = rtf.IndexOf("[A]", StringComparison.Ordinal);
