@@ -137,16 +137,16 @@ foreach ($case in $(if ($HoverOnly) { @('hover-source') } else { @('tools','mult
             $script:annotationReadyMs = $watch.ElapsedMilliseconds
             if (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Attach')) { throw 'Selection did not stay open with its drawing toolbar.' }
             if ($multiple -and -not $continuous) { Assert-ToolbarNearCrop $selector 315; Save-Toolbar $case }
-            Click-Tool $selector 'Pen'
             if ($case -eq 'ctrl-once') {
-                # Choosing Pen exits continuous selection. Add region must still
-                # add one crop and return to drawing without another tool click.
+                # Explicit Add region must still add one crop and return to
+                # drawing, even when entered directly from continuous selection.
                 Click-Tool $selector 'Blue'
                 Click-Tool $selector 'Remove region'
                 Click-Tool $selector 'Add region'
                 [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,490,195,526,245)
                 [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,496,210,518,234)
             }
+            Click-Tool $selector 'Pen'
             Click-Tool $selector 'Coral'
             $firstStrokeEnd = if ($continuous) { 203 } else { 310 }
             [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,190,210,$firstStrokeEnd,234)

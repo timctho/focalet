@@ -98,7 +98,9 @@ internal class ContentSelectionForm : PointSelectionForm
                 activeIndex = Math.Min(activeIndex, entries.Count - 1);
                 if (entries.Count == 0) { tool = "select"; continuousSelection = false; }
                 break;
-            case "select": if (entries.Count < maximumSelections) tool = action; break;
+            case "select":
+                if (entries.Count < maximumSelections) { tool = action; continuousSelection = false; }
+                break;
             default:
                 if (action.StartsWith('#')) color = action;
                 else if (action.StartsWith("width", StringComparison.Ordinal)) widthIndex = int.Parse(action.AsSpan(5), System.Globalization.CultureInfo.InvariantCulture);
