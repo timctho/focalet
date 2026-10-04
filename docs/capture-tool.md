@@ -19,7 +19,9 @@ is unsigned and Windows may require opening confirmation.
 1. Quit the full Zommi app or another tool using Alt+A. Open the capture tool.
 2. In the source window, press **Shift+Alt+A**. Drag a rectangle, then use
    **Add region**, **S**, or **Ctrl-drag** for more regions, up to eight.
-   Annotate any region and choose **Done** (or Enter).
+   After a Ctrl-drag, you can release Ctrl and keep selecting more regions.
+   Choose a drawing tool or a region's letter to switch to annotation, then
+   choose **Done** (or Enter).
    While Ctrl is held, the drawing toolbar stays hidden so it cannot block another
    region. Release Ctrl to show it beside the latest selected region.
 3. Switch to the destination app and click its input at the intended caret.

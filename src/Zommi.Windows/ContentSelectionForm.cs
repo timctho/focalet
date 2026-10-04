@@ -23,6 +23,7 @@ internal class ContentSelectionForm : PointSelectionForm
     private Point? anchor;
     private Rectangle dragged;
     private bool controlAtMouseDown;
+    private bool continuousSelection;
     private int activeIndex = -1;
     private string tool = "select";
     private string color = "#FF686B";
@@ -95,13 +96,13 @@ internal class ContentSelectionForm : PointSelectionForm
             case "delete":
                 if (activeIndex >= 0) entries.RemoveAt(activeIndex);
                 activeIndex = Math.Min(activeIndex, entries.Count - 1);
-                if (entries.Count == 0) tool = "select";
+                if (entries.Count == 0) { tool = "select"; continuousSelection = false; }
                 break;
             case "select": if (entries.Count < maximumSelections) tool = action; break;
             default:
                 if (action.StartsWith('#')) color = action;
                 else if (action.StartsWith("width", StringComparison.Ordinal)) widthIndex = int.Parse(action.AsSpan(5), System.Globalization.CultureInfo.InvariantCulture);
-                else if (Active is not null) tool = action;
+                else if (Active is not null) { tool = action; continuousSelection = false; }
                 break;
         }
         UpdateToolbar(reposition: action is "delete" or "select", choosingRegion: action == "select");
@@ -114,7 +115,9 @@ internal class ContentSelectionForm : PointSelectionForm
         var status = Active is { } active
             ? active.Drawing.Strokes.Count >= AnnotationDocument.MaximumStrokes
                 ? "Drawing limit · Undo a mark to continue"
-                : $"{(char)('A' + activeIndex)} · {active.Selection.Region.Width} × {active.Selection.Region.Height} · Draw, then {confirmLabel.ToLowerInvariant()}"
+                : tool == "select" && continuousSelection
+                    ? entries.Count >= maximumSelections ? $"Region limit · Draw, then {confirmLabel.ToLowerInvariant()}" : "Select more · Choose a tool to draw"
+                    : $"{(char)('A' + activeIndex)} · {active.Selection.Region.Width} × {active.Selection.Region.Height} · Draw, then {confirmLabel.ToLowerInvariant()}"
             : "Drag to select · Ctrl for more";
         toolbar.UpdateState(tool, color, widthIndex, entries.Count, maximumSelections,
             Active?.Drawing.CanUndo ?? false, Active?.Drawing.CanRedo ?? false, status);
@@ -156,6 +159,7 @@ internal class ContentSelectionForm : PointSelectionForm
                 {
                     activeIndex = index;
                     if (tool == "select") tool = "pen";
+                    continuousSelection = false;
                     UpdateToolbar(reposition: true); Invalidate(); return;
                 }
         }
@@ -232,8 +236,10 @@ internal class ContentSelectionForm : PointSelectionForm
             entries.Add(new Entry(selected, new AnnotationDocument()));
             activeIndex = entries.Count - 1;
         }
-        // Ctrl keeps selection mode for quick A/B collection; a normal crop is ready to draw.
-        tool = controlAtMouseDown ? "select" : "pen";
+        // Ctrl starts continuous selection. Releasing it must not turn the next
+        // crop into a one-shot selection; an explicit drawing tool or badge exits.
+        continuousSelection |= controlAtMouseDown;
+        tool = continuousSelection ? "select" : "pen";
         UpdateToolbar(reposition: true);
         Invalidate();
     }

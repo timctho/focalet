@@ -28,11 +28,11 @@ New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 function Click-Tool([IntPtr]$Window, [string]$Name) {
     if (-not [ZommiWindowsAcceptanceNative]::ClickNamedButton($Window,$Name)) { throw "Drawing tool unavailable: $Name" }
 }
-function Assert-ToolbarNearCrop([IntPtr]$Window, [int]$Bottom) {
+function Assert-ToolbarNearCrop([IntPtr]$Window, [int]$Bottom, [int]$Left = 175) {
     $watch = [Diagnostics.Stopwatch]::StartNew()
     do {
         $bounds = [ZommiWindowsAcceptanceNative]::NamedButtonContainerBounds($Window,'Pen')
-        if ($bounds.Length -eq 4 -and [Math]::Abs($bounds[0] - 175) -le 64 -and
+        if ($bounds.Length -eq 4 -and [Math]::Abs($bounds[0] - $Left) -le 64 -and
             $bounds[1] -gt $Bottom -and $bounds[1] -le $Bottom + 64) { return }
         Start-Sleep -Milliseconds 10
     } while ($watch.ElapsedMilliseconds -lt 1000)
@@ -66,8 +66,9 @@ function Assert-ColoredPixels($Item, [string]$Color) {
     } finally { $image.Dispose(); $stream.Dispose() }
 }
 $results = @()
-foreach ($case in $(if ($HoverOnly) { @('hover-source') } else { @('tools','multiple-regions','ctrl-release','hover-source','changed-source','cancel','image-selector') })) {
-    $multiple = $case -in @('multiple-regions','ctrl-release')
+foreach ($case in $(if ($HoverOnly) { @('hover-source') } else { @('tools','multiple-regions','ctrl-release','ctrl-once','ctrl-held-limit','hover-source','changed-source','cancel','image-selector') })) {
+    $continuous = $case -in @('ctrl-once','ctrl-held-limit')
+    $multiple = $continuous -or $case -in @('multiple-regions','ctrl-release')
     $fixture = [ZommiContextFixture]::new()
     try {
         $fixture.ExpandForAnnotations()
@@ -100,7 +101,22 @@ foreach ($case in $(if ($HoverOnly) { @('hover-source') } else { @('tools','mult
                 $stableBounds = if ($ready) { $clientBounds } else { $null }
                 Start-Sleep -Milliseconds 50
             }
-            if ($multiple) {
+            if ($continuous) {
+                [ZommiAnnotationInput]::Control($true)
+                try {
+                    for ($i=0; $i -lt 8; $i++) {
+                        $x = 175 + 45 * $i
+                        [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,$x,195,($x+36),245)
+                        # A single Ctrl-drag must allow B through H without another Ctrl press.
+                        if ($case -eq 'ctrl-once' -and $i -eq 0) { [ZommiAnnotationInput]::Control($false) }
+                    }
+                    # The ninth drag must not add a region or accidentally draw.
+                    [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,540,195,576,245)
+                } finally { [ZommiAnnotationInput]::Control($false) }
+                Assert-ToolbarNearCrop $selector 245 490
+                if ([ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Add region')) { throw "$case did not reach the eight-region limit." }
+                Save-Toolbar $case
+            } elseif ($multiple) {
                 [ZommiAnnotationInput]::Control($true)
                 try {
                     [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,175,195,535,245)
@@ -120,10 +136,20 @@ foreach ($case in $(if ($HoverOnly) { @('hover-source') } else { @('tools','mult
             while (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Attach') -and $watch.ElapsedMilliseconds -lt 1000) { Start-Sleep -Milliseconds 10 }
             $script:annotationReadyMs = $watch.ElapsedMilliseconds
             if (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Attach')) { throw 'Selection did not stay open with its drawing toolbar.' }
-            if ($multiple) { Assert-ToolbarNearCrop $selector 315; Save-Toolbar $case }
+            if ($multiple -and -not $continuous) { Assert-ToolbarNearCrop $selector 315; Save-Toolbar $case }
             Click-Tool $selector 'Pen'
+            if ($case -eq 'ctrl-once') {
+                # Choosing Pen exits continuous selection. Add region must still
+                # add one crop and return to drawing without another tool click.
+                Click-Tool $selector 'Blue'
+                Click-Tool $selector 'Remove region'
+                Click-Tool $selector 'Add region'
+                [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,490,195,526,245)
+                [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,496,210,518,234)
+            }
             Click-Tool $selector 'Coral'
-            [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,190,210,310,234)
+            $firstStrokeEnd = if ($continuous) { 203 } else { 310 }
+            [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,190,210,$firstStrokeEnd,234)
             $strokeReady = [Diagnostics.Stopwatch]::StartNew()
             while (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Undo') -and $strokeReady.ElapsedMilliseconds -lt 1000) { Start-Sleep -Milliseconds 10 }
             if (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Undo')) { throw "The first annotation stroke was not recorded: $case" }
@@ -140,7 +166,15 @@ foreach ($case in $(if ($HoverOnly) { @('hover-source') } else { @('tools','mult
                 Click-Tool $selector 'Undo'
                 Click-Tool $selector 'Redo'
             }
-            if ($multiple) {
+            if ($continuous) {
+                Click-Tool $selector 'Blue'
+                # H was already drawn by the Add region check above.
+                $end = if ($case -eq 'ctrl-once') { 7 } else { 8 }
+                for ($i=1; $i -lt $end; $i++) {
+                    $x = 175 + 45 * $i
+                    [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,($x+6),210,($x+28),234)
+                }
+            } elseif ($multiple) {
                 Click-Tool $selector 'Arrow'
                 Click-Tool $selector 'Blue'
                 [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,190,280,445,302)
@@ -161,10 +195,14 @@ foreach ($case in $(if ($HoverOnly) { @('hover-source') } else { @('tools','mult
         } else {
             if ($result.cancelled) { throw "Annotation capture cancelled: $($result.errorMessage)" }
             $items = if ($multiple) { @($result.selections) } else { @($result) }
-            $expectedItems = if ($multiple) { 2 } else { 1 }
-            if ($items.Count -ne $expectedItems) { throw 'Annotation region association changed.' }
+            $expectedItems = if ($continuous) { 8 } elseif ($multiple) { 2 } else { 1 }
+            if ($items.Count -ne $expectedItems) { throw "Annotation region association changed: $case expected=$expectedItems actual=$($items.Count)" }
             for ($i=0; $i -lt $items.Count; $i++) {
                 $item = $items[$i]
+                if ($continuous) {
+                    if ($item.bounds.x -ne (175 + 45 * $i) -or $item.bounds.y -ne 195 -or
+                        $item.bounds.width -ne 36 -or $item.bounds.height -ne 50) { throw "$case lost region order or bounds at $i." }
+                }
                 $expected = if ($case -eq 'tools') { 5 } else { 1 }
                 if ($item.snapshot.imageAnnotations.strokeCount -ne $expected -or $item.snapshot.imageAnnotations.source -ne 'user' -or -not $item.snapshot.imageAnnotations.bakedIntoImage) { throw "Missing or wrong annotation provenance: $case; expected=$expected; actual=$($item.snapshot.imageAnnotations | ConvertTo-Json -Compress)" }
                 $color = if ($i -eq 0) { 'coral' } else { 'blue' }
