@@ -187,7 +187,7 @@ void main() {
       ),
     );
     final captureSource = File(
-      '${root.parent.path}/Zommi.Windows/ForegroundContextCapture.cs',
+      '${root.parent.path}/Zommi.Capture.Windows/ForegroundContextCapture.cs',
     ).readAsStringSync();
     expect(
       captureSource,
@@ -201,7 +201,7 @@ void main() {
       ),
     );
     final pointSelector = File(
-      '${root.parent.path}/Zommi.Windows/PointSelectionForm.cs',
+      '${root.parent.path}/Zommi.Capture.Windows/PointSelectionForm.cs',
     ).readAsStringSync();
     expect(
       pointSelector,

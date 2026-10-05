@@ -132,4 +132,4 @@ The test replaces the clipboard and should run only on a disposable CI desktop.
 The entrypoint, tray, hotkeys and paste flow live in `src/Zommi.CaptureTool`.
 It references the shared `src/Zommi.Capture.Windows` library, not the Desktop
 helper executable or Flutter app. The capture package has its own manifest and
-checksums. [Compare Capture and Desktop use cases](products.md).
+checksums. [Compare Capture and Desktop use cases](https://timctho.github.io/zommi/products/).
