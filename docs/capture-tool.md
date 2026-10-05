@@ -1,22 +1,24 @@
-# Standalone capture tool for Windows
+# Focalet Capture for Windows
 
-This prototype runs the capture selector independently of Zommi's chat UI and
-agent broker. It needs no agent sign-in. The current public Zommi installer does
+Use Capture to share screen regions with the editor, terminal or chat app you
+already use. This prototype runs independently of Focalet Desktop and its agent
+broker. It needs no agent sign-in. The current public Zommi installer does
 not include this separate tool.
 
-Build from a committed checkout on Windows with .NET 8 and PowerShell 7:
+Build from a committed checkout on Windows with .NET 8 and PowerShell 7.
+Flutter, Rust and Desktop are not required to build or use this product:
 
 ```powershell
 ./scripts/package-capture-tool.ps1
 ```
 
-Extract `artifacts/zommi-capture-tool-win-x64.zip` and open
-`Zommi.CaptureTool.exe`. The package includes its .NET runtime. This prototype
+Extract `artifacts/focalet-capture-win-x64.zip` and open
+`Focalet.Capture.exe`. The package includes its .NET runtime. This prototype
 is unsigned and Windows may require opening confirmation.
 
 ## Capture first, then paste into the input you choose
 
-1. Quit the full Zommi app or another tool using Alt+A. Open the capture tool.
+1. Quit Desktop (currently named Zommi) or another tool using Alt+A. Open the capture tool.
 2. In the source window, press **Shift+Alt+A**. Drag a rectangle, then use
    **Add region**, **S**, or **Ctrl-drag** for more regions, up to eight.
    After a Ctrl-drag, you can release Ctrl and keep selecting more regions.
@@ -27,7 +29,7 @@ is unsigned and Windows may require opening confirmation.
 3. Switch to the destination app and click its input at the intended caret.
 4. Press **Alt+A** to paste **image A → context A → image B → context B**.
    Each image keeps its original pixels and dimensions. Images are never merged,
-   and Zommi does not inject Enter into the destination.
+   and Capture does not inject Enter into the destination.
    Completed pastes finish without a notification, including text fallback.
 
 Capture only prepares a batch in memory. It does not choose a destination,
@@ -124,3 +126,10 @@ and clipboard interruption tests stop remaining steps. Actual ChatGPT and Orca s
 separate from these isolated fixtures.
 
 The test replaces the clipboard and should run only on a disposable CI desktop.
+
+## Product boundary
+
+The entrypoint, tray, hotkeys and paste flow live in `src/Zommi.CaptureTool`.
+It references the shared `src/Zommi.Capture.Windows` library, not the Desktop
+helper executable or Flutter app. The capture package has its own manifest and
+checksums. [Compare Capture and Desktop use cases](products.md).

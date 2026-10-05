@@ -1,4 +1,4 @@
-site_name: Zommi
+site_name: Focalet
 site_description: Visual context for AI agents. Share screenshots, annotations and available browser context with your existing agent.
 site_url: https://timctho.github.io/zommi/
 repo_url: https://github.com/timctho/zommi
@@ -28,7 +28,9 @@ exclude_docs: |
 nav:
   - Home: index.md
   - Get started:
-      - Install Zommi: install.md
+      - Choose Capture or Desktop: products.md
+      - Use Capture (Windows): capture-tool.md
+      - Install Desktop: install.md
       - Use Claude Code: guides/claude-code.md
       - Connect Chrome and Edge: guides/chrome-edge.md
       - Ubuntu Wayland: guides/ubuntu-wayland.md

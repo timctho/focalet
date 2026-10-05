@@ -3,7 +3,9 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Zommi.Capture;
 
-namespace Zommi.Windows;
+using Zommi.Windows;
+
+namespace Zommi.CaptureTool;
 
 internal sealed record CapturePasteResult(int StepsSent, int UnreadImages, string? StoppedBecause = null);
 

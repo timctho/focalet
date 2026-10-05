@@ -10,7 +10,7 @@ if ($LASTEXITCODE -ne 0) {
     git -C $root diff --name-only HEAD
     throw 'Commit tracked source changes before packaging.'
 }
-$output = Join-Path $root "artifacts/zommi-capture-tool-$Runtime"
+$output = Join-Path $root "artifacts/focalet-capture-$Runtime"
 if (Test-Path -LiteralPath $output) { Remove-Item -LiteralPath $output -Recurse -Force }
 $temporary = Join-Path ([IO.Path]::GetTempPath()) "zommi-capture-build-$([Guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Path $temporary | Out-Null
@@ -33,8 +33,8 @@ try {
     Remove-Item -LiteralPath $temporary -Recurse -Force
 }
 $manifest = @{
-    product = 'Zommi Capture'; channel = 'prototype'; gitCommit = $commit; runtime = $Runtime
-    entryPoint = 'Zommi.CaptureTool.exe'; signing = 'unsigned'
+    product = 'Focalet Capture'; channel = 'prototype'; gitCommit = $commit; runtime = $Runtime
+    entryPoint = 'Focalet.Capture.exe'; signing = 'unsigned'
 }
 $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output 'capture-tool-manifest.json') -Encoding utf8
 $files = Get-ChildItem -LiteralPath $output -File -Recurse | Sort-Object FullName

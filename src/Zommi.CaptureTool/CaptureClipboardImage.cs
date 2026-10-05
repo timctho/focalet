@@ -1,7 +1,9 @@
 using System.Drawing.Imaging;
 using Zommi.Capture;
 
-namespace Zommi.Windows;
+using Zommi.Windows;
+
+namespace Zommi.CaptureTool;
 
 /// <summary>Exports one selected image at its original resolution.</summary>
 internal static class CaptureClipboardImage

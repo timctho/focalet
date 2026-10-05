@@ -4,10 +4,13 @@
     <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
-    <ApplicationManifest>../Zommi.Windows/app.manifest</ApplicationManifest>
-    <ApplicationIcon>../Zommi.Flutter/windows/runner/resources/app_icon.ico</ApplicationIcon>
+    <AssemblyName>Focalet.Capture</AssemblyName>
+    <Product>Focalet Capture</Product>
+    <Title>Focalet Capture</Title>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../Zommi.Windows/Zommi.Windows.csproj" />
+    <ProjectReference Include="../Zommi.Capture.Windows/Zommi.Capture.Windows.csproj" />
   </ItemGroup>
 </Project>

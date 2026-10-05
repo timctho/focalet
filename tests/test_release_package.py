@@ -461,7 +461,7 @@ class ReleasePackageTests(unittest.TestCase):
             self.assertIn(contract, background)
 
     def test_windows_pixel_capture_uses_the_verified_direct_gdi_path(self) -> None:
-        source = (SCRIPTS.parent / "src/Zommi.Windows/ScreenCapture.cs").read_text(
+        source = (SCRIPTS.parent / "src/Zommi.Capture.Windows/ScreenCapture.cs").read_text(
             encoding="utf-8"
         )
         for contract in (
@@ -476,7 +476,7 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertNotIn("graphics.CopyFromScreen", source)
 
     def test_windows_selector_forces_initial_foreground_and_stays_topmost(self) -> None:
-        native = SCRIPTS.parent / "src/Zommi.Windows"
+        native = SCRIPTS.parent / "src/Zommi.Capture.Windows"
         region = (native / "RegionSelectionForm.cs").read_text(encoding="utf-8")
         content = (native / "ContentSelectionForm.cs").read_text(encoding="utf-8")
         self.assertIn(": ContentSelectionForm(returnProcessId, capturedDesktop, 1, theme)", region)
@@ -495,7 +495,7 @@ class ReleasePackageTests(unittest.TestCase):
             self.assertIn(contract, source)
 
     def test_windows_point_context_uses_a_crosshair_and_clicked_target(self) -> None:
-        source = (SCRIPTS.parent / "src/Zommi.Windows/PointSelectionForm.cs").read_text(
+        source = (SCRIPTS.parent / "src/Zommi.Capture.Windows/PointSelectionForm.cs").read_text(
             encoding="utf-8"
         )
         host = (SCRIPTS.parent / "src/Zommi.Windows/CaptureNativeHost.cs").read_text(

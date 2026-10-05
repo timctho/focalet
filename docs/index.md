@@ -1,54 +1,63 @@
 ---
-title: Zommi — visual context for AI agents
-description: Share screenshots, annotations and available browser or accessibility context with Codex, Claude Code and other AI agents on Windows, macOS and Ubuntu.
+title: Focalet — visual context for AI agents
+description: Capture screen context into your existing tools, or work with your agents in a dedicated desktop app.
 ---
-# Zommi — visual context for AI agents
+# Focalet — visual context for AI agents
 
-**Show your agent what you mean.** Zommi is an open-source desktop companion for
-Codex, Claude Code and other AI agents. Select and annotate a screen region,
-review the attachment, and ask your question with available text, links and structure.
+**Show your agent what you mean.** Select and annotate screen regions, then share
+the images with available text, links and structure.
 
-[Download Zommi](https://github.com/timctho/zommi/releases/latest){ .btn .btn-primary }
-[Get started](install.md){ .btn .btn-outline-primary }
+## Choose how you work
 
-<video controls autoplay muted loop playsinline preload="metadata" poster="demos/frontend-poster.webp" style="width: 100%; border-radius: 12px;" aria-label="Sketch a stacked chart and trend line, then watch the agent rebuild them">
+| | Focalet Capture | Focalet Desktop |
+| --- | --- | --- |
+| Best for | Staying in your existing editor, terminal or chat app | Managing agent conversations in a dedicated app |
+| Capture workflow | Shift+Alt+A to select; focus the destination; Alt+A to paste | Alt+A (⌥ A on Mac) to select and attach to a chat draft |
+| Agent setup | None in Capture; use the receiving app as usual | Connect an existing supported agent runtime |
+| Platforms | Windows prototype | Windows, macOS and Ubuntu |
+| Get started | [Build and use Capture](capture-tool.md) | [Install Desktop](install.md) |
+
+[Use cases and product boundaries](products.md) explains which app to choose.
+Both live in the same repository and share capture components. Neither app
+requires the other to be installed.
+
+Focalet is the new product name. Public Desktop installers and the installed UI
+still use **Zommi**; their download names, settings and repository URL are retained
+for compatibility. Capture is a separate prototype and is not included in those
+installers.
+
+## Capture: keep your existing input
+
+Select a page fragment, an error message and a chart in one batch. Click the
+input in your existing tool and paste **image A → context A → image B → context B**.
+Images remain separate. Text still arrives in inputs that do not accept images;
+the receiver decides how to display attachments. See [Capture usage](capture-tool.md).
+
+## Desktop: work across agent sessions
+
+Connect an installed agent, choose a model, and manage chats, drafts and
+attachments in a dedicated window. Runtime support includes Codex, Claude Code,
+OpenCode, Gemini CLI, Hermes, OpenClaw and Pi; features depend on each protocol.
+The selected agent continues to own credentials, tools, permissions and history.
+
+<video controls autoplay muted loop playsinline preload="metadata" poster="demos/frontend-poster.webp" style="width: 100%; border-radius: 12px;" aria-label="Desktop demo: sketch a chart and ask an agent to rebuild it">
   <source src="demos/frontend.mp4" type="video/mp4">
-  <a href="demos/frontend.mp4">Watch the frontend demo</a>.
+  <a href="demos/frontend.mp4">Watch the Desktop demo</a>.
 </video>
 
-**Redesign a chart with a sketch.** Turn one chart into a channel breakdown and trend.
+The recorded Desktop demo uses the Zommi name.
 
-> Same six months: stacked channels left, revenue trend right.
-
-## Select. Attach. Ask.
-
-1. Connect an installed agent runtime and choose a model.
-2. Press **Alt+A** (**⌥ A** on Mac), select a region, and annotate it if useful.
-3. Attach the selection to your draft, review it, and send your question.
-
-Use your existing agent account. Zommi supports Windows 10/11 x64, macOS 12+
-on Apple Silicon and Intel, and Ubuntu 24.04 GNOME Wayland x64.
-
-## Start with your task
-
-- [Share screenshots and screen context with Claude Code](guides/claude-code.md).
+- [Install Desktop and connect an agent](install.md).
+- [Share screen context with Claude Code from Desktop](guides/claude-code.md).
 - [Connect Chrome and Edge for browser DOM context](guides/chrome-edge.md).
-- [Capture desktop context on Ubuntu Wayland](guides/ubuntu-wayland.md).
-- [Learn capture limits and image-only fallbacks](browser-context.md).
-- [Understand privacy and agent permissions](privacy.md).
-
-## Work with your existing agents
-
-Zommi connects to Codex, Claude Code, OpenCode, Gemini CLI, Hermes, OpenClaw and
-Pi. Features depend on each runtime's protocol. See the
-[runtime setup and limitations](install.md#2-choose-the-agent-you-already-have)
-and [runtime commands](runtime-commands.md).
+- [Capture on Ubuntu Wayland in Desktop](guides/ubuntu-wayland.md).
+- [Understand capture limits](browser-context.md) and [privacy](privacy.md).
 
 ## Build and contribute
 
-The project uses Flutter for the desktop UI, Rust for the agent broker, and
-native capture helpers. Start with the [contributor guide](../CONTRIBUTING.md),
-[component map](desktop-reference.md) or [repository instructions for coding agents](../AGENTS.md).
+Capture uses .NET and native Windows APIs. Desktop uses Flutter, a Rust agent
+broker and platform capture helpers. See the [contributor guide](../CONTRIBUTING.md),
+[component map](desktop-reference.md) and [coding agent guide](../AGENTS.md).
 
-Zommi is licensed under [Apache 2.0](../LICENSE).
+Focalet is licensed under [Apache 2.0](../LICENSE).
 [Code signing policy](code-signing.md) · [Security policy](../SECURITY.md)

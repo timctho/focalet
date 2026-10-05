@@ -1,5 +1,11 @@
 # Releases in the Zommi repository
 
+This policy covers **Focalet Desktop**, whose current installers and release
+identifiers retain the Zommi name. **Focalet Capture** has a separate Windows
+prototype package from `scripts/package-capture-tool.ps1`, verified and retained
+by the Capture PR job. It is not bundled into Desktop releases or published by
+this release pipeline. See [product boundaries](products.md).
+
 Publish installers in [timctho/zommi Releases](https://github.com/timctho/zommi/releases),
 alongside the source. Release tags point to the exact accepted source revision.
 Releases inherit repository visibility; publishing does not change it. Downloads

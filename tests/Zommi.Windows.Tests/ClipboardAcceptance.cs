@@ -1,3 +1,4 @@
+using Zommi.CaptureTool;
 using System.Drawing;
 using System.Windows.Forms;
 using Zommi.Capture;

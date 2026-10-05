@@ -1,20 +1,36 @@
-# Desktop reference
+# Components and local state
 
-Start with [installation](install.md) to use Zommi or
-[contributing](../CONTRIBUTING.md) to build it.
+Start with [Capture or Desktop](products.md) to choose an app, or
+[contributing](../CONTRIBUTING.md) to build it. Existing source paths retain the
+Zommi identifiers during the Focalet naming transition.
 
 ## Components
 
-| Location | Responsibility |
-| --- | --- |
-| `src/Zommi.Flutter` | Desktop UI, sessions, composer, attachment previews, hotkeys and tray |
-| `crates/zommi-core` | Agent discovery, runtime adapters and context handoff |
-| `crates/zommi-core-host` | JSONL broker between Flutter and the runtime adapters |
-| `src/Zommi.Windows` and `src/Zommi.Capture.Core` | Windows selection, annotations, accessibility and browser capture |
-| `src/Zommi.CaptureTool` | Experimental Windows tray tool for [pasting a capture batch](capture-tool.md) into an existing input |
-| `crates/zommi-linux-capture` | GNOME Wayland ScreenCast and AT-SPI capture |
-| `src/Zommi.Gnome` | GNOME window geometry, identity and Alt+A integration |
-| `src/Zommi.Flutter/macos/Runner` | macOS selection and platform integration |
+| Product / layer | Location | Responsibility |
+| --- | --- | --- |
+| Focalet Capture | `src/Zommi.CaptureTool` | Windows tray app, capture/paste hotkeys, clipboard image/context sequence; builds `Focalet.Capture.exe` |
+| Focalet Desktop | `src/Zommi.Flutter` | Desktop UI, sessions, composer, attachment previews, hotkeys and tray |
+| Desktop runtime | `crates/zommi-core` | Agent discovery, runtime adapters and context handoff |
+| Desktop runtime | `crates/zommi-core-host` | JSONL broker between Flutter and the runtime adapters |
+| Desktop Windows adapter | `src/Zommi.Windows` | JSONL capture host and acceptance probes; builds the compatible `Zommi.Capture.exe` helper |
+| Shared capture | `src/Zommi.Capture.Windows` | Windows selection, annotations, screen pixels, accessibility, browser capture and invocation-time window identity |
+| Shared capture | `src/Zommi.Capture.Core` | Context models, extraction, alignment and clipboard representations without an app dependency |
+| Desktop Linux capture | `crates/zommi-linux-capture`, `src/Zommi.Gnome` | GNOME Wayland ScreenCast, AT-SPI, geometry, identity and shortcut integration |
+| Desktop macOS capture | `src/Zommi.Flutter/macos/Runner` | macOS selection and platform integration |
+
+Capture and the Windows Desktop adapter both reference the shared capture
+library. Neither references the other's executable. Clipboard injection and
+capture-tool hotkeys belong only to Capture; JSONL request handling belongs only
+to the Desktop adapter. Platform capture implementations on Linux and macOS
+remain part of Desktop; a standalone Capture product is currently Windows-only.
+
+`zommi-core` is an agent runtime library, not the shared capture library. Capture
+can build and run without Rust, Flutter, a broker or an installed agent. Build
+Capture with `scripts/package-capture-tool.ps1`; build Desktop with
+`scripts/package-windows.ps1` or `scripts/package-unix.sh`. The two packages do
+not bundle each other's app.
+
+## Desktop agent boundary
 
 The selected agent owns authentication, tools, permissions and canonical chat
 history. Zommi binds each chat to an exact runtime target and session; runtime
@@ -44,7 +60,7 @@ requests. A Codex thread held by another writer opens read-only and retries
 ownership while preserving its draft. For missing Codex history, check the
 [runtime home and history lookup](codex-history-repair.md).
 
-## Native packages
+## Desktop native packages
 
 | Platform | Archive | Entrypoint |
 | --- | --- | --- |
@@ -60,3 +76,14 @@ acceptance is separate from headless contract tests.
 
 See [release preparation](public-releases.md), [Windows acceptance](windows-acceptance.md)
 and [macOS testing](macos-testing.md) for packaging and platform checks.
+
+## Capture package and state
+
+Capture builds `artifacts/focalet-capture-win-x64.zip` independently. It includes
+`Focalet.Capture.exe`, its .NET runtime, licenses, usage notes,
+`capture-tool-manifest.json` and `SHA256SUMS.txt`. It contains no Flutter UI or
+Rust agent broker. `scripts/verify_capture_package.py` checks the exact source
+revision, file inventory and hashes; Windows CI also launches the packaged app.
+
+The tray app keeps its current batch and paste-mode choices in memory until it
+exits. It has no session catalog or agent credentials. See [Capture use](capture-tool.md).

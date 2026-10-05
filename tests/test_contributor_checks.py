@@ -64,39 +64,44 @@ class ContributorChecksTests(unittest.TestCase):
             self.assertNotIn("permissions", job)
             if name in {"contracts", "windows", "macos"}:
                 self.assertEqual(job["needs"], "documentation")
-                self.assertEqual(job["if"], "needs.documentation.outputs.native_required == 'true'")
+                self.assertEqual(job["if"], "needs.documentation.outputs.desktop_required == 'true'")
             for step in job["steps"]:
                 if "uses" in step:
                     self.assertRegex(step["uses"], r"^[\w-]+/[\w-]+@[0-9a-f]{40}$")
                     if step["uses"].startswith("actions/checkout@"):
                         self.assertEqual(step["with"]["persist-credentials"], "false")
         gate = workflow["jobs"]["required"]
-        self.assertEqual(set(gate["needs"]), {"documentation", "contracts", "windows", "macos"})
+        self.assertEqual(set(gate["needs"]), {"documentation", "contracts", "windows", "macos", "capture_windows"})
         self.assertEqual(gate["if"], "always()")
         command = gate["steps"][0]["run"]
-        for docs, native, linux, windows, macos in itertools.product(
-            ["success", "failure", "skipped", "cancelled"],
-            ["true", "false", ""],
-            ["success", "failure", "skipped", "cancelled"],
-            ["success", "failure", "skipped", "cancelled"],
-            ["success", "failure", "skipped", "cancelled"],
+        capture_job = workflow["jobs"]["capture_windows"]
+        self.assertEqual(capture_job["if"], "needs.documentation.outputs.capture_required == 'true'")
+        # Exercise the gate across both product scopes, including unknown scope,
+        # failed/cancelled jobs and jobs incorrectly skipped or run.
+        for desktop, capture, linux, windows, macos, capture_result in itertools.product(
+            ["true", "false", ""], ["true", "false", ""],
+            *([["success", "failure", "skipped", "cancelled"]] * 4),
         ):
-            result = subprocess.run(
-                ["bash", "-c", command],
-                env={
-                    "DOCS_RESULT": docs,
-                    "NATIVE_REQUIRED": native,
-                    "LINUX_RESULT": linux,
-                    "WINDOWS_RESULT": windows,
-                    "MACOS_RESULT": macos,
-                },
-                capture_output=True,
+            environment = {
+                "DOCS_RESULT": "success", "DESKTOP_REQUIRED": desktop, "CAPTURE_REQUIRED": capture,
+                "LINUX_RESULT": linux, "WINDOWS_RESULT": windows, "MACOS_RESULT": macos,
+                "CAPTURE_RESULT": capture_result,
+            }
+            result = subprocess.run(["bash", "-c", command], env=environment, capture_output=True)
+            expected = (
+                ((desktop == "true" and linux == windows == macos == "success")
+                 or (desktop == "false" and linux == windows == macos == "skipped"))
+                and ((capture == "true" and capture_result == "success")
+                     or (capture == "false" and capture_result == "skipped"))
             )
-            self.assertEqual(
-                result.returncode == 0,
-                docs == "success" and ((native == "true" and linux == windows == macos == "success")
-                                       or (native == "false" and linux == windows == macos == "skipped"))
-            )
+            self.assertEqual(result.returncode == 0, expected, environment)
+        for docs in ["failure", "skipped", "cancelled", ""]:
+            result = subprocess.run(["bash", "-c", command], env={
+                "DOCS_RESULT": docs, "DESKTOP_REQUIRED": "true", "CAPTURE_REQUIRED": "true",
+                "LINUX_RESULT": "success", "WINDOWS_RESULT": "success", "MACOS_RESULT": "success",
+                "CAPTURE_RESULT": "success",
+            }, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
 
     def test_native_release_workflow_is_explicitly_operator_invoked(self):
         workflow = yaml.load(

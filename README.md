@@ -1,13 +1,20 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="design/zommi-logo/exports/ocean/lockup-dark.png">
-  <img src="design/zommi-logo/exports/ocean/lockup-light.png" alt="Zommi" width="240">
-</picture>
+# Focalet — visual context for AI agents
 
-# Zommi — visual context for AI agents
+**Show your agent what you mean.** Select and annotate screen regions, then share
+screenshots and available browser or accessibility context. Choose the app that
+fits how you already work:
 
-**Show your agent what you mean.** Zommi is an open-source desktop companion for
-Codex, Claude Code and other AI agents. Select and annotate screen regions, then
-share screenshots and available browser or accessibility context with your agent.
+| Product | Use it when | Availability |
+| --- | --- | --- |
+| **[Focalet Capture](docs/capture-tool.md)** | You want to stay in Cursor, a terminal, ChatGPT or another existing input. Capture several regions, then paste each image and its context in order. No agent setup is needed. | Windows tray tool; separate prototype package |
+| **[Focalet Desktop](docs/install.md)** | You want a dedicated window for agent chats, saved sessions, model selection, approvals and captured attachments. | Windows, macOS and Ubuntu; existing Zommi installers |
+
+Both apps live in this repository and share capture components. Capture does not
+require Desktop, Flutter or the agent broker. [Use cases and product boundaries](docs/products.md).
+
+Focalet is the new product name. The repository URL, existing Desktop installers,
+settings and technical identifiers retain **Zommi** for compatibility. The public
+Desktop release does not yet include the separate Capture tool.
 
 [![CI](https://github.com/timctho/zommi/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/timctho/zommi/actions/workflows/checks.yml)
 [![Latest release](https://img.shields.io/github/v/release/timctho/zommi)](https://github.com/timctho/zommi/releases/latest)
@@ -21,7 +28,7 @@ share screenshots and available browser or accessibility context with your agent
 
 [Watch the frontend demo](docs/demos/frontend.mp4) · [Documentation](https://timctho.github.io/zommi/)
 
-## Download
+## Download Desktop
 
 | Platform | Architecture | Download |
 | --- | --- | --- |
@@ -39,7 +46,7 @@ Connect your agent, press **Alt+A** (**⌥ A** on Mac), select a region, and rev
 the attachment before sending. [Chrome and Edge setup](docs/guides/chrome-edge.md) ·
 [Claude Code guide](docs/guides/claude-code.md) · [Ubuntu Wayland guide](docs/guides/ubuntu-wayland.md)
 
-## Connect your agent
+## Connect your agent in Desktop
 
 Choose an installed agent, or use **Configure runtime → Add runtime** to add a
 CLI. Repeat for additional runtimes, connect, then choose a model from the chat
@@ -57,7 +64,7 @@ header. Sign in through your agent's own flow if needed.
 | **OpenClaw** | Chats and commands exposed by its ACP or local Gateway configuration |
 | **Pi** | Chats, images, models and runtime commands through RPC |
 
-## See it in action
+## Desktop examples
 
 Animated previews play automatically; click one for the clearer video.
 
@@ -91,7 +98,7 @@ boxes, and cross out an option. The agent turns the sketch into linked formulas.
 
 [![Freehand groups, connections and an exclusion become two linked quotes](docs/demos/sheets-preview.webp)](docs/demos/sheets.mp4)
 
-## Capture and share
+## Capture and share in Desktop
 
 Press **Alt+A** (**⌥ A** on Mac), select a region, review the attachment and ask your question.
 On Windows and Mac, use the drawing toolbar to annotate or add more regions, then press
@@ -99,7 +106,7 @@ On Windows and Mac, use the drawing toolbar to annotate or add more regions, the
 
 On Windows, Ubuntu Wayland and macOS, attachments can include source identity, text, links, element
 structure and coordinates through accessibility and an optional authorized
-browser connection. When reliable alignment is unavailable, Zommi attaches
+browser connection. When reliable alignment is unavailable, Desktop attaches
 **Image only** with an explanation.
 
 Capture happens when you invoke it. Review what you share: source metadata can
@@ -110,7 +117,7 @@ First launch and App settings include **Full access (YOLO)**, enabled by default
 Turn it off to follow each agent’s permission policy and show its approval
 requests. [Runtime permissions](docs/install.md#2-choose-the-agent-you-already-have)
 
-## Platforms
+## Desktop platforms
 
 | Platform | Capture support |
 | --- | --- |
@@ -128,5 +135,5 @@ Desktop Integration** in App settings for Alt+A and aligned app context.
 
 ## License
 
-Zommi is licensed under [Apache 2.0](LICENSE).
+Focalet is licensed under [Apache 2.0](LICENSE).
 [Third-party components](THIRD_PARTY_NOTICES.md) retain their respective licenses.

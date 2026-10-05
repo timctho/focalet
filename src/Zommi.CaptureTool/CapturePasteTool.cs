@@ -2,7 +2,9 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Zommi.Capture;
 
-namespace Zommi.Windows;
+using Zommi.Windows;
+
+namespace Zommi.CaptureTool;
 
 public static class CapturePasteTool
 {
@@ -10,6 +12,7 @@ public static class CapturePasteTool
     public static int Run()
     {
         ApplicationConfiguration.Initialize();
+        // Retain the previous singleton identity during the product rename.
         using var singleton = new Mutex(true, @"Local\Zommi.CaptureTool", out var first);
         if (!first) return 0;
         try
@@ -20,8 +23,8 @@ public static class CapturePasteTool
         }
         catch (System.ComponentModel.Win32Exception)
         {
-            MessageBox.Show("Shift+Alt+A or Alt+A is already registered. Quit Zommi or the other capture tool, then open Zommi Capture again.",
-                "Zommi Capture", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show("Shift+Alt+A or Alt+A is already registered. Quit Zommi or the other capture tool, then open Focalet Capture again.",
+                "Focalet Capture", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return 2;
         }
         finally { BrowserObservationBridge.CloseConnections(); singleton.ReleaseMutex(); }
@@ -46,7 +49,7 @@ public static class CapturePasteTool
         private readonly HotkeyWindow hotkey;
         private readonly NotifyIcon tray;
         private readonly ContextMenuStrip menu;
-        private readonly Func<CaptureNativeHost.SelectedBatch> select;
+        private readonly Func<RegionCaptureSession.SelectedBatch> select;
         private readonly Action<string, string>? report;
         private readonly bool includeOwnProcess;
         private CaptureClipboardBatch? lastBatch;
@@ -57,9 +60,9 @@ public static class CapturePasteTool
         internal bool Busy => busy;
         internal bool HasBatch => lastBatch is not null;
 
-        public CaptureContext(Func<CaptureNativeHost.SelectedBatch>? select = null, Action<string, string>? report = null, bool includeOwnProcess = false)
+        public CaptureContext(Func<RegionCaptureSession.SelectedBatch>? select = null, Action<string, string>? report = null, bool includeOwnProcess = false)
         {
-            this.select = select ?? (() => CaptureNativeHost.SelectBatch(0, CaptureTheme.Default, "Done"));
+            this.select = select ?? (() => RegionCaptureSession.SelectBatch(0, CaptureTheme.Default, "Done"));
             this.report = report;
             this.includeOwnProcess = includeOwnProcess;
             hotkey = new HotkeyWindow(Capture, Paste);
@@ -79,7 +82,7 @@ public static class CapturePasteTool
             menu.Items.Add("Quit", null, (_, _) => { if (!busy) ExitThread(); });
             tray = new NotifyIcon
             {
-                Icon = SystemIcons.Application, Text = "Zommi Capture · Shift+Alt+A capture · Alt+A paste", ContextMenuStrip = menu, Visible = true,
+                Icon = SystemIcons.Application, Text = "Focalet Capture · Shift+Alt+A capture · Alt+A paste", ContextMenuStrip = menu, Visible = true,
             };
             Notify("Ready", "Shift+Alt+A to capture. Then click the destination input and press Alt+A to paste.");
         }
@@ -181,7 +184,7 @@ public static class CapturePasteTool
         {
             this.capture = capture;
             this.paste = paste;
-            CreateHandle(new CreateParams { Caption = "Zommi Capture hotkeys", Parent = new nint(-3) });
+            CreateHandle(new CreateParams { Caption = "Focalet Capture hotkeys", Parent = new nint(-3) });
             if (!RegisterHotKey(Handle, 1, 0x4005, 0x41) || !RegisterHotKey(Handle, 2, 0x4001, 0x41))
             {
                 var error = Marshal.GetLastWin32Error();

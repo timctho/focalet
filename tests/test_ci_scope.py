@@ -22,6 +22,23 @@ class ScopeTests(unittest.TestCase):
             with self.subTest(paths=paths):
                 self.assertTrue(ci_scope.requires_native(paths))
 
+    def test_product_local_changes_select_only_their_native_lane(self):
+        for paths, expected in [
+            (["README.md", "docs/capture-tool.md"], (False, False)),
+            (["src/Zommi.CaptureTool/CapturePasteTool.cs", "docs/capture-tool.md"], (False, True)),
+            (["scripts/package-capture-tool.ps1"], (False, True)),
+            (["src/Zommi.Flutter/lib/main.dart"], (True, False)),
+            (["crates/zommi-core/src/lib.rs"], (True, False)),
+            (["src/Zommi.Capture.Core/CaptureModels.cs"], (True, True)),
+            (["src/Zommi.Capture.Windows/ContentSelectionForm.cs"], (True, True)),
+            (["src/Zommi.CaptureTool/A.cs", "src/Zommi.Flutter/lib/main.dart"], (True, True)),
+            (["src/Zommi.CaptureTool/../../something"], (True, True)),
+            ([".github/workflows/checks.yml"], (True, True)),
+            (None, (True, True)), ([], (True, True)), ([""], (True, True)),
+        ]:
+            with self.subTest(paths=paths):
+                self.assertEqual(ci_scope.required_products(paths), expected)
+
     def test_move_from_source_to_docs_still_requires_native_checks(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

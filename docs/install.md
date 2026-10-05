@@ -1,4 +1,8 @@
-# Install Zommi and connect your agent
+# Install Focalet Desktop and connect your agent
+
+**Focalet Desktop is currently distributed and displayed as Zommi.** This guide
+covers the dedicated chat app. To paste screen context into an app you already
+use, see [Focalet Capture](capture-tool.md); it needs no agent setup in Focalet.
 
 Zommi is a desktop companion for an agent you already use. If Codex, Pi, Hermes
 or another supported runtime already works in its own terminal, keep that

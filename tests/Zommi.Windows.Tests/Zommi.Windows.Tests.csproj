@@ -6,6 +6,7 @@
     <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../../src/Zommi.CaptureTool/Zommi.CaptureTool.csproj" />
     <ProjectReference Include="../../src/Zommi.Windows/Zommi.Windows.csproj" />
   </ItemGroup>
 </Project>

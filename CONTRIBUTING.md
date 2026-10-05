@@ -1,8 +1,41 @@
-# Contributing to Zommi
+# Contributing to Focalet
 
-Zommi connects a desktop selection to an existing agent. Keep credentials,
-canonical history, tools and permissions with that agent. See the
-[desktop reference](docs/desktop-reference.md) for the source layout.
+Focalet Capture and Focalet Desktop live in one repository with shared capture
+libraries. See [product use cases](docs/products.md) and the
+[component map](docs/desktop-reference.md). Existing technical identifiers retain
+Zommi for compatibility. Credentials, canonical history, tools and permissions
+stay with the user's selected agent.
+
+## Work on Capture independently
+
+The Windows tray app is in `src/Zommi.CaptureTool`; the shared Windows capture
+library is in `src/Zommi.Capture.Windows`. Capture does not depend on Flutter, the
+Desktop helper executable or the Rust agent broker.
+
+Install .NET SDK 8 and PowerShell 7 on Windows, then run:
+
+```powershell
+dotnet build src/Zommi.CaptureTool/Zommi.CaptureTool.csproj --configuration Release
+# Build the self-contained prototype ZIP from committed source:
+./scripts/package-capture-tool.ps1
+```
+
+For managed and Windows native tests, also install Python 3.10+ and run
+`python scripts/check.py --suite capture`. The interactive paste acceptance
+additionally uses Node.js 22 and the pinned Electron fixture:
+
+```powershell
+npm ci --prefix tests/clipboard-electron --ignore-scripts --no-audit --no-fund
+node tests/clipboard-electron/node_modules/electron/install.js
+dotnet run --project tests/Zommi.Windows.Tests --configuration Release -- --paste-acceptance
+```
+
+Run interactive acceptance on a disposable Windows desktop: it controls focus,
+keyboard input and the clipboard. The PR Capture job provides that environment
+without a personal browser profile or agent account. No Rust or Flutter setup is
+needed for these Capture checks. On Linux, the capture suite runs portable
+contracts and cross-compiles the Windows consumers; native interaction still
+requires Windows.
 
 ## Set up
 
@@ -146,15 +179,19 @@ an unexplained regression.
 
 The **PR checks** workflow runs for every PR, including forks, on disposable
 GitHub-hosted runners. Documentation and CI-policy checks always run. An explicit
-allowlist of Markdown and documentation media changes can skip native builds;
-source, dependency, workflow, build and unknown changes require Linux, Windows
-and both macOS architectures. It uses read-only repository access,
-no deployment secrets and pinned action revisions. It does not run fork code on
-maintainers' self-hosted machines. **PR checks passed** requires documentation to
-succeed and every applicable platform job to succeed. Native skips are accepted
-only when the scope job explicitly identified a documentation-only change.
-Unknown scope, failure and cancellation fail the gate. Rust and Flutter caches
-are separated by OS/toolchain; dependency lockfiles participate in cache keys.
+allowlist of Markdown and documentation media can skip native builds.
+Capture app, clipboard fixture or Capture packaging changes run the dedicated
+**Capture contracts (Windows)** job without Flutter or Rust. Desktop UI/runtime
+changes run Linux, Windows and both macOS Desktop jobs. Shared capture,
+dependency, workflow, build configuration and unknown changes run both products'
+native checks. A change touching both apps also runs both sets.
+
+**PR checks passed** requires documentation and each selected product's jobs to
+succeed. A skip is accepted only when the scope job explicitly excluded that
+product; missing scope, failure and cancellation fail the gate. CI uses read-only
+repository access, no deployment secrets and pinned action revisions. It does
+not run fork code on maintainers' persistent machines. Rust and Flutter caches
+are separated by OS/toolchain and dependency lockfiles.
 
 Repository maintainers should require **PR checks passed** in the `main` branch
 rules and require review for workflow changes. This file does not enable GitHub
