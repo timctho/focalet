@@ -56,7 +56,7 @@ def paint_stroke(cr, stroke):
 class Selector:
     def __init__(self, application, frames, complete):
         self.complete = complete
-        self.regions, self.windows, self.areas = [], [], []
+        self.regions, self.windows, self.areas, self.tool_buttons = [], [], [], []
         self.tool, self.color, self.drag = 'Select', (1, .15, .15), None
         self.frames = [(f, pixbuf(png_bytes(f['dataUrl']))) for f in frames]
         self.application = application
@@ -66,11 +66,19 @@ class Selector:
             window.set_icon_from_file(str(application.root / 'app-icon.png'))
             overlay = Gtk.Overlay(); area = Gtk.DrawingArea()
             overlay.add(area); window.add(overlay)
-            toolbar = Gtk.Box(spacing=6, margin=16, halign=Gtk.Align.CENTER, valign=Gtk.Align.START)
-            toolbar.get_style_context().add_class('toolbar')
-            label = Gtk.Label(label='Drag regions · Control adds · Enter finishes'); toolbar.pack_start(label, False, False, 4)
+            toolbar = Gtk.Box(spacing=6, margin=16, margin_top=44, halign=Gtk.Align.CENTER, valign=Gtk.Align.START)
+            toolbar.get_style_context().add_class('focalet-capture-toolbar')
+            style = Gtk.CssProvider()
+            style.load_from_data(b'.focalet-capture-toolbar { background: #172b3a; border: 1px solid #6e91a8; border-radius: 12px; padding: 8px; } .focalet-capture-hint { color: #ffffff; }')
+            toolbar.get_style_context().add_provider(style, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+            label = Gtk.Label(label='Drag regions · Ctrl adds')
+            label.get_style_context().add_class('focalet-capture-hint')
+            label.get_style_context().add_provider(style, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+            toolbar.pack_start(label, False, False, 4)
             for name in ('Select', 'Pen', 'Arrow', 'Box', 'Ellipse'):
                 button = Gtk.Button(label=name); button.connect('clicked', lambda _, n=name: self.set_tool(n)); toolbar.pack_start(button, False, False, 0)
+                self.tool_buttons.append((name, button))
+                if name == self.tool: button.get_style_context().add_class('suggested-action')
             color = Gtk.ColorButton(); color.set_rgba(Gdk.RGBA(1, .15, .15, 1))
             color.connect('color-set', lambda b: self.set_color(b.get_rgba())); toolbar.pack_start(color, False, False, 0)
             for title, action in (('Undo', self.undo), ('Cancel', self.cancel), ('Done', self.finish)):
@@ -93,6 +101,10 @@ class Selector:
 
     def set_tool(self, tool):
         self.tool = tool
+        for name, button in self.tool_buttons:
+            context = button.get_style_context()
+            if name == tool: context.add_class('suggested-action')
+            else: context.remove_class('suggested-action')
 
     def set_color(self, color):
         self.color = (color.red, color.green, color.blue)
@@ -102,7 +114,7 @@ class Selector:
             area.queue_draw()
 
     def key(self, window, event):
-        if event.keyval in (Gdk.KEY_Control_L, Gdk.KEY_Control_R): self.tool = 'Select'
+        if event.keyval in (Gdk.KEY_Control_L, Gdk.KEY_Control_R): self.set_tool('Select')
         elif event.keyval == Gdk.KEY_Escape: self.cancel()
         elif event.keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter): self.finish()
         elif event.keyval in (Gdk.KEY_BackSpace, Gdk.KEY_Delete): self.undo()
@@ -115,7 +127,7 @@ class Selector:
     def press(self, area, event, index):
         if event.button == 3: self.cancel(); return True
         if event.button != 1: return False
-        if event.state & Gdk.ModifierType.CONTROL_MASK: self.tool = 'Select'
+        if event.state & Gdk.ModifierType.CONTROL_MASK: self.set_tool('Select')
         point = self.local_point(event, index)
         if self.tool == 'Select': self.drag = (index, point, point, None)
         else:
