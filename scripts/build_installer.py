@@ -9,6 +9,7 @@ from pathlib import Path
 import platform
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 
@@ -71,6 +72,20 @@ def windows_installer(package: Path, output: Path, manifest: dict, compiler: str
     return asset
 
 
+def dmg_size_megabytes(layout: Path) -> int:
+    """Budget logical payload bytes, filesystem blocks and HFS+ metadata."""
+    payload = entries = 0
+    for path in layout.rglob("*"):
+        info = path.lstat()
+        entries += 1
+        if stat.S_ISREG(info.st_mode):
+            payload += ((info.st_size + 4095) // 4096) * 4096
+    # Source-folder auto-sizing can underestimate sparse/compressed binaries.
+    # Do not follow Applications or other bundle symlinks into the build host.
+    capacity = payload + payload // 5 + entries * 4096 + 32 * 1024 * 1024
+    return (capacity + 1024 * 1024 - 1) // (1024 * 1024)
+
+
 def macos_installer(package: Path, output: Path, manifest: dict, *, capture: bool = False) -> Path:
     if platform.system() != "Darwin":
         raise ValueError("DMG creation and verification must run on macOS.")
@@ -87,6 +102,7 @@ def macos_installer(package: Path, output: Path, manifest: dict, *, capture: boo
         (layout / "Applications").symlink_to("/Applications")
         shutil.copy2(Path(__file__).parents[1] / ("docs/capture-tool.md" if capture else "docs/install.md"), layout / "Install.txt")
         subprocess.run(["hdiutil", "create", "-volname", name, "-srcfolder", str(layout),
+                        "-fs", "HFS+", "-size", f"{dmg_size_megabytes(layout)}m",
                         "-format", "UDZO", "-ov", str(asset)], check=True)
         subprocess.run(["hdiutil", "verify", str(asset)], check=True)
         mounted.mkdir()
