@@ -112,7 +112,12 @@ internal static class ChromiumClipboardAcceptance
                     throw new InvalidOperationException("The synthetic source must expose the browser Group that previously stole the destination.");
                 input.Focus();
                 var focused = Stopwatch.StartNew();
-                while (!(await Evaluate($"document.hasFocus() && document.activeElement.id === '{id}'")).GetBoolean())
+                // Chromium updates DOM focus before its accessibility provider.
+                // Both channels must identify the intended input before testing
+                // saved native focus identity or injecting a clipboard payload.
+                while (!input.Properties.HasKeyboardFocus.ValueOrDefault ||
+                    automation.FocusedElement()?.Properties.Name.ValueOrDefault != name ||
+                    !(await Evaluate($"document.hasFocus() && document.activeElement.id === '{id}'")).GetBoolean())
                 {
                     if (focused.ElapsedMilliseconds > 2000) throw new InvalidOperationException("Native accessibility did not focus the fixture input.");
                     await Task.Delay(25, token);
@@ -145,7 +150,10 @@ internal static class ChromiumClipboardAcceptance
             };
             await Evaluate("chat.setSelectionRange(13,13);true");
             var target = CapturePasteTarget.RememberWindow() ?? throw new InvalidOperationException("Browser input not focused.");
-            target = CapturePasteTarget.ObserveInput(inputAutomation, target).Target;
+            var observation = CapturePasteTarget.ObserveInput(inputAutomation, target);
+            if (observation.Kind != CaptureInputKind.Input)
+                throw new InvalidOperationException("The fixture input has no native focus identity: " + observation.Kind);
+            target = observation.Target;
             await FocusInput("plain");
             if (await target.IsInputCurrentAsync()) throw new InvalidOperationException("A different browser input accepted the saved editor identity.");
             // The user selects the input and caret before invoking paste.

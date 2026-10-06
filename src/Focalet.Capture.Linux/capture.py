@@ -57,6 +57,19 @@ class Capture(Gtk.Application):
         self.connect('activate', self.activate)
         self.connect('shutdown', self.shutdown)
 
+    @property
+    def busy(self):
+        return self._busy
+
+    @busy.setter
+    def busy(self, value):
+        self._busy = value
+        if getattr(self, 'connected', False):
+            try:
+                self.call('SetCaptureBusy', (value,))
+            except GLib.Error:
+                self.connected = False
+
     def activate(self, *_):
         if not hasattr(self, 'held'):
             self.hold(); self.held = True
@@ -97,7 +110,8 @@ class Capture(Gtk.Application):
             self.selector.cancel(); self.selector = None
 
     def call(self, method, value=None):
-        params = GLib.Variant('(s)', value) if value is not None else None
+        signature = '(b)' if method == 'SetCaptureBusy' else '(s)'
+        params = GLib.Variant(signature, value) if value is not None else None
         return self.proxy.call_sync(method, params, Gio.DBusCallFlags.NONE, 1500, None).unpack()
 
     def report(self, text):

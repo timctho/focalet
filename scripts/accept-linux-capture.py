@@ -33,6 +33,12 @@ def main():
         def drag(x, y, w, h):
             session.driver('Motion', x, y); session.driver('Button', 'true')
             time.sleep(.1); session.driver('Motion', x+w, y+h); time.sleep(.1); session.driver('Button', 'false'); time.sleep(.2)
+        def focus_fixture(pid):
+            session.driver('Ready')  # Leave GNOME's startup overview before choosing an input.
+            session.driver('Activate', pid)
+            wayland.wait('focused fixture outside overview', lambda: status()['available'] and
+                json.loads(session.driver('Window', pid)[0]).get('focused'))
+            time.sleep(.3)
         def choose_tool(name):
             import pyatspi
             for app in pyatspi.Registry.getDesktop(0):
@@ -53,7 +59,7 @@ def main():
             events_path = Path(directory)/'received.json'
             fixture = session.start('receiver', ['/usr/bin/python3', ROOT/'tests/fixtures/capture-paste-gtk.py', events_path])
             wayland.wait('synthetic receiver', lambda: events_path.exists())
-            session.driver('Activate', fixture.pid); time.sleep(.4)
+            focus_fixture(fixture.pid)
             window = json.loads(session.driver('Window', fixture.pid)[0])
             hotkey(capture=True)
             print('After capture shortcut:', status(), flush=True)
@@ -69,7 +75,10 @@ def main():
             wayland.wait('two captured regions', lambda: '2 regions ready' in status().get('captureStatus', ''), seconds=60)
             def events(): return json.loads(events_path.read_text())
             for count in (4, 8):
-                session.driver('Activate', fixture.pid); time.sleep(.2); hotkey()
+                focus_fixture(fixture.pid); hotkey()
+                if count == 4:
+                    wayland.wait('first image read', lambda: len(events()) >= 1, seconds=10)
+                    hotkey()  # Busy presses must leave the active paste lease alone.
                 wayland.wait('ordered image/context paste', lambda: len(events()) >= count, seconds=15)
                 current = events()
                 assert [e['type'] for e in current] == ['image', 'text', 'image', 'text']*(count//4), current
@@ -87,7 +96,7 @@ def main():
             fallback_path = Path(directory)/'fallback.json'
             fallback = session.start('text-receiver', ['/usr/bin/python3', ROOT/'tests/fixtures/capture-paste-gtk.py', fallback_path, '--text-only'])
             wayland.wait('text receiver', lambda: fallback_path.exists())
-            session.driver('Activate', fallback.pid); time.sleep(.4); hotkey()
+            focus_fixture(fallback.pid); hotkey()
             wayland.wait('text fallback', lambda: len(json.loads(fallback_path.read_text())) == 2, seconds=15)
             assert [e['type'] for e in json.loads(fallback_path.read_text())] == ['text', 'text']
             capture.terminate(); capture.wait(timeout=10)

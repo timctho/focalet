@@ -15,6 +15,7 @@ const INTERFACE = `<node><interface name="com.focalet.Desktop">
   <method name="Snapshot"><arg type="s" direction="out"/></method>
   <method name="Present"><arg type="u" direction="in"/><arg type="b" direction="out"/></method>
   <method name="RegisterCapture"><arg type="b" direction="out"/></method>
+  <method name="SetCaptureBusy"><arg type="b" direction="in"/></method>
   <method name="CaptureState"><arg type="s" direction="in"/></method>
   <method name="RestoreCapture"><arg type="s" direction="in"/><arg type="b" direction="out"/></method>
   <method name="Paste"><arg type="s" direction="in"/><arg type="b" direction="out"/></method>
@@ -140,6 +141,7 @@ export default class FocaletExtension extends Extension {
 
     _captureAction(action) {
         if (!this._captureOwner || !this._status().available) return;
+        if (this._captureBusy && (action === 'capture' || action === 'paste')) return;
         let token = '';
         if (action === 'paste' || action === 'capture') {
             const window = global.display.focus_window;
@@ -153,6 +155,10 @@ export default class FocaletExtension extends Extension {
             'com.focalet.Desktop', 'CaptureAction', new GLib.Variant('(ss)', [action, token]));
     }
     _authorized(invocation) { return this._captureOwner && invocation.get_sender() === this._captureOwner; }
+    SetCaptureBusyAsync([busy], invocation) {
+        if (this._authorized(invocation)) this._captureBusy = busy;
+        invocation.return_value(null);
+    }
     CaptureStateAsync([text], invocation) {
         if (this._authorized(invocation)) this._captureStatus.label.text = text.slice(0, 180);
         invocation.return_value(null);
@@ -200,7 +206,7 @@ export default class FocaletExtension extends Extension {
         Main.wm.removeKeybinding('capture-content');
         if (this._watch) Gio.bus_unwatch_name(this._watch);
         this._watch = 0; this._captureOwner = null; this._lease = null; this._captureSession = null;
-        this._panel?.destroy(); this._panel = null; this._keyboard = null; this._pointer = null;
+        this._panel?.destroy(); this._panel = null; this._captureBusy = false; this._captureStatus = null; this._keyboard = null; this._pointer = null;
     }
 
     disable() {
