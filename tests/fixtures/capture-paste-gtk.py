@@ -26,6 +26,7 @@ def pasted(widget, event):
             def image_received(board, selection, _):
                 data = bytes(selection.get_data()); loader = GdkPixbuf.PixbufLoader.new_with_type('png'); loader.write(data); loader.close()
                 image = loader.get_pixbuf()
+                output.with_name(f'{output.stem}-image-{len(events)}.png').write_bytes(data)
                 events.append({'type': 'image', 'width': image.get_width(), 'height': image.get_height(), 'sha256': hashlib.sha256(data).hexdigest()})
                 output.write_text(json.dumps(events))
             board.request_contents(Gdk.Atom.intern('image/png', False), image_received, None)

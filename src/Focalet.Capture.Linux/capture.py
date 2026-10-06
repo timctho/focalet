@@ -50,6 +50,7 @@ class Capture(Gtk.Application):
             self.preferences = json.loads(self.preference_file.read_text())
         except (OSError, ValueError):
             self.preferences = {}
+        if not isinstance(self.preferences, dict): self.preferences = {}
         self.token, self.source_token = '', ''
         self.focus_changed, self.focused = False, None
         self.clipboard = Clipboard(self.root / 'libfocalet-clipboard.so')
@@ -59,6 +60,7 @@ class Capture(Gtk.Application):
     def activate(self, *_):
         if not hasattr(self, 'held'):
             self.hold(); self.held = True
+            Atspi.init()
             Atspi.set_timeout(200, 200)
             self.listener = Atspi.EventListener.new(self.focus_event, None)
             self.listener.register('object:state-changed:focused')
@@ -99,6 +101,7 @@ class Capture(Gtk.Application):
         return self.proxy.call_sync(method, params, Gio.DBusCallFlags.NONE, 1500, None).unpack()
 
     def report(self, text):
+        if os.environ.get("FOCALET_CAPTURE_DIAGNOSTICS") == "1": print(text, flush=True)
         if self.connected:
             try:
                 self.call('CaptureState', (text,))

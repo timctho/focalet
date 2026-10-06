@@ -52,7 +52,8 @@ final class ClipboardPayload: NSObject, NSPasteboardItemDataProvider {
   }
 }
 
-final class BrowserHelper {
+final class BrowserHelper: @unchecked Sendable {
+  private let queue = DispatchQueue(label: "com.focalet.capture.browser")
   private let process = Process()
   private let input = Pipe()
   private let output = Pipe()
@@ -64,7 +65,7 @@ final class BrowserHelper {
   }
   func request(_ method: String, _ params: [String: Any] = [:]) async throws -> [String: Any] {
     try await withCheckedThrowingContinuation { continuation in
-      DispatchQueue.global(qos: .userInitiated).async {
+      queue.async {
         let deadline = DispatchWorkItem { [weak self] in if self?.process.isRunning == true { self?.process.terminate() } }
         DispatchQueue.global().asyncAfter(deadline: .now() + 25, execute: deadline)
         defer { deadline.cancel() }
@@ -95,6 +96,7 @@ private func axAttribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
   return AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success ? value : nil
 }
 
+@MainActor
 struct PasteTarget {
   let pid: pid_t
   let birth: String?

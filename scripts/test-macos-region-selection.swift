@@ -1,6 +1,6 @@
 import Cocoa
 
-// Compile together with Runner/MacRegionSelector.swift. Exercises selection
+// Compile together with src/Focalet.Capture.Mac/MacRegionSelector.swift. Exercises selection
 // and Retina crop geometry without screen access, UI input, or user data.
 @main
 struct MacRegionSelectionTests {
@@ -38,6 +38,15 @@ struct MacRegionSelectionTests {
     let decoded = NSBitmapImageRep(data: png)!
     assert(decoded.pixelsWide == 200 && decoded.pixelsHigh == 140)
     assert(decoded.colorAt(x: 10, y: 10)!.redComponent > 0.9)
+    let stroke = MacCaptureStroke(tool: "Arrow", points: [CGPoint(x: 30, y: 40), CGPoint(x: 100, y: 60)], color: .blue)
+    let annotated = try! MacCaptureStroke.render(cropped, state.regions[0].rect, [stroke])
+    let marked = NSBitmapImageRep(data: annotated)!
+    assert(marked.pixelsWide == decoded.pixelsWide && marked.pixelsHigh == decoded.pixelsHigh)
+    assert(marked.colorAt(x: 190, y: 130)!.redComponent > 0.9, "Unmarked pixels changed")
+    assert(marked.colorAt(x: 90, y: 40)!.blueComponent > 0.9, "Retina annotation coordinates drifted")
+    assert(decoded.colorAt(x: 90, y: 40)!.redComponent > 0.9, "Annotation mutated the frozen source")
+    let description = stroke.metadata(state.regions[0].rect, 200, 140)
+    assert(description["coordinateSpace"] as? String == "image-pixels")
     for _ in 0..<10 { state.undo() }
     assert(state.regions.isEmpty)
     let birth = MacRegionCaptureBackend.processStartToken(getpid())

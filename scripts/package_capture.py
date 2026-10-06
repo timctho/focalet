@@ -79,7 +79,7 @@ def package(target: str, output: Path):
             shutil.copytree(source/'src/Focalet.Gnome', extension)
             run('glib-compile-schemas', extension/'schemas')
             launcher = destination/'focalet-capture'
-            launcher.write_text('#!/bin/sh\nexec /usr/bin/python3 "$(dirname "$(readlink -f "$0")")/capture.py" "$@"\n')
+            launcher.write_text('#!/bin/sh\nexport PYTHONDONTWRITEBYTECODE=1\nexec /usr/bin/python3 "$(dirname "$(readlink -f "$0")")/capture.py" "$@"\n')
             launcher.chmod(0o755); entry = launcher.name
         else:
             run('dotnet', 'publish', source/'src/Focalet.CaptureTool/Focalet.CaptureTool.csproj', '--configuration', 'Release',

@@ -28,14 +28,27 @@ def main():
             return json.loads(session.bus('com.focalet.Desktop', '/com/focalet/Desktop', 'com.focalet.Desktop.Status')[0])
         def hotkey(capture=False):
             if capture: session.driver('Key', 0xFFE1, 'true')
-            session.driver('Key', 0xFFE9, 'true'); session.key(ord('a')); session.driver('Key', 0xFFE9, 'false')
+            session.driver('Key', 0xFFE9, 'true'); session.key(ord('A') if capture else ord('a')); session.driver('Key', 0xFFE9, 'false')
             if capture: session.driver('Key', 0xFFE1, 'false')
         def drag(x, y, w, h):
             session.driver('Motion', x, y); session.driver('Button', 'true')
             time.sleep(.1); session.driver('Motion', x+w, y+h); time.sleep(.1); session.driver('Button', 'false'); time.sleep(.2)
+        def choose_tool(name):
+            import pyatspi
+            for app in pyatspi.Registry.getDesktop(0):
+                pending = [app]
+                while pending:
+                    element = pending.pop()
+                    try:
+                        if element.getRoleName() == 'push button' and element.name == name:
+                            element.queryAction().doAction(0); return True
+                        pending.extend(element)
+                    except Exception:
+                        pass
+            return False
         try:
             session.start_desktop()
-            capture = session.start('capture', [args.package/'focalet-capture'])
+            capture = session.start('capture', [args.package/'focalet-capture'], env={**session.env, 'FOCALET_CAPTURE_DIAGNOSTICS': '1'})
             wayland.wait('Capture panel and shortcuts', lambda: status().get('captureConnected'))
             events_path = Path(directory)/'received.json'
             fixture = session.start('receiver', ['/usr/bin/python3', ROOT/'tests/fixtures/capture-paste-gtk.py', events_path])
@@ -43,11 +56,14 @@ def main():
             session.driver('Activate', fixture.pid); time.sleep(.4)
             window = json.loads(session.driver('Window', fixture.pid)[0])
             hotkey(capture=True)
+            print('After capture shortcut:', status(), flush=True)
             wayland.wait('portal authorization', lambda: session.portal_action(), seconds=30)
             wayland.wait('selector window', lambda: bool(json.loads(session.driver('Window', capture.pid)[0])), seconds=30)
             time.sleep(.4)
             x, y = int(window['x'])+45, int(window['y'])+80
             drag(x, y, 430, 80); drag(x, y+125, 490, 85)
+            wayland.wait('Arrow drawing tool', lambda: choose_tool('Arrow'))
+            drag(x+20, y+20, 150, 30)
             session.driver('Snapshot', str(args.output.resolve()/'selected-regions.png'))
             session.key(0xFF0D)
             wayland.wait('two captured regions', lambda: '2 regions ready' in status().get('captureStatus', ''), seconds=60)
@@ -59,8 +75,15 @@ def main():
                 assert [e['type'] for e in current] == ['image', 'text', 'image', 'text']*(count//4), current
                 assert '[A]' in current[-3]['text'] and '[B]' in current[-1]['text'], current
                 assert 'Captured metadata (JSON):' in current[-1]['text']
+                assert 'Capture fixture A' in current[-3]['text'], current[-3]
+                assert 'Capture fixture B' in current[-1]['text'], current[-1]
+                assert '"tool":"arrow"' in current[-3]['text'], current[-3]
                 assert (current[-4]['width'], current[-4]['height']) == (430, 80), current
                 assert (current[-2]['width'], current[-2]['height']) == (490, 85), current
+            from PIL import Image
+            image = Image.open(events_path.with_name('received-image-0.png')).convert('RGB')
+            assert sum(1 for r,g,b in image.getdata() if r > 200 and g < 100 and b < 100) > 80, 'Annotation pixels missing'
+            image.save(args.output/'pasted-annotated-region.png')
             fallback_path = Path(directory)/'fallback.json'
             fallback = session.start('text-receiver', ['/usr/bin/python3', ROOT/'tests/fixtures/capture-paste-gtk.py', fallback_path, '--text-only'])
             wayland.wait('text receiver', lambda: fallback_path.exists())
@@ -73,6 +96,11 @@ def main():
                 'repeatPaste': True, 'textFallback': True, 'panelLifecycle': True}))
             print('PASS native Capture: two images/context in order, repeat paste, text fallback and panel cleanup.')
         finally:
+            try:
+                (args.output/'final-status.json').write_text(json.dumps(status()))
+                session.driver('Snapshot', str(args.output.resolve()/'final-desktop.png'))
+            except Exception:
+                pass
             session.close()
     return 0
 
