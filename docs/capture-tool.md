@@ -50,11 +50,19 @@ automatically. Known protected fields are excluded. Destination accessibility
 checks inspect identity and state, not input text. The receiving app controls
 whether it accepts images and where attachments appear.
 
+On Windows, attaching an image can briefly move focus to the containing page.
+Capture waits up to 1.5 seconds for the original input to regain focus, without
+moving the caret or sending the image again. A different input, window or replaced
+clipboard still stops the sequence. Presses while pasting do not queue another
+batch; briefly held shortcut keys pause the current sequence until released.
+
 ## Menu and clipboard
 
 The system tray, menu bar or GNOME panel provides **Capture**, **Copy last batch**,
 **Copy text**, preferences, and **Quit**. Text-only and slower-image preferences
 are in the menu on Windows/Mac and **Preferences** on Ubuntu.
+Windows uses the same smooth rounded menu design as Desktop, with keyboard
+navigation and native accessible actions and checkboxes.
 
 Each automatic image step offers only image formats: PNG/DIB/RTF on Windows,
 PNG/TIFF on Mac, and PNG on Ubuntu. GNOME owns Ubuntu clipboard transfers

@@ -12,9 +12,10 @@ internal static class ElectronClipboardAcceptance
         var fixture = Path.GetFullPath("tests/clipboard-electron");
         var electron = Path.Combine(fixture, "node_modules/electron/dist/electron.exe");
         if (!File.Exists(electron)) throw new InvalidOperationException("Install the locked tests/clipboard-electron dependencies first.");
-        foreach (var mode in new[] { "terminal", "native-chat" })
+        foreach (var mode in new[] { "terminal", "native-chat", "native-chat-transient-focus", "native-chat-other-input" })
         foreach (var slowerImages in new[] { false, true })
         {
+            if (slowerImages && mode is "native-chat-transient-focus" or "native-chat-other-input") continue;
             var pace = slowerImages ? "slower" : "fast";
             var temporary = Path.Combine(Path.GetTempPath(), "focalet-electron-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(temporary);
@@ -37,9 +38,23 @@ internal static class ElectronClipboardAcceptance
                 input.Focus();
                 await ForegroundRoutingAcceptance.WaitFor(() => input.Properties.HasKeyboardFocus.ValueOrDefault, "Electron input did not acquire focus.");
                 target = CapturePasteTarget.RememberWindow() ?? throw new InvalidOperationException("Electron input was not current.");
+                var observation = await Task.Run(() => CapturePasteTarget.ObserveInput(automation, target));
+                if (observation.Kind != CaptureInputKind.Input) throw new InvalidOperationException("Electron editor was not recognized as the chosen input.");
+                target = observation.Target;
                 var elapsed = Stopwatch.StartNew();
                 var result = await CapturePasteSequence.PasteAsync(batch, target, false, slowerImages);
                 elapsed.Stop();
+                if (mode == "native-chat-other-input")
+                {
+                    if (result.StoppedBecause is null || result.StepsSent != 1)
+                        throw new InvalidOperationException("Paste continued into a different editor: " + result);
+                    await Task.Delay(500);
+                    using var stopped = JsonDocument.Parse(File.ReadAllText(Path.Combine(temporary, "result.json")));
+                    if (stopped.RootElement.GetProperty("events").GetArrayLength() != 1)
+                        throw new InvalidOperationException("Changing editors dispatched more than the first image.");
+                    Console.WriteLine("PASS Electron paste stops after the accepted image when a different editor gains focus.");
+                    continue;
+                }
                 if (result.StoppedBecause is not null) throw new InvalidOperationException("Electron sequence stopped: " + result);
                 await Task.Delay(1800);
                 var json = File.ReadAllText(Path.Combine(temporary, "result.json"));

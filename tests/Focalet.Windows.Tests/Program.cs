@@ -6,6 +6,7 @@ using Focalet.Windows;
 
 if (args.Length == 2 && args[0] == "--console-receiver") return ConsoleRoutingAcceptance.Receive(args[1]);
 if (args.Contains("--paste-acceptance", StringComparer.Ordinal)) return ClipboardAcceptance.Run();
+if (args.Contains("--tray-menu-acceptance", StringComparer.Ordinal)) return CaptureTrayMenuAcceptance.Run();
 if (args.Contains("--browser-focus-acceptance", StringComparer.Ordinal)) return ClipboardAcceptance.Run(focusOnly: true);
 
 var tests = new (string Name, Action Run)[]

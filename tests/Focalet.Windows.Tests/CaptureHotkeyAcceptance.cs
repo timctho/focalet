@@ -47,6 +47,13 @@ internal static class CaptureHotkeyAcceptance
         SendHotkey(capture: false);
         await ForegroundRoutingAcceptance.WaitFor(() => context.Busy, "Paste did not start.");
         SendHotkey(capture: false); // A press while busy must not queue another batch.
+        await ForegroundRoutingAcceptance.WaitFor(() => Count(rich.Rtf!, @"\pict") >= 1, "The first image was not dispatched.");
+        // Real shortcut presses hold Alt across multiple paste-loop ticks.
+        // Ignore the busy invocation and wait for release without duplicating
+        // or abandoning the already accepted image.
+        SendHotkey(capture: false, releaseAlt: false);
+        try { await Task.Delay(250); }
+        finally { SendInput(1, [Key(0x12, true)], Marshal.SizeOf<Input>()); }
         await ForegroundRoutingAcceptance.WaitFor(() => Count(rich.Rtf!, @"\pict") == 2 && !context.Busy, "Alt+A did not paste the pending batch.", 20000);
         if (notices.Count != 0) throw new InvalidOperationException("Successful paste displayed a notification.");
         // RichEdit represents each pasted image as a space in Text and strips
@@ -116,13 +123,13 @@ internal static class CaptureHotkeyAcceptance
 
     private static int Count(string value, string part) => value.Split(part, StringSplitOptions.None).Length - 1;
 
-    private static void SendHotkey(bool capture)
+    private static void SendHotkey(bool capture, bool releaseAlt = true)
     {
         var keys = new List<Input> { Key(0x12) };
         if (capture) keys.Add(Key(0x10));
         keys.Add(Key(0x41)); keys.Add(Key(0x41, true));
         if (capture) keys.Add(Key(0x10, true));
-        keys.Add(Key(0x12, true));
+        if (releaseAlt) keys.Add(Key(0x12, true));
         if (SendInput((uint)keys.Count, keys.ToArray(), Marshal.SizeOf<Input>()) != keys.Count)
             throw new InvalidOperationException("Could not dispatch the fixture hotkey.");
     }
