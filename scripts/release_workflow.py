@@ -91,7 +91,7 @@ def main() -> None:
         return
     command = [sys.executable, str(ROOT / "scripts/publish_release.py"),
                "--repository", os.environ["GITHUB_REPOSITORY"], "--tag", tag,
-               "--expected-commit", commit, "--platforms", profile, "--output", "artifacts/release"]
+               "--expected-commit", commit, "--platforms", profile, "--include-capture", "--output", "artifacts/release"]
     for metadata in sorted((ROOT / "artifacts/installers").rglob("*.release.json")):
         command += ["--metadata", str(metadata)]
     if not prerelease:

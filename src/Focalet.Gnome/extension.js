@@ -2,6 +2,10 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
+import Clutter from 'gi://Clutter';
+import St from 'gi://St';
+import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
+import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as Config from 'resource:///org/gnome/shell/misc/config.js';
@@ -10,6 +14,13 @@ const INTERFACE = `<node><interface name="com.focalet.Desktop">
   <method name="Status"><arg type="s" direction="out"/></method>
   <method name="Snapshot"><arg type="s" direction="out"/></method>
   <method name="Present"><arg type="u" direction="in"/><arg type="b" direction="out"/></method>
+  <method name="RegisterCapture"><arg type="b" direction="out"/></method>
+  <method name="CaptureState"><arg type="s" direction="in"/></method>
+  <method name="RestoreCapture"><arg type="s" direction="in"/><arg type="b" direction="out"/></method>
+  <method name="Paste"><arg type="s" direction="in"/><arg type="b" direction="out"/></method>
+  <method name="PasteReady"><arg type="s" direction="in"/><arg type="b" direction="out"/></method>
+  <method name="ReleaseCapture"/>
+  <signal name="CaptureAction"><arg type="s"/><arg type="s"/></signal>
   <signal name="SelectContent"/>
 </interface></node>`;
 
@@ -28,13 +39,15 @@ export default class FocaletExtension extends Extension {
         this._settings = this.getSettings();
         Main.wm.addKeybinding('select-content', this._settings,
             Meta.KeyBindingFlags.IGNORE_AUTOREPEAT, Shell.ActionMode.NORMAL,
-            () => this._service?.emit_signal('SelectContent', new GLib.Variant('()', [])));
+            () => this._captureOwner ? this._captureAction('paste') : this._service?.emit_signal('SelectContent', new GLib.Variant('()', [])));
+        this._lease = null; this._captureSession = null;
     }
 
     _status() {
-        return {schemaVersion: 1, integrationVersion: 2, sessionId: this._sessionId,
+        return {schemaVersion: 1, integrationVersion: 3, sessionId: this._sessionId,
             sessionType: Meta.is_wayland_compositor() ? 'wayland' : 'x11',
-            shellVersion: Config.PACKAGE_VERSION,
+            shellVersion: Config.PACKAGE_VERSION, captureConnected: Boolean(this._captureOwner),
+            captureStatus: this._captureStatus?.label.text ?? '',
             available: !Main.overview.visible && !Main.sessionMode.isLocked && Main.modalCount === 0};
     }
 
@@ -98,7 +111,100 @@ export default class FocaletExtension extends Extension {
         return false;
     }
 
+    RegisterCaptureAsync(_args, invocation) {
+        const owner = invocation.get_sender();
+        if (this._captureOwner && this._captureOwner !== owner) {
+            invocation.return_value(new GLib.Variant('(b)', [false])); return;
+        }
+        if (!this._captureOwner) {
+            this._captureOwner = owner;
+            this._watch = Gio.bus_watch_name_on_connection(Gio.DBus.session, owner,
+                Gio.BusNameWatcherFlags.NONE, null, () => this._releaseCapture());
+            this._keyboard = Clutter.get_default_backend().get_default_seat().create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
+            this._pointer = Clutter.get_default_backend().get_default_seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
+            Main.wm.addKeybinding('capture-content', this._settings,
+                Meta.KeyBindingFlags.IGNORE_AUTOREPEAT, Shell.ActionMode.NORMAL, () => this._captureAction('capture'));
+            this._panel = new PanelMenu.Button(0.0, 'Focalet Capture');
+            this._panel.add_child(new St.Icon({gicon: Gio.icon_new_for_string(`${this.path}/focalet-symbolic.svg`), style_class: 'system-status-icon'}));
+            this._captureStatus = new PopupMenu.PopupMenuItem('No capture ready', {reactive: false});
+            this._panel.menu.addMenuItem(this._captureStatus);
+            for (const [title, action] of [['Capture · Shift+Alt+A', 'capture'], ['Copy last batch', 'copy'],
+                ['Copy text', 'copy-text'], ['Preferences…', 'preferences'], ['About Focalet Capture', 'about'], ['Quit', 'quit']]) {
+                const item = new PopupMenu.PopupMenuItem(title);
+                item.connect('activate', () => GLib.idle_add(GLib.PRIORITY_DEFAULT, () => { this._captureAction(action); return GLib.SOURCE_REMOVE; })); this._panel.menu.addMenuItem(item);
+            }
+            Main.panel.addToStatusArea('focalet-capture', this._panel);
+        }
+        invocation.return_value(new GLib.Variant('(b)', [true]));
+    }
+
+    _captureAction(action) {
+        if (!this._captureOwner || !this._status().available) return;
+        let token = '';
+        if (action === 'paste' || action === 'capture') {
+            const window = global.display.focus_window;
+            if (!window) return;
+            token = GLib.uuid_string_random();
+            const state = {token, window, until: GLib.get_monotonic_time() + 60000000};
+            if (action === 'paste') this._lease = state;
+            else this._captureSession = {...state, pointer: global.get_pointer().slice(0, 2)};
+        }
+        Gio.DBus.session.emit_signal(this._captureOwner, '/com/focalet/Desktop',
+            'com.focalet.Desktop', 'CaptureAction', new GLib.Variant('(ss)', [action, token]));
+    }
+    _authorized(invocation) { return this._captureOwner && invocation.get_sender() === this._captureOwner; }
+    CaptureStateAsync([text], invocation) {
+        if (this._authorized(invocation)) this._captureStatus.label.text = text.slice(0, 180);
+        invocation.return_value(null);
+    }
+    RestoreCaptureAsync([token], invocation) {
+        const state = this._captureSession;
+        const valid = this._authorized(invocation) && state?.token === token && this._status().available &&
+            global.get_window_actors().some(a => a.meta_window === state.window);
+        this._captureSession = null;
+        if (valid) {
+            state.window.activate(global.get_current_time());
+            this._pointer.notify_absolute_motion(GLib.get_monotonic_time(), ...state.pointer);
+        }
+        invocation.return_value(new GLib.Variant('(b)', [Boolean(valid)]));
+    }
+    _pasteReady(token, invocation) {
+        const state = this._lease;
+        const mask = Clutter.ModifierType.SHIFT_MASK | Clutter.ModifierType.CONTROL_MASK |
+            Clutter.ModifierType.MOD1_MASK | Clutter.ModifierType.SUPER_MASK;
+        const valid = this._authorized(invocation) && state?.token === token && this._status().available &&
+            state.until > GLib.get_monotonic_time() && state.window === global.display.focus_window;
+        if (!valid) { this._lease = null; return false; }
+        return (global.get_pointer()[2] & mask) === 0;
+    }
+    PasteReadyAsync([token], invocation) {
+        invocation.return_value(new GLib.Variant('(b)', [this._pasteReady(token, invocation)]));
+    }
+    PasteAsync([token], invocation) {
+        const ready = this._pasteReady(token, invocation);
+        if (ready) {
+            const now = GLib.get_monotonic_time();
+            // Balanced virtual key events leave physical modifier state alone.
+            this._keyboard.notify_keyval(now, Clutter.KEY_Control_L, Clutter.KeyState.PRESSED);
+            this._keyboard.notify_keyval(now+1, Clutter.KEY_v, Clutter.KeyState.PRESSED);
+            this._keyboard.notify_keyval(now+2, Clutter.KEY_v, Clutter.KeyState.RELEASED);
+            this._keyboard.notify_keyval(now+3, Clutter.KEY_Control_L, Clutter.KeyState.RELEASED);
+        }
+        invocation.return_value(new GLib.Variant('(b)', [ready]));
+    }
+    ReleaseCaptureAsync(_args, invocation) {
+        if (this._authorized(invocation)) this._releaseCapture();
+        invocation.return_value(null);
+    }
+    _releaseCapture() {
+        Main.wm.removeKeybinding('capture-content');
+        if (this._watch) Gio.bus_unwatch_name(this._watch);
+        this._watch = 0; this._captureOwner = null; this._lease = null; this._captureSession = null;
+        this._panel?.destroy(); this._panel = null; this._keyboard = null; this._pointer = null;
+    }
+
     disable() {
+        this._releaseCapture();
         Main.wm.removeKeybinding('select-content');
         this._service?.unexport();
         this._service = null;

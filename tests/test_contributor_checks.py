@@ -71,35 +71,35 @@ class ContributorChecksTests(unittest.TestCase):
                     if step["uses"].startswith("actions/checkout@"):
                         self.assertEqual(step["with"]["persist-credentials"], "false")
         gate = workflow["jobs"]["required"]
-        self.assertEqual(set(gate["needs"]), {"documentation", "contracts", "windows", "macos", "capture_windows"})
+        self.assertEqual(set(gate["needs"]), {"documentation", "contracts", "windows", "macos", "capture_windows", "capture_unix"})
         self.assertEqual(gate["if"], "always()")
         command = gate["steps"][0]["run"]
         capture_job = workflow["jobs"]["capture_windows"]
         self.assertEqual(capture_job["if"], "needs.documentation.outputs.capture_required == 'true'")
         # Exercise the gate across both product scopes, including unknown scope,
         # failed/cancelled jobs and jobs incorrectly skipped or run.
-        for desktop, capture, linux, windows, macos, capture_result in itertools.product(
+        for desktop, capture, linux, windows, macos, capture_result, capture_unix in itertools.product(
             ["true", "false", ""], ["true", "false", ""],
-            *([["success", "failure", "skipped", "cancelled"]] * 4),
+            *([["success", "failure", "skipped", "cancelled"]] * 5),
         ):
             environment = {
                 "DOCS_RESULT": "success", "DESKTOP_REQUIRED": desktop, "CAPTURE_REQUIRED": capture,
                 "LINUX_RESULT": linux, "WINDOWS_RESULT": windows, "MACOS_RESULT": macos,
-                "CAPTURE_RESULT": capture_result,
+                "CAPTURE_RESULT": capture_result, "CAPTURE_UNIX_RESULT": capture_unix,
             }
             result = subprocess.run(["bash", "-c", command], env=environment, capture_output=True)
             expected = (
                 ((desktop == "true" and linux == windows == macos == "success")
                  or (desktop == "false" and linux == windows == macos == "skipped"))
-                and ((capture == "true" and capture_result == "success")
-                     or (capture == "false" and capture_result == "skipped"))
+                and ((capture == "true" and capture_result == capture_unix == "success")
+                     or (capture == "false" and capture_result == capture_unix == "skipped"))
             )
             self.assertEqual(result.returncode == 0, expected, environment)
         for docs in ["failure", "skipped", "cancelled", ""]:
             result = subprocess.run(["bash", "-c", command], env={
                 "DOCS_RESULT": docs, "DESKTOP_REQUIRED": "true", "CAPTURE_REQUIRED": "true",
                 "LINUX_RESULT": "success", "WINDOWS_RESULT": "success", "MACOS_RESULT": "success",
-                "CAPTURE_RESULT": "success",
+                "CAPTURE_RESULT": "success", "CAPTURE_UNIX_RESULT": "success",
             }, capture_output=True)
             self.assertNotEqual(result.returncode, 0)
 

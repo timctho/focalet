@@ -91,7 +91,7 @@ jobs:
         run: |
           sudo apt-get update
           # Keep the native GNOME test dependencies without optional desktop apps and wallpapers.
-          sudo apt-get install --no-install-recommends -y binutils clang cmake ninja-build pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-pipewire gstreamer1.0-plugins-base libepoxy-dev libayatana-appindicator3-dev libx11-dev libsqlite3-dev libasound2t64 ffmpeg dpkg-dev desktop-file-utils dbus-x11 at-spi2-core dconf-gsettings-backend libgl1-mesa-dri gnome-shell xdg-desktop-portal-gnome pipewire wireplumber python3-pil python3-pyatspi python3-gi gir1.2-gtk-3.0 gir1.2-gtk-4.0
+          sudo apt-get install --no-install-recommends -y binutils clang cmake ninja-build pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-pipewire gstreamer1.0-plugins-base libepoxy-dev libayatana-appindicator3-dev libx11-dev libsqlite3-dev libasound2t64 ffmpeg dpkg-dev desktop-file-utils dbus-x11 at-spi2-core dconf-gsettings-backend libgl1-mesa-dri gnome-shell xdg-desktop-portal-gnome pipewire wireplumber python3-pil python3-pyatspi python3-gi python3-gi-cairo gir1.2-atspi-2.0 gir1.2-gtk-3.0 gir1.2-gtk-4.0
           python -m pip install -r tests/requirements.txt
       - name: Check Ubuntu and macOS source
         if: runner.os != 'Windows'
@@ -128,7 +128,7 @@ jobs:
       - name: Test native macOS selection geometry
         if: runner.os == 'macOS'
         run: |
-          xcrun swiftc -swift-version 5 src/Focalet.Flutter/macos/Runner/MacRegionSelector.swift scripts/test-macos-region-selection.swift -o /tmp/focalet-macos-region-tests
+          xcrun swiftc -swift-version 5 src/Focalet.Capture.Mac/MacRegionSelector.swift scripts/test-macos-region-selection.swift -o /tmp/focalet-macos-region-tests
           /tmp/focalet-macos-region-tests
       - name: Build Windows desktop package and installer
         if: runner.os == 'Windows'
@@ -146,6 +146,38 @@ jobs:
       - name: Test Windows capture contracts from the package
         if: runner.os == 'Windows'
         run: ./scripts/accept-windows-capture.ps1 -PackageDirectory artifacts/focalet-windows-x64 -NonVisualOnly
+      - name: Build and verify Unix Capture installers
+        if: runner.os != 'Windows'
+        env:
+          TARGET_PLATFORM: ${{ matrix.platform }}
+          TARGET_ARCHITECTURE: ${{ matrix.architecture }}
+        run: |
+          python3 scripts/package_capture.py "$TARGET_PLATFORM"
+          runtime="$TARGET_PLATFORM-$TARGET_ARCHITECTURE"
+          if [ "$TARGET_PLATFORM" = macos ]; then runtime="osx-$TARGET_ARCHITECTURE"; fi
+          python3 scripts/verify_capture_package.py "artifacts/focalet-capture-$runtime" --expected-commit "$GITHUB_SHA"
+          python3 scripts/build_capture_installer.py "artifacts/focalet-capture-$runtime" --expected-commit "$GITHUB_SHA" --output artifacts/installers
+          if [ "$TARGET_PLATFORM" = macos ]; then python3 scripts/verify_capture_package.py "artifacts/focalet-capture-$runtime" --expected-commit "$GITHUB_SHA" --smoke; fi
+      - name: Test installed Ubuntu Capture and removal
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install --no-install-recommends -y ./artifacts/installers/Focalet-Capture-Ubuntu-amd64.deb
+          python3 scripts/verify_capture_package.py /opt/focalet-capture --expected-commit "$GITHUB_SHA"
+          /usr/bin/python3 scripts/accept-linux-capture.py --package /opt/focalet-capture
+          sudo apt-get remove -y focalet-capture
+          test ! -e /usr/bin/focalet-capture
+          test ! -e /opt/focalet-capture/focalet-capture
+      - name: Build and verify Windows Capture installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python scripts/package_capture.py windows
+          if ($LASTEXITCODE -ne 0) { throw 'Capture package failed' }
+          $compiler = Join-Path ${env:ProgramFiles(x86)} 'NSIS/makensis.exe'
+          python scripts/build_capture_installer.py artifacts/focalet-capture-win-x64 --expected-commit $env:GITHUB_SHA --output artifacts/installers --makensis $compiler
+          if ($LASTEXITCODE -ne 0) { throw 'Capture installer failed' }
+          python scripts/accept_capture_windows_installer.py artifacts/installers/Focalet-Capture-Setup-x64.exe --expected-commit $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'Installed Capture acceptance failed' }
       - name: Ensure checks and builds did not rewrite source
         run: git diff --exit-code
       - name: Save failed synthetic Wayland acceptance

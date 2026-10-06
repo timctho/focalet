@@ -490,7 +490,7 @@ jobs:
       - name: Test native macOS selection geometry
         run: |
           xcrun swiftc -swift-version 5 \
-            src/Focalet.Flutter/macos/Runner/MacRegionSelector.swift \
+            src/Focalet.Capture.Mac/MacRegionSelector.swift \
             scripts/test-macos-region-selection.swift \
             -o /tmp/focalet-macos-region-tests
           /tmp/focalet-macos-region-tests

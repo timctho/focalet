@@ -1,10 +1,9 @@
 # Releases in the Focalet repository
 
-This policy covers **Focalet Desktop**. New packages, manifests and installers
-use the Focalet name; earlier release assets remain immutable. **Focalet Capture** has a separate Windows
-prototype package from `scripts/package-capture-tool.ps1`, verified and retained
-by the Capture PR job. It is not bundled into Desktop releases or published by
-this release pipeline. See [product boundaries](products.md).
+This policy covers **Focalet Desktop** and **Focalet Capture**. A release builds
+both products from one version and exact source SHA. Each has its own Windows,
+Ubuntu and architecture-specific Mac installer. Capture builds independently of
+Flutter and the agent broker. See [product boundaries](products.md).
 
 Publish installers in [timctho/focalet Releases](https://github.com/timctho/focalet/releases),
 alongside the source. Release tags point to the exact accepted source revision.
@@ -23,7 +22,7 @@ private and is not uploaded by the publisher.
 | Trigger | Workflow / machine | Result |
 | --- | --- | --- |
 | Every PR, including forks; every push to `main`; manual dispatch | [PR checks](../.github/workflows/checks.yml), GitHub-hosted `ubuntu-24.04`, `windows-2025`, `macos-15`, `macos-15-intel` | Tests and a native release-mode package on each platform and Mac architecture, plus Windows installer compilation; no installer upload or published Release |
-| A release version change pushed to `main` | [Release workflow](../.github/workflows/release.yml), GitHub-hosted Windows, Ubuntu and both Mac architectures | Builds, checks and automatically publishes all four installers |
+| A release version change pushed to `main` | [Release workflow](../.github/workflows/release.yml), GitHub-hosted Windows, Ubuntu and both Mac architectures | Builds, checks and automatically publishes all eight installers |
 | Manual dispatch of Build and publish release | Same release workflow, GitHub-hosted runners for the selected platforms | Builds installers and optionally publishes after every selected build passes |
 | Manual dispatch of Native acceptance | [Native acceptance](../.github/workflows/ci.yml); Ubuntu/Windows on opted-in self-hosted runners, Mac on GitHub-hosted runners | Native acceptance and optional package artifacts; Mac can create an installer in a draft release |
 | Maintainer runs `publish_release.py --publish` with accepted installer metadata | Maintainer's build/publication environment | Publishes the verified installers, checksums and source manifest to GitHub Releases |
@@ -62,10 +61,10 @@ GitHub sorts releases from the same day by their numeric version, then compares
 prerelease suffixes alphabetically. That puts `preview.9` above `preview.10`.
 Before crossing that boundary, increase the patch version and restart the preview
 counter: for example, use `0.1.1-preview.1+5` after `0.1.0-preview.11+4`.
-The publisher rejects tags that could sort below an existing version. Leave old
-tags and installers unchanged; their manifests identify their original versions.
+The publisher rejects tags that could sort below an existing version. Keep Git tags unchanged. Remove obsolete GitHub releases and their assets only
+when explicitly requested, after replacement downloads are published and verified.
 
-Automatic releases use the `all` platform set: Windows x64, Ubuntu x64, macOS
+Automatic releases include both products (`--include-capture`) and use the `all` platform set: Windows x64, Ubuntu x64, macOS
 Apple Silicon and macOS Intel. The workflow builds the installers once, runs
 the release checks below and publishes those same files only if every selected
 platform succeeds. A failed or cancelled check
@@ -83,7 +82,7 @@ and recovery. Open **Actions → Build and publish release → Run workflow**, s
 | `platforms` | `all` (default), `windows-ubuntu`, `windows`, `ubuntu`, `macos` (both Mac architectures), `macos-arm64`, or `macos-x64` |
 | `publish` | Off: retain installers as Actions artifacts. On: publish them to this repository's Releases after all selected builds pass |
 
-For example, build all four installers without publishing:
+For example, build all eight installers without publishing:
 
 ```sh
 gh workflow run release.yml --ref main \
@@ -105,7 +104,8 @@ the final publication job. It needs no personal access token or self-hosted
 runner; `GITHUB_TOKEN` publishes into this repository.
 
 Ubuntu produces `Focalet-Ubuntu-amd64.deb`, Windows produces `Focalet-Setup-x64.exe`,
-and Mac produces architecture-specific DMGs. Ubuntu builds require 24.04 and
+and Mac produces architecture-specific DMGs. Capture assets use the
+`Focalet-Capture-` prefix with the same platform and architecture suffixes. Ubuntu builds require 24.04 and
 validate bundled ELF runtime requirements against the
 [package compatibility baseline](ubuntu-testing.md#package-compatibility) before
 creating an installer. Installers are unsigned by this
@@ -213,8 +213,7 @@ Mac Apple Silicon `.release.json` metadata; Mac Intel is optional. For a Mac-onl
 preview, use `--platforms macos` with both DMGs, or explicitly select
 `--platforms macos-arm64` or `--platforms macos-x64` with the corresponding
 `.release.json`. Every selected installer must be present; choosing `macos`
-still requires both architectures. Automatic version releases still require all
-four installers.
+still requires both architectures. Automatic version releases require all eight installers.
 
 After publication, download the actual installer and checksum files from
 `timctho/focalet` and compare them with the accepted local bytes. Use authenticated

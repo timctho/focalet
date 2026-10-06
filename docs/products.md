@@ -15,9 +15,9 @@ only need to give it what you see on screen. Examples:
 - Capture a chart and its labels, then paste into the conversation where you are
   already investigating the issue.
 
-On Windows, **Shift+Alt+A** opens selection and annotation. Select up to eight
+**Shift+Alt+A** (**Shift+Option+A** on Mac) opens selection and annotation. Select up to eight
 regions, finish, then click the destination input and press **Alt+A**. Each image
-is followed by that region's text and available DOM/UIA metadata. The images
+is followed by that region's text and available DOM/accessibility metadata. The images
 remain separate, and unsupported image inputs still receive the text. The batch
 can be pasted again; successful pastes finish silently.
 
@@ -26,9 +26,11 @@ a message. It needs no agent sign-in and does not require Desktop. The receiving
 app controls image support, attachment placement and upload completion.
 See [Capture setup, controls and limitations](capture-tool.md).
 
-Capture is currently a **Windows prototype** with its own portable package.
-The Desktop installers do not install it. Do not run both apps with Alt+A
-registered: quit one, or change Desktop's capture shortcut before starting Capture.
+Capture has independent installers for Windows x64, macOS Apple Silicon/Intel
+and Ubuntu 24.04 GNOME Wayland x64. Both products use the same Focalet icon.
+Capture lives in the system tray, menu bar or GNOME panel. Desktop installers
+do not install it. On Windows and Mac, quit Desktop or change its capture shortcut
+before starting Capture. Ubuntu routes Alt+A to Capture while it is running.
 
 ## Focalet Desktop: a dedicated workspace for agent chats
 
@@ -57,17 +59,19 @@ chat/session UI and uses the Rust broker for agent connections. The Rust
 `focalet-core` is the **agent runtime core**; it is not a dependency of Capture.
 
 Each app has a separate entrypoint, build and package. Capture-only changes run
-Windows Capture CI without building Flutter. Shared or unknown source changes
-run both products' applicable native checks. Desktop's existing release pipeline
-and Capture's prototype artifact remain separate. See the
+native Capture CI without building Flutter. Shared or unknown source changes
+run both products' applicable native checks. One release publishes separate
+installers for both products, built from the same version and source revision. See the
 [component map](desktop-reference.md) and [contributor checks](../CONTRIBUTING.md).
 
 ## Naming and upgrades
 
 Both apps, source packages, environment variables and OS identities use Focalet.
-Capture launches `Focalet.Capture.exe`; Desktop launches `Focalet.exe` on Windows,
+Capture launches `Focalet.Capture.exe` on Windows, `focalet-capture` on Ubuntu
+and `Focalet Capture.app` on Mac; Desktop launches `Focalet.exe` on Windows,
 `focalet` on Linux and `Focalet.app` on macOS. Desktop's Windows capture helper is
 `Focalet.CaptureHost.exe`, distinct from the standalone app.
 
 See [upgrade notes](migration.md) for prior installations. Recorded demos and
-already published releases retain their original bytes and source provenance.
+Git tags retain source provenance. Obsolete release downloads may be removed
+after their replacement is published and verified.

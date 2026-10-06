@@ -9,23 +9,27 @@ description: Capture screen context into your existing tools, or work with your 
 **Show your agent what you mean.** Select and annotate screen regions, then share
 the images with available text, links and structure.
 
-## Choose how you work
+## Choose your workflow
 
 | | Focalet Capture | Focalet Desktop |
 | --- | --- | --- |
-| Best for | Staying in your existing editor, terminal or chat app | Managing agent conversations in a dedicated app |
-| Capture workflow | Shift+Alt+A to select; focus the destination; Alt+A to paste | Alt+A (⌥ A on Mac) to select and attach to a chat draft |
-| Agent setup | None in Capture; use the receiving app as usual | Connect an existing supported agent runtime |
-| Platforms | Windows prototype | Windows, macOS and Ubuntu |
-| Get started | [Build and use Capture](capture-tool.md) | [Install Desktop](install.md) |
+| Use it for | Adding screen context to your existing editor, terminal or chat app | Managing agent chats, saved sessions, models and attachments in a dedicated window |
+| Examples | Show Cursor a UI bug; paste a chart into ChatGPT; give a terminal agent several annotated regions | Switch between project conversations; review captured attachments; respond to agent approvals |
+| Setup | No agent connection or sign-in in Capture | Connect an installed agent and use its existing account |
+| Platforms | Windows, macOS and Ubuntu GNOME Wayland | Windows, macOS and Ubuntu GNOME Wayland |
 
-[Use cases and product boundaries](products.md) explains which app to choose.
-Both live in the same repository and share capture components. Neither app
-requires the other to be installed.
+### Download
 
-All source packages, application identities and new builds use **Focalet**.
-Capture is a separate Windows prototype. For earlier installations and historical
-release downloads, see [upgrade notes](migration.md).
+| Platform | Focalet Capture | Focalet Desktop |
+| --- | --- | --- |
+| Windows 10/11 · x64 | [Windows setup](https://github.com/timctho/focalet/releases) | [Windows setup](https://github.com/timctho/focalet/releases) |
+| macOS 12+ · Apple Silicon | [Apple Silicon DMG](https://github.com/timctho/focalet/releases) | [Apple Silicon DMG](https://github.com/timctho/focalet/releases) |
+| macOS 12+ · Intel | [Intel DMG](https://github.com/timctho/focalet/releases) | [Intel DMG](https://github.com/timctho/focalet/releases) |
+| Ubuntu 24.04 · x64 · GNOME Wayland | [Ubuntu package](https://github.com/timctho/focalet/releases) | [Ubuntu package](https://github.com/timctho/focalet/releases) |
+
+Install either app independently. Capture runs from the system tray or menu bar;
+Desktop opens an agent workspace. The next release includes both products on all
+four targets.
 
 ## Capture: keep your existing input
 
@@ -57,7 +61,7 @@ footage is retained; new builds display Focalet.
 
 ## Build and contribute
 
-Capture uses .NET and native Windows APIs. Desktop uses Flutter, a Rust agent
+Capture uses native Windows, macOS and GTK APIs. Desktop uses Flutter, a Rust agent
 broker and platform capture helpers. See the [contributor guide](../CONTRIBUTING.md),
 [component map](desktop-reference.md) and [coding agent guide](../AGENTS.md).
 

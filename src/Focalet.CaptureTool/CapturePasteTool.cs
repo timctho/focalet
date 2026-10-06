@@ -48,6 +48,7 @@ public static class CapturePasteTool
         private readonly HotkeyWindow hotkey;
         private readonly NotifyIcon tray;
         private readonly ContextMenuStrip menu;
+        private readonly Icon icon;
         private readonly Func<RegionCaptureSession.SelectedBatch> select;
         private readonly Action<string, string>? report;
         private readonly bool includeOwnProcess;
@@ -64,6 +65,9 @@ public static class CapturePasteTool
             this.select = select ?? (() => RegionCaptureSession.SelectBatch(0, CaptureTheme.Default, "Done"));
             this.report = report;
             this.includeOwnProcess = includeOwnProcess;
+            using var iconStream = typeof(CapturePasteTool).Assembly.GetManifestResourceStream("Focalet.Capture.Icon")
+                ?? throw new InvalidOperationException("The Capture icon is missing.");
+            icon = new Icon(iconStream);
             hotkey = new HotkeyWindow(Capture, Paste);
             menu = new ContextMenuStrip();
             batchStatus = new ToolStripMenuItem("No capture ready") { Enabled = false };
@@ -81,7 +85,7 @@ public static class CapturePasteTool
             menu.Items.Add("Quit", null, (_, _) => { if (!busy) ExitThread(); });
             tray = new NotifyIcon
             {
-                Icon = SystemIcons.Application, Text = "Focalet Capture · Shift+Alt+A capture · Alt+A paste", ContextMenuStrip = menu, Visible = true,
+                Icon = icon, Text = "Focalet Capture · Shift+Alt+A capture · Alt+A paste", ContextMenuStrip = menu, Visible = true,
             };
             Notify("Ready", "Shift+Alt+A to capture. Then click the destination input and press Alt+A to paste.");
         }
@@ -170,7 +174,7 @@ public static class CapturePasteTool
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { hotkey.Dispose(); tray.Visible = false; tray.Dispose(); menu.Dispose(); lastBatch = null; }
+            if (disposing) { hotkey.Dispose(); tray.Visible = false; tray.Dispose(); menu.Dispose(); icon.Dispose(); lastBatch = null; }
             base.Dispose(disposing);
         }
     }
