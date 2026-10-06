@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block extrahead %}
 {{ super() }}
+<link rel="icon" type="image/png" sizes="256x256" href="{{ 'assets/focalet-icon.png' | url }}">
 <meta property="og:type" content="website">
 <meta property="og:title" content="{{ page.title | default(config.site_name, true) | e }} · Focalet">
 <meta property="og:description" content="{{ page.meta.description | default(config.site_description, true) | e }}">

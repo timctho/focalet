@@ -2,6 +2,8 @@
 title: Focalet — visual context for AI agents
 description: Capture screen context into your existing tools, or work with your agents in a dedicated desktop app.
 ---
+![Focalet aperture icon](assets/focalet-icon.png){ width="72" }
+
 # Focalet — visual context for AI agents
 
 **Show your agent what you mean.** Select and annotate screen regions, then share

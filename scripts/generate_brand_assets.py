@@ -90,6 +90,9 @@ def main() -> None:
         cairosvg.svg2png(bytestring=source, write_to=str(assets / name),
                         output_width=size, output_height=size)
 
+    # Documentation uses the same identity as the installed apps.
+    (ROOT / "docs/assets/focalet-icon.png").write_bytes((assets / "app-icon.png").read_bytes())
+
     # Supply native frames rather than asking Windows to resize a large bitmap.
     sizes = (16, 24, 32, 48, 64, 128, 256)
     frames = [Image.open(BytesIO(cairosvg.svg2png(

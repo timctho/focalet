@@ -1,6 +1,6 @@
 # Focalet branding
 
-The Focalet logo uses a focus frame and center point with an outlined Manrope
+The Focalet logo uses a tilted rounded aperture with a curved negative-space opening with an outlined Manrope
 wordmark in the Ocean palette:
 
 | Asset | Color |
