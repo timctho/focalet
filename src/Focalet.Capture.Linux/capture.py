@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Standalone Focalet Capture for Ubuntu GNOME Wayland."""
 from pathlib import Path
-import ctypes
 import json
 import os
 import shutil
@@ -20,23 +19,24 @@ BUS, OBJECT = 'com.focalet.Desktop', '/com/focalet/Desktop'
 
 
 class Clipboard:
-    def __init__(self, path):
-        self.lib = ctypes.CDLL(str(path))
-        self.lib.focalet_clipboard_set.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_char_p]
-        self.lib.focalet_clipboard_set.restype = ctypes.c_int
-        self.lib.focalet_clipboard_read_at.restype = ctypes.c_int64
-        self.lib.focalet_clipboard_owned.restype = ctypes.c_int
+    def __init__(self, application):
+        self.app = application
+        self.state = {}
 
-    def set(self, data, image=False, html=None):
-        return bool(self.lib.focalet_clipboard_set(data, len(data), image, html.encode() if html else None))
+    def set(self, data, image=False, html=None, token=None):
+        return self.app.call('SetCaptureClipboard', (token or self.app.token, image, data, html or ''), '(sbays)')[0]
 
     @property
     def owned(self):
-        return bool(self.lib.focalet_clipboard_owned())
+        try:
+            self.state = json.loads(self.app.call('CaptureClipboardState', (self.app.token,))[0])
+        except GLib.Error:
+            self.state = {}
+        return self.state.get('owned', False)
 
     @property
     def read_at(self):
-        return self.lib.focalet_clipboard_read_at() / 1_000_000
+        return self.state.get('readAt', 0) / 1_000_000
 
 
 class Capture(Gtk.Application):
@@ -53,7 +53,7 @@ class Capture(Gtk.Application):
         if not isinstance(self.preferences, dict): self.preferences = {}
         self.token, self.source_token = '', ''
         self.focus_changed, self.focused = False, None
-        self.clipboard = Clipboard(self.root / 'libfocalet-clipboard.so')
+        self.clipboard = Clipboard(self)
         self.connect('activate', self.activate)
         self.connect('shutdown', self.shutdown)
 
@@ -95,7 +95,7 @@ class Capture(Gtk.Application):
         if self.proxy.get_name_owner() and not self.connected:
             try:
                 status = json.loads(self.call('Status')[0])
-                if status.get('integrationVersion', 0) >= 3:
+                if status.get('integrationVersion', 0) >= 4:
                     self.connected = self.call('RegisterCapture')[0]
                     if self.connected:
                         self.report('Ready · Shift+Alt+A to capture')
@@ -109,8 +109,8 @@ class Capture(Gtk.Application):
         if self.selector:
             self.selector.cancel(); self.selector = None
 
-    def call(self, method, value=None):
-        signature = '(b)' if method == 'SetCaptureBusy' else '(s)'
+    def call(self, method, value=None, signature='(s)'):
+        signature = '(b)' if method == 'SetCaptureBusy' else signature
         params = GLib.Variant(signature, value) if value is not None else None
         return self.proxy.call_sync(method, params, Gio.DBusCallFlags.NONE, 1500, None).unpack()
 
@@ -128,7 +128,7 @@ class Capture(Gtk.Application):
         if signal != 'CaptureAction': return
         action, token = params.unpack()
         actions = {'capture': lambda: self.capture(token), 'paste': lambda: self.paste(token),
-                   'copy': self.copy, 'copy-text': lambda: self.copy(text=True),
+                   'copy': lambda: self.copy(token=token), 'copy-text': lambda: self.copy(text=True, token=token),
                    'preferences': self.settings, 'about': self.about, 'quit': self.quit}
         if action in actions: actions[action]()
 
@@ -299,9 +299,9 @@ class Capture(Gtk.Application):
         if message: self.report(message)
         # Successful repeatable paste is silent.
 
-    def copy(self, text=False):
+    def copy(self, text=False, token=None):
         if self.busy or self.batch is None: return
-        self.clipboard.set(self.batch.text().encode(), html=None if text or self.preferences.get('textOnly') else self.batch.html())
+        self.clipboard.set(self.batch.text().encode(), html=None if text or self.preferences.get('textOnly') else self.batch.html(), token=token)
 
     def settings(self):
         if getattr(self, 'settings_window', None):

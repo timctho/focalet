@@ -47,7 +47,7 @@ def verify(root: Path, commit: str) -> dict:
     prefix = "Focalet Capture.app/Contents/Resources/" if runtime.startswith("osx-") else ""
     required = {manifest["entryPoint"], "capture-tool-manifest.json", *[prefix+n for n in ("LICENSE", "THIRD_PARTY_NOTICES.md", "README.md")]}
     if runtime == "linux-x64":
-        required |= {"capture.py", "selector.py", "capture_context.py", "libfocalet-clipboard.so", "app-icon.png",
+        required |= {"capture.py", "selector.py", "capture_context.py", "gnome-extension/focalet@focalet/native/libfocalet-clipboard.so", "gnome-extension/focalet@focalet/native/FocaletClipboard-1.0.typelib", "app-icon.png",
                      "native/focalet-linux-capture", "native/focalet-browser-capture", "gnome-extension/focalet@focalet/schemas/gschemas.compiled"}
     elif runtime.startswith("osx-"):
         required |= {prefix+name for name in ("AppIcon.icns", "tray-template.png", "native/focalet-browser-capture")}

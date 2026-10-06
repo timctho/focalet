@@ -3,7 +3,7 @@
   "name": "Focalet Desktop and Capture Integration",
   "description": "Connect screen selections to their application context and open Focalet with Alt+A.",
   "shell-version": ["46"],
-  "version": 3,
+  "version": 4,
   "url": "https://github.com/timctho/focalet",
   "settings-schema": "org.gnome.shell.extensions.focalet"
 }

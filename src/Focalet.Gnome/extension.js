@@ -1,5 +1,6 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import GIRepository from 'gi://GIRepository?version=2.0';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import Clutter from 'gi://Clutter';
@@ -15,6 +16,8 @@ const INTERFACE = `<node><interface name="com.focalet.Desktop">
   <method name="Snapshot"><arg type="s" direction="out"/></method>
   <method name="Present"><arg type="u" direction="in"/><arg type="b" direction="out"/></method>
   <method name="RegisterCapture"><arg type="b" direction="out"/></method>
+  <method name="SetCaptureClipboard"><arg type="s" direction="in"/><arg type="b" direction="in"/><arg type="ay" direction="in"/><arg type="s" direction="in"/><arg type="b" direction="out"/></method>
+  <method name="CaptureClipboardState"><arg type="s" direction="in"/><arg type="s" direction="out"/></method>
   <method name="SetCaptureBusy"><arg type="b" direction="in"/></method>
   <method name="CaptureState"><arg type="s" direction="in"/></method>
   <method name="RestoreCapture"><arg type="s" direction="in"/><arg type="b" direction="out"/></method>
@@ -45,7 +48,7 @@ export default class FocaletExtension extends Extension {
     }
 
     _status() {
-        return {schemaVersion: 1, integrationVersion: 3, sessionId: this._sessionId,
+        return {schemaVersion: 1, integrationVersion: 4, sessionId: this._sessionId,
             sessionType: Meta.is_wayland_compositor() ? 'wayland' : 'x11',
             shellVersion: Config.PACKAGE_VERSION, captureConnected: Boolean(this._captureOwner),
             captureStatus: this._captureStatus?.label.text ?? '',
@@ -112,7 +115,22 @@ export default class FocaletExtension extends Extension {
         return false;
     }
 
-    RegisterCaptureAsync(_args, invocation) {
+    async RegisterCaptureAsync(_args, invocation) {
+        // Load only installed integration code, never a path supplied over D-Bus.
+        // Desktop alone does not need this optional Capture component.
+        if (!this._clipboardAPI) {
+            const directories = [`${this.path}/native`, '/opt/focalet-capture/gnome-extension/focalet@focalet/native'];
+            const directory = directories.find(path => GLib.file_test(`${path}/FocaletClipboard-1.0.typelib`, GLib.FileTest.IS_REGULAR));
+            if (!directory) { invocation.return_value(new GLib.Variant('(b)', [false])); return; }
+            try {
+                GIRepository.Repository.prepend_search_path(directory);
+                GIRepository.Repository.prepend_library_path(directory);
+                this._clipboardAPI = (await import('gi://FocaletClipboard?version=1.0')).default;
+            } catch (error) {
+                console.error(`Focalet Capture clipboard could not load: ${error}`);
+                invocation.return_value(new GLib.Variant('(b)', [false])); return;
+            }
+        }
         const owner = invocation.get_sender();
         if (this._captureOwner && this._captureOwner !== owner) {
             invocation.return_value(new GLib.Variant('(b)', [false])); return;
@@ -151,10 +169,40 @@ export default class FocaletExtension extends Extension {
             if (action === 'paste') this._lease = state;
             else this._captureSession = {...state, pointer: global.get_pointer().slice(0, 2)};
         }
+        if (action === 'copy' || action === 'copy-text') {
+            token = GLib.uuid_string_random();
+            this._copyLease = {token, until: GLib.get_monotonic_time() + 10000000};
+        }
         Gio.DBus.session.emit_signal(this._captureOwner, '/com/focalet/Desktop',
             'com.focalet.Desktop', 'CaptureAction', new GLib.Variant('(ss)', [action, token]));
     }
     _authorized(invocation) { return this._captureOwner && invocation.get_sender() === this._captureOwner; }
+    SetCaptureClipboardAsync([token, image, bytes, markup], invocation) {
+        const copy = this._copyLease?.token === token && this._copyLease.until > GLib.get_monotonic_time();
+        if (!this._authorized(invocation) || (!copy && !this._pasteReady(token, invocation)) ||
+            bytes.length > 33554432 || markup.length > 70000000 || (image && markup.length)) {
+            invocation.return_value(new GLib.Variant('(b)', [false])); return;
+        }
+        try {
+            const source = this._clipboardAPI.Source.new();
+            const data = GLib.Bytes.new(bytes);
+            if (image) source.add('image/png', data);
+            else {
+                for (const mime of ['text/plain;charset=utf-8', 'UTF8_STRING', 'text/plain']) source.add(mime, data);
+                if (markup) source.add('text/html', GLib.Bytes.new(new TextEncoder().encode(markup)));
+            }
+            global.display.get_selection().set_owner(Meta.SelectionType.SELECTION_CLIPBOARD, source);
+            this._captureClipboard = source; this._clipboardToken = token; this._copyLease = null;
+            invocation.return_value(new GLib.Variant('(b)', [source.is_active()]));
+        } catch (error) {
+            console.error(`Focalet Capture clipboard write failed: ${error}`);
+            invocation.return_value(new GLib.Variant('(b)', [false]));
+        }
+    }
+    CaptureClipboardStateAsync([token], invocation) {
+        const source = this._authorized(invocation) && this._clipboardToken === token ? this._captureClipboard : null;
+        invocation.return_value(new GLib.Variant('(s)', [JSON.stringify({owned: Boolean(source?.is_active()), readAt: source?.get_read_at() ?? 0})]));
+    }
     SetCaptureBusyAsync([busy], invocation) {
         if (this._authorized(invocation)) this._captureBusy = busy;
         invocation.return_value(null);
@@ -206,7 +254,8 @@ export default class FocaletExtension extends Extension {
         Main.wm.removeKeybinding('capture-content');
         if (this._watch) Gio.bus_unwatch_name(this._watch);
         this._watch = 0; this._captureOwner = null; this._lease = null; this._captureSession = null;
-        this._panel?.destroy(); this._panel = null; this._captureBusy = false; this._captureStatus = null; this._keyboard = null; this._pointer = null;
+        this._panel?.destroy(); this._panel = null; this._captureBusy = false; this._captureStatus = null;
+        this._captureClipboard = null; this._clipboardToken = null; this._copyLease = null; this._keyboard = null; this._pointer = null;
     }
 
     disable() {

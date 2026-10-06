@@ -57,7 +57,9 @@ The system tray, menu bar or GNOME panel provides **Capture**, **Copy last batch
 are in the menu on Windows/Mac and **Preferences** on Ubuntu.
 
 Each automatic image step offers only image formats: PNG/DIB/RTF on Windows,
-PNG/TIFF on Mac, and PNG on Ubuntu. Its following text step contains the region
+PNG/TIFF on Mac, and PNG on Ubuntu. GNOME owns Ubuntu clipboard transfers
+so the receiving input keeps focus; Capture does not activate a hidden window
+to write the clipboard. Its following text step contains the region
 label, readable context and complete bounded snapshot JSON. Inputs that ignore
 images still receive the text. DOM, accessibility IDs, hierarchy, geometry,
 state, source and alignment remain available when captured reliably.

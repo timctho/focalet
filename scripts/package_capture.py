@@ -67,9 +67,6 @@ def package(target: str, output: Path):
             for pattern in ('src/Focalet.Capture.Linux/*.py', 'src/Focalet.Capture.Unix/*.py'):
                 for file in source.glob(pattern): shutil.copy2(file, destination)
             shutil.copy2(source/'src/Focalet.Capture.Linux/Resources/app-icon.png', destination)
-            flags = subprocess.check_output(['pkg-config', '--cflags', '--libs', 'gtk+-3.0'], text=True).split()
-            run('cc', '-shared', '-fPIC', '-O2', '-Wall', '-Wextra', '-Werror', source/'src/Focalet.Capture.Linux/clipboard.c',
-                '-o', destination/'libfocalet-clipboard.so', *flags)
             # Cache compiled native dependencies, but select only the capture helper.
             env = {**os.environ, 'CARGO_TARGET_DIR': str(ROOT/'target')}
             run('cargo', 'build', '--locked', '--release', '--manifest-path', source/'Cargo.toml', '-p', 'focalet-linux-capture', env=env)
@@ -78,6 +75,18 @@ def package(target: str, output: Path):
             extension = destination/'gnome-extension/focalet@focalet'
             shutil.copytree(source/'src/Focalet.Gnome', extension)
             run('glib-compile-schemas', extension/'schemas')
+            native = extension/'native'; native.mkdir()
+            flags = subprocess.check_output(['pkg-config', '--cflags', '--libs', 'libmutter-14'], text=True).split()
+            run('cc', '-shared', '-fPIC', '-O2', '-Wall', '-Wextra', '-Werror', source/'src/Focalet.Capture.Linux/clipboard.c',
+                '-o', native/'libfocalet-clipboard.so', *flags)
+            gir = subprocess.check_output(['pkg-config', '--variable=girdir', 'libmutter-14'], text=True).strip()
+            gi_env = {**os.environ, 'LD_LIBRARY_PATH': ':'.join([str(native), gir, os.environ.get('LD_LIBRARY_PATH', '')])}
+            run('g-ir-scanner', f'--add-include-path={gir}', '--quiet', '--warn-all', '--namespace=FocaletClipboard', '--nsversion=1.0',
+                '--identifier-prefix=FocaletClipboard', '--symbol-prefix=focalet_clipboard', '--include=Meta-14',
+                '--library=focalet-clipboard', f'--library-path={native}', '--pkg=libmutter-14',
+                source/'src/Focalet.Capture.Linux/clipboard.h', source/'src/Focalet.Capture.Linux/clipboard.c',
+                '-o', native/'FocaletClipboard-1.0.gir', env=gi_env)
+            run('g-ir-compiler', f'--includedir={gir}', native/'FocaletClipboard-1.0.gir', '-o', native/'FocaletClipboard-1.0.typelib')
             launcher = destination/'focalet-capture'
             launcher.write_text('#!/bin/sh\nexport PYTHONDONTWRITEBYTECODE=1\nexec /usr/bin/python3 "$(dirname "$(readlink -f "$0")")/capture.py" "$@"\n')
             launcher.chmod(0o755); entry = launcher.name

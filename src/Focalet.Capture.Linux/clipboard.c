@@ -1,48 +1,55 @@
-/* Native GTK selection ownership lets Capture wait until the destination reads
- * the image before replacing it with its text. No display polling or key hooks. */
-#include <gtk/gtk.h>
-#include <string.h>
-typedef struct {
-  GBytes *bytes, *html;
+/* GNOME owns the selection while the user's destination keeps keyboard focus.
+ * Each source retains its bytes for outstanding asynchronous clipboard reads. */
+#include "clipboard.h"
+struct _FocaletClipboardSource {
+  MetaSelectionSource parent_instance;
+  GHashTable *formats;
   gint64 read_at;
-} Payload;
-static Payload *current;
-static void clear(GtkClipboard *board, gpointer data) {
-  (void)board;
-  Payload *payload = data;
-  /* A delayed clear for the previous selection must not erase its successor. */
-  if (current == payload) current = NULL;
-  g_clear_pointer(&payload->bytes, g_bytes_unref);
-  g_clear_pointer(&payload->html, g_bytes_unref);
-  g_free(payload);
+};
+G_DEFINE_TYPE(FocaletClipboardSource, focalet_clipboard_source, META_TYPE_SELECTION_SOURCE)
+static GList *mimetypes(MetaSelectionSource *source) {
+  FocaletClipboardSource *self = FOCALET_CLIPBOARD_SOURCE(source);
+  GList *result = NULL;
+  GHashTableIter iterator;
+  gpointer key;
+  g_hash_table_iter_init(&iterator, self->formats);
+  while (g_hash_table_iter_next(&iterator, &key, NULL)) result = g_list_prepend(result, g_strdup(key));
+  return result;
 }
-static void provide(GtkClipboard *board, GtkSelectionData *selection, guint info, gpointer data) {
-  (void)board;
-  Payload *payload = data;
-  GBytes *bytes = info == 2 ? payload->html : payload->bytes;
-  if (!bytes) return;
-  gsize size;
-  const guchar *content = g_bytes_get_data(bytes, &size);
-  if (info == 1) gtk_selection_data_set_text(selection, (const gchar *)content, (gint)size);
-  else gtk_selection_data_set(selection, gtk_selection_data_get_target(selection), 8, content, (gint)size);
-  payload->read_at = g_get_monotonic_time();
+static void read_async(MetaSelectionSource *source, const gchar *mime, GCancellable *cancel,
+                       GAsyncReadyCallback callback, gpointer data) {
+  FocaletClipboardSource *self = FOCALET_CLIPBOARD_SOURCE(source);
+  GTask *task = g_task_new(source, cancel, callback, data);
+  GBytes *bytes = g_hash_table_lookup(self->formats, mime);
+  if (bytes) {
+    self->read_at = g_get_monotonic_time();
+    g_task_return_pointer(task, g_memory_input_stream_new_from_bytes(bytes), g_object_unref);
+  } else {
+    g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, "Clipboard format is unavailable");
+  }
+  g_object_unref(task);
 }
-gboolean focalet_clipboard_set(const void *data, int size, gboolean image, const char *markup) {
-  GtkClipboard *board = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
-  Payload *next = g_new0(Payload, 1);
-  next->bytes = g_bytes_new(data, size);
-  if (markup) next->html = g_bytes_new(markup, strlen(markup));
-  GtkTargetList *list = gtk_target_list_new(NULL, 0);
-  if (image) gtk_target_list_add(list, gdk_atom_intern_static_string("image/png"), 0, 0);
-  else gtk_target_list_add_text_targets(list, 1);
-  if (markup) gtk_target_list_add(list, gdk_atom_intern_static_string("text/html"), 0, 2);
-  gint count;
-  GtkTargetEntry *targets = gtk_target_table_new_from_list(list, &count);
-  gboolean owned = gtk_clipboard_set_with_data(board, targets, count, provide, clear, next);
-  gtk_target_table_free(targets, count); gtk_target_list_unref(list);
-  if (owned) current = next;
-  else clear(board, next);
-  return owned;
+static GInputStream *read_finish(MetaSelectionSource *source, GAsyncResult *result, GError **error) {
+  g_return_val_if_fail(g_task_is_valid(result, source), NULL);
+  return g_task_propagate_pointer(G_TASK(result), error);
 }
-gboolean focalet_clipboard_owned(void) { return current != NULL; }
-gint64 focalet_clipboard_read_at(void) { return current ? current->read_at : 0; }
+static void finalize(GObject *object) {
+  g_hash_table_unref(FOCALET_CLIPBOARD_SOURCE(object)->formats);
+  G_OBJECT_CLASS(focalet_clipboard_source_parent_class)->finalize(object);
+}
+static void focalet_clipboard_source_class_init(FocaletClipboardSourceClass *klass) {
+  MetaSelectionSourceClass *source = META_SELECTION_SOURCE_CLASS(klass);
+  source->get_mimetypes = mimetypes; source->read_async = read_async; source->read_finish = read_finish;
+  G_OBJECT_CLASS(klass)->finalize = finalize;
+}
+static void focalet_clipboard_source_init(FocaletClipboardSource *self) {
+  self->formats = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, (GDestroyNotify)g_bytes_unref);
+}
+FocaletClipboardSource *focalet_clipboard_source_new(void) {
+  return g_object_new(FOCALET_CLIPBOARD_TYPE_SOURCE, NULL);
+}
+void focalet_clipboard_source_add(FocaletClipboardSource *self, const gchar *mime, GBytes *bytes) {
+  g_return_if_fail(!meta_selection_source_is_active(META_SELECTION_SOURCE(self)));
+  g_hash_table_replace(self->formats, g_strdup(mime), g_bytes_ref(bytes));
+}
+gint64 focalet_clipboard_source_get_read_at(FocaletClipboardSource *self) { return self->read_at; }
