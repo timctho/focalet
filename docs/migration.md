@@ -30,9 +30,11 @@ credentials or agent history.
 
 ## Releases and recordings
 
-Already published release assets and recorded demos keep their original bytes,
-checksums and source revisions. A repository rename does not rename old installer
-assets. If a release lists `Zommi-Setup-x64.exe`, `Zommi-macOS-*.dmg` or
-`Zommi-Ubuntu-amd64.deb`, it predates this change. Use that release's filenames,
-or build Focalet from the current source until a new release is published.
-New release artifacts use `Focalet-*` and `focalet-*` names.
+The first release under the Focalet name is **v0.3.0**. It contains independent
+Capture and Desktop installers for Windows x64, macOS Apple Silicon/Intel and
+Ubuntu 24.04 GNOME Wayland x64. Download the appropriate installer from the
+[README download table](https://github.com/timctho/focalet#download).
+
+Previous GitHub release downloads were removed after the new installers were
+published and verified. Git tags retain their source history. Recorded demos keep
+their original footage and provenance; current builds display Focalet.

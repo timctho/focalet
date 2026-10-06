@@ -2,8 +2,9 @@
 
 ## Current status
 
-The v0.2.1 Windows application and installer are unsigned. No SignPath certificate
-has been approved or connected to the release workflow. A checksum verifies that
+The v0.3.0 Windows applications and installers for Capture and Desktop are
+unsigned. No SignPath certificate has been approved or connected to the release
+workflow. A checksum verifies that
 a download matches a published file; it does not establish publisher identity.
 Consult each release's signing metadata for that release's actual status.
 

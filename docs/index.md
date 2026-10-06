@@ -22,14 +22,13 @@ the images with available text, links and structure.
 
 | Platform | Focalet Capture | Focalet Desktop |
 | --- | --- | --- |
-| Windows 10/11 · x64 | [Windows setup](https://github.com/timctho/focalet/releases) | [Windows setup](https://github.com/timctho/focalet/releases) |
-| macOS 12+ · Apple Silicon | [Apple Silicon DMG](https://github.com/timctho/focalet/releases) | [Apple Silicon DMG](https://github.com/timctho/focalet/releases) |
-| macOS 12+ · Intel | [Intel DMG](https://github.com/timctho/focalet/releases) | [Intel DMG](https://github.com/timctho/focalet/releases) |
-| Ubuntu 24.04 · x64 · GNOME Wayland | [Ubuntu package](https://github.com/timctho/focalet/releases) | [Ubuntu package](https://github.com/timctho/focalet/releases) |
+| Windows 10/11 · x64 | [Windows setup](https://github.com/timctho/focalet/releases/download/v0.3.0/Focalet-Capture-Setup-x64.exe) | [Windows setup](https://github.com/timctho/focalet/releases/download/v0.3.0/Focalet-Setup-x64.exe) |
+| macOS 12+ · Apple Silicon | [Apple Silicon DMG](https://github.com/timctho/focalet/releases/download/v0.3.0/Focalet-Capture-macOS-arm64.dmg) | [Apple Silicon DMG](https://github.com/timctho/focalet/releases/download/v0.3.0/Focalet-macOS-arm64.dmg) |
+| macOS 12+ · Intel | [Intel DMG](https://github.com/timctho/focalet/releases/download/v0.3.0/Focalet-Capture-macOS-x64.dmg) | [Intel DMG](https://github.com/timctho/focalet/releases/download/v0.3.0/Focalet-macOS-x64.dmg) |
+| Ubuntu 24.04 · x64 · GNOME Wayland | [Ubuntu package](https://github.com/timctho/focalet/releases/download/v0.3.0/Focalet-Capture-Ubuntu-amd64.deb) | [Ubuntu package](https://github.com/timctho/focalet/releases/download/v0.3.0/Focalet-Ubuntu-amd64.deb) |
 
 Install either app independently. Capture runs from the system tray or menu bar;
-Desktop opens an agent workspace. The next release includes both products on all
-four targets.
+Desktop opens an agent workspace. All downloads above are **v0.3.0**.
 
 ## Capture: keep your existing input
 

@@ -9,9 +9,9 @@ installation and account. You do not need a separate model API key in Focalet.
 
 ## 1. Install the app
 
-Check the [upgrade and release notes](migration.md) if the latest assets predate
-the rename. Download the [latest Focalet release](https://github.com/timctho/focalet/releases/latest).
-Choose the installer for your computer from that release's assets.
+For an earlier installation, follow the [upgrade notes](migration.md). Download
+Desktop directly from the [README download table](https://github.com/timctho/focalet#download).
+Choose your platform in the **Focalet Desktop** column.
 Do not use GitHub's “Source code” archive as an installer.
 
 | Computer | Download | Install |
