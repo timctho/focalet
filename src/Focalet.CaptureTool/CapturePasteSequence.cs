@@ -15,18 +15,19 @@ internal static class CapturePasteSequence
     public static async Task<CapturePasteResult> PasteAsync(CaptureClipboardBatch batch, CapturePasteTarget target, bool textOnly, bool slowerImages = false)
     {
         using var clipboard = new PasteClipboard();
+        using var activity = new CapturePasteActivity();
         var sent = 0;
         var unreadImages = 0;
         for (var index = 0; index < batch.Items.Count; index++)
         {
             foreach (var image in textOnly ? new[] { false } : new[] { true, false })
             {
-                if (await WaitForInputAsync(target, clipboard, sent > 0) is { } notReady)
+                if (await WaitForInputAsync(target, clipboard, activity, sent > 0) is { } notReady)
                     return new(sent, unreadImages, notReady);
                 if (image) clipboard.SetImage(batch.Items[index]);
                 else clipboard.SetText(batch.TextParts[index]);
                 clipboard.Arm();
-                if (await WaitForInputAsync(target, clipboard, true) is { } interrupted)
+                if (await WaitForInputAsync(target, clipboard, activity, true) is { } interrupted)
                     return new(sent, unreadImages, interrupted);
                 if (!target.Paste(CapturePasteTarget.GetClipboardSequenceNumber(), clipboard.Handle))
                     return new(sent, unreadImages, "Paste could not be dispatched. It will not be retried.");
@@ -44,6 +45,7 @@ internal static class CapturePasteSequence
                 while (wait.ElapsedMilliseconds < (image ? 5000 : 3000))
                 {
                     await Task.Delay(50);
+                    if (activity.Changed) return new(sent, unreadImages, "Keyboard or mouse input interrupted paste.");
                     if (!clipboard.OwnsClipboard)
                         return new(sent, unreadImages, "Another application replaced the clipboard.");
                     if (!target.IsCurrent()) return new(sent, unreadImages, "The destination window changed during paste.");
@@ -69,14 +71,16 @@ internal static class CapturePasteSequence
         return new(sent, unreadImages);
     }
 
-    private static async Task<string?> WaitForInputAsync(CapturePasteTarget target, PasteClipboard clipboard, bool checkClipboard)
+    private static async Task<string?> WaitForInputAsync(CapturePasteTarget target, PasteClipboard clipboard, CapturePasteActivity activity, bool checkClipboard)
     {
         var wait = Stopwatch.StartNew();
         while (true)
         {
+            if (activity.Changed) return "Keyboard or mouse input interrupted paste.";
             if (!target.IsCurrent()) return "The destination window changed during paste.";
             if (checkClipboard && !clipboard.OwnsClipboard) return "Another application replaced the clipboard.";
             var state = await target.InputStateAsync();
+            if (activity.Changed) return "Keyboard or mouse input interrupted paste.";
             if (!target.IsCurrent()) return "The destination window changed during paste.";
             if (checkClipboard && !clipboard.OwnsClipboard) return "Another application replaced the clipboard.";
             if (state == CaptureInputState.Changed) return "The focused input changed during paste.";

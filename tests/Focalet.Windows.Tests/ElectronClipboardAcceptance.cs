@@ -12,10 +12,11 @@ internal static class ElectronClipboardAcceptance
         var fixture = Path.GetFullPath("tests/clipboard-electron");
         var electron = Path.Combine(fixture, "node_modules/electron/dist/electron.exe");
         if (!File.Exists(electron)) throw new InvalidOperationException("Install the locked tests/clipboard-electron dependencies first.");
-        foreach (var mode in new[] { "terminal", "native-chat", "native-chat-transient-focus", "native-chat-other-input" })
+        foreach (var mode in new[] { "terminal", "native-chat", "native-chat-transient-focus", "native-chat-other-input",
+            "native-chat-rich-remount", "native-chat-rich-upload-focus", "native-chat-rich-new-container", "native-chat-rich-retained-editor", "native-chat-rich-sibling" })
         foreach (var slowerImages in new[] { false, true })
         {
-            if (slowerImages && mode is "native-chat-transient-focus" or "native-chat-other-input") continue;
+            if (slowerImages && mode is not ("terminal" or "native-chat")) continue;
             var pace = slowerImages ? "slower" : "fast";
             var temporary = Path.Combine(Path.GetTempPath(), "focalet-electron-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(temporary);
@@ -37,6 +38,7 @@ internal static class ElectronClipboardAcceptance
                     ?? throw new InvalidOperationException("Electron fixture input is unavailable.");
                 input.Focus();
                 await ForegroundRoutingAcceptance.WaitFor(() => input.Properties.HasKeyboardFocus.ValueOrDefault, "Electron input did not acquire focus.");
+                Console.WriteLine($"Electron {mode}: control={input.Properties.ControlType.ValueOrDefault}, class={input.Properties.ClassName.ValueOrDefault}, id={input.Properties.AutomationId.ValueOrDefault}");
                 target = CapturePasteTarget.RememberWindow() ?? throw new InvalidOperationException("Electron input was not current.");
                 var observation = await Task.Run(() => CapturePasteTarget.ObserveInput(automation, target));
                 if (observation.Kind != CaptureInputKind.Input) throw new InvalidOperationException("Electron editor was not recognized as the chosen input.");
@@ -44,7 +46,7 @@ internal static class ElectronClipboardAcceptance
                 var elapsed = Stopwatch.StartNew();
                 var result = await CapturePasteSequence.PasteAsync(batch, target, false, slowerImages);
                 elapsed.Stop();
-                if (mode == "native-chat-other-input")
+                if (mode is "native-chat-other-input" or "native-chat-rich-new-container" or "native-chat-rich-retained-editor" or "native-chat-rich-sibling")
                 {
                     if (result.StoppedBecause is null || result.StepsSent != 1)
                         throw new InvalidOperationException("Paste continued into a different editor: " + result);
@@ -52,7 +54,7 @@ internal static class ElectronClipboardAcceptance
                     using var stopped = JsonDocument.Parse(File.ReadAllText(Path.Combine(temporary, "result.json")));
                     if (stopped.RootElement.GetProperty("events").GetArrayLength() != 1)
                         throw new InvalidOperationException("Changing editors dispatched more than the first image.");
-                    Console.WriteLine("PASS Electron paste stops after the accepted image when a different editor gains focus.");
+                    Console.WriteLine($"PASS Electron {mode} stops after the accepted image when a different editor gains focus.");
                     continue;
                 }
                 if (result.StoppedBecause is not null) throw new InvalidOperationException("Electron sequence stopped: " + result);
@@ -60,6 +62,8 @@ internal static class ElectronClipboardAcceptance
                 var json = File.ReadAllText(Path.Combine(temporary, "result.json"));
                 using var document = JsonDocument.Parse(json);
                 var events = document.RootElement.GetProperty("events").EnumerateArray().ToArray();
+                if (mode == "native-chat-rich-remount" && events[^1].GetProperty("replacements").GetInt32() != 4)
+                    throw new InvalidOperationException("Rich editor fixture did not remount after every paste.");
                 Console.WriteLine($"Electron {mode} {pace}: " + JsonSerializer.Serialize(new {
                     elapsedMs = elapsed.ElapsedMilliseconds, events = events.Select(e => e.GetProperty("kind").GetString()), diagnostics = document.RootElement.GetProperty("diagnostics") }));
                 if (!events.Select(e => e.GetProperty("kind").GetString()).SequenceEqual(new[] { "image", "text", "image", "text" }))

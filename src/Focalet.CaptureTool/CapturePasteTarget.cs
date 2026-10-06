@@ -16,7 +16,7 @@ internal sealed record CaptureInputObservation(CapturePasteTarget Target, Captur
 internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessId, long ProcessStarted)
     : WindowFocus(Window, Focus, ProcessId, ProcessStarted)
 {
-    private AutomationElement? InputElement { get; init; }
+    private CaptureInputIdentity? InputIdentity { get; init; }
     private UIA3Automation? InputAutomation { get; init; }
     public string Description => NativeCaptureWindow.Title(Window);
     public new static CapturePasteTarget? Remember()
@@ -57,7 +57,11 @@ internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessI
         if (!target.IsCurrent() || !element.Properties.HasKeyboardFocus.ValueOrDefault) return Unknown();
         // The user already chose the caret. Keep identity for interruption checks,
         // without selecting UIA output ranges or moving focus.
-        return new(target with { InputElement = element, InputAutomation = automation }, CaptureInputKind.Input);
+        var editor = CaptureInputIdentity.Editor(automation, element);
+        if (editor.Properties.IsPassword.ValueOrDefault || !editor.Properties.IsEnabled.ValueOrDefault)
+            return new(target, CaptureInputKind.Protected);
+        var identity = CaptureInputIdentity.Remember(automation, editor);
+        return new(target with { InputIdentity = identity, InputAutomation = automation }, CaptureInputKind.Input);
     }
 
     internal static bool IsTerminalControl(string windowClass, string? inputClass) =>
@@ -78,13 +82,11 @@ internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessI
     internal async Task<CaptureInputState> InputStateAsync()
     {
         if (!IsCurrent()) return CaptureInputState.Changed;
-        if (InputElement is null) return CaptureInputState.Current;
+        if (InputIdentity is null) return CaptureInputState.Current;
         return await Task.Run(() =>
         {
             try
             {
-                if (InputElement.Properties.HasKeyboardFocus.ValueOrDefault)
-                    return IsCurrent() ? CaptureInputState.Current : CaptureInputState.Changed;
                 var focused = InputAutomation?.FocusedElement();
                 if (!IsCurrent()) return CaptureInputState.Changed;
                 if (focused is null) return CaptureInputState.Settling;
@@ -92,18 +94,25 @@ internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessI
                 if (process != ProcessId && (Focus == 0 || process != WindowProcess(Focus))) return CaptureInputState.Changed;
                 var window = focused.Properties.NativeWindowHandle.ValueOrDefault;
                 if (window != 0 && !ContainsWindow(window)) return CaptureInputState.Changed;
-                if (InputAutomation?.Compare(InputElement, focused) == true) return CaptureInputState.Settling;
-                if (focused.Properties.IsPassword.ValueOrDefault ||
-                    focused.Patterns.Value.PatternOrDefault?.IsReadOnly.ValueOrDefault == false)
+                if (!focused.Properties.HasKeyboardFocus.ValueOrDefault) return CaptureInputState.Settling;
+                var editor = CaptureInputIdentity.Editor(InputAutomation!, focused);
+                if (editor.Properties.IsPassword.ValueOrDefault || !editor.Properties.IsEnabled.ValueOrDefault)
                     return CaptureInputState.Changed;
-                // An attachment can briefly move accessibility focus to the
-                // containing page while the SAME editor is being updated.
-                // Never bind to another editor or move the user's caret.
-                var type = focused.Properties.ControlType.ValueOrDefault;
-                return type == ControlType.Document || type == ControlType.Pane || type == ControlType.Window
-                    ? CaptureInputState.Settling : CaptureInputState.Changed;
+                if (editor.Properties.ControlType.ValueOrDefault == ControlType.Edit &&
+                    editor.Patterns.Value.PatternOrDefault?.IsReadOnly.ValueOrDefault == true)
+                    return CaptureInputState.Settling;
+                if (InputIdentity.Matches(InputAutomation!, editor))
+                    return IsCurrent() ? CaptureInputState.Current : CaptureInputState.Changed;
+                if (editor.Properties.ControlType.ValueOrDefault == ControlType.Edit ||
+                    editor.Patterns.Value.PatternOrDefault?.IsReadOnly.ValueOrDefault == false)
+                    return CaptureInputState.Changed;
+                // Upload controls can temporarily take focus. Wait for the
+                // original editor; never paste into the temporary control.
+                return CaptureInputState.Settling;
             }
-            catch (Exception error) when (error is not OutOfMemoryException) { return CaptureInputState.Changed; }
+            // UIA providers can be temporarily unavailable while a rich editor
+            // updates. An unreadable provider is not evidence of another input.
+            catch (Exception error) when (error is not OutOfMemoryException) { return CaptureInputState.Settling; }
         });
     }
 
@@ -131,7 +140,7 @@ internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessI
 
     private static Input Key(ushort value, bool up = false) => new()
     {
-        Type = 1, Data = new InputData { Keyboard = new KeyboardInput { Key = value, Flags = up ? 2u : 0u } },
+        Type = 1, Data = new InputData { Keyboard = new KeyboardInput { Key = value, Flags = up ? 2u : 0u, Extra = CapturePasteActivity.PasteTag } },
     };
 
     [StructLayout(LayoutKind.Sequential)]

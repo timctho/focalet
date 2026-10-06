@@ -117,6 +117,16 @@ internal static class CaptureHotkeyAcceptance
         await Task.Delay(700);
         if (!context.HasBatch || previous.Rtf != interrupted || Clipboard.GetText() != "interrupted hotkey fixture")
             throw new InvalidOperationException("Interrupted paste resumed automatically or discarded the batch.");
+        notices.Clear();
+        picturesBeforeInterruption = Count(previous.Rtf!, @"\pict");
+        SendHotkey(capture: false);
+        await ForegroundRoutingAcceptance.WaitFor(() => Count(previous.Rtf!, @"\pict") > picturesBeforeInterruption,
+            "Navigation fixture did not receive its first image.");
+        SendInput(2, [Key(0x27), Key(0x27, true)], Marshal.SizeOf<Input>()); // Move the caret in the SAME input.
+        await ForegroundRoutingAcceptance.WaitFor(() => notices.Contains("Paste stopped") && !context.Busy,
+            "User navigation within the same input did not stop the batch.");
+        if (Count(previous.Rtf!, @"\pict") != picturesBeforeInterruption + 1)
+            throw new InvalidOperationException("Paste continued after user navigation.");
         if (enters != 0 || captured != 2) throw new InvalidOperationException("Repeated paste sent Enter or captured again.");
         Console.WriteLine("PASS Shift+Alt+A captures without clipboard changes; deliberate Alt+A repeats silently at the current input; busy presses do not queue; cancellation and interruption retain the batch without automatic retries.");
     }
