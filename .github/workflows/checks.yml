@@ -192,6 +192,7 @@ jobs:
           path: |
             artifacts/focalet-capture-win-x64.zip
             artifacts/capture-paste-acceptance.png
+            artifacts/capture-tray-menu*.png
             artifacts/capture-native-clipboard.png
             artifacts/capture-browser-paste.png
             artifacts/capture-electron-*.png

@@ -21,15 +21,14 @@ internal static class CapturePasteSequence
         {
             foreach (var image in textOnly ? new[] { false } : new[] { true, false })
             {
-                if (!await target.IsInputCurrentAsync() || !CapturePasteTarget.ModifiersReleased)
-                    return new(sent, unreadImages, "The input or pressed keys changed.");
-                if (sent > 0 && !clipboard.OwnsClipboard)
-                    return new(sent, unreadImages, "Another application replaced the clipboard.");
+                if (await WaitForInputAsync(target, clipboard, sent > 0) is { } notReady)
+                    return new(sent, unreadImages, notReady);
                 if (image) clipboard.SetImage(batch.Items[index]);
                 else clipboard.SetText(batch.TextParts[index]);
                 clipboard.Arm();
-                if (!await target.IsInputCurrentAsync() ||
-                    !target.Paste(CapturePasteTarget.GetClipboardSequenceNumber(), clipboard.Handle))
+                if (await WaitForInputAsync(target, clipboard, true) is { } interrupted)
+                    return new(sent, unreadImages, interrupted);
+                if (!target.Paste(CapturePasteTarget.GetClipboardSequenceNumber(), clipboard.Handle))
                     return new(sent, unreadImages, "Paste could not be dispatched. It will not be retried.");
                 sent++;
 
@@ -41,11 +40,21 @@ internal static class CapturePasteSequence
                 var minimumWait = image ? (slowerImages ? 3000 : 500) : 150;
                 var settleAfterRead = image ? (slowerImages ? 600 : 200) : 75;
                 var wait = Stopwatch.StartNew();
+                Stopwatch? heldKeys = null;
                 while (wait.ElapsedMilliseconds < (image ? 5000 : 3000))
                 {
                     await Task.Delay(50);
-                    if (!clipboard.OwnsClipboard || !target.IsCurrent() || !CapturePasteTarget.ModifiersReleased)
-                        return new(sent, unreadImages, "Focus, keys or clipboard changed during paste.");
+                    if (!clipboard.OwnsClipboard)
+                        return new(sent, unreadImages, "Another application replaced the clipboard.");
+                    if (!target.IsCurrent()) return new(sent, unreadImages, "The destination window changed during paste.");
+                    if (!CapturePasteTarget.ModifiersReleased)
+                    {
+                        heldKeys ??= Stopwatch.StartNew();
+                        if (heldKeys.ElapsedMilliseconds >= 1500)
+                            return new(sent, unreadImages, "The shortcut keys were not released.");
+                        continue;
+                    }
+                    heldKeys = null;
                     if (clipboard.Read && wait.ElapsedMilliseconds >= minimumWait &&
                         clipboard.MillisecondsSinceRead >= settleAfterRead) break;
                 }
@@ -58,6 +67,24 @@ internal static class CapturePasteSequence
             }
         }
         return new(sent, unreadImages);
+    }
+
+    private static async Task<string?> WaitForInputAsync(CapturePasteTarget target, PasteClipboard clipboard, bool checkClipboard)
+    {
+        var wait = Stopwatch.StartNew();
+        while (true)
+        {
+            if (!target.IsCurrent()) return "The destination window changed during paste.";
+            if (checkClipboard && !clipboard.OwnsClipboard) return "Another application replaced the clipboard.";
+            var state = await target.InputStateAsync();
+            if (!target.IsCurrent()) return "The destination window changed during paste.";
+            if (checkClipboard && !clipboard.OwnsClipboard) return "Another application replaced the clipboard.";
+            if (state == CaptureInputState.Changed) return "The focused input changed during paste.";
+            if (state == CaptureInputState.Current && CapturePasteTarget.ModifiersReleased) return null;
+            if (wait.ElapsedMilliseconds >= 1500)
+                return state == CaptureInputState.Settling ? "The selected input did not regain focus." : "The shortcut keys were not released.";
+            await Task.Delay(25);
+        }
     }
 
     // Win32 delayed rendering also works with apps using Electron's native

@@ -9,6 +9,7 @@ using Focalet.Windows;
 namespace Focalet.CaptureTool;
 
 internal enum CaptureInputKind { Unknown, Input, Protected }
+internal enum CaptureInputState { Current, Settling, Changed }
 internal sealed record CaptureInputObservation(CapturePasteTarget Target, CaptureInputKind Kind);
 
 /// <summary>Identity of the input focused when the user invokes paste.</summary>
@@ -16,6 +17,7 @@ internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessI
     : WindowFocus(Window, Focus, ProcessId, ProcessStarted)
 {
     private AutomationElement? InputElement { get; init; }
+    private UIA3Automation? InputAutomation { get; init; }
     public string Description => NativeCaptureWindow.Title(Window);
     public new static CapturePasteTarget? Remember()
         => RememberWindow() is { Focus: not 0 } target ? target : null;
@@ -55,7 +57,7 @@ internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessI
         if (!target.IsCurrent() || !element.Properties.HasKeyboardFocus.ValueOrDefault) return Unknown();
         // The user already chose the caret. Keep identity for interruption checks,
         // without selecting UIA output ranges or moving focus.
-        return new(target with { InputElement = element }, CaptureInputKind.Input);
+        return new(target with { InputElement = element, InputAutomation = automation }, CaptureInputKind.Input);
     }
 
     internal static bool IsTerminalControl(string windowClass, string? inputClass) =>
@@ -71,13 +73,37 @@ internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessI
     internal bool ContainsWindow(nint window) => window == Window || GetAncestor(window, 2) == Window;
 
     public async Task<bool> IsInputCurrentAsync()
+        => await InputStateAsync() == CaptureInputState.Current;
+
+    internal async Task<CaptureInputState> InputStateAsync()
     {
-        if (!IsCurrent()) return false;
-        if (InputElement is null) return true;
+        if (!IsCurrent()) return CaptureInputState.Changed;
+        if (InputElement is null) return CaptureInputState.Current;
         return await Task.Run(() =>
         {
-            try { return InputElement.Properties.HasKeyboardFocus.ValueOrDefault && IsCurrent(); }
-            catch (Exception error) when (error is not OutOfMemoryException) { return false; }
+            try
+            {
+                if (InputElement.Properties.HasKeyboardFocus.ValueOrDefault)
+                    return IsCurrent() ? CaptureInputState.Current : CaptureInputState.Changed;
+                var focused = InputAutomation?.FocusedElement();
+                if (!IsCurrent()) return CaptureInputState.Changed;
+                if (focused is null) return CaptureInputState.Settling;
+                var process = focused.Properties.ProcessId.ValueOrDefault;
+                if (process != ProcessId && (Focus == 0 || process != WindowProcess(Focus))) return CaptureInputState.Changed;
+                var window = focused.Properties.NativeWindowHandle.ValueOrDefault;
+                if (window != 0 && !ContainsWindow(window)) return CaptureInputState.Changed;
+                if (InputAutomation?.Compare(InputElement, focused) == true) return CaptureInputState.Settling;
+                if (focused.Properties.IsPassword.ValueOrDefault ||
+                    focused.Patterns.Value.PatternOrDefault?.IsReadOnly.ValueOrDefault == false)
+                    return CaptureInputState.Changed;
+                // An attachment can briefly move accessibility focus to the
+                // containing page while the SAME editor is being updated.
+                // Never bind to another editor or move the user's caret.
+                var type = focused.Properties.ControlType.ValueOrDefault;
+                return type == ControlType.Document || type == ControlType.Pane || type == ControlType.Window
+                    ? CaptureInputState.Settling : CaptureInputState.Changed;
+            }
+            catch (Exception error) when (error is not OutOfMemoryException) { return CaptureInputState.Changed; }
         });
     }
 
