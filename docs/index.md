@@ -9,6 +9,14 @@ description: Capture screen context into your existing tools, or work with your 
 **Show your agent what you mean.** Select and annotate screen regions, then share
 the images with available text, links and structure.
 
+<video controls autoplay muted loop playsinline preload="metadata" poster="demos/frontend-poster.webp" style="width: 100%; border-radius: 12px;" aria-label="Desktop demo: sketch a chart and ask an agent to rebuild it">
+  <source src="demos/frontend.mp4" type="video/mp4">
+  <a href="demos/frontend.mp4">Watch the Desktop demo</a>.
+</video>
+
+This is a historical Desktop recording from before the rename. Its original
+footage is retained; new builds display Focalet.
+
 ## Choose your workflow
 
 | | Focalet Capture | Focalet Desktop |
@@ -43,14 +51,6 @@ Connect an installed agent, choose a model, and manage chats, drafts and
 attachments in a dedicated window. Runtime support includes Codex, Claude Code,
 OpenCode, Gemini CLI, Hermes, OpenClaw and Pi; features depend on each protocol.
 The selected agent continues to own credentials, tools, permissions and history.
-
-<video controls autoplay muted loop playsinline preload="metadata" poster="demos/frontend-poster.webp" style="width: 100%; border-radius: 12px;" aria-label="Desktop demo: sketch a chart and ask an agent to rebuild it">
-  <source src="demos/frontend.mp4" type="video/mp4">
-  <a href="demos/frontend.mp4">Watch the Desktop demo</a>.
-</video>
-
-This is a historical Desktop recording from before the rename. Its original
-footage is retained; new builds display Focalet.
 
 - [Install Desktop and connect an agent](install.md).
 - [Share screen context with Claude Code from Desktop](guides/claude-code.md).
