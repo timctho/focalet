@@ -26,10 +26,10 @@ class ProductBoundariesTests(unittest.TestCase):
         return found
 
     def test_apps_share_libraries_without_referencing_each_other(self):
-        apps = [ROOT / "src/Zommi.CaptureTool/Zommi.CaptureTool.csproj",
-                ROOT / "src/Zommi.Windows/Zommi.Windows.csproj"]
+        apps = [ROOT / "src/Focalet.CaptureTool/Focalet.CaptureTool.csproj",
+                ROOT / "src/Focalet.Windows/Focalet.Windows.csproj"]
         graphs = [self.dependencies(app) for app in apps]
-        self.assertIn((ROOT / "src/Zommi.Capture.Windows/Zommi.Capture.Windows.csproj").resolve(), graphs[0] & graphs[1])
+        self.assertIn((ROOT / "src/Focalet.Capture.Windows/Focalet.Capture.Windows.csproj").resolve(), graphs[0] & graphs[1])
         for app, graph in zip(apps, graphs):
             for dependency in graph - {app.resolve()}:
                 output = ET.parse(dependency).findtext("PropertyGroup/OutputType", "Library")
@@ -71,7 +71,7 @@ class ProductBoundariesTests(unittest.TestCase):
     def test_capture_rejects_a_bundled_desktop_even_with_valid_checksums(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            self.package(root, **{"zommi-core-host.exe": b"MZ fixture"})
+            self.package(root, **{"focalet-core-host.exe": b"MZ fixture"})
             with self.assertRaisesRegex(ValueError, "Desktop component"):
                 verify(root, "a" * 40)
 

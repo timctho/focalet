@@ -91,7 +91,7 @@ function Get-DescendantProcessIds {
     )
 }
 
-function Get-ZommiRuntimeRootProcessIds {
+function Get-FocaletRuntimeRootProcessIds {
     param(
         [Parameter(Mandatory = $true)]
         [object[]] $Processes
@@ -102,9 +102,9 @@ function Get-ZommiRuntimeRootProcessIds {
             Where-Object {
                 $_.Name -ieq 'wsl.exe' -and
                 -not [string]::IsNullOrWhiteSpace($_.CommandLine) -and
-                ($_.CommandLine.Contains('ZOMMI_RUNTIME_CHILD=1') -or
+                ($_.CommandLine.Contains('FOCALET_RUNTIME_CHILD=1') -or
                     # Compatibility with Hermes processes launched before the
-                    # general Zommi runtime marker was introduced.
+                    # general Focalet runtime marker was introduced.
                     $_.CommandLine.Contains('HERMES_DASHBOARD_SESSION_TOKEN='))
             } |
             ForEach-Object { [uint32] $_.ProcessId }
@@ -198,6 +198,6 @@ function Restore-ExplorerWindowsToPath {
 Export-ModuleMember -Function `
     Move-PathWithRetry, `
     Get-DescendantProcessIds, `
-    Get-ZommiRuntimeRootProcessIds, `
+    Get-FocaletRuntimeRootProcessIds, `
     Redirect-ExplorerWindowsFromPath, `
     Restore-ExplorerWindowsToPath

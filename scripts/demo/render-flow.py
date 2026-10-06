@@ -26,7 +26,7 @@ def main():
         raise ValueError("The context insert must last between 3 and 12 seconds")
     if args.output.exists():
         raise ValueError("Use a fresh output filename")
-    with tempfile.TemporaryDirectory(prefix="zommi-context-flow-") as directory:
+    with tempfile.TemporaryDirectory(prefix="focalet-context-flow-") as directory:
         with Browser(
             args.browser, Path(__file__).with_name("context-flow.html").as_uri()
         ) as browser:

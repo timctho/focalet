@@ -2,7 +2,7 @@
 
 Use Capture to share screen regions with the editor, terminal or chat app you
 already use. This prototype runs independently of Focalet Desktop and its agent
-broker. It needs no agent sign-in. The current public Zommi installer does
+broker. It needs no agent sign-in. The current public Focalet installer does
 not include this separate tool.
 
 Build from a committed checkout on Windows with .NET 8 and PowerShell 7.
@@ -18,7 +18,7 @@ is unsigned and Windows may require opening confirmation.
 
 ## Capture first, then paste into the input you choose
 
-1. Quit Desktop (currently named Zommi) or another tool using Alt+A. Open the capture tool.
+1. Quit Focalet Desktop or another tool using Alt+A. Open the capture tool.
 2. In the source window, press **Shift+Alt+A**. Drag a rectangle, then use
    **Add region**, **S**, or **Ctrl-drag** for more regions, up to eight.
    After a Ctrl-drag, you can release Ctrl and keep selecting more regions.
@@ -98,15 +98,15 @@ clipboard retains its last payload until another application replaces it.
 
 ## Verification
 
-`tests/Zommi.Capture.Tests` covers ordered per-region text with complete metadata,
+`tests/Focalet.Capture.Tests` covers ordered per-region text with complete metadata,
 safe rich-document encoding, Unicode byte offsets and batch limits.
-`tests/Zommi.Windows.Tests` checks rich-document import and individual native
+`tests/Focalet.Windows.Tests` checks rich-document import and individual native
 image geometry/pixels.
 
 On a disposable Windows desktop, run the real clipboard/focus acceptance:
 
 ```powershell
-dotnet run --project tests/Zommi.Windows.Tests --configuration Release -- --paste-acceptance
+dotnet run --project tests/Focalet.Windows.Tests --configuration Release -- --paste-acceptance
 ```
 
 It uses synthetic native plain/rich inputs, a disposable Chromium profile, and a
@@ -129,7 +129,7 @@ The test replaces the clipboard and should run only on a disposable CI desktop.
 
 ## Product boundary
 
-The entrypoint, tray, hotkeys and paste flow live in `src/Zommi.CaptureTool`.
-It references the shared `src/Zommi.Capture.Windows` library, not the Desktop
+The entrypoint, tray, hotkeys and paste flow live in `src/Focalet.CaptureTool`.
+It references the shared `src/Focalet.Capture.Windows` library, not the Desktop
 helper executable or Flutter app. The capture package has its own manifest and
-checksums. [Compare Capture and Desktop use cases](https://timctho.github.io/zommi/products/).
+checksums. [Compare Capture and Desktop use cases](https://timctho.github.io/focalet/products/).

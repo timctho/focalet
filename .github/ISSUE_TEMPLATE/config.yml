@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Installation and troubleshooting
-    url: https://timctho.github.io/zommi/install/
+    url: https://timctho.github.io/focalet/install/
     about: Check setup, platform permissions and known runtime limitations.
   - name: Report a security vulnerability privately
-    url: https://github.com/timctho/zommi/security/advisories/new
+    url: https://github.com/timctho/focalet/security/advisories/new
     about: Keep vulnerability details out of public issues.

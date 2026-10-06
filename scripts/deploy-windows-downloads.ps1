@@ -12,7 +12,7 @@ $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 Import-Module (Join-Path $PSScriptRoot 'windows-deployment-helpers.psm1') -Force
 $architecture = if ($Runtime -eq 'win-arm64') { 'arm64' } else { 'x64' }
-$packageName = "zommi-windows-$architecture"
+$packageName = "focalet-windows-$architecture"
 $sourceDirectory = Join-Path $repositoryRoot "artifacts/$packageName"
 $sourceArchive = "$sourceDirectory.zip"
 $downloadsRoot = [IO.Path]::GetFullPath($DownloadsDirectory).TrimEnd('\')
@@ -71,7 +71,7 @@ function Get-ExactTargetProcesses {
     $normalizedExecutable = [IO.Path]::GetFullPath($ExecutablePath)
     return @(
         Get-CimInstance Win32_Process | Where-Object {
-            $_.Name -eq 'Zommi.exe' -and
+            $_.Name -eq 'Focalet.exe' -and
             $_.ExecutablePath -and
             [string]::Equals(
                 [IO.Path]::GetFullPath($_.ExecutablePath),
@@ -96,19 +96,19 @@ function Get-TargetDirectoryProcesses {
     )
 }
 
-function Get-DownloadsZommiProcesses {
-    $zommiDownloadsPrefix = $downloadsRoot + '\zommi'
+function Get-DownloadsFocaletProcesses {
+    $focaletDownloadsPrefix = $downloadsRoot + '\focalet'
     return @(
         Get-CimInstance Win32_Process | Where-Object {
             $_.ExecutablePath -and
             [IO.Path]::GetFullPath($_.ExecutablePath).StartsWith(
-                $zommiDownloadsPrefix,
+                $focaletDownloadsPrefix,
                 [StringComparison]::OrdinalIgnoreCase)
         }
     )
 }
 
-function Start-DurableZommiProcess {
+function Start-DurableFocaletProcess {
     param(
         [string] $FilePath,
         [string] $WorkingDirectory
@@ -155,21 +155,21 @@ try {
         throw 'The staged portable archive does not match the source archive.'
     }
 
-    $targetExecutable = Join-Path $targetDirectory 'Zommi.exe'
+    $targetExecutable = Join-Path $targetDirectory 'Focalet.exe'
     $redirectedExplorerWindowHandles = @(
         Redirect-ExplorerWindowsFromPath `
             -Source $targetDirectory `
             -Destination $downloadsRoot
     )
-    # Stop every Zommi package launched from Downloads, including older package
+    # Stop every Focalet package launched from Downloads, including older package
     # folder names, so a stale UI or helper cannot survive the replacement.
     # Include the complete descendant tree: the Rust core can own conhost, WSL,
     # and runtime processes whose executable paths are outside Downloads but
     # whose inherited working-directory handles still lock the package folder.
-    $targetProcesses = @(Get-DownloadsZommiProcesses)
+    $targetProcesses = @(Get-DownloadsFocaletProcesses)
     $processSnapshot = @(Get-CimInstance Win32_Process)
     $runtimeRootProcessIds = @(
-        Get-ZommiRuntimeRootProcessIds -Processes $processSnapshot
+        Get-FocaletRuntimeRootProcessIds -Processes $processSnapshot
     )
     $rootProcessIds = @(
         @($targetProcesses.ProcessId) + $runtimeRootProcessIds |
@@ -192,8 +192,8 @@ try {
     foreach ($processId in $targetProcessIds) {
         Wait-Process -Id $processId -Timeout 10 -ErrorAction SilentlyContinue
     }
-    if (@(Get-DownloadsZommiProcesses).Count -ne 0) {
-        throw 'A Zommi process inside Downloads remained running.'
+    if (@(Get-DownloadsFocaletProcesses).Count -ne 0) {
+        throw 'A Focalet process inside Downloads remained running.'
     }
     $remainingTreeProcesses = @(
         Get-CimInstance Win32_Process | Where-Object {
@@ -201,7 +201,7 @@ try {
         }
     )
     if ($remainingTreeProcesses.Count -ne 0) {
-        throw "A Zommi descendant remained running: $($remainingTreeProcesses.ProcessId -join ',')."
+        throw "A Focalet descendant remained running: $($remainingTreeProcesses.ProcessId -join ',')."
     }
 
     if (Test-Path -LiteralPath $targetDirectory) {
@@ -228,13 +228,13 @@ try {
     $flutterProcessCount = 0
     $singleInstanceVerified = $false
     if (-not $NoStart) {
-        $startedProcess = Start-DurableZommiProcess `
-            -FilePath (Join-Path $targetDirectory 'Zommi.exe') `
+        $startedProcess = Start-DurableFocaletProcess `
+            -FilePath (Join-Path $targetDirectory 'Focalet.exe') `
             -WorkingDirectory $targetDirectory
         Start-Sleep -Seconds 2
         $startedProcess.Refresh()
         if ($startedProcess.HasExited) {
-            throw "The deployed Zommi process exited with code $($startedProcess.ExitCode)."
+            throw "The deployed Focalet process exited with code $($startedProcess.ExitCode)."
         }
 
         $runningTargets = @()
@@ -242,9 +242,9 @@ try {
         do {
             $startedProcess.Refresh()
             if ($startedProcess.HasExited) {
-                throw "The deployed Zommi process exited with code $($startedProcess.ExitCode)."
+                throw "The deployed Focalet process exited with code $($startedProcess.ExitCode)."
             }
-            $runningTargets = @(Get-ExactTargetProcesses (Join-Path $targetDirectory 'Zommi.exe'))
+            $runningTargets = @(Get-ExactTargetProcesses (Join-Path $targetDirectory 'Focalet.exe'))
             if ($runningTargets.Count -ge 1 -and
                 $runningTargets.ProcessId -contains $startedProcess.Id) {
                 break
@@ -259,15 +259,15 @@ try {
         $startedProcessId = $startedProcess.Id
 
         $duplicateProcess = Start-Process `
-            -FilePath (Join-Path $targetDirectory 'Zommi.exe') `
+            -FilePath (Join-Path $targetDirectory 'Focalet.exe') `
             -WorkingDirectory $targetDirectory `
             -PassThru
         if (-not $duplicateProcess.WaitForExit(5000)) {
             Stop-Process -Id $duplicateProcess.Id -Force -ErrorAction SilentlyContinue
-            throw 'A duplicate Zommi launch did not exit within five seconds.'
+            throw 'A duplicate Focalet launch did not exit within five seconds.'
         }
         Start-Sleep -Milliseconds 300
-        $runningTargets = @(Get-ExactTargetProcesses (Join-Path $targetDirectory 'Zommi.exe'))
+        $runningTargets = @(Get-ExactTargetProcesses (Join-Path $targetDirectory 'Focalet.exe'))
         if ($runningTargets.Count -ne 1 -or
             $runningTargets.ProcessId -notcontains $startedProcess.Id) {
             throw "Single-instance verification failed; found $($runningTargets.Count) exact-path processes."
@@ -287,7 +287,7 @@ try {
         targetDirectory = $targetDirectory
         targetArchive = $targetArchive
         files = $deployedFileCount
-        executableSha256 = (Get-FileHash -LiteralPath (Join-Path $targetDirectory 'Zommi.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+        executableSha256 = (Get-FileHash -LiteralPath (Join-Path $targetDirectory 'Focalet.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
         archiveSha256 = $targetArchiveHash.ToLowerInvariant()
         stoppedProcesses = $stoppedProcessCount
         redirectedExplorerWindows = $redirectedExplorerWindowHandles.Count
@@ -313,9 +313,9 @@ catch {
         Move-PathWithRetry -Source $backupArchive -Destination $targetArchive
     }
     if ($stoppedProcessCount -gt 0 -and
-        (Test-Path -LiteralPath (Join-Path $targetDirectory 'Zommi.exe') -PathType Leaf)) {
-        Start-DurableZommiProcess `
-            -FilePath (Join-Path $targetDirectory 'Zommi.exe') `
+        (Test-Path -LiteralPath (Join-Path $targetDirectory 'Focalet.exe') -PathType Leaf)) {
+        Start-DurableFocaletProcess `
+            -FilePath (Join-Path $targetDirectory 'Focalet.exe') `
             -WorkingDirectory $targetDirectory | Out-Null
     }
     throw

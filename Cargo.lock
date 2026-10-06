@@ -2443,7 +2443,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 
 [[package]]
-name = "zommi-core"
+name = "focalet-core"
 version = "0.1.0"
 dependencies = [
  "base64",
@@ -2464,7 +2464,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "zommi-core-host"
+name = "focalet-core-host"
 version = "0.1.0"
 dependencies = [
  "libc",
@@ -2474,11 +2474,11 @@ dependencies = [
  "uuid",
  "wait-timeout",
  "windows-sys 0.61.2",
- "zommi-core",
+ "focalet-core",
 ]
 
 [[package]]
-name = "zommi-linux-capture"
+name = "focalet-linux-capture"
 version = "0.1.0"
 dependencies = [
  "ashpd",

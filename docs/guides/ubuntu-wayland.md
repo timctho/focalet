@@ -1,10 +1,10 @@
 # Capture desktop context on Ubuntu Wayland
 
-Zommi's Linux release targets **Ubuntu 24.04 LTS x64 with GNOME Wayland**.
+Focalet's Linux release targets **Ubuntu 24.04 LTS x64 with GNOME Wayland**.
 Other Linux desktops and display servers are not covered by this support claim.
 
-1. Install the `.deb` from [Zommi releases](https://github.com/timctho/zommi/releases/latest).
-2. Enable **Zommi Desktop Integration** in App settings for the global shortcut
+1. Install the `.deb` from [Focalet releases](https://github.com/timctho/focalet/releases/latest).
+2. Enable **Focalet Desktop Integration** in App settings for the global shortcut
    and reliable window identity and geometry.
 3. Grant the screen-sharing authorization requested by the desktop portal.
 4. Connect your agent, press **Alt+A**, select a region and review the attachment.

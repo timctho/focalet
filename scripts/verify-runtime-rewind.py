@@ -57,11 +57,11 @@ async def verify(mode, root):
     server.requests = []
     threading.Thread(target=server.serve_forever, daemon=True).start()
     # Retain the user's shell/runtime launch tools, but isolate provider config.
-    environment = {k: v for k, v in without_parent_context(os.environ).items() if not any(fragment in k for fragment in ['API_KEY', 'TOKEN', 'SECRET', 'PASSWORD']) and not k.startswith('ZOMMI_')}
+    environment = {k: v for k, v in without_parent_context(os.environ).items() if not any(fragment in k for fragment in ['API_KEY', 'TOKEN', 'SECRET', 'PASSWORD']) and not k.startswith('FOCALET_')}
     environment.update({
-        'ZOMMI_CORE_STATE_PATH': str(root / 'binding.json'),
-        'ZOMMI_RUNTIME_OVERRIDES_PATH': str(root / 'overrides.json'),
-        'ZOMMI_RUNTIME_DISCOVERY_CACHE_PATH': str(root / 'discovery.json'),
+        'FOCALET_CORE_STATE_PATH': str(root / 'binding.json'),
+        'FOCALET_RUNTIME_OVERRIDES_PATH': str(root / 'overrides.json'),
+        'FOCALET_RUNTIME_DISCOVERY_CACHE_PATH': str(root / 'discovery.json'),
     })
     endpoint = f'http://127.0.0.1:{server.server_port}/v1'
     gateway = None
@@ -71,12 +71,12 @@ async def verify(mode, root):
             'models': [{'id': 'fixture', 'contextWindow': 64000, 'maxTokens': 4096}]
         }}}))
         environment.update({'PI_CODING_AGENT_DIR': str(root), 'PI_CODING_AGENT_SESSION_DIR': str(root / 'sessions'),
-            'ZOMMI_PI_COMMAND': shutil.which('pi'),
-            'ZOMMI_PI_ARGS_JSON': json.dumps(['--mode', 'rpc', '--provider', 'fixture', '--model', 'fixture', '--no-extensions', '--no-skills', '--no-prompt-templates'])})
+            'FOCALET_PI_COMMAND': shutil.which('pi'),
+            'FOCALET_PI_ARGS_JSON': json.dumps(['--mode', 'rpc', '--provider', 'fixture', '--model', 'fixture', '--no-extensions', '--no-skills', '--no-prompt-templates'])})
     elif mode == 'hermes':
         (root / 'config.yaml').write_text(f'model:\n  default: fixture\n  provider: custom\n  base_url: {endpoint}\n  api_key: fixture-local\n  api_mode: chat_completions\n')
         environment.update({'HERMES_HOME': str(root), 'OPENAI_API_KEY': 'fixture-local', 'OPENAI_BASE_URL': endpoint,
-                            'ZOMMI_HERMES_COMMAND': shutil.which('hermes')})
+                            'FOCALET_HERMES_COMMAND': shutil.which('hermes')})
     else:
         with socket.socket() as sock:
             sock.bind(('127.0.0.1', 0))
@@ -88,8 +88,8 @@ async def verify(mode, root):
                 'models': [{'id': 'fixture', 'name': 'Fixture', 'contextWindow': 64000, 'maxTokens': 4096}]}}}}
         (root / 'openclaw.json').write_text(json.dumps(config))
         environment.update({'OPENCLAW_STATE_DIR': str(root), 'OPENCLAW_CONFIG_PATH': str(root / 'openclaw.json'),
-            'OPENCLAW_GATEWAY_TOKEN': 'fixture-local', 'ZOMMI_OPENCLAW_GATEWAY_URL': f'ws://127.0.0.1:{port}',
-            'ZOMMI_OPENCLAW_DEVICE_IDENTITY_PATH': str(root / 'device.json')})
+            'OPENCLAW_GATEWAY_TOKEN': 'fixture-local', 'FOCALET_OPENCLAW_GATEWAY_URL': f'ws://127.0.0.1:{port}',
+            'FOCALET_OPENCLAW_DEVICE_IDENTITY_PATH': str(root / 'device.json')})
     core = None
     async def start_gateway():
         nonlocal gateway
@@ -113,7 +113,7 @@ async def verify(mode, root):
         if mode == 'openclaw':
             await start_gateway()
         async def launch():
-            return await asyncio.create_subprocess_exec(str(repo / 'target/debug/zommi-core-host'), cwd=root, env=environment,
+            return await asyncio.create_subprocess_exec(str(repo / 'target/debug/focalet-core-host'), cwd=root, env=environment,
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=(root / 'core.log').open('a'), limit=64 * 1024 * 1024)
         core = await launch()
         seq = 0
@@ -185,10 +185,10 @@ async def verify(mode, root):
         result = {'runtime': mode, 'status': 'passed', 'middleEditRemovedSuffix': True,
                   'providerInputExcludedRemovedMessages': True, 'runtimeRestartPreservedRewind': True,
                   'newBranch': connection['sessionId'] != selected['sessionId'],
-                  'coreSha256': hashlib.sha256((repo / 'target/debug/zommi-core-host').read_bytes()).hexdigest(),
+                  'coreSha256': hashlib.sha256((repo / 'target/debug/focalet-core-host').read_bytes()).hexdigest(),
                   'sourceSha256': {str(path.relative_to(repo)): hashlib.sha256(path.read_bytes()).hexdigest()
-                      for path in [repo / 'crates/zommi-core-host/src/main.rs',
-                                   *sorted((repo / 'crates/zommi-core/src').glob('*.rs'))]}}
+                      for path in [repo / 'crates/focalet-core-host/src/main.rs',
+                                   *sorted((repo / 'crates/focalet-core/src').glob('*.rs'))]}}
         (root / 'verification.json').write_text(json.dumps(result, indent=2) + '\n')
         print(json.dumps(result), flush=True)
         return result
@@ -208,5 +208,5 @@ if __name__ == '__main__':
     parser.add_argument('--runtime', choices=['pi', 'hermes', 'openclaw'], required=True)
     parser.add_argument('--output-directory', type=Path)
     args = parser.parse_args()
-    directory = args.output_directory or Path(tempfile.mkdtemp(prefix=f'zommi-real-{args.runtime}-rewind-'))
+    directory = args.output_directory or Path(tempfile.mkdtemp(prefix=f'focalet-real-{args.runtime}-rewind-'))
     asyncio.run(verify(args.runtime, directory.resolve()))

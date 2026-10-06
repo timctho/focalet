@@ -27,7 +27,7 @@ async def verify(args):
     )
     fixture = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fixture)
-    with tempfile.TemporaryDirectory(prefix="zommi-real-codex-") as directory:
+    with tempfile.TemporaryDirectory(prefix="focalet-real-codex-") as directory:
         root = Path(directory)
         server = ThreadingHTTPServer(("127.0.0.1", 0), fixture.Handler)
         server.request_log = root / "provider-request.json"
@@ -42,11 +42,11 @@ async def verify(args):
         environment = without_parent_context(os.environ)
         environment.update({
             "CODEX_HOME": str(root),
-            "ZOMMI_CODEX_COMMAND": str(Path(args.codex).absolute()),
-            "ZOMMI_CODEX_ARGS_JSON": '["app-server"]',
-            "ZOMMI_CORE_STATE_PATH": str(root / "binding.json"),
-            "ZOMMI_RUNTIME_OVERRIDES_PATH": str(root / "overrides.json"),
-            "ZOMMI_RUNTIME_DISCOVERY_CACHE_PATH": str(root / "discovery.json"),
+            "FOCALET_CODEX_COMMAND": str(Path(args.codex).absolute()),
+            "FOCALET_CODEX_ARGS_JSON": '["app-server"]',
+            "FOCALET_CORE_STATE_PATH": str(root / "binding.json"),
+            "FOCALET_RUNTIME_OVERRIDES_PATH": str(root / "overrides.json"),
+            "FOCALET_RUNTIME_DISCOVERY_CACHE_PATH": str(root / "discovery.json"),
         })
         async def launch_core():
             return await asyncio.create_subprocess_exec(
@@ -218,7 +218,7 @@ async def verify(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--core-host", default="target/debug/zommi-core-host")
+    parser.add_argument("--core-host", default="target/debug/focalet-core-host")
     parser.add_argument("--codex", default=shutil.which("codex"))
     parser.add_argument("--switches", type=int, default=40)
     parser.add_argument("--verify-rewind", action="store_true")

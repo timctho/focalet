@@ -7,17 +7,17 @@ fits how you already work:
 | Product | Use it when | Availability |
 | --- | --- | --- |
 | **[Focalet Capture](docs/capture-tool.md)** | You want to stay in Cursor, a terminal, ChatGPT or another existing input. Capture several regions, then paste each image and its context in order. No agent setup is needed. | Windows tray tool; separate prototype package |
-| **[Focalet Desktop](docs/install.md)** | You want a dedicated window for agent chats, saved sessions, model selection, approvals and captured attachments. | Windows, macOS and Ubuntu; existing Zommi installers |
+| **[Focalet Desktop](docs/install.md)** | You want a dedicated window for agent chats, saved sessions, model selection, approvals and captured attachments. | Windows, macOS and Ubuntu; existing Focalet installers |
 
 Both apps live in this repository and share capture components. Capture does not
 require Desktop, Flutter or the agent broker. [Use cases and product boundaries](docs/products.md).
 
-Focalet is the new product name. The repository URL, existing Desktop installers,
-settings and technical identifiers retain **Zommi** for compatibility. The public
-Desktop release does not yet include the separate Capture tool.
+The project, source packages and applications use the **Focalet** name.
+Capture remains a separate Windows prototype. See [upgrade notes](docs/migration.md)
+for earlier installations and release availability.
 
-[![CI](https://github.com/timctho/zommi/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/timctho/zommi/actions/workflows/checks.yml)
-[![Latest release](https://img.shields.io/github/v/release/timctho/zommi)](https://github.com/timctho/zommi/releases/latest)
+[![CI](https://github.com/timctho/focalet/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/timctho/focalet/actions/workflows/checks.yml)
+[![Latest release](https://img.shields.io/github/v/release/timctho/focalet)](https://github.com/timctho/focalet/releases/latest)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
 [![Sketch a stacked chart and trend line, then watch the agent rebuild them](docs/demos/frontend-preview.webp)](docs/demos/frontend.mp4)
@@ -26,18 +26,18 @@ Desktop release does not yet include the separate Capture tool.
 
 > Same six months: stacked channels left, revenue trend right.
 
-[Watch the frontend demo](docs/demos/frontend.mp4) · [Documentation](https://timctho.github.io/zommi/)
+[Watch the frontend demo](docs/demos/frontend.mp4) · [Documentation](https://timctho.github.io/focalet/)
 
 ## Download Desktop
 
 | Platform | Architecture | Download |
 | --- | --- | --- |
-| Windows 10/11 | x64 | [Setup](https://github.com/timctho/zommi/releases/latest/download/Zommi-Setup-x64.exe) |
-| macOS 12+ | Apple Silicon (M1 or later) | [DMG](https://github.com/timctho/zommi/releases/latest/download/Zommi-macOS-arm64.dmg) |
-| macOS 12+ | Intel | [DMG](https://github.com/timctho/zommi/releases/latest/download/Zommi-macOS-x64.dmg) |
-| Ubuntu 24.04 LTS · GNOME Wayland | x64 | [.deb](https://github.com/timctho/zommi/releases/latest/download/Zommi-Ubuntu-amd64.deb) |
+| Windows 10/11 | x64 | [Setup](https://github.com/timctho/focalet/releases/latest) |
+| macOS 12+ | Apple Silicon (M1 or later) | [DMG](https://github.com/timctho/focalet/releases/latest) |
+| macOS 12+ | Intel | [DMG](https://github.com/timctho/focalet/releases/latest) |
+| Ubuntu 24.04 LTS · GNOME Wayland | x64 | [.deb](https://github.com/timctho/focalet/releases/latest) |
 
-[Latest release and checksums](https://github.com/timctho/zommi/releases/latest)
+[Latest release and checksums](https://github.com/timctho/focalet/releases/latest)
 
 Uses your existing agent account. [Installation guide](docs/install.md) ·
 [Build from source](CONTRIBUTING.md)
@@ -52,7 +52,7 @@ Choose an installed agent, or use **Configure runtime → Add runtime** to add a
 CLI. Repeat for additional runtimes, connect, then choose a model from the chat
 header. Sign in through your agent's own flow if needed.
 
-[![Configure agent runtimes, connect, and see the full Zommi window](docs/demos/setup-preview.webp)](docs/demos/setup.mp4)
+[![Configure agent runtimes, connect, and see the full Focalet window](docs/demos/setup-preview.webp)](docs/demos/setup.mp4)
 
 | Agent | Support |
 | --- | --- |
@@ -125,10 +125,10 @@ requests. [Runtime permissions](docs/install.md#2-choose-the-agent-you-already-h
 | **macOS 12+ · Apple Silicon / Intel** | Multiple regions, drawing, native Accessibility and optional browser context |
 | **Ubuntu 24.04 LTS · x64 · GNOME Wayland** | Multiple regions, drawing, AT-SPI and optional browser context; requires the bundled desktop integration and screen-sharing authorization; [install and test](docs/ubuntu-testing.md) |
 
-Linux support targets Ubuntu 24.04's GNOME Wayland desktop. Enable **Zommi
+Linux support targets Ubuntu 24.04's GNOME Wayland desktop. Enable **Focalet
 Desktop Integration** in App settings for Alt+A and aligned app context.
 
-[Releases](https://github.com/timctho/zommi/releases) ·
+[Releases](https://github.com/timctho/focalet/releases) ·
 [Installation and permissions](docs/install.md) ·
 [Contributing](CONTRIBUTING.md) · [Privacy](docs/privacy.md) ·
 [Security](SECURITY.md) · [Code signing policy](docs/code-signing.md)

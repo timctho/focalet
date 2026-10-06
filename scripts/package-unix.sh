@@ -8,7 +8,7 @@ if [[ "$target_platform" != linux && "$target_platform" != macos ]]; then
 fi
 
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-flutter_directory="$repository_root/src/Zommi.Flutter"
+flutter_directory="$repository_root/src/Focalet.Flutter"
 
 if [[ "$target_platform" == linux ]]; then
   python3 "$repository_root/scripts/ubuntu_compatibility.py" build-host
@@ -17,9 +17,9 @@ fi
 if [[ "$target_platform" == macos ]]; then
   # Keep this checkout's local builds on the same identity. Ad-hoc signatures
   # use binary hashes, so replacing the app invalidates existing TCC grants.
-  macos_signing_identity=${ZOMMI_MACOS_SIGNING_IDENTITY:-$(git -C "$repository_root" config --local --get zommi.macosSigningIdentity || true)}
+  macos_signing_identity=${FOCALET_MACOS_SIGNING_IDENTITY:-$(git -C "$repository_root" config --local --get focalet.macosSigningIdentity || true)}
   if [[ -z "$macos_signing_identity" || "$macos_signing_identity" == - ]]; then
-    echo 'macOS: using ad-hoc signing; rebuilt apps can lose Screen Recording and Accessibility grants. Set ZOMMI_MACOS_SIGNING_IDENTITY or git config --local zommi.macosSigningIdentity to retain a signing identity.' >&2
+    echo 'macOS: using ad-hoc signing; rebuilt apps can lose Screen Recording and Accessibility grants. Set FOCALET_MACOS_SIGNING_IDENTITY or git config --local focalet.macosSigningIdentity to retain a signing identity.' >&2
   fi
 fi
 
@@ -27,7 +27,7 @@ resolve_linux_runtime_library() {
   local soname=$1
   local search_path
   local candidate
-  IFS=: read -r -a search_paths <<< "${ZOMMI_LINUX_RUNTIME_LIBRARY_DIRS:-}"
+  IFS=: read -r -a search_paths <<< "${FOCALET_LINUX_RUNTIME_LIBRARY_DIRS:-}"
   for search_path in "${search_paths[@]}"; do
     [[ -n "$search_path" ]] || continue
     candidate="$search_path/$soname"
@@ -89,30 +89,30 @@ fi
     export FLUTTER_XCODE_ARCHS="$machine_architecture"
   fi
   flutter pub get
-  flutter build "$target_platform" --release --no-pub "--dart-define=ZOMMI_BUILD_REVISION=$git_commit" "${version_arguments[@]}"
+  flutter build "$target_platform" --release --no-pub "--dart-define=FOCALET_BUILD_REVISION=$git_commit" "${version_arguments[@]}"
 )
 cargo build \
   --manifest-path "$repository_root/Cargo.toml" \
   --release \
-  --bin zommi-core-host
+  --bin focalet-core-host
 if [[ "$target_platform" == linux ]]; then
   cargo build \
     --manifest-path "$repository_root/Cargo.toml" \
     --release \
-    --bin zommi-linux-capture
+    --bin focalet-linux-capture
 fi
 
 if [[ "$target_platform" == linux ]]; then
   flutter_output="$flutter_directory/build/linux/$release_architecture/release/bundle"
   bundle_linux_runtime_libraries "$flutter_output/lib"
 else
-  flutter_output="$flutter_directory/build/macos/Build/Products/Release/Zommi.app"
+  flutter_output="$flutter_directory/build/macos/Build/Products/Release/Focalet.app"
 fi
-core_host="${CARGO_TARGET_DIR:-$repository_root/target}/release/zommi-core-host"
+core_host="${CARGO_TARGET_DIR:-$repository_root/target}/release/focalet-core-host"
 browser_runtime="$target_platform-$release_architecture"
 if [[ "$target_platform" == macos ]]; then browser_runtime="osx-$release_architecture"; fi
 browser_output="$repository_root/artifacts/browser-capture-$browser_runtime"
-dotnet publish "$repository_root/src/Zommi.BrowserCapture/Zommi.BrowserCapture.csproj" \
+dotnet publish "$repository_root/src/Focalet.BrowserCapture/Focalet.BrowserCapture.csproj" \
   --configuration Release --runtime "$browser_runtime" --self-contained true \
   -p:PublishSingleFile=true -p:DebugType=None --output "$browser_output"
 assembler_arguments=(
@@ -138,12 +138,12 @@ elif [[ "$target_platform" == linux ]]; then
   assembler_arguments+=(--signing-status checksum-only --signing-mechanism sha256)
   assembler_arguments+=(
     --linux-capture-host
-    "${CARGO_TARGET_DIR:-$repository_root/target}/release/zommi-linux-capture"
+    "${CARGO_TARGET_DIR:-$repository_root/target}/release/focalet-linux-capture"
   )
 fi
 python3 "${assembler_arguments[@]}"
 
-package_directory="$repository_root/artifacts/zommi-$target_platform-$release_architecture"
+package_directory="$repository_root/artifacts/focalet-$target_platform-$release_architecture"
 python3 "$repository_root/scripts/verify_release.py" \
   "$package_directory" \
   --expected-platform "$target_platform" \

@@ -10,18 +10,18 @@ from test_runtime_commands import Core, FIXTURES
 
 class ClaudeRuntimeTests(unittest.TestCase):
     def setUp(self):
-        self.directory = tempfile.TemporaryDirectory(prefix='zommi-claude-')
+        self.directory = tempfile.TemporaryDirectory(prefix='focalet-claude-')
         self.addCleanup(self.directory.cleanup)
         self.path = Path(self.directory.name)
-        self.env = {k: v for k, v in os.environ.items() if not k.startswith('ZOMMI_')}
-        self.env.update(ZOMMI_RUNTIME_DISCOVERY_MODE='configured-only',
-                        ZOMMI_CLAUDE_COMMAND=sys.executable,
-                        ZOMMI_CLAUDE_ARGS_JSON=json.dumps([str(FIXTURES / 'fake_claude_runtime.py')]),
-                        ZOMMI_FAKE_CLAUDE_STORE=str(self.path / 'sessions'),
-                        ZOMMI_FAKE_REQUEST_LOG=str(self.path / 'wire.jsonl'),
-                        ZOMMI_CORE_STATE_PATH=str(self.path / 'binding.json'),
-                        ZOMMI_RUNTIME_OVERRIDES_PATH=str(self.path / 'overrides.json'),
-                        ZOMMI_RUNTIME_DISCOVERY_CACHE_PATH=str(self.path / 'targets.json'))
+        self.env = {k: v for k, v in os.environ.items() if not k.startswith('FOCALET_')}
+        self.env.update(FOCALET_RUNTIME_DISCOVERY_MODE='configured-only',
+                        FOCALET_CLAUDE_COMMAND=sys.executable,
+                        FOCALET_CLAUDE_ARGS_JSON=json.dumps([str(FIXTURES / 'fake_claude_runtime.py')]),
+                        FOCALET_FAKE_CLAUDE_STORE=str(self.path / 'sessions'),
+                        FOCALET_FAKE_REQUEST_LOG=str(self.path / 'wire.jsonl'),
+                        FOCALET_CORE_STATE_PATH=str(self.path / 'binding.json'),
+                        FOCALET_RUNTIME_OVERRIDES_PATH=str(self.path / 'overrides.json'),
+                        FOCALET_RUNTIME_DISCOVERY_CACHE_PATH=str(self.path / 'targets.json'))
         self.core = self.start()
 
     def start(self):
@@ -115,17 +115,17 @@ class ClaudeRuntimeTests(unittest.TestCase):
 
     def test_missing_auth_is_actionable(self):
         self.core.close()
-        self.env['ZOMMI_FAKE_CLAUDE_AUTH'] = 'missing'
+        self.env['FOCALET_FAKE_CLAUDE_AUTH'] = 'missing'
         self.core = self.start()
         result = self.core.request('runtime.connect', {'runtimeTargetId': self.target['id'], 'cwd':str(self.path)}, ok=False)
         self.assertEqual(result['error']['code'], 'authentication-required')
 
     def test_older_cli_retries_without_optional_partial_flag_and_keeps_permissions(self):
         self.core.close()
-        self.env['ZOMMI_CLAUDE_ARGS_JSON'] = json.dumps([
+        self.env['FOCALET_CLAUDE_ARGS_JSON'] = json.dumps([
             str(FIXTURES / 'fake_claude_runtime.py'), '--include-partial-messages',
             '--permission-prompt-tool', 'stdio'])
-        self.env['ZOMMI_FAKE_CLAUDE_REJECT_PARTIAL'] = '1'
+        self.env['FOCALET_FAKE_CLAUDE_REJECT_PARTIAL'] = '1'
         self.core = self.start()
         self.connect(fullAccess=True)
         operation, _ = self.turn('one accepted prompt')
@@ -144,7 +144,7 @@ class ClaudeRuntimeTests(unittest.TestCase):
 
     def test_required_flag_failure_keeps_stderr_and_does_not_remove_permissions(self):
         self.core.close()
-        self.env['ZOMMI_FAKE_CLAUDE_STARTUP_ERROR'] = "error: unknown option '--permission-prompt-tool'"
+        self.env['FOCALET_FAKE_CLAUDE_STARTUP_ERROR'] = "error: unknown option '--permission-prompt-tool'"
         self.core = self.start()
         result = self.core.request('runtime.connect', {'runtimeTargetId': self.target['id'], 'cwd': str(self.path)}, ok=False)
         self.assertEqual(result['error']['code'], 'runtime-update-required')
@@ -155,12 +155,12 @@ class ClaudeRuntimeTests(unittest.TestCase):
 
     def test_legacy_resume_requires_update_without_touching_saved_chat(self):
         self.core.close()
-        self.env['ZOMMI_CLAUDE_ARGS_JSON'] = json.dumps([
+        self.env['FOCALET_CLAUDE_ARGS_JSON'] = json.dumps([
             str(FIXTURES / 'fake_claude_runtime.py'), '--include-partial-messages',
             '--permission-prompt-tool', 'stdio'])
         old_cli = self.path / 'old-cli'
         old_cli.touch()
-        self.env['ZOMMI_FAKE_CLAUDE_REJECT_PARTIAL'] = str(old_cli)
+        self.env['FOCALET_FAKE_CLAUDE_REJECT_PARTIAL'] = str(old_cli)
         self.core = self.start()
         self.connect()
         operation, _ = self.turn('crash-now')

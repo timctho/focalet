@@ -28,7 +28,7 @@ class PublicReleaseTests(unittest.TestCase):
             asset.write_bytes(f"{platform}-{architecture}".encode())
             metadata = self.root / (name + ".release.json")
             metadata.write_text(json.dumps({
-                "product": "Zommi", "version": "0.1.0", "gitCommit": self.commit,
+                "product": "Focalet", "version": "0.1.0", "gitCommit": self.commit,
                 "platform": platform, "architecture": architecture, "file": name,
                 "sha256": hashlib.sha256(asset.read_bytes()).hexdigest(),
                 "applicationSigning": {"status": "unsigned"}, "installerSigning": "unsigned",
@@ -43,7 +43,7 @@ class PublicReleaseTests(unittest.TestCase):
         self.assertNotIn(str(self.root), json.dumps(manifest))
 
     def test_tampered_installer_is_rejected(self):
-        (self.root / "Zommi-Setup-x64.exe").write_bytes(b"changed after acceptance")
+        (self.root / "Focalet-Setup-x64.exe").write_bytes(b"changed after acceptance")
         with self.assertRaisesRegex(ValueError, "checksum mismatch"):
             publish.collect_assets(self.metadata, self.commit)
 
@@ -73,7 +73,7 @@ class PublicReleaseTests(unittest.TestCase):
             profile = f"macos-{architecture}"
             with self.subTest(profile=profile):
                 paths, manifest = publish.collect_assets([metadata], self.commit, platforms=profile)
-                self.assertEqual([path.name for path in paths], [f"Zommi-macOS-{architecture}.dmg"])
+                self.assertEqual([path.name for path in paths], [f"Focalet-macOS-{architecture}.dmg"])
                 self.assertEqual([(a["platform"], a["architecture"]) for a in manifest["assets"]],
                                  [("macos", architecture)])
                 for invalid in ([], self.metadata[1:3], [self.metadata[3 - index]], self.metadata):
@@ -121,7 +121,7 @@ class PublicReleaseTests(unittest.TestCase):
 
     def test_explicit_windows_preview_includes_only_the_accepted_installer(self):
         paths, manifest = publish.collect_assets(self.metadata[:1], self.commit, windows_only=True)
-        self.assertEqual([p.name for p in paths], ["Zommi-Setup-x64.exe"])
+        self.assertEqual([p.name for p in paths], ["Focalet-Setup-x64.exe"])
         self.assertEqual([a["platform"] for a in manifest["assets"]], ["windows"])
         for invalid in ([], self.metadata[1:], self.metadata):
             with self.subTest(metadata=invalid), self.assertRaisesRegex(ValueError, "exactly the Windows"):
@@ -133,9 +133,9 @@ class PublicReleaseTests(unittest.TestCase):
             json.dumps({"sha": self.commit}),
             json.dumps([[], [{"name": "v0.1.0-preview.5", "commit": {"sha": self.commit}}]]),
         ]) as gh:
-            publish.verify_destination("timctho/zommi", self.commit, "v0.1.0-preview.5")
+            publish.verify_destination("timctho/focalet", self.commit, "v0.1.0-preview.5")
         self.assertEqual(gh.call_args_list[0].args,
-                         ("api", f"repos/timctho/zommi/commits/{self.commit}"))
+                         ("api", f"repos/timctho/focalet/commits/{self.commit}"))
 
     def test_preview_digit_boundary_requires_a_patch_bump(self):
         existing = ["v0.1.0-preview.8", "v0.1.0-preview.9", "v0.1.0-preview.11"]
@@ -161,18 +161,18 @@ class PublicReleaseTests(unittest.TestCase):
             json.dumps([[{"name": "v0.1.0-preview.9", "commit": {"sha": self.commit}}]]),
         ]):
             with self.assertRaisesRegex(ValueError, "GitHub can sort"):
-                publish.verify_destination("timctho/zommi", self.commit, "v0.1.0-preview.10")
+                publish.verify_destination("timctho/focalet", self.commit, "v0.1.0-preview.10")
 
     def test_release_cannot_use_a_tag_or_source_for_different_binaries(self):
         with patch.object(publish, "gh", return_value=json.dumps({"sha": "b" * 40})):
             with self.assertRaisesRegex(ValueError, "exact installer source"):
-                publish.verify_destination("timctho/zommi", self.commit, "v0.1.0-preview.5")
+                publish.verify_destination("timctho/focalet", self.commit, "v0.1.0-preview.5")
         with patch.object(publish, "gh", side_effect=[
             json.dumps({"sha": self.commit}),
             json.dumps([[{"name": "v0.1.0-preview.5", "commit": {"sha": "b" * 40}}]]),
         ]):
             with self.assertRaisesRegex(ValueError, "tag points to a different"):
-                publish.verify_destination("timctho/zommi", self.commit, "v0.1.0-preview.5")
+                publish.verify_destination("timctho/focalet", self.commit, "v0.1.0-preview.5")
 
     def run_windows_publication(self, *, tamper_digest=False, stable=False):
         calls, uploaded = [], {}
@@ -189,11 +189,11 @@ class PublicReleaseTests(unittest.TestCase):
                     p = Path(path)
                     uploaded[p.name] = "sha256:" + hashlib.sha256(p.read_bytes()).hexdigest()
                 if tamper_digest:
-                    uploaded["Zommi-Setup-x64.exe"] = "sha256:" + "0" * 64
+                    uploaded["Focalet-Setup-x64.exe"] = "sha256:" + "0" * 64
             if args[:2] == ("release", "view"):
                 if "assets" in args:
                     return json.dumps({"assets": [{"name": n, "digest": h} for n, h in uploaded.items()]})
-                return "https://github.com/timctho/zommi/releases/tag/v0.1.0-preview.5"
+                return "https://github.com/timctho/focalet/releases/tag/v0.1.0-preview.5"
             return ""
 
         argv = ["publish_release.py", "--tag", "v0.1.0" if stable else "v0.1.0-preview.5",
@@ -214,10 +214,10 @@ class PublicReleaseTests(unittest.TestCase):
         calls, output = self.run_windows_publication()
         for operation in ("create", "edit"):
             call = next(c for c in calls if c[:2] == ("release", operation))
-            self.assertEqual(call[call.index("--repo") + 1], "timctho/zommi")
+            self.assertEqual(call[call.index("--repo") + 1], "timctho/focalet")
             self.assertEqual(call[call.index("--target") + 1], self.commit)
         self.assertNotIn("Mac:", (output / "release-notes.md").read_text())
-        self.assertIn("timctho/zommi/releases/download/", (output / "release-notes.md").read_text())
+        self.assertIn("timctho/focalet/releases/download/", (output / "release-notes.md").read_text())
         self.assertFalse(any("--visibility" in c for c in calls))
 
     def test_upload_digest_mismatch_leaves_the_release_unpublished(self):
@@ -243,7 +243,7 @@ class PublicReleaseTests(unittest.TestCase):
             self.assertEqual(publish.main(), 0)
             github.assert_not_called()
         notes = (output / "release-notes.md").read_text()
-        self.assertIn("sudo apt install ./Zommi-Ubuntu-amd64.deb", notes)
+        self.assertIn("sudo apt install ./Focalet-Ubuntu-amd64.deb", notes)
         self.assertNotIn("Windows: run Setup", notes)
 
     def test_published_release_cannot_be_overwritten(self):

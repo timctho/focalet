@@ -1,4 +1,4 @@
-public sealed class ZommiDesktopFrameCapture : System.IDisposable {
+public sealed class FocaletDesktopFrameCapture : System.IDisposable {
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern System.IntPtr SetThreadDpiAwarenessContext(System.IntPtr context);
     [System.Runtime.InteropServices.DllImport("user32.dll")]
@@ -24,7 +24,7 @@ public sealed class ZommiDesktopFrameCapture : System.IDisposable {
         }
     }
 
-    public ZommiDesktopFrameCapture(int[] captureArea) {
+    public FocaletDesktopFrameCapture(int[] captureArea) {
         if (captureArea == null || captureArea.Length != 4 || captureArea[2] <= 0 || captureArea[3] <= 0) throw new System.ArgumentException("A positive physical capture region is required.");
         area = (int[])captureArea.Clone();
     }
@@ -36,7 +36,7 @@ public sealed class ZommiDesktopFrameCapture : System.IDisposable {
     }
 
     public DeferredFrame CaptureDeferred() {
-        if (disposed) throw new System.ObjectDisposedException("ZommiDesktopFrameCapture");
+        if (disposed) throw new System.ObjectDisposedException("FocaletDesktopFrameCapture");
         var previous = SetThreadDpiAwarenessContext(new System.IntPtr(-4));
         var frame = new DeferredFrame();
         try {

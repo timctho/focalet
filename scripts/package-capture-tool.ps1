@@ -12,7 +12,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 $output = Join-Path $root "artifacts/focalet-capture-$Runtime"
 if (Test-Path -LiteralPath $output) { Remove-Item -LiteralPath $output -Recurse -Force }
-$temporary = Join-Path ([IO.Path]::GetTempPath()) "zommi-capture-build-$([Guid]::NewGuid().ToString('N'))"
+$temporary = Join-Path ([IO.Path]::GetTempPath()) "focalet-capture-build-$([Guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Path $temporary | Out-Null
 try {
     # Build only committed files, independent of untracked test output or local files.
@@ -22,8 +22,8 @@ try {
     $source = Join-Path $temporary 'source'
     Expand-Archive -LiteralPath $sourceArchive -DestinationPath $source
     $nuget = @('--configfile', (Join-Path $source 'NuGet.config'))
-    if ($env:ZOMMI_NUGET_SOURCE) { $nuget += @('--source', $env:ZOMMI_NUGET_SOURCE) }
-    dotnet publish (Join-Path $source 'src/Zommi.CaptureTool/Zommi.CaptureTool.csproj') @nuget `
+    if ($env:FOCALET_NUGET_SOURCE) { $nuget += @('--source', $env:FOCALET_NUGET_SOURCE) }
+    dotnet publish (Join-Path $source 'src/Focalet.CaptureTool/Focalet.CaptureTool.csproj') @nuget `
         --configuration Release --runtime $Runtime --self-contained true `
         -p:PublishSingleFile=true -p:DebugType=None --output $output
     if ($LASTEXITCODE -ne 0) { throw 'Capture tool build failed.' }

@@ -48,7 +48,7 @@ public sealed class DemoRecorder : IDisposable {
                     if (sample.GetPixel(0, 0).ToArgb() == color.ToArgb()) { matched = true; break; }
                 }
                 if (!matched) {
-                    if (Environment.GetEnvironmentVariable("ZOMMI_DEMO_PROBE_DIAGNOSTICS") == "1") {
+                    if (Environment.GetEnvironmentVariable("FOCALET_DEMO_PROBE_DIAGNOSTICS") == "1") {
                         GetWindowRect(window.Handle, out var bounds);
                         var center = new Point { X=(bounds.Left+bounds.Right)/2, Y=(bounds.Top+bounds.Bottom)/2 };
                         graphics.CopyFromScreen(center.X, center.Y, 0, 0, sample.Size);

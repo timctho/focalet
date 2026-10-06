@@ -16,7 +16,7 @@ class ScopeTests(unittest.TestCase):
         self.assertFalse(ci_scope.requires_native(["README.md", "docs/install.md", "docs/assets/social-card.png"]))
 
     def test_unknown_empty_and_executable_changes_require_native_checks(self):
-        for paths in [[], ["README.md", "src/Zommi.Flutter/pubspec.yaml"], ["docs/hook.py"],
+        for paths in [[], ["README.md", "src/Focalet.Flutter/pubspec.yaml"], ["docs/hook.py"],
                       ["docs/demo.json"], [".github/workflows/checks.yml"], ["scripts/ci_scope.py"],
                       ["docs/../src/main.rs"], ["Cargo.lock"], ["tests/test_ci_scope.py"]]:
             with self.subTest(paths=paths):
@@ -25,14 +25,14 @@ class ScopeTests(unittest.TestCase):
     def test_product_local_changes_select_only_their_native_lane(self):
         for paths, expected in [
             (["README.md", "docs/capture-tool.md"], (False, False)),
-            (["src/Zommi.CaptureTool/CapturePasteTool.cs", "docs/capture-tool.md"], (False, True)),
+            (["src/Focalet.CaptureTool/CapturePasteTool.cs", "docs/capture-tool.md"], (False, True)),
             (["scripts/package-capture-tool.ps1"], (False, True)),
-            (["src/Zommi.Flutter/lib/main.dart"], (True, False)),
-            (["crates/zommi-core/src/lib.rs"], (True, False)),
-            (["src/Zommi.Capture.Core/CaptureModels.cs"], (True, True)),
-            (["src/Zommi.Capture.Windows/ContentSelectionForm.cs"], (True, True)),
-            (["src/Zommi.CaptureTool/A.cs", "src/Zommi.Flutter/lib/main.dart"], (True, True)),
-            (["src/Zommi.CaptureTool/../../something"], (True, True)),
+            (["src/Focalet.Flutter/lib/main.dart"], (True, False)),
+            (["crates/focalet-core/src/lib.rs"], (True, False)),
+            (["src/Focalet.Capture.Core/CaptureModels.cs"], (True, True)),
+            (["src/Focalet.Capture.Windows/ContentSelectionForm.cs"], (True, True)),
+            (["src/Focalet.CaptureTool/A.cs", "src/Focalet.Flutter/lib/main.dart"], (True, True)),
+            (["src/Focalet.CaptureTool/../../something"], (True, True)),
             ([".github/workflows/checks.yml"], (True, True)),
             (None, (True, True)), ([], (True, True)), ([""], (True, True)),
         ]:

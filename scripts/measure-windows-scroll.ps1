@@ -21,7 +21,7 @@ Add-Type -AssemblyName System.Drawing
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
-public static class ZommiScrollInput {
+public static class FocaletScrollInput {
     [DllImport("user32.dll")] private static extern void mouse_event(uint flags,uint x,uint y,uint data,UIntPtr extra);
     [DllImport("user32.dll")] private static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] private static extern bool SetCursorPos(int x,int y);
@@ -37,15 +37,15 @@ function Read-Trace([string]$Path){
     return @(Get-Content $Path | ForEach-Object { if($_.Trim()){$_|ConvertFrom-Json} })
 }
 function Screenshot([IntPtr]$Window,[string]$Path){
-    $bounds=[ZommiWindowsAcceptanceNative]::PhysicalBounds($Window)
+    $bounds=[FocaletWindowsAcceptanceNative]::PhysicalBounds($Window)
     $bitmap=[Drawing.Bitmap]::new($bounds[2],$bounds[3])
     $graphics=[Drawing.Graphics]::FromImage($bitmap)
     try{$graphics.CopyFromScreen($bounds[0],$bounds[1],0,0,$bitmap.Size);$bitmap.Save($Path)}
     finally{$graphics.Dispose();$bitmap.Dispose()}
 }
 Assert-DesktopCaptureSurface
-$executable=Join-Path $package 'Zommi.exe'
-$suspended=@(Suspend-ConflictingZommiApplications -EntryPoint $executable)
+$executable=Join-Path $package 'Focalet.exe'
+$suspended=@(Suspend-ConflictingFocaletApplications -EntryPoint $executable)
 $runProfile=Join-Path $results 'profile'
 $null=New-Item -ItemType Directory -Force -Path $runProfile
 $expectedHistoryTurns=120
@@ -64,17 +64,17 @@ $start.RedirectStandardOutput=$true
 $start.RedirectStandardError=$true
 $start.Environment['APPDATA']=$runProfile
 $start.Environment['LOCALAPPDATA']=$runProfile
-$start.Environment['ZOMMI_SCROLL_TRACE']=$trace
-$start.Environment['ZOMMI_CODEX_COMMAND']=$python
-$start.Environment['ZOMMI_CODEX_ARGS_JSON']=ConvertTo-Json -Compress -InputObject @((Join-Path $PSScriptRoot 'scroll-runtime-fixture.py'))
-$start.Environment['ZOMMI_CORE_STATE_PATH']=$binding
-$start.Environment['ZOMMI_RUNTIME_OVERRIDES_PATH']=Join-Path $runProfile 'overrides.json'
-$start.Environment['ZOMMI_RUNTIME_DISCOVERY_CACHE_PATH']=Join-Path $runProfile 'discovery.json'
-$start.Environment['ZOMMI_SCROLL_STREAM_SIGNAL']=$streamSignal
-$start.Environment['ZOMMI_SCROLL_WORKLOAD']=$Workload
-if($HistoryFile){$start.Environment['ZOMMI_SCROLL_HISTORY']=$HistoryFile}
-if($Renderer -ne 'default'){$start.Environment['ZOMMI_WINDOWS_RENDERER']=$Renderer}
-$start.Environment['ZOMMI_ACCEPTANCE_LOG']=Join-Path $results 'desktop.jsonl'
+$start.Environment['FOCALET_SCROLL_TRACE']=$trace
+$start.Environment['FOCALET_CODEX_COMMAND']=$python
+$start.Environment['FOCALET_CODEX_ARGS_JSON']=ConvertTo-Json -Compress -InputObject @((Join-Path $PSScriptRoot 'scroll-runtime-fixture.py'))
+$start.Environment['FOCALET_CORE_STATE_PATH']=$binding
+$start.Environment['FOCALET_RUNTIME_OVERRIDES_PATH']=Join-Path $runProfile 'overrides.json'
+$start.Environment['FOCALET_RUNTIME_DISCOVERY_CACHE_PATH']=Join-Path $runProfile 'discovery.json'
+$start.Environment['FOCALET_SCROLL_STREAM_SIGNAL']=$streamSignal
+$start.Environment['FOCALET_SCROLL_WORKLOAD']=$Workload
+if($HistoryFile){$start.Environment['FOCALET_SCROLL_HISTORY']=$HistoryFile}
+if($Renderer -ne 'default'){$start.Environment['FOCALET_WINDOWS_RENDERER']=$Renderer}
+$start.Environment['FOCALET_ACCEPTANCE_LOG']=Join-Path $results 'desktop.jsonl'
 $application=$null
 try{
     $application=[Diagnostics.Process]::Start($start)
@@ -89,13 +89,13 @@ try{
     }while([DateTime]::UtcNow -lt $deadline)
     if(-not $ready.Count -or $ready[0].turns -ne $expectedHistoryTurns -or $ready[0].mode -ne 'release'){throw 'The release app did not load the expected agent history.'}
     $window=Wait-ForVisibleProcessWindow -ProcessId $application.Id
-    [ZommiWindowsAcceptanceNative]::Restore($window)
-    if($Maximized){Start-Sleep -Milliseconds 400;[ZommiWindowsAcceptanceNative]::Maximize($window)}
+    [FocaletWindowsAcceptanceNative]::Restore($window)
+    if($Maximized){Start-Sleep -Milliseconds 400;[FocaletWindowsAcceptanceNative]::Maximize($window)}
     Start-Sleep -Seconds 2
-    $bounds=[ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
+    $bounds=[FocaletWindowsAcceptanceNative]::PhysicalBounds($window)
     $x=$bounds[0]+[int]($bounds[2]*0.60)
     $y=$bounds[1]+[int]($bounds[3]*0.45)
-    if(-not [ZommiWindowsAcceptanceNative]::IsOwnedWindowAtPoint($window,$x,$y)){throw 'The benchmark transcript is covered.'}
+    if(-not [FocaletWindowsAcceptanceNative]::IsOwnedWindowAtPoint($window,$x,$y)){throw 'The benchmark transcript is covered.'}
     Screenshot $window (Join-Path $results 'before.png')
     $measurements=@()
     foreach($scenario in @('static','streaming')){
@@ -105,7 +105,7 @@ try{
             foreach($index in 0..($WheelEvents-1)){
                 # Travel up then back down through the same text, at 60 Hz.
                 $delta=if($index -lt $WheelEvents/2){120}else{-120}
-                [ZommiScrollInput]::Wheel($x,$y,$delta)
+                [FocaletScrollInput]::Wheel($x,$y,$delta)
                 $remaining=($index+1)*16-$watch.ElapsedMilliseconds
                 if($remaining -gt 0){Start-Sleep -Milliseconds $remaining}
             }
@@ -137,5 +137,5 @@ try{
 }finally{
     if($application -and -not $application.HasExited){$application.Kill($true);$application.WaitForExit()}
     if($stderr){$stderr.GetAwaiter().GetResult()|Set-Content (Join-Path $results 'stderr.log')}
-    Restore-SuspendedZommiApplications -ExecutablePaths $suspended
+    Restore-SuspendedFocaletApplications -ExecutablePaths $suspended
 }

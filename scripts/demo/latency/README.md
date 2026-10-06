@@ -7,7 +7,7 @@ It displays /checkout p95 latency by five-minute UTC bucket, across both regions
 The chart exposes the exact executed SQL in its standard `aria-description`.
 Each SVG point exposes time, latency and request count. This is an accessible
 sample application, not a claim that arbitrary dashboards expose hidden queries.
-Zommi's existing native browser provider captures an intersecting chart object's
+Focalet's existing native browser provider captures an intersecting chart object's
 description and spatially selected point labels. The agent must use its own
 workspace tools to analyze the database; the metadata contains no diagnosis.
 

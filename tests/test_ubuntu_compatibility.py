@@ -55,7 +55,7 @@ Version symbols section '.gnu.version' contains 4 entries:
                      "Linux C compiler and binutils required")
 class NativeElfCompatibilityTests(unittest.TestCase):
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory(prefix="zommi-elf-test-")
+        temporary = tempfile.TemporaryDirectory(prefix="focalet-elf-test-")
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.package = self.root / "package"

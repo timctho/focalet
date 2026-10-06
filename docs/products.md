@@ -50,11 +50,11 @@ See [Desktop installation](install.md) and [runtime support](runtime-commands.md
 
 The apps share selected pixels, annotations, browser/accessibility extraction and
 context models where their platforms overlap. On Windows they both depend on
-`Zommi.Capture.Windows`, a library with no tray, paste loop or agent broker.
+`Focalet.Capture.Windows`, a library with no tray, paste loop or agent broker.
 
 Capture owns its hotkeys, clipboard output and ordered paste flow. Desktop owns
 chat/session UI and uses the Rust broker for agent connections. The Rust
-`zommi-core` is the **agent runtime core**; it is not a dependency of Capture.
+`focalet-core` is the **agent runtime core**; it is not a dependency of Capture.
 
 Each app has a separate entrypoint, build and package. Capture-only changes run
 Windows Capture CI without building Flutter. Shared or unknown source changes
@@ -62,11 +62,12 @@ run both products' applicable native checks. Desktop's existing release pipeline
 and Capture's prototype artifact remain separate. See the
 [component map](desktop-reference.md) and [contributor checks](../CONTRIBUTING.md).
 
-## Naming and compatibility
+## Naming and upgrades
 
-**Focalet Capture** and **Focalet Desktop** are the product names. Existing
-Desktop releases, installed UI, executable names, settings directories, protocol
-identifiers and the GitHub repository still use **Zommi**. Keeping these stable
-preserves upgrades, local settings and links while the naming transition proceeds.
-Capture's new package launches `Focalet.Capture.exe`; it retains the old tool's
-single-instance identity so the two versions cannot run together.
+Both apps, source packages, environment variables and OS identities use Focalet.
+Capture launches `Focalet.Capture.exe`; Desktop launches `Focalet.exe` on Windows,
+`focalet` on Linux and `Focalet.app` on macOS. Desktop's Windows capture helper is
+`Focalet.CaptureHost.exe`, distinct from the standalone app.
+
+See [upgrade notes](migration.md) for prior installations. Recorded demos and
+already published releases retain their original bytes and source provenance.

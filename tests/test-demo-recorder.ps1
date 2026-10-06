@@ -17,7 +17,7 @@ function Reject([scriptblock]$Action){
  try{& $Action}catch{$rejected=$true}
  if(-not $rejected){throw 'An invalid recording state was accepted.'}
 }
-$demoProfile=Join-Path ([IO.Path]::GetTempPath()) ('zommi-recorder-guards-'+[guid]::NewGuid().ToString('N'))
+$demoProfile=Join-Path ([IO.Path]::GetTempPath()) ('focalet-recorder-guards-'+[guid]::NewGuid().ToString('N'))
 $null=New-Item -ItemType Directory $demoProfile
 try{
  $controlPath=Join-Path $demoProfile 'control.json'
@@ -61,7 +61,7 @@ if($CheckNativeRecorder){
  $references+=Get-ChildItem $PSHOME -Filter 'System.Private.Windows*.dll'|ForEach-Object FullName
  $references+=Get-ChildItem $PSHOME -Filter 'System.Windows.Forms.Primitives.dll'|ForEach-Object FullName
  Add-Type -CompilerOptions '/nowarn:1701,9191' -ReferencedAssemblies $references -TypeDefinition (Get-Content -Raw (Join-Path (Split-Path $source -Parent) 'windows-recorder.cs'))
- $capture=Join-Path ([IO.Path]::GetTempPath()) ('zommi-recorder-deadline-'+[guid]::NewGuid().ToString('N'))
+ $capture=Join-Path ([IO.Path]::GetTempPath()) ('focalet-recorder-deadline-'+[guid]::NewGuid().ToString('N'))
  $recorder=$null
  try{
   Reject {[DemoRecorder]::new($capture,0,0,1,1,0)}

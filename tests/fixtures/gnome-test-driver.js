@@ -5,7 +5,7 @@ import Clutter from 'gi://Clutter';
 import Shell from 'gi://Shell';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
-const XML = `<node><interface name="com.zommi.TestDriver">
+const XML = `<node><interface name="com.focalet.TestDriver">
   <method name="Ready"><arg type="s" direction="out"/></method><method name="Key"><arg type="u" direction="in"/><arg type="b" direction="in"/></method>
   <method name="Click"><arg type="i" direction="in"/><arg type="i" direction="in"/></method>
   <method name="Motion"><arg type="i" direction="in"/><arg type="i" direction="in"/></method>
@@ -21,20 +21,20 @@ export default class Driver extends Extension {
         this.pointer = Clutter.get_default_backend().get_default_seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
         this.keyboard = Clutter.get_default_backend().get_default_seat().create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
         this.service = Gio.DBusExportedObject.wrapJSObject(XML, this);
-        this.service.export(Gio.DBus.session, '/com/zommi/TestDriver');
-        this.owner = Gio.bus_own_name_on_connection(Gio.DBus.session, 'com.zommi.TestDriver', Gio.BusNameOwnerFlags.NONE, null, null);
+        this.service.export(Gio.DBus.session, '/com/focalet/TestDriver');
+        this.owner = Gio.bus_own_name_on_connection(Gio.DBus.session, 'com.focalet.TestDriver', Gio.BusNameOwnerFlags.NONE, null, null);
     }
     Ready() {
         Main.overview.hide();
         return JSON.stringify({keyboardReady: Main.actionMode === Shell.ActionMode.NORMAL});
     }
     DisconnectIntegration() {
-        const integration = Main.extensionManager.lookup('zommi@zommi').stateObj;
+        const integration = Main.extensionManager.lookup('focalet@focalet').stateObj;
         integration._service.unexport();
         integration._service = null;
     }
     FailIntegration() {
-        Main.extensionManager.logExtensionError('zommi@zommi', new Error('Synthetic integration failure'));
+        Main.extensionManager.logExtensionError('focalet@focalet', new Error('Synthetic integration failure'));
     }
     Key(key, pressed) { this.keyboard.notify_keyval(GLib.get_monotonic_time(), key, pressed ? Clutter.KeyState.PRESSED : Clutter.KeyState.RELEASED); }
     Motion(x,y) { this.pointer.notify_absolute_motion(GLib.get_monotonic_time(),x,y); }
@@ -56,7 +56,7 @@ export default class Driver extends Extension {
                 object.screenshot_finish(result);
                 stream.close(null);
                 invocation.return_value(new GLib.Variant('()', []));
-            } catch (error) { invocation.return_dbus_error('com.zommi.TestDriver.Error', `${error}`); }
+            } catch (error) { invocation.return_dbus_error('com.focalet.TestDriver.Error', `${error}`); }
         });
     }
     Click(x,y) {

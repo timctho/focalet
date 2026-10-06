@@ -10,7 +10,7 @@ Copy `app/` into a disposable workspace and serve it with
 baseline here unchanged; the agent edits only the disposable copy. Use a browser
 viewport around 900 CSS pixels wide and select Jan–Jun.
 
-Use the actual Zommi app in Ocean beside the source browser. Enable authorized
+Use the actual Focalet app in Ocean beside the source browser. Enable authorized
 browser context and select the revenue panel. Use Pen to draw two panels,
 stacked bars on the left, and a trend line on the right. Review the attachment's
 Details before sending:

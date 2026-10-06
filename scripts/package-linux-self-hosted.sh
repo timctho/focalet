@@ -7,6 +7,6 @@ if ! command -v clang++ >/dev/null || ! command -v ninja >/dev/null ||
   exit 2
 fi
 bash "$repository_root/scripts/package-unix.sh" linux
-if [[ "${ZOMMI_LINUX_STARTUP_SMOKE:-0}" == 1 ]]; then
+if [[ "${FOCALET_LINUX_STARTUP_SMOKE:-0}" == 1 ]]; then
   bash "$repository_root/scripts/smoke-linux-release.sh"
 fi

@@ -1,12 +1,12 @@
 [CmdletBinding()]
 param([Parameter(Mandatory=$true)][string]$CaptureHost, [string]$ResultPath, [switch]$IndependentWorkerOnly)
 $ErrorActionPreference = 'Stop'
-if (-not ('ZommiWindowsAcceptanceNative' -as [type])) {
+if (-not ('FocaletWindowsAcceptanceNative' -as [type])) {
     . (Join-Path $PSScriptRoot 'accept-windows-capture.ps1') -PackageDirectory (Split-Path $CaptureHost) -HelpersOnly -ResultPath $ResultPath
 }
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
-if (-not ('ZommiContextFixture' -as [type])) {
+if (-not ('FocaletContextFixture' -as [type])) {
     $references = @([System.Windows.Forms.Form].Assembly.Location, [System.Drawing.Bitmap].Assembly.Location)
     if ($PSVersionTable.PSEdition -eq 'Core') { $references += Get-ChildItem (Join-Path $PSHOME 'ref') -Filter '*.dll' | ForEach-Object FullName }
     Add-Type -ReferencedAssemblies $references -Path (Join-Path $PSScriptRoot 'windows-context-fixture.cs')
@@ -14,7 +14,7 @@ if (-not ('ZommiContextFixture' -as [type])) {
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
-public static class ZommiMultiInput {
+public static class FocaletMultiInput {
     [DllImport("user32.dll")] private static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
     [DllImport("user32.dll")] private static extern bool PostMessage(IntPtr window, uint message, IntPtr key, IntPtr data);
     public static void Control(bool down) { keybd_event(0x11, 0, down ? 0u : 2u, UIntPtr.Zero); System.Threading.Thread.Sleep(40); }
@@ -24,7 +24,7 @@ public static class ZommiMultiInput {
 function Wait-MultiOutline([int]$X, [int]$Y) {
     $deadline = [DateTime]::UtcNow.AddSeconds(4)
     do {
-        if ([ZommiWindowsAcceptanceNative]::HasSelectionEdge($X,$Y,$true)) { return }
+        if ([FocaletWindowsAcceptanceNative]::HasSelectionEdge($X,$Y,$true)) { return }
         Start-Sleep -Milliseconds 25
     } while ([DateTime]::UtcNow -lt $deadline)
     throw "Queued mint outline missing at ${X},${Y}."
@@ -32,7 +32,7 @@ function Wait-MultiOutline([int]$X, [int]$Y) {
 Assert-DesktopCaptureSurface
 # A single helper must show its modal selector while its MTA is blocked in UIA.
 if ($IndependentWorkerOnly) {
-    $fixture = [ZommiContextFixture]::new()
+    $fixture = [FocaletContextFixture]::new()
     $shared = $null
     try {
         $fixture.Raise()
@@ -57,9 +57,9 @@ if ($IndependentWorkerOnly) {
         $watch = [Diagnostics.Stopwatch]::StartNew()
         $shared.StandardInput.WriteLine('{"id":"select","method":"selectContent","params":{"browserPageDetails":false}}')
         $shared.StandardInput.Flush()
-        $selector = Wait-ForWindow -ProcessId $shared.Id -Title 'Zommi content selection'
+        $selector = Wait-ForWindow -ProcessId $shared.Id -Title 'Focalet content selection'
         if ($watch.ElapsedMilliseconds -gt 1200) { throw "The shared-host selector took $($watch.ElapsedMilliseconds) ms while the UIA worker was busy (limit 1200 ms)." }
-        [ZommiWindowsAcceptanceNative]::CancelSelection($selector) | Out-Null
+        [FocaletWindowsAcceptanceNative]::CancelSelection($selector) | Out-Null
         $responses = @{}
         while (-not $responses.ContainsKey('select')) {
             $remaining = 1200 - $watch.ElapsedMilliseconds
@@ -93,56 +93,56 @@ if ($IndependentWorkerOnly) {
 $cases = @('duplicates', 'rectangles', 'rapid', 'rapid-release', 'cancel', 'changed')
 $results = @()
 foreach ($case in $cases) {
-    $fixture = [ZommiContextFixture]::new()
+    $fixture = [FocaletContextFixture]::new()
     try {
         $fixture.Raise()
         Start-Sleep -Milliseconds 200
         # Pin contrasting probe colors; responsiveness must not depend on the default theme.
         $result = Invoke-CaptureRequest -Executable $CaptureHost -Method 'selectContent' -Parameters @{browserPageDetails=$false;theme=@{accent=0xffc5ecd4L;outline=0xff8eb09dL;surface=0xff191f1eL}} -Interact {
             param($process)
-            $selector = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi content selection'
-            [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(220,220) | Out-Null
+            $selector = Wait-ForWindow -ProcessId $process.Id -Title 'Focalet content selection'
+            [FocaletWindowsAcceptanceNative]::SetPhysicalCursorPos(220,220) | Out-Null
             $deadline = [DateTime]::UtcNow.AddSeconds(5)
-            while (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Cancel') -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 25 }
-            if (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Cancel')) { throw 'Rectangle selector unavailable.' }
-            [ZommiMultiInput]::Control($true)
+            while (-not [FocaletWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Cancel') -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 25 }
+            if (-not [FocaletWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Cancel')) { throw 'Rectangle selector unavailable.' }
+            [FocaletMultiInput]::Control($true)
             try {
                 if ($case -in @('rapid','rapid-release')) {
                     $fixture.PauseProvider(600)
                     # Rapid rectangles must retain order without UIA lookups while dragging.
-                    [ZommiWindowsAcceptanceNative]::BeginSelectionDrag($selector,510,355,528,373) | Out-Null
-                    [ZommiWindowsAcceptanceNative]::EndSelectionDrag($selector,528,373)
-                    if ($case -eq 'rapid-release') { [ZommiMultiInput]::Control($false) }
-                    [ZommiWindowsAcceptanceNative]::BeginSelectionDrag($selector,534,355,552,373) | Out-Null
-                    [ZommiWindowsAcceptanceNative]::EndSelectionDrag($selector,552,373)
+                    [FocaletWindowsAcceptanceNative]::BeginSelectionDrag($selector,510,355,528,373) | Out-Null
+                    [FocaletWindowsAcceptanceNative]::EndSelectionDrag($selector,528,373)
+                    if ($case -eq 'rapid-release') { [FocaletMultiInput]::Control($false) }
+                    [FocaletWindowsAcceptanceNative]::BeginSelectionDrag($selector,534,355,552,373) | Out-Null
+                    [FocaletWindowsAcceptanceNative]::EndSelectionDrag($selector,552,373)
                 } elseif ($case -eq 'rectangles') {
-                    [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,180,200,530,240)
-                    [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,180,270,530,310)
+                    [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector,180,200,530,240)
+                    [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector,180,270,530,310)
                 } else {
-                    [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,180,200,530,240)
+                    [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector,180,200,530,240)
                     # Moving over a queued rectangle must not erase its mint outline.
                     Start-Sleep -Milliseconds 800
                     Wait-MultiOutline 530 225
-                    [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,180,270,530,310)
+                    [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector,180,270,530,310)
                     # Duplicate region must not produce another attachment.
-                    [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,180,270,530,310)
+                    [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector,180,270,530,310)
                 }
-            } finally { [ZommiMultiInput]::Control($false) }
+            } finally { [FocaletMultiInput]::Control($false) }
             if ($case -eq 'rapid-release') {
-                [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(620,490) | Out-Null
+                [FocaletWindowsAcceptanceNative]::SetPhysicalCursorPos(620,490) | Out-Null
                 Wait-MultiOutline 528 364
                 Wait-MultiOutline 552 364
                 if ($process.HasExited) { throw 'A queued rectangle after Ctrl release submitted the batch.' }
             } elseif ($case -ne 'rapid') {
-                [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(620,490) | Out-Null
+                [FocaletWindowsAcceptanceNative]::SetPhysicalCursorPos(620,490) | Out-Null
                 Wait-MultiOutline 530 225
                 Wait-MultiOutline 530 295
                 Start-Sleep -Milliseconds 150
-                if ($process.HasExited -or -not [ZommiWindowsAcceptanceNative]::IsOwnedWindowAtPoint($selector,220,220)) { throw 'Releasing Ctrl submitted the batch.' }
+                if ($process.HasExited -or -not [FocaletWindowsAcceptanceNative]::IsOwnedWindowAtPoint($selector,220,220)) { throw 'Releasing Ctrl submitted the batch.' }
             }
             if ($case -eq 'changed') { $fixture.ChangeTitle() }
-            if ($case -eq 'cancel') { [ZommiWindowsAcceptanceNative]::CancelSelection($selector) | Out-Null }
-            else { [ZommiMultiInput]::Enter($selector) }
+            if ($case -eq 'cancel') { [FocaletWindowsAcceptanceNative]::CancelSelection($selector) | Out-Null }
+            else { [FocaletMultiInput]::Enter($selector) }
         }
         if ($case -in @('cancel','changed')) {
             if ($result.cancelled -ne $true -or $result.selections -or $result.dataUrl) { throw "$case leaked a partial batch." }
@@ -164,7 +164,7 @@ foreach ($case in $cases) {
         Write-Host "multi-${case}: ok"
     } finally { $fixture.Dispose() }
 }
-$fixture = [ZommiContextFixture]::new()
+$fixture = [FocaletContextFixture]::new()
 try {
     $fixture.Raise()
     $fixture.ShowGrid()
@@ -172,9 +172,9 @@ try {
         $bounds = $fixture.GridCellBounds($row,0)
         $result = Invoke-CaptureRequest -Executable $CaptureHost -Method 'selectContent' -Parameters @{browserPageDetails=$false;theme=@{accent=0xffc5ecd4L;outline=0xff8eb09dL;surface=0xff191f1eL}} -Interact {
             param($process)
-            $selector = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi content selection'
-            [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,($bounds[0]+15),($bounds[1]+8),($bounds[0]+110),($bounds[1]+25))
-            [ZommiWindowsAcceptanceNative]::ConfirmSelection($selector)
+            $selector = Wait-ForWindow -ProcessId $process.Id -Title 'Focalet content selection'
+            [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector,($bounds[0]+15),($bounds[1]+8),($bounds[0]+110),($bounds[1]+25))
+            [FocaletWindowsAcceptanceNative]::ConfirmSelection($selector)
         }
         $cells = @($result.snapshot.spatialContext.cells)
         if ($result.cancelled -or $cells.Count -ne 1 -or $cells[0].dataRowNumber -ne ($row+1) -or

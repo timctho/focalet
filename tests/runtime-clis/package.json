@@ -1,5 +1,5 @@
 {
-  "name": "zommi-runtime-cli-tests",
+  "name": "focalet-runtime-cli-tests",
   "private": true,
   "description": "Pinned real CLIs for credential-free broker acceptance",
   "dependencies": {

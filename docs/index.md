@@ -21,10 +21,9 @@ the images with available text, links and structure.
 Both live in the same repository and share capture components. Neither app
 requires the other to be installed.
 
-Focalet is the new product name. Public Desktop installers and the installed UI
-still use **Zommi**; their download names, settings and repository URL are retained
-for compatibility. Capture is a separate prototype and is not included in those
-installers.
+All source packages, application identities and new builds use **Focalet**.
+Capture is a separate Windows prototype. For earlier installations and historical
+release downloads, see [upgrade notes](migration.md).
 
 ## Capture: keep your existing input
 
@@ -45,7 +44,8 @@ The selected agent continues to own credentials, tools, permissions and history.
   <a href="demos/frontend.mp4">Watch the Desktop demo</a>.
 </video>
 
-The recorded Desktop demo uses the Zommi name.
+This is a historical Desktop recording from before the rename. Its original
+footage is retained; new builds display Focalet.
 
 - [Install Desktop and connect an agent](install.md).
 - [Share screen context with Claude Code from Desktop](guides/claude-code.md).

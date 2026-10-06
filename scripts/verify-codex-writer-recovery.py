@@ -24,10 +24,10 @@ def module(name, path):
 
 
 def verify(core_host, codex):
-    os.environ['ZOMMI_TEST_CORE_HOST'] = str(Path(core_host).resolve())
+    os.environ['FOCALET_TEST_CORE_HOST'] = str(Path(core_host).resolve())
     bridge = module('bridge', ROOT / 'tests/test_codex_home_persistence.py')
     fixture = module('fixture', ROOT / 'tests/fake_responses_server.py')
-    with tempfile.TemporaryDirectory(prefix='zommi-writer-recovery-') as directory:
+    with tempfile.TemporaryDirectory(prefix='focalet-writer-recovery-') as directory:
         root = Path(directory)
         server = ThreadingHTTPServer(('127.0.0.1', 0), fixture.Handler)
         server.request_log = root / 'provider-request.json'
@@ -41,11 +41,11 @@ def verify(core_host, codex):
 
         def connect(name, preferred=None):
             environment = without_parent_context(os.environ)
-            environment.update(CODEX_HOME=str(root), ZOMMI_CODEX_COMMAND=str(Path(codex).absolute()),
-                               ZOMMI_CODEX_ARGS_JSON='["app-server"]',
-                               ZOMMI_CORE_STATE_PATH=str(root / name / 'binding.json'),
-                               ZOMMI_RUNTIME_OVERRIDES_PATH=str(root / name / 'overrides.json'),
-                               ZOMMI_RUNTIME_DISCOVERY_CACHE_PATH=str(root / name / 'discovery.json'))
+            environment.update(CODEX_HOME=str(root), FOCALET_CODEX_COMMAND=str(Path(codex).absolute()),
+                               FOCALET_CODEX_ARGS_JSON='["app-server"]',
+                               FOCALET_CORE_STATE_PATH=str(root / name / 'binding.json'),
+                               FOCALET_RUNTIME_OVERRIDES_PATH=str(root / name / 'overrides.json'),
+                               FOCALET_RUNTIME_DISCOVERY_CACHE_PATH=str(root / name / 'discovery.json'))
             core = bridge.Core(environment)
             clients.append(core)
             request(core, 'core.initialize')
@@ -108,7 +108,7 @@ def verify(core_host, codex):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--core-host', default='target/debug/zommi-core-host')
+    parser.add_argument('--core-host', default='target/debug/focalet-core-host')
     parser.add_argument('--codex', default=shutil.which('codex'))
     args = parser.parse_args()
     verify(args.core_host, args.codex)

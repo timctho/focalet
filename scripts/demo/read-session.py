@@ -36,7 +36,7 @@ def main():
         os.environ, **json.loads((args.profile / "demo-environment.json").read_text())
     )
     executable = args.package / (
-        "zommi-core-host.exe" if os.name == "nt" else "zommi-core-host"
+        "focalet-core-host.exe" if os.name == "nt" else "focalet-core-host"
     )
     process = subprocess.Popen(
         [str(executable)],

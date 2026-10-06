@@ -25,20 +25,20 @@ $ownerSid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 & icacls.exe $OutputDirectory /inheritance:r /grant:r ('*'+$ownerSid+':(OI)(CI)F') '*S-1-5-18:(OI)(CI)F' | Out-Null
 if($LASTEXITCODE -ne 0){throw 'Could not restrict recording evidence.'}
 $demoProfile=Join-Path $OutputDirectory 'profile'
-$null=New-Item -ItemType Directory (Join-Path $demoProfile 'Zommi')
+$null=New-Item -ItemType Directory (Join-Path $demoProfile 'Focalet')
 # Presentation preferences only: no completed setup, runtime binding or fake agent.
-@{runtimeSetupCompleted=$false;themeMode='light';themeColor='ocean';chatFontSize=14}|ConvertTo-Json|Set-Content (Join-Path $demoProfile 'Zommi/settings.json')
+@{runtimeSetupCompleted=$false;themeMode='light';themeColor='ocean';chatFontSize=14}|ConvertTo-Json|Set-Content (Join-Path $demoProfile 'Focalet/settings.json')
 $previous=@();$app=$null;$recorder=$null
 try {
- $previous=@(Suspend-ConflictingZommiApplications -EntryPoint (Join-Path $OutputDirectory 'not-running.exe'))
- $start=[Diagnostics.ProcessStartInfo]::new((Join-Path $PackageDirectory 'Zommi.exe'))
+ $previous=@(Suspend-ConflictingFocaletApplications -EntryPoint (Join-Path $OutputDirectory 'not-running.exe'))
+ $start=[Diagnostics.ProcessStartInfo]::new((Join-Path $PackageDirectory 'Focalet.exe'))
  $start.UseShellExecute=$false;$start.WorkingDirectory=$PackageDirectory
  foreach($key in @('APPDATA','LOCALAPPDATA')){$start.Environment[$key]=$demoProfile}
- foreach($entry in @{ZOMMI_CORE_STATE_PATH='binding.json';ZOMMI_RUNTIME_OVERRIDES_PATH='overrides.json';ZOMMI_RUNTIME_DISCOVERY_CACHE_PATH='targets.json';XDG_CONFIG_HOME='config';XDG_STATE_HOME='state';XDG_CACHE_HOME='cache'}.GetEnumerator()){
+ foreach($entry in @{FOCALET_CORE_STATE_PATH='binding.json';FOCALET_RUNTIME_OVERRIDES_PATH='overrides.json';FOCALET_RUNTIME_DISCOVERY_CACHE_PATH='targets.json';XDG_CONFIG_HOME='config';XDG_STATE_HOME='state';XDG_CACHE_HOME='cache'}.GetEnumerator()){
   $start.Environment[$entry.Key]=Join-Path $demoProfile $entry.Value
  }
  foreach($key in @($start.Environment.Keys)){
-  if($key.StartsWith('ZOMMI_FAKE_') -or $key -eq 'ZOMMI_RUNTIME_DISCOVERY_MODE'){$null=$start.Environment.Remove($key)}
+  if($key.StartsWith('FOCALET_FAKE_') -or $key -eq 'FOCALET_RUNTIME_DISCOVERY_MODE'){$null=$start.Environment.Remove($key)}
  }
  $app=[Diagnostics.Process]::Start($start)
  $deadline=[DateTime]::UtcNow.AddSeconds(60)
@@ -70,7 +70,7 @@ try {
   Start-Sleep -Milliseconds 100
  }
  if(-not $finished){throw 'Setup recording timed out.'}
- $settings=Get-Content (Join-Path $demoProfile 'Zommi/settings.json') -Raw|ConvertFrom-Json
+ $settings=Get-Content (Join-Path $demoProfile 'Focalet/settings.json') -Raw|ConvertFrom-Json
  $binding=Get-Content (Join-Path $demoProfile 'binding.json') -Raw|ConvertFrom-Json
  if(-not $settings.runtimeSetupCompleted -or -not $binding.runtimeTargetId -or -not $binding.sessionId){throw 'First-run setup did not persist a real runtime session.'}
  $markers['end']=$clock.Elapsed.TotalSeconds
@@ -81,5 +81,5 @@ try {
 }finally{
  if($recorder){$recorder.Dispose()}
  if($app -and -not $app.HasExited){[void]$app.CloseMainWindow();if(-not $app.WaitForExit(5000)){$app.Kill($true)}}
- Restore-SuspendedZommiApplications -ExecutablePaths $previous
+ Restore-SuspendedFocaletApplications -ExecutablePaths $previous
 }

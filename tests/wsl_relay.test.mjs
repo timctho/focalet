@@ -78,7 +78,7 @@ function runRuntime(endpoint, invocation = {}) {
 }
 
 test('configured npm CLI launches when Node is absent from the WSL PATH', async () => {
-  const temporary = await mkdtemp(path.join(os.tmpdir(), 'zommi-wsl-node-'));
+  const temporary = await mkdtemp(path.join(os.tmpdir(), 'focalet-wsl-node-'));
   const endpointPath = path.join(temporary, 'endpoints', 'test.json');
   const cli = path.join(temporary, 'codex with spaces');
   await writeFile(cli, `#!/usr/bin/env node
@@ -87,18 +87,18 @@ process.stdin.on('end', () => console.log(JSON.stringify({
   args: process.argv.slice(2),
   home: process.env.CODEX_HOME,
   providerKey: process.env.PUBLIC_API_KEY,
-  fixtureHome: process.env.ZOMMI_FAKE_CODEX_HOME,
+  fixtureHome: process.env.FOCALET_FAKE_CODEX_HOME,
   leaked: process.env.PARENT_APP_LEAK_PROBE,
 })));
 `, { mode: 0o755 });
   const relay = spawn(process.execPath, [
-    'scripts/zommi-wsl-relay.js', '--endpoint', endpointPath,
+    'scripts/focalet-wsl-relay.js', '--endpoint', endpointPath,
     '--token', TOKEN, '--version', String(TRANSPORT_VERSION), '--distribution', 'test',
   ], {
     // The relay can find Node by absolute path, just like the launcher does for
     // nvm installations. Its children still need Node for npm CLI shebangs.
     env: { ...process.env, PATH: temporary, PUBLIC_API_KEY: 'fixture-provider-key',
-      ZOMMI_FAKE_CODEX_HOME: '/fixture',
+      FOCALET_FAKE_CODEX_HOME: '/fixture',
       PARENT_APP_AGENT_HOOK_ENDPOINT: 'http://127.0.0.1:1', PARENT_APP_LEAK_PROBE: 'must-not-reach-runtime' },
     stdio: ['ignore', 'ignore', 'pipe'],
   });
@@ -134,14 +134,14 @@ function runRustProxy(endpointPath, runtime = [
 ]) {
   return new Promise((resolve, reject) => {
     const targetRoot = process.env.CARGO_TARGET_DIR || 'target';
-    const executable = path.resolve(targetRoot, 'debug', `zommi-core-host${process.platform === 'win32' ? '.exe' : ''}`);
+    const executable = path.resolve(targetRoot, 'debug', `focalet-core-host${process.platform === 'win32' ? '.exe' : ''}`);
     const child = spawn(executable, [
       '--wsl-proxy',
       '--distribution', 'test',
       '--cwd', '/',
       '--', ...runtime,
     ], {
-      env: { ...process.env, ZOMMI_WSL_RELAY_ENDPOINT: endpointPath },
+      env: { ...process.env, FOCALET_WSL_RELAY_ENDPOINT: endpointPath },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const stdout = [];
@@ -160,10 +160,10 @@ function runRustProxy(endpointPath, runtime = [
 }
 
 test('persistent WSL relay authenticates and frames runtime stdio', async () => {
-  const temporary = await mkdtemp(path.join(os.tmpdir(), 'zommi-wsl-relay-'));
+  const temporary = await mkdtemp(path.join(os.tmpdir(), 'focalet-wsl-relay-'));
   const endpointPath = path.join(temporary, 'endpoints', 'test.json');
   const relay = spawn(process.execPath, [
-    'scripts/zommi-wsl-relay.js',
+    'scripts/focalet-wsl-relay.js',
     '--endpoint', endpointPath,
     '--token', TOKEN,
     '--version', String(TRANSPORT_VERSION),
@@ -191,7 +191,7 @@ test('persistent WSL relay authenticates and frames runtime stdio', async () => 
     const proxy = await runRustProxy(endpointPath);
     assert.equal(proxy.code, 9);
     assert.equal(proxy.stdout, 'proxy-out:proxy-input-one\n');
-    assert.equal(proxy.stderr, 'Zommi: preparing WSL transport.\nZommi: WSL transport ready; launching agent.\nproxy-err:proxy-input-two\n');
+    assert.equal(proxy.stderr, 'Focalet: preparing WSL transport.\nFocalet: WSL transport ready; launching agent.\nproxy-err:proxy-input-two\n');
   } finally {
     relay.kill('SIGTERM');
     await Promise.race([
@@ -205,10 +205,10 @@ test('persistent WSL relay authenticates and frames runtime stdio', async () => 
 
 for (const inputMode of ['open', 'closed', 'backpressure']) {
   test(`spool heartbeat handles stale timestamps, transient reads, and lost clients with ${inputMode} stdin`, async () => {
-    const temporary = await mkdtemp(path.join(os.tmpdir(), 'zommi-heartbeat-'));
+    const temporary = await mkdtemp(path.join(os.tmpdir(), 'focalet-heartbeat-'));
     const endpointPath = path.join(temporary, 'endpoints', 'test.json');
     const relay = spawn(process.execPath, [
-      'scripts/zommi-wsl-relay.js', '--endpoint', endpointPath,
+      'scripts/focalet-wsl-relay.js', '--endpoint', endpointPath,
       '--token', TOKEN, '--version', String(TRANSPORT_VERSION), '--distribution', 'test',
     ], { stdio: ['ignore', 'ignore', 'pipe'] });
     const diagnostics = [];
@@ -278,7 +278,7 @@ for (const inputMode of ['open', 'closed', 'backpressure']) {
 }
 
 test('overlapping relays leave foreign requests for their authenticated owner', async () => {
-  const temporary = await mkdtemp(path.join(os.tmpdir(), 'zommi-relay-ownership-'));
+  const temporary = await mkdtemp(path.join(os.tmpdir(), 'focalet-relay-ownership-'));
   const firstEndpoint = path.join(temporary, 'endpoints', 'first.json');
   const secondEndpoint = path.join(temporary, 'endpoints', 'second.json');
   const secondToken = 'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789';
@@ -287,7 +287,7 @@ test('overlapping relays leave foreign requests for their authenticated owner', 
   const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const start = (endpoint, token) => {
     const relay = spawn(process.execPath, [
-      'scripts/zommi-wsl-relay.js', '--endpoint', endpoint, '--token', token,
+      'scripts/focalet-wsl-relay.js', '--endpoint', endpoint, '--token', token,
       '--version', String(TRANSPORT_VERSION), '--distribution', 'test',
     ], { stdio: ['ignore', 'ignore', 'pipe'] });
     relay.stderr.on('data', (chunk) => diagnostics.push(chunk));
@@ -328,7 +328,7 @@ test('overlapping relays leave foreign requests for their authenticated owner', 
       for (const result of results) {
         assert.equal(result.code, 9);
         assert.equal(result.stdout, 'proxy-out:proxy-input-one\n');
-        assert.equal(result.stderr, 'Zommi: preparing WSL transport.\nZommi: WSL transport ready; launching agent.\nproxy-err:proxy-input-two\n');
+        assert.equal(result.stderr, 'Focalet: preparing WSL transport.\nFocalet: WSL transport ready; launching agent.\nproxy-err:proxy-input-two\n');
       }
     }
   } finally {

@@ -1,14 +1,14 @@
 # Repairing Codex history lookup
 
-A cached chat can appear in Zommi while Codex returns
+A cached chat can appear in Focalet while Codex returns
 `no rollout found for thread id ...` when it is opened. Check the `codexHome`
 returned by app-server `initialize` against the home containing that chat's
-`sessions/.../rollout-...-<thread-id>.jsonl` file. Launching Zommi from a terminal
+`sessions/.../rollout-...-<thread-id>.jsonl` file. Launching Focalet from a terminal
 or updater that inherits a different `CODEX_HOME` can expose this mismatch.
 The sidebar catalog stores runtime and session IDs; it does not move histories
 when the runtime's home changes.
 
-Zommi now saves the `codexHome` reported by the first successful app-server
+Focalet now saves the `codexHome` reported by the first successful app-server
 handshake for each exact runtime target. Subsequent launches and recovery
 attempts explicitly set `CODEX_HOME` to that directory, including inside the
 Windows-to-WSL relay. A different returned home or an unreadable binding stops
@@ -17,14 +17,14 @@ the connection before loading or creating chats.
 Bindings live in a `codex-homes` directory next to `session-binding.json`.
 Each file is named with the SHA-256 of the runtime target ID and contains
 `runtimeTargetId` and `codexHome`. When repairing an existing split installation,
-close Zommi, repair the history links below, and set that target's binding to the
+close Focalet, repair the history links below, and set that target's binding to the
 chosen absolute home before restarting. Changing a binding selects a history
 directory; it does not move histories or credentials. Keep bindings scoped to
 the exact runtime and execution host. Older servers that do not report
 `codexHome` retain their existing behavior until a home has been bound.
 
 `scripts/repair_codex_history.py` reproduces the missing-file lookup repair.
-Run it on the host where Codex stores its history: for Windows Zommi using WSL
+Run it on the host where Codex stores its history: for Windows Focalet using WSL
 Codex, run the script **inside that WSL distribution**, with the Windows catalog
 accessible through `/mnt/c`. Python 3.10 or newer is required. Native Windows
 also needs permission to create symbolic links.
@@ -36,7 +36,7 @@ Preview the links, using the real paths and target ID from your installation:
 
 ```sh
 python3 scripts/repair_codex_history.py \
-  --catalog /path/to/Zommi/session-catalog.sqlite \
+  --catalog /path/to/Focalet/session-catalog.sqlite \
   --runtime-target-id runtime-your-codex-target \
   --home /path/to/original-codex-home \
   --home /path/to/current-codex-home
@@ -60,7 +60,7 @@ metadata, broken links, and destinations outside the supplied session directorie
 cause an error. The report contains paths and IDs, not transcript text or
 credentials. Keep original files in place while their links are in use.
 
-After applying, open the previously failing chats in the installed Zommi app,
+After applying, open the previously failing chats in the installed Focalet app,
 check their histories, and switch back to the current chat. This verifies the
 running app as well as the filesystem. The repair does not change runtime-home
 selection: select the repaired home in the target's home binding before

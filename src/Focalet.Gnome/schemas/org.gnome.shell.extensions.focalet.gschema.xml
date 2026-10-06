@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.focalet" path="/org/gnome/shell/extensions/focalet/">
+    <key name="select-content" type="as">
+      <default>['&lt;Alt&gt;a']</default>
+      <summary>Select content for Focalet</summary>
+    </key>
+  </schema>
+</schemalist>

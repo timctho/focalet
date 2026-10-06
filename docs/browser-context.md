@@ -37,7 +37,7 @@ omitted. Drawing is bounded to 256 strokes per region and 4,096 points per strok
 Ubuntu tolerates sparse one-level RGB rounding from the compositor; source
 identity and accessibility consistency checks still have to match.
 
-The rectangle is the primary user reference. Zommi enriches it with DOM or native accessibility when the source and image
+The rectangle is the primary user reference. Focalet enriches it with DOM or native accessibility when the source and image
 can be aligned: UI Automation on Windows, AT-SPI on Ubuntu Wayland, and AX on macOS.
 macOS requires Accessibility permission; browser DOM additionally requires a
 supported Chromium browser with an authorized CDP connection. Safari can supply
@@ -54,7 +54,7 @@ unobscured inside custom-drawn application surfaces.
 Canvas/custom-drawn content, an unconfirmed source window, or a changing document
 can produce **Image only** with an explanation. Windows image-only captures
 retain physical screen geometry even when there is no single source window.
-On platforms where the screenshot tool does not return a screen origin, Zommi
+On platforms where the screenshot tool does not return a screen origin, Focalet
 keeps the actual image size without inventing a screen mapping. Capture is a
 single observation, not a continuing screen share.
 
@@ -62,7 +62,7 @@ single observation, not a continuing screen share.
 
 All runtime adapters use the shared context handoff. The model receives the
 image plus the complete bounded `regionContext` payload immediately; reading
-additional local files or invoking a special Zommi retrieval tool is not needed.
+additional local files or invoking a special Focalet retrieval tool is not needed.
 No agent-specific action indices or tool APIs are required.
 
 | Data | Meaning |
@@ -105,7 +105,7 @@ availability depends on that runtime's retention.
 ## Connecting a Chromium browser
 
 **App settings → Browser connections** shows Edge and Chrome separately. Both
-can remain connected; Zommi chooses the browser owning the selected window.
+can remain connected; Focalet chooses the browser owning the selected window.
 Opening settings or refreshing status does not open a debugging connection or
 request browser permission. **Ready to connect** means a discovery endpoint was
 found, while **Connected** means the helper has an open connection whose browser
@@ -116,22 +116,22 @@ Use **Set up** for browser-specific instructions, then **Connect**. Chrome's
 `chrome://inspect/#remote-debugging` page enables remote debugging on versions
 that support it. Edge's setup links to Microsoft's DevTools Protocol guide;
 `--remote-debugging-port=0` requests an automatically assigned port and discovery
-file. Startup options require a new browser process; Zommi does not close an
+file. Startup options require a new browser process; Focalet does not close an
 existing browser to apply them. Configure the profile containing the page you
 want to capture. **Reconnect** retries only the selected browser and clears its
 failed-connection cooldown. The other browser's connection remains available.
 
-Zommi discovers an existing `DevToolsActivePort` file in the standard Chrome,
+Focalet discovers an existing `DevToolsActivePort` file in the standard Chrome,
 Edge and Brave user-data directories (plus Chromium on Ubuntu/macOS). The browser must already offer remote
-debugging and permit the connection. Zommi does not restart the browser or
+debugging and permit the connection. Focalet does not restart the browser or
 change its profile. For a browser that exposes a different local debugging
-port, launch Zommi with `ZOMMI_BROWSER_CDP_ENDPOINT=http://127.0.0.1:9222`
+port, launch Focalet with `FOCALET_BROWSER_CDP_ENDPOINT=http://127.0.0.1:9222`
 (substitute the port supplied by that browser). A loopback browser WebSocket
 endpoint is also accepted. Remote endpoints and credentials in URLs are
 rejected. An explicit endpoint is exclusive; failed binding does not try another
 profile. Automatic discovery only considers the selected browser family.
-Settings identifies when the single `ZOMMI_BROWSER_CDP_ENDPOINT` override is
-active. Remove that override from Zommi's launch environment and restart Zommi
+Settings identifies when the single `FOCALET_BROWSER_CDP_ENDPOINT` override is
+active. Remove that override from Focalet's launch environment and restart Focalet
 to restore automatic discovery for both browsers. A connection belonging to the
 other browser is reported explicitly and is not disconnected by its neighbor's
 Reconnect control.
@@ -149,13 +149,13 @@ late reply. A real disconnect reconnects once. The first connection allows up to
 attempts for one minute so a rejected prompt is not repeated for each item.
 Turning Full webpage details off and on clears this connection state.
 
-Chrome controls authorization for a new connection. Restarting Chrome or Zommi,
+Chrome controls authorization for a new connection. Restarting Chrome or Focalet,
 or revoking/disconnecting browser access, can require another confirmation.
 Connections owned by an agent's separate Chrome MCP server are independent.
 
-In **App settings**, turn off **Full webpage details** to stop Zommi using a
+In **App settings**, turn off **Full webpage details** to stop Focalet using a
 debugging connection from the next capture. This applies to Alt+A, Select content
-and image selection, and closes previously retained Zommi browser connections
+and image selection, and closes previously retained Focalet browser connections
 when the helper handles its next capture. Images, physical coordinates and
 native accessibility remain available; DOM text and image/product URLs may be
 missing. The preference persists and is on by default. It does not change
@@ -230,7 +230,7 @@ accessibility mismatch.
 ## Verification
 
 `bash scripts/test-browser-capture.sh` runs a real Chromium process with an
-isolated temporary profile. Set `ZOMMI_TEST_CHROMIUM` when the executable cannot
+isolated temporary profile. Set `FOCALET_TEST_CHROMIUM` when the executable cannot
 be discovered. The gate uses mouse and keyboard input for selection, parent
 expansion and cancellation; it checks region text, hidden/password exclusions,
 document mutation, same-URL reload and duplicate-window rejection. Its fixture
@@ -244,7 +244,7 @@ capture surface and the built package; headless Chromium tests do not establish
 Windows hotkey, focus, UIA or GDI correctness.
 
 For the packaged Windows browser gate, run
-`./scripts/accept-windows-browser.ps1 -PackageDirectory ./artifacts/zommi-windows-x64`.
+`./scripts/accept-windows-browser.ps1 -PackageDirectory ./artifacts/focalet-windows-x64`.
 It uses a temporary Chromium profile, verifies the native window/viewport binding
 with the packaged helper, and records the helper's SHA-256 beside the test
 results. The packaged gate also counts browser WebSocket handshakes and target
@@ -254,19 +254,19 @@ also loses its browser observation lease after 30 seconds.
 
 The browser tests also verify passive status, simultaneous browser connections,
 reconnect isolation, disabled capture, failed authorization and cooldown reset.
-To check real Edge and Chrome process identities on Windows, set `ZOMMI_TEST_EDGE`
-to `msedge.exe` and run `tests/Zommi.Browser.Tests` with Chrome's executable,
+To check real Edge and Chrome process identities on Windows, set `FOCALET_TEST_EDGE`
+to `msedge.exe` and run `tests/Focalet.Browser.Tests` with Chrome's executable,
 an evidence output directory, and `--connections-only`. This uses temporary
 headless browser profiles and does not change personal browser settings.
 
-For native bbox and UIA verification without launching the Zommi app, run
-`./scripts/accept-windows-bbox-context.ps1 -CaptureHost <path-to-Zommi.Capture.exe>`.
+For native bbox and UIA verification without launching the Focalet app, run
+`./scripts/accept-windows-bbox-context.ps1 -CaptureHost <path-to-Focalet.CaptureHost.exe>`.
 It verifies partial intersections, image-only empty areas, covered controls,
 provider IDs/states, invalid gestures and responsive dragging during a busy
 provider. `accept-windows-multi-content.ps1` verifies ordered multi-rectangle
 batches, duplicates, cancellation, source changes and partial table cells.
 
-`accept-windows-annotations.ps1 -CaptureHost <path-to-Zommi.Capture.exe>
+`accept-windows-annotations.ps1 -CaptureHost <path-to-Focalet.CaptureHost.exe>
 -OutputDirectory <private-evidence-directory>` exercises the native drawing
 toolbar, exported pixels, per-region undo/redo, changed-source fallback and
 cancellation against a synthetic Windows fixture.

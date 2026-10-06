@@ -11,10 +11,10 @@ import subprocess
 
 
 ASSETS = {
-    ("windows", "x64"): "Zommi-Setup-x64.exe",
-    ("macos", "arm64"): "Zommi-macOS-arm64.dmg",
-    ("macos", "x64"): "Zommi-macOS-x64.dmg",
-    ("linux", "x64"): "Zommi-Ubuntu-amd64.deb",
+    ("windows", "x64"): "Focalet-Setup-x64.exe",
+    ("macos", "arm64"): "Focalet-macOS-arm64.dmg",
+    ("macos", "x64"): "Focalet-macOS-x64.dmg",
+    ("linux", "x64"): "Focalet-Ubuntu-amd64.deb",
 }
 
 PROFILES = {
@@ -49,7 +49,7 @@ def collect_assets(metadata: list[Path], commit: str, *, windows_only: bool = Fa
         target = (value.get("platform"), value.get("architecture"))
         if target not in ASSETS or target in targets:
             raise ValueError("Unknown or duplicate installer target.")
-        if value.get("product") != "Zommi" or value.get("gitCommit") != commit:
+        if value.get("product") != "Focalet" or value.get("gitCommit") != commit:
             raise ValueError("Installer source revision does not match this release.")
         if value.get("file") != ASSETS[target]:
             raise ValueError("Unexpected installer filename.")
@@ -76,7 +76,7 @@ def collect_assets(metadata: list[Path], commit: str, *, windows_only: bool = Fa
             raise ValueError("Installers must exactly match the selected platforms.")
     elif not windows_only and not {("windows", "x64"), ("macos", "arm64")} <= targets:
         raise ValueError("A release needs Windows x64 and Mac Apple Silicon installers.")
-    return paths, {"product": "Zommi", "version": version, "gitCommit": commit, "assets": records}
+    return paths, {"product": "Focalet", "version": version, "gitCommit": commit, "assets": records}
 
 
 def gh(*arguments: str) -> str:
@@ -120,7 +120,7 @@ def verify_destination(repository: str, commit: str, tag: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repository", default="timctho/zommi", help="Source repository, owner/name (visibility is preserved)")
+    parser.add_argument("--repository", default="timctho/focalet", help="Source repository, owner/name (visibility is preserved)")
     parser.add_argument("--tag", required=True)
     parser.add_argument("--expected-commit", required=True)
     parser.add_argument("--metadata", action="append", type=Path, required=True)
@@ -137,12 +137,12 @@ def main() -> int:
                                       platforms=args.platforms, tag=args.tag)
     validate_tag(args.tag, manifest["version"], stable=args.stable)
     args.output.mkdir(parents=True, exist_ok=True)
-    manifest_path = args.output / "zommi-release.json"
+    manifest_path = args.output / "focalet-release.json"
     checksums = args.output / "SHA256SUMS.txt"
     notes = args.output / "release-notes.md"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     checksums.write_text("".join(f"{item['sha256']}  {item['file']}\n" for item in manifest["assets"]), encoding="ascii")
-    lines = [f"Zommi {args.tag}", "", "| Computer | Download |", "| --- | --- |"]
+    lines = [f"Focalet {args.tag}", "", "| Computer | Download |", "| --- | --- |"]
     for item in manifest["assets"]:
         label = ("Windows 10/11 (x64)" if item["platform"] == "windows" else
                  "Ubuntu 24.04 LTS (x64)" if item["platform"] == "linux" else
@@ -153,14 +153,14 @@ def main() -> int:
     if "windows" in selected:
         instructions.append("Windows: run Setup.")
     if "macos" in selected:
-        instructions.append("Mac: open the DMG and drag Zommi.app to Applications.")
+        instructions.append("Mac: open the DMG and drag Focalet.app to Applications.")
     if "linux" in selected:
-        instructions.append("Ubuntu: run `sudo apt install ./Zommi-Ubuntu-amd64.deb`, then open Zommi from the app menu.")
+        instructions.append("Ubuntu: run `sudo apt install ./Focalet-Ubuntu-amd64.deb`, then open Focalet from the app menu.")
     lines += ["", " ".join(instructions),
               "Choose your installed agent runtime in the first-launch setup.", "",
-              "See the exact signing status in zommi-release.json; Windows/macOS may require opening confirmation.",
+              "See the exact signing status in focalet-release.json; Windows/macOS may require opening confirmation.",
               "See the repository README for installation instructions. SHA256SUMS.txt verifies the downloads.", "",
-              f"Source revision: `{args.expected_commit}`. Build identity and signing status: `zommi-release.json`."]
+              f"Source revision: `{args.expected_commit}`. Build identity and signing status: `focalet-release.json`."]
     notes.write_text("\n".join(lines) + "\n", encoding="utf-8")
     if not args.publish:
         print(f"Prepared release files in {args.output}; no GitHub changes made.")
@@ -177,7 +177,7 @@ def main() -> int:
             raise ValueError("The draft contains unexpected assets; review them before publishing.")
     else:
         gh("release", "create", args.tag, "--repo", args.repository, "--target", args.expected_commit,
-           "--draft", f"--prerelease={'false' if args.stable else 'true'}", "--title", f"Zommi {args.tag}", "--notes-file", str(notes))
+           "--draft", f"--prerelease={'false' if args.stable else 'true'}", "--title", f"Focalet {args.tag}", "--notes-file", str(notes))
     gh("release", "upload", args.tag, "--repo", args.repository, *map(str, upload_paths), "--clobber")
     uploaded = json.loads(gh("release", "view", args.tag, "--repo", args.repository, "--json", "assets"))
     if {item["name"]: item.get("digest") for item in uploaded["assets"]} != expected_hashes:

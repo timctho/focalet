@@ -38,7 +38,7 @@ ipcMain.on('ready', () => {
 });
 ipcMain.handle('mode', () => mode);
 app.whenReady().then(async () => {
-  window = new BrowserWindow({ title: 'Zommi Electron clipboard fixture', width: 900, height: 650, alwaysOnTop: true,
+  window = new BrowserWindow({ title: 'Focalet Electron clipboard fixture', width: 900, height: 650, alwaysOnTop: true,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true } });
   window.webContents.on('will-navigate', event => event.preventDefault());
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));

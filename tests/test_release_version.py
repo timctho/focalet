@@ -17,7 +17,7 @@ class ReleaseVersionTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.pubspec = self.root / "src/Zommi.Flutter/pubspec.yaml"
+        self.pubspec = self.root / "src/Focalet.Flutter/pubspec.yaml"
         self.pubspec.parent.mkdir(parents=True)
 
     def version(self, value):
@@ -51,7 +51,7 @@ class ReleaseVersionTests(unittest.TestCase):
         with patch.object(assemble_release, "REPOSITORY", self.root):
             assemble_release._write_manifest(
                 package, target_platform="linux", architecture="x64", commit="a" * 40,
-                entrypoint="zommi", core_host="zommi-core-host", capture_host="zommi-linux-capture",
+                entrypoint="focalet", core_host="focalet-core-host", capture_host="focalet-linux-capture",
                 signing={"status": "unsigned", "mechanism": "none"},
             )
         manifest = json.loads((package / "release-manifest.json").read_text())
@@ -67,7 +67,7 @@ class ReleaseVersionTests(unittest.TestCase):
         (package / "release-manifest.json").write_text(json.dumps(manifest))
         output = self.root / "installers"
         output.mkdir()
-        asset = output / "Zommi-Ubuntu-amd64.deb"
+        asset = output / "Focalet-Ubuntu-amd64.deb"
         asset.write_bytes(b"verified installer fixture")
         argv = ["build_installer.py", str(package), "--expected-commit", "a" * 40, "--output", str(output)]
         with patch("sys.argv", argv), patch.object(build_installer, "verify_package"), \

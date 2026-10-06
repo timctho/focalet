@@ -1,4 +1,4 @@
-# Zommi Linux hotkey plugin
+# Focalet Linux hotkey plugin
 
 This is an API-compatible Linux implementation for `hotkey_manager` 0.2.x.
 It retains the upstream package name and MIT license, but replaces Keybinder

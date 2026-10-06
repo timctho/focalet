@@ -8,11 +8,11 @@ import threading
 import time
 
 THREAD = "scroll-benchmark"
-COUNT = int(os.environ.get("ZOMMI_SCROLL_TURNS", "120"))
-WORKLOAD = os.environ.get("ZOMMI_SCROLL_WORKLOAD", "standard")
+COUNT = int(os.environ.get("FOCALET_SCROLL_TURNS", "120"))
+WORKLOAD = os.environ.get("FOCALET_SCROLL_WORKLOAD", "standard")
 lock = threading.Lock()
 cancel = threading.Event()
-signal_path = os.environ.get("ZOMMI_SCROLL_STREAM_SIGNAL")
+signal_path = os.environ.get("FOCALET_SCROLL_STREAM_SIGNAL")
 watching = False
 
 
@@ -60,7 +60,7 @@ for number in range(1, COUNT + 1):
             ])
         history[-1]["items"][1:3] = activities
 
-history_path = os.environ.get("ZOMMI_SCROLL_HISTORY")
+history_path = os.environ.get("FOCALET_SCROLL_HISTORY")
 if history_path:
     with open(history_path, encoding="utf-8-sig") as source:
         history = json.load(source)["thread"]["turns"]
@@ -118,7 +118,7 @@ for line in sys.stdin:
     if method == "initialize":
         result = {"userAgent": "codex-cli/scroll-benchmark"}
     elif method == "thread/list":
-        result = {"data": [{"id": THREAD, "threadSource": "zommi", "name": "Scroll benchmark", "updatedAt": 1}]}
+        result = {"data": [{"id": THREAD, "threadSource": "focalet", "name": "Scroll benchmark", "updatedAt": 1}]}
     elif method in ("thread/start", "thread/resume", "thread/read"):
         result = {"thread": {"id": THREAD, "turns": history, "cwd": os.getcwd()}}
     elif method in ("model/list", "mcpServerStatus/list"):

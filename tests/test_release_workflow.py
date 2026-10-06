@@ -21,13 +21,13 @@ class ReleaseWorkflowTests(unittest.TestCase):
     def test_plan_and_publication_derive_identity_without_user_tag_or_channel(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            pubspec = root / "src/Zommi.Flutter/pubspec.yaml"
+            pubspec = root / "src/Focalet.Flutter/pubspec.yaml"
             pubspec.parent.mkdir(parents=True)
             output = root / "outputs"
             environment = {
                 "GITHUB_EVENT_NAME": "workflow_dispatch",
                 "GITHUB_REF": "refs/heads/main", "GITHUB_SHA": "a" * 40,
-                "GITHUB_OUTPUT": str(output), "GITHUB_REPOSITORY": "timctho/zommi",
+                "GITHUB_OUTPUT": str(output), "GITHUB_REPOSITORY": "timctho/focalet",
                 "RELEASE_PLATFORMS": "windows-ubuntu", "RELEASE_PUBLISH": "true",
                 # Old caller values must never override the committed version.
                 "RELEASE_TAG": "v9.9.9", "RELEASE_PRERELEASE": "false",
@@ -74,7 +74,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         workflow = yaml.load(raw, Loader=yaml.BaseLoader)
         self.assertEqual(set(workflow["on"]), {"push", "workflow_dispatch"})
         self.assertEqual(workflow["on"]["push"], {
-            "branches": ["main"], "paths": ["src/Zommi.Flutter/pubspec.yaml"],
+            "branches": ["main"], "paths": ["src/Focalet.Flutter/pubspec.yaml"],
         })
         self.assertEqual(set(workflow["on"]["workflow_dispatch"]["inputs"]), {"platforms", "publish"})
         self.assertEqual(workflow["on"]["workflow_dispatch"]["inputs"]["platforms"]["default"], "all")
@@ -136,7 +136,7 @@ class ReleasePushTests(unittest.TestCase):
                                        stderr=subprocess.PIPE).strip()
 
     def commit(self, version, *, description="Test release"):
-        self.pubspec.write_text(f"name: zommi\ndescription: {description}\nversion: {version}\n")
+        self.pubspec.write_text(f"name: focalet\ndescription: {description}\nversion: {version}\n")
         self.git("add", release.VERSION_FILE)
         self.git("-c", "user.name=Release Test", "-c", "user.email=release@example.invalid",
                  "-c", "commit.gpgsign=false",
@@ -173,11 +173,26 @@ class ReleasePushTests(unittest.TestCase):
         self.assertEqual(len(entries), 4)
         self.assertEqual({(item["platform"], item["architecture"], item["os"], item["asset"])
                           for item in entries}, {
-            ("windows", "x64", "windows-2025", "Zommi-Setup-x64.exe"),
-            ("linux", "x64", "ubuntu-24.04", "Zommi-Ubuntu-amd64.deb"),
-            ("macos", "arm64", "macos-15", "Zommi-macOS-arm64.dmg"),
-            ("macos", "x64", "macos-15-intel", "Zommi-macOS-x64.dmg"),
+            ("windows", "x64", "windows-2025", "Focalet-Setup-x64.exe"),
+            ("linux", "x64", "ubuntu-24.04", "Focalet-Ubuntu-amd64.deb"),
+            ("macos", "arm64", "macos-15", "Focalet-macOS-arm64.dmg"),
+            ("macos", "x64", "macos-15-intel", "Focalet-macOS-x64.dmg"),
         })
+
+    def test_first_renamed_release_reads_the_previous_version_at_its_old_path(self):
+        legacy = self.root / "src/Zommi.Flutter/pubspec.yaml"
+        legacy.parent.mkdir(parents=True)
+        self.pubspec.rename(legacy)
+        self.git("add", "-A")
+        self.git("-c", "user.name=Release Test", "-c", "user.email=release@example.invalid",
+                 "commit", "-qm", "Legacy layout")
+        self.before = self.git("rev-parse", "HEAD")
+        legacy.rename(self.pubspec)
+        self.git("add", "-A")
+        self.commit("0.1.0-preview.8+2")
+        self.assertEqual(self.run_plan()["build"], "false")
+        self.commit("0.1.0-preview.9+3")
+        self.assertEqual(self.run_plan()["build"], "true")
 
     def test_build_number_only_and_other_pubspec_changes_skip(self):
         for version in ("0.1.0-preview.8+2", "0.1.0-preview.8"):

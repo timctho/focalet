@@ -7,21 +7,21 @@ Unicode true
 Var RemoveData
 Var RemoveDataCheckbox
 
-Name "Zommi"
+Name "Focalet"
 OutFile "${OUTPUT_FILE}"
-InstallDir "$LOCALAPPDATA\Programs\Zommi"
-InstallDirRegKey HKCU "Software\Zommi" "InstallDir"
+InstallDir "$LOCALAPPDATA\Programs\Focalet"
+InstallDirRegKey HKCU "Software\Focalet" "InstallDir"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
 VIProductVersion "${APP_VERSION}.0"
-VIAddVersionKey "ProductName" "Zommi"
-VIAddVersionKey "FileDescription" "Zommi Setup"
+VIAddVersionKey "ProductName" "Focalet"
+VIAddVersionKey "FileDescription" "Focalet Setup"
 VIAddVersionKey "FileVersion" "${APP_VERSION}"
-VIAddVersionKey "LegalCopyright" "Zommi contributors"
+VIAddVersionKey "LegalCopyright" "Focalet contributors"
 !define MUI_ICON "${APP_ICON}"
 !define MUI_UNICON "${APP_ICON}"
 !define MUI_ABORTWARNING
-!define MUI_FINISHPAGE_RUN "$INSTDIR\Zommi.exe"
+!define MUI_FINISHPAGE_RUN "$INSTDIR\Focalet.exe"
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
@@ -34,7 +34,7 @@ UninstPage custom un.DataOptions un.DataOptionsLeave
 Function .onInit
   Call RequireClosed
   ${IfNot} ${RunningX64}
-    MessageBox MB_OK|MB_ICONSTOP "Zommi requires 64-bit Windows."
+    MessageBox MB_OK|MB_ICONSTOP "Focalet requires 64-bit Windows."
     Abort
   ${EndIf}
 FunctionEnd
@@ -42,21 +42,21 @@ FunctionEnd
 !macro RequireClosed Prefix
 Function ${Prefix}RequireClosed
 retry:
-  System::Call 'kernel32::OpenMutexW(i 0x00100000, i 0, w "Local\Zommi.Desktop.SingleInstance") p.r0'
+  System::Call 'kernel32::OpenMutexW(i 0x00100000, i 0, w "Local\Focalet.Desktop.SingleInstance") p.r0'
   StrCmp $0 0 checkFile
   System::Call 'kernel32::CloseHandle(p r0)'
   Goto busy
 checkFile:
   ; Earlier desktop versions did not own the current single-instance mutex.
-  IfFileExists "$INSTDIR\Zommi.exe" 0 done
+  IfFileExists "$INSTDIR\Focalet.exe" 0 done
   ClearErrors
-  FileOpen $0 "$INSTDIR\Zommi.exe" a
+  FileOpen $0 "$INSTDIR\Focalet.exe" a
   IfErrors busy
   FileClose $0
   Goto done
 busy:
   IfSilent fail
-  MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "Close Zommi (including its tray icon) before continuing. This prevents an incomplete update or reset." IDRETRY retry
+  MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "Close Focalet (including its tray icon) before continuing. This prevents an incomplete update or reset." IDRETRY retry
 fail:
   SetErrorLevel 2
   Abort
@@ -78,9 +78,9 @@ FunctionEnd
 Function un.DataOptions
   nsDialogs::Create 1018
   Pop $0
-  ${NSD_CreateLabel} 0 0 100% 36u "Choose whether to keep Zommi ready for a future reinstall or start fresh. Agent accounts and agent-owned conversations are kept in either case."
+  ${NSD_CreateLabel} 0 0 100% 36u "Choose whether to keep Focalet ready for a future reinstall or start fresh. Agent accounts and agent-owned conversations are kept in either case."
   Pop $0
-  ${NSD_CreateCheckbox} 0 48u 100% 32u "Remove all Zommi settings, cached agent detection and local session metadata"
+  ${NSD_CreateCheckbox} 0 48u 100% 32u "Remove all Focalet settings, cached agent detection and local session metadata"
   Pop $RemoveDataCheckbox
   ${NSD_SetState} $RemoveDataCheckbox $RemoveData
   nsDialogs::Show
@@ -90,41 +90,41 @@ Function un.DataOptionsLeave
   ${NSD_GetState} $RemoveDataCheckbox $RemoveData
 FunctionEnd
 
-Section "Zommi"
+Section "Focalet"
   SetShellVarContext current
   Call RequireClosed
   !include "${INSTALL_FILES}"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
-  CreateDirectory "$SMPROGRAMS\Zommi"
-  CreateShortcut "$SMPROGRAMS\Zommi\Zommi.lnk" "$INSTDIR\Zommi.exe" "" "$INSTDIR\${APP_ICON_RELATIVE}"
+  CreateDirectory "$SMPROGRAMS\Focalet"
+  CreateShortcut "$SMPROGRAMS\Focalet\Focalet.lnk" "$INSTDIR\Focalet.exe" "" "$INSTDIR\${APP_ICON_RELATIVE}"
   ; Refresh shortcuts created by earlier installers without adding new ones.
-  ${If} ${FileExists} "$SMPROGRAMS\Zommi.lnk"
-    CreateShortcut "$SMPROGRAMS\Zommi.lnk" "$INSTDIR\Zommi.exe" "" "$INSTDIR\${APP_ICON_RELATIVE}"
-    WriteRegDWORD HKCU "Software\Zommi" "LegacyStartShortcut" 1
+  ${If} ${FileExists} "$SMPROGRAMS\Focalet.lnk"
+    CreateShortcut "$SMPROGRAMS\Focalet.lnk" "$INSTDIR\Focalet.exe" "" "$INSTDIR\${APP_ICON_RELATIVE}"
+    WriteRegDWORD HKCU "Software\Focalet" "LegacyStartShortcut" 1
   ${EndIf}
-  ${If} ${FileExists} "$DESKTOP\Zommi.lnk"
-    CreateShortcut "$DESKTOP\Zommi.lnk" "$INSTDIR\Zommi.exe" "" "$INSTDIR\${APP_ICON_RELATIVE}"
-    WriteRegDWORD HKCU "Software\Zommi" "DesktopShortcut" 1
+  ${If} ${FileExists} "$DESKTOP\Focalet.lnk"
+    CreateShortcut "$DESKTOP\Focalet.lnk" "$INSTDIR\Focalet.exe" "" "$INSTDIR\${APP_ICON_RELATIVE}"
+    WriteRegDWORD HKCU "Software\Focalet" "DesktopShortcut" 1
   ${EndIf}
-  WriteRegStr HKCU "Software\Zommi" "InstallDir" "$INSTDIR"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Zommi" "DisplayName" "Zommi"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Zommi" "DisplayVersion" "${APP_DISPLAY_VERSION}"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Zommi" "Publisher" "Zommi"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Zommi" "DisplayIcon" "$INSTDIR\${APP_ICON_RELATIVE}"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Zommi" "UninstallString" '"$INSTDIR\Uninstall.exe"'
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Zommi" "QuietUninstallString" '"$INSTDIR\Uninstall.exe" /S'
-  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Zommi" "NoModify" 1
-  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Zommi" "NoRepair" 1
+  WriteRegStr HKCU "Software\Focalet" "InstallDir" "$INSTDIR"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Focalet" "DisplayName" "Focalet"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Focalet" "DisplayVersion" "${APP_DISPLAY_VERSION}"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Focalet" "Publisher" "Focalet"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Focalet" "DisplayIcon" "$INSTDIR\${APP_ICON_RELATIVE}"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Focalet" "UninstallString" '"$INSTDIR\Uninstall.exe"'
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Focalet" "QuietUninstallString" '"$INSTDIR\Uninstall.exe" /S'
+  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Focalet" "NoModify" 1
+  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Focalet" "NoRepair" 1
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 SectionEnd
 
 Section "Uninstall"
   SetShellVarContext current
   ${If} $RemoveData == 1
-    DetailPrint "Stopping Zommi background connections before reset..."
+    DetailPrint "Stopping Focalet background connections before reset..."
     ClearErrors
     StrCpy $0 4
-    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\support\stop-zommi-relays.ps1" -DataDirectory "$LOCALAPPDATA\Zommi"'
+    nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\support\stop-focalet-relays.ps1" -DataDirectory "$LOCALAPPDATA\Focalet"'
     Pop $0
     Pop $1
     ${If} ${Errors}
@@ -133,23 +133,23 @@ Section "Uninstall"
     ${If} $0 != 0
       DetailPrint "$1"
       IfSilent +2
-      MessageBox MB_OK|MB_ICONSTOP "Could not stop a Zommi background connection. Close Zommi and retry uninstall. Your data was kept.$\r$\n$\r$\n$1"
+      MessageBox MB_OK|MB_ICONSTOP "Could not stop a Focalet background connection. Close Focalet and retry uninstall. Your data was kept.$\r$\n$\r$\n$1"
       SetErrorLevel 4
       Abort
     ${EndIf}
     ClearErrors
-    ${If} ${FileExists} "$APPDATA\Zommi\*.*"
-      RMDir /r "$APPDATA\Zommi"
+    ${If} ${FileExists} "$APPDATA\Focalet\*.*"
+      RMDir /r "$APPDATA\Focalet"
     ${EndIf}
-    ${If} ${FileExists} "$LOCALAPPDATA\Zommi\*.*"
-      RMDir /r "$LOCALAPPDATA\Zommi"
+    ${If} ${FileExists} "$LOCALAPPDATA\Focalet\*.*"
+      RMDir /r "$LOCALAPPDATA\Focalet"
     ${EndIf}
-    ${If} ${FileExists} "$TEMP\zommi-tray-*.ico"
-      Delete "$TEMP\zommi-tray-*.ico"
+    ${If} ${FileExists} "$TEMP\focalet-tray-*.ico"
+      Delete "$TEMP\focalet-tray-*.ico"
     ${EndIf}
     ${If} ${Errors}
       IfSilent +2
-      MessageBox MB_OK|MB_ICONSTOP "Some Zommi data is still in use. Close Zommi and retry uninstall. The reset is not complete."
+      MessageBox MB_OK|MB_ICONSTOP "Some Focalet data is still in use. Close Focalet and retry uninstall. The reset is not complete."
       SetErrorLevel 3
       Abort
     ${EndIf}
@@ -157,18 +157,18 @@ Section "Uninstall"
   !include "${UNINSTALL_FILES}"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir "$INSTDIR"
-  Delete "$SMPROGRAMS\Zommi\Zommi.lnk"
-  RMDir "$SMPROGRAMS\Zommi"
-  ReadRegDWORD $0 HKCU "Software\Zommi" "LegacyStartShortcut"
+  Delete "$SMPROGRAMS\Focalet\Focalet.lnk"
+  RMDir "$SMPROGRAMS\Focalet"
+  ReadRegDWORD $0 HKCU "Software\Focalet" "LegacyStartShortcut"
   ${If} $0 == 1
-    Delete "$SMPROGRAMS\Zommi.lnk"
+    Delete "$SMPROGRAMS\Focalet.lnk"
   ${EndIf}
-  ReadRegDWORD $0 HKCU "Software\Zommi" "DesktopShortcut"
+  ReadRegDWORD $0 HKCU "Software\Focalet" "DesktopShortcut"
   ${If} $0 == 1
-    Delete "$DESKTOP\Zommi.lnk"
+    Delete "$DESKTOP\Focalet.lnk"
   ${EndIf}
-  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Zommi"
-  DeleteRegKey HKCU "Software\Zommi"
+  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Focalet"
+  DeleteRegKey HKCU "Software\Focalet"
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
-  ; Agent-owned data outside Zommi's two profile directories is never removed.
+  ; Agent-owned data outside Focalet's two profile directories is never removed.
 SectionEnd

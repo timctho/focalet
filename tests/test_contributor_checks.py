@@ -34,19 +34,19 @@ class ContributorChecksTests(unittest.TestCase):
         inherited = {
             "PATH": "/toolchains",
             "HOME": "/personal",
-            "ZOMMI_CODEX_COMMAND": "/personal/codex",
-            "ZOMMI_OPENCLAW_GATEWAY_URL": "ws://127.0.0.1:9999",
-            "ZOMMI_CORE_STATE_PATH": "/personal/chat.json",
-            "ZOMMI_TEST_CHROMIUM": "/tools/chrome",
+            "FOCALET_CODEX_COMMAND": "/personal/codex",
+            "FOCALET_OPENCLAW_GATEWAY_URL": "ws://127.0.0.1:9999",
+            "FOCALET_CORE_STATE_PATH": "/personal/chat.json",
+            "FOCALET_TEST_CHROMIUM": "/tools/chrome",
         }
         environment = checks.isolated_runtime_environment("/isolated", inherited)
-        self.assertEqual(environment["ZOMMI_RUNTIME_DISCOVERY_MODE"], "configured-only")
-        self.assertNotIn("ZOMMI_CODEX_COMMAND", environment)
-        self.assertNotIn("ZOMMI_OPENCLAW_GATEWAY_URL", environment)
-        self.assertEqual(environment["ZOMMI_CORE_STATE_PATH"], "/isolated/binding.json")
+        self.assertEqual(environment["FOCALET_RUNTIME_DISCOVERY_MODE"], "configured-only")
+        self.assertNotIn("FOCALET_CODEX_COMMAND", environment)
+        self.assertNotIn("FOCALET_OPENCLAW_GATEWAY_URL", environment)
+        self.assertEqual(environment["FOCALET_CORE_STATE_PATH"], "/isolated/binding.json")
         self.assertEqual(environment["HOME"], inherited["HOME"])
-        self.assertEqual(environment["ZOMMI_TEST_CHROMIUM"], "/tools/chrome")
-        self.assertEqual(inherited["ZOMMI_CORE_STATE_PATH"], "/personal/chat.json")
+        self.assertEqual(environment["FOCALET_TEST_CHROMIUM"], "/tools/chrome")
+        self.assertEqual(inherited["FOCALET_CORE_STATE_PATH"], "/personal/chat.json")
 
     def test_external_prs_get_all_platforms_without_secrets_or_persistent_runners(
         self,
@@ -110,7 +110,7 @@ class ContributorChecksTests(unittest.TestCase):
         self.assertEqual(set(workflow["on"]), {"workflow_dispatch"})
 
     def test_runner_preserves_arguments_and_propagates_failure(self):
-        with tempfile.TemporaryDirectory(prefix="zommi check ") as directory:
+        with tempfile.TemporaryDirectory(prefix="focalet check ") as directory:
             script = Path(directory, "failure script.py")
             script.write_text(
                 "import sys\nassert sys.argv[1] == 'argument with spaces'\nsys.exit(23)\n"
@@ -125,7 +125,7 @@ class ContributorChecksTests(unittest.TestCase):
                 checks.run("flutter", "test")
 
     def test_shell_syntax_error_after_the_first_script_fails_checks(self):
-        with tempfile.TemporaryDirectory(prefix="zommi shell checks ") as directory:
+        with tempfile.TemporaryDirectory(prefix="focalet shell checks ") as directory:
             root = Path(directory)
             scripts = root / "scripts"
             scripts.mkdir()

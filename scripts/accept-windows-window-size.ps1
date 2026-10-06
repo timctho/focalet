@@ -33,7 +33,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using Accessibility;
 
-public static class ZommiWindowSizeAccess {
+public static class FocaletWindowSizeAccess {
     [StructLayout(LayoutKind.Sequential)] private struct Rectangle { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] private struct Point { public int Left, Top; }
     [StructLayout(LayoutKind.Sequential)] private struct Animation { public uint Size; public int Enabled; }
@@ -74,27 +74,27 @@ public static class ZommiWindowSizeAccess {
     public static Frame[] Sample(IntPtr window, int duration) {
         var previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
         var frames = new List<Frame>();
-        var pending = new List<ZommiDesktopFrameCapture.DeferredFrame>();
+        var pending = new List<FocaletDesktopFrameCapture.DeferredFrame>();
         var clock = duration >= 1000 && interactionClock != null ? interactionClock : Stopwatch.StartNew();
         try {
             do {
                 Rectangle rectangle;
                 if (!GetWindowRect(window, out rectangle)) throw new InvalidOperationException("No window bounds");
                 var captureStarted = Stopwatch.GetTimestamp();
-                var captured = duration >= 1000 ? ZommiRenderedSizeProbe.CaptureDeferred() : null;
+                var captured = duration >= 1000 ? FocaletRenderedSizeProbe.CaptureDeferred() : null;
                 var captureCompleted = Stopwatch.GetTimestamp();
                 if (captured != null) pending.Add(captured);
                 frames.Add(new Frame { elapsedMs = clock.ElapsedMilliseconds, presentedMs = captured != null && captured.PresentationTimestamp > 0 ? 1000 * (captured.PresentationTimestamp - interactionStarted) / Stopwatch.Frequency : 0, captureStartedMs = 1000 * (captureStarted - interactionStarted) / Stopwatch.Frequency, captureCompletedMs = 1000 * (captureCompleted - interactionStarted) / Stopwatch.Frequency, bounds = new [] { rectangle.Left, rectangle.Top, rectangle.Right - rectangle.Left, rectangle.Bottom - rectangle.Top } });
                 Thread.Sleep(15);
             } while (clock.ElapsedMilliseconds < duration);
             for (var index = 0; index < pending.Count; index++) {
-                frames[index].marker = ZommiRenderedSizeProbe.AnalyzeDeferred(pending[index], frames[index].elapsedMs);
-                frames[index].markers = ZommiRenderedSizeProbe.LastMarkers;
-                frames[index].background = ZommiRenderedSizeProbe.LastBackground;
+                frames[index].marker = FocaletRenderedSizeProbe.AnalyzeDeferred(pending[index], frames[index].elapsedMs);
+                frames[index].markers = FocaletRenderedSizeProbe.LastMarkers;
+                frames[index].background = FocaletRenderedSizeProbe.LastBackground;
                 frames[index].processedMs = clock.ElapsedMilliseconds;
             }
             return frames.ToArray();
-        } finally { foreach (var captured in pending) captured.Dispose(); SetThreadDpiAwarenessContext(previous); if (duration >= 1000) ZommiRenderedSizeProbe.Save(); }
+        } finally { foreach (var captured in pending) captured.Dispose(); SetThreadDpiAwarenessContext(previous); if (duration >= 1000) FocaletRenderedSizeProbe.Save(); }
     }
 
     public static void Click(int left, int top) {
@@ -160,8 +160,8 @@ foreach ($markerCount in 1..2) {
             $graphics.Clear([Drawing.Color]::White)
             foreach ($index in 0..($markerCount - 1)) { $graphics.FillEllipse($brush, (10 + 110 * $index), 10, 60, 60) }
         } finally { $brush.Dispose(); $graphics.Dispose() }
-        [ZommiRenderedSizeProbe]::Area = @(0, 0, 240, 100)
-        $markers = @([ZommiRenderedSizeProbe]::FindMarkers($bitmap))
+        [FocaletRenderedSizeProbe]::Area = @(0, 0, 240, 100)
+        $markers = @([FocaletRenderedSizeProbe]::FindMarkers($bitmap))
         if ($markers.Count -ne $markerCount) { throw 'Rendered marker detector failed its duplicate-frame fixture.' }
     } finally { $bitmap.Dispose() }
 }
@@ -170,18 +170,18 @@ $PackageDirectory = [IO.Path]::GetFullPath($PackageDirectory)
 $manifest = Get-Content -Raw (Join-Path $PackageDirectory 'release-manifest.json') | ConvertFrom-Json
 if ($manifest.gitCommit -ne $ExpectedCommit) { throw 'Native size probe package commit mismatch.' }
 Assert-DesktopCaptureSurface
-$probeRoot = Join-Path $env:TEMP ('zommi-window-size-' + [Guid]::NewGuid().ToString('N'))
+$probeRoot = Join-Path $env:TEMP ('focalet-window-size-' + [Guid]::NewGuid().ToString('N'))
 $null = New-Item -ItemType Directory -Path $probeRoot
 if (-not $ResultPath) { $ResultPath = Join-Path $probeRoot 'result.json' }
 $ResultPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ResultPath)
-[ZommiRenderedSizeProbe]::EvidenceDirectory = Join-Path ([IO.Path]::GetDirectoryName($ResultPath)) 'rendered-size-frames'
+[FocaletRenderedSizeProbe]::EvidenceDirectory = Join-Path ([IO.Path]::GetDirectoryName($ResultPath)) 'rendered-size-frames'
 $log = Join-Path $probeRoot 'events.jsonl'
-$settings = Join-Path $probeRoot 'Zommi\settings.json'
+$settings = Join-Path $probeRoot 'Focalet\settings.json'
 $null = [IO.Directory]::CreateDirectory((Split-Path -Parent $settings))
 # Window controls are tested after the welcome flow has completed.
 [IO.File]::WriteAllText($settings, '{"runtimeSetupCompleted":true,"themeMode":"light","themeColor":"custom","customThemeColor":4286675145}')
-$entrypoint = Join-Path $PackageDirectory 'Zommi.exe'
-$result = @{ gitCommit = $ExpectedCommit; package = $PackageDirectory; captureApi = 'dxgi-desktop-duplication'; latencyClock = 'dxgi-present-qpc-from-input-release'; nativeAnimationsEnabled = [ZommiWindowSizeAccess]::NativeAnimationsEnabled(); transitions = @() }
+$entrypoint = Join-Path $PackageDirectory 'Focalet.exe'
+$result = @{ gitCommit = $ExpectedCommit; package = $PackageDirectory; captureApi = 'dxgi-desktop-duplication'; latencyClock = 'dxgi-present-qpc-from-input-release'; nativeAnimationsEnabled = [FocaletWindowSizeAccess]::NativeAnimationsEnabled(); transitions = @() }
 $result.resizePolicy = 'retained-frame-without-animation'
 if ($CaptureBackend -eq 'Gdi') {
     $result.captureApi = 'gdi-desktop-region'
@@ -202,8 +202,8 @@ function Get-SizeControl {
     param([string] $Name, [switch] $RuntimeEntry)
     $script:sizeControl = $null
     Wait-SizeCondition -Description "control $Name" -Condition {
-        $script:view = [ZommiWindowSizeAccess]::FindWindowEx($window, [IntPtr]::Zero, [NullString]::Value, [NullString]::Value)
-        try { $entries = @([ZommiWindowSizeAccess]::Read($view)) }
+        $script:view = [FocaletWindowSizeAccess]::FindWindowEx($window, [IntPtr]::Zero, [NullString]::Value, [NullString]::Value)
+        try { $entries = @([FocaletWindowSizeAccess]::Read($view)) }
         catch [Runtime.InteropServices.COMException] { return $false }
         catch [ArgumentException] { return $false }
         $script:sizeControl = @($entries | Where-Object {
@@ -219,20 +219,20 @@ function Click-SizeControl {
     $bounds = (Get-SizeControl $Name -RuntimeEntry:$RuntimeEntry).Bounds
     $left = [int]($bounds[0] + $bounds[2] / 2)
     $top = [int]($bounds[1] + $bounds[3] / 2)
-    if (-not [ZommiWindowsAcceptanceNative]::IsOwnedWindowAtPoint($window, $left, $top)) { throw "Obscured control: $Name" }
-    [ZommiWindowSizeAccess]::Click($left, $top)
+    if (-not [FocaletWindowsAcceptanceNative]::IsOwnedWindowAtPoint($window, $left, $top)) { throw "Obscured control: $Name" }
+    [FocaletWindowSizeAccess]::Click($left, $top)
 }
 
 function Measure-SizeTransition {
     param([string] $Name, [string] $Mode, [switch] $NativeRestore)
-    $before = [ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
-    $workArea = [ZommiWindowsAcceptanceNative]::WorkArea($window)
-    [ZommiRenderedSizeProbe]::Area = $workArea
-    $markerBefore = [ZommiRenderedSizeProbe]::Capture(0, $false)
-    $backgroundBefore = [ZommiRenderedSizeProbe]::LastBackground
+    $before = [FocaletWindowsAcceptanceNative]::PhysicalBounds($window)
+    $workArea = [FocaletWindowsAcceptanceNative]::WorkArea($window)
+    [FocaletRenderedSizeProbe]::Area = $workArea
+    $markerBefore = [FocaletRenderedSizeProbe]::Capture(0, $false)
+    $backgroundBefore = [FocaletRenderedSizeProbe]::LastBackground
     if ($null -eq $markerBefore) { throw 'Rendered send control was not visible before resize.' }
-    $scale = [ZommiWindowSizeAccess]::GetDpiForWindow($window) / 96.0
-    $clientBefore = [ZommiWindowsAcceptanceNative]::PhysicalClientBounds($window)
+    $scale = [FocaletWindowSizeAccess]::GetDpiForWindow($window) / 96.0
+    $clientBefore = [FocaletWindowsAcceptanceNative]::PhysicalClientBounds($window)
     $targetWidth = if ($Mode -eq 'wide') { 1320 * $scale } else { 1120 * $scale }
     $targetRight = $workArea[0] + $workArea[2] / 2 + [Math]::Min($targetWidth, $workArea[2]) / 2
     $targetBottom = [Math]::Min($before[1] + $before[3], $workArea[1] + $workArea[3])
@@ -243,19 +243,19 @@ function Measure-SizeTransition {
     $captureTop = [Math]::Max($workArea[1], [Math]::Min($markerBefore[1], $targetMarkerTop) - $markerBefore[3])
     $captureRight = [Math]::Min($workArea[0] + $workArea[2], [Math]::Max($markerBefore[0], $targetMarkerLeft) + 3 * $markerBefore[2])
     $captureBottom = [Math]::Min($workArea[1] + $workArea[3], [Math]::Max($markerBefore[1], $targetMarkerTop) + 2 * $markerBefore[3])
-    [ZommiRenderedSizeProbe]::Area = @($captureLeft, $captureTop, ($captureRight - $captureLeft), ($captureBottom - $captureTop))
-    $null = [ZommiRenderedSizeProbe]::Capture(0, $false)
-    if ($NativeRestore) { [ZommiWindowSizeAccess]::Restore($window) }
+    [FocaletRenderedSizeProbe]::Area = @($captureLeft, $captureTop, ($captureRight - $captureLeft), ($captureBottom - $captureTop))
+    $null = [FocaletRenderedSizeProbe]::Capture(0, $false)
+    if ($NativeRestore) { [FocaletWindowSizeAccess]::Restore($window) }
     else { Click-SizeControl $Name }
-    $frames = @([ZommiWindowSizeAccess]::Sample($window, 3000))
-    $after = [ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
+    $frames = @([FocaletWindowSizeAccess]::Sample($window, 3000))
+    $after = [FocaletWindowsAcceptanceNative]::PhysicalBounds($window)
     $distinct = @($frames | ForEach-Object { $_.bounds -join ',' } | Select-Object -Unique)
-    $result.lastMeasurement = @{ name = $Name; before = $before; after = $after; frames = $frames; captureArea = [ZommiRenderedSizeProbe]::Area; distinctBounds = $distinct.Count; inputQpc = [ZommiWindowSizeAccess]::InputTimestamp; qpcFrequency = [Diagnostics.Stopwatch]::Frequency }
+    $result.lastMeasurement = @{ name = $Name; before = $before; after = $after; frames = $frames; captureArea = [FocaletRenderedSizeProbe]::Area; distinctBounds = $distinct.Count; inputQpc = [FocaletWindowSizeAccess]::InputTimestamp; qpcFrequency = [Diagnostics.Stopwatch]::Frequency }
     if (-not $NativeRestore) {
         Wait-SizeCondition -Description "persisted $Mode" -Condition { (Test-Path $settings) -and (Get-Content -Raw $settings | ConvertFrom-Json).windowSize -eq $Mode }
     }
-    $markerAfter = [ZommiRenderedSizeProbe]::Capture(0, $false)
-    $backgroundAfter = [ZommiRenderedSizeProbe]::LastBackground
+    $markerAfter = [FocaletRenderedSizeProbe]::Capture(0, $false)
+    $backgroundAfter = [FocaletRenderedSizeProbe]::LastBackground
     if ($null -eq $markerAfter) { throw 'Rendered send control was not visible after resize.' }
     $visualDistinct = @($frames | ForEach-Object { $_.marker -join ',' } | Select-Object -Unique)
     $result.lastMeasurement.markerBefore = $markerBefore
@@ -334,21 +334,21 @@ function Measure-SizeTransition {
         $previous = $frame.bounds
     }
     if ($Mode -eq 'maximized') {
-        if (-not [ZommiWindowsAcceptanceNative]::IsZoomed($window)) { throw 'Max did not retain native maximized state.' }
-        $workArea = [ZommiWindowsAcceptanceNative]::WorkArea($window)
-        $clientBounds = [ZommiWindowsAcceptanceNative]::PhysicalClientBounds($window)
+        if (-not [FocaletWindowsAcceptanceNative]::IsZoomed($window)) { throw 'Max did not retain native maximized state.' }
+        $workArea = [FocaletWindowsAcceptanceNative]::WorkArea($window)
+        $clientBounds = [FocaletWindowsAcceptanceNative]::PhysicalClientBounds($window)
         foreach ($axis in 0..3) {
             if ([Math]::Abs($clientBounds[$axis] - $workArea[$axis]) -gt 3) { throw 'Max escaped the monitor work area.' }
         }
-    } elseif ([ZommiWindowsAcceptanceNative]::IsZoomed($window)) { throw 'Normal size retained native maximized state.' }
-    if (-not [ZommiWindowsAcceptanceNative]::Foreground($window)) { throw "Resize $Name lost foreground ownership." }
+    } elseif ([FocaletWindowsAcceptanceNative]::IsZoomed($window)) { throw 'Normal size retained native maximized state.' }
+    if (-not [FocaletWindowsAcceptanceNative]::Foreground($window)) { throw "Resize $Name lost foreground ownership." }
     $result.transitions += @{ mode = $Mode; before = $before; after = $after; distinctBounds = $distinct.Count; renderedPositions = $visualDistinct.Count; markerBefore = $markerBefore; markerAfter = $markerAfter; backgroundBefore = $backgroundBefore; backgroundAfter = $backgroundAfter; maximumBackgroundChange = $maximumBackgroundChange; firstMotionMs = $firstMotionMs; firstObservedMotionMs = $firstObservedMotionMs; settledMs = $settledMs; frames = $frames }
     Write-Host "Rendered $Name transition: $($visualDistinct.Count) positions, RGB change $maximumBackgroundChange, response $firstMotionMs ms, settled $settledMs ms"
 }
 
 $application = $null
 $background = $null
-$suspended = @(Suspend-ConflictingZommiApplications -EntryPoint (Join-Path $probeRoot 'not-running.exe'))
+$suspended = @(Suspend-ConflictingFocaletApplications -EntryPoint (Join-Path $probeRoot 'not-running.exe'))
 try {
     $startInfo = New-Object Diagnostics.ProcessStartInfo
     $startInfo.FileName = $entrypoint
@@ -356,68 +356,68 @@ try {
     $startInfo.UseShellExecute = $false
     $startInfo.RedirectStandardError = $true
     $startInfo.EnvironmentVariables['APPDATA'] = $probeRoot
-    $startInfo.EnvironmentVariables['ZOMMI_ACCEPTANCE_LOG'] = $log
+    $startInfo.EnvironmentVariables['FOCALET_ACCEPTANCE_LOG'] = $log
     $application = [Diagnostics.Process]::Start($startInfo)
-    [ZommiWindowSizeAccess]::ObserveErrors($application)
+    [FocaletWindowSizeAccess]::ObserveErrors($application)
     $window = Wait-ForVisibleProcessWindow -ProcessId $application.Id
     $null = Wait-ForAcceptanceEvent -Path $log -Name 'desktop.ready'
     Start-Sleep -Seconds 5
-    $null = [ZommiWindowSizeAccess]::Sample($window, 1)
-    [ZommiWindowsAcceptanceNative]::Restore($window)
-    $view = [ZommiWindowSizeAccess]::FindWindowEx($window, [IntPtr]::Zero, [NullString]::Value, [NullString]::Value)
+    $null = [FocaletWindowSizeAccess]::Sample($window, 1)
+    [FocaletWindowsAcceptanceNative]::Restore($window)
+    $view = [FocaletWindowSizeAccess]::FindWindowEx($window, [IntPtr]::Zero, [NullString]::Value, [NullString]::Value)
     # Alt+A opens the content picker. Cancel it before measuring size controls,
     # leaving the composer empty and using the real return-to-chat focus path.
-    [ZommiWindowsAcceptanceNative]::SendAltA($false)
-    $selector = Wait-ForPackagedSelector -CaptureExecutable (Join-Path $PackageDirectory 'native/Zommi.Capture.exe')
-    if (-not [ZommiWindowsAcceptanceNative]::CancelSelection($selector)) {
+    [FocaletWindowsAcceptanceNative]::SendAltA($false)
+    $selector = Wait-ForPackagedSelector -CaptureExecutable (Join-Path $PackageDirectory 'native/Focalet.CaptureHost.exe')
+    if (-not [FocaletWindowsAcceptanceNative]::CancelSelection($selector)) {
         throw 'Could not cancel content selection before the size-control gate.'
     }
     $selection = Wait-ForAcceptanceEvent -Path $log -Name 'selection.content'
     if ($selection.Event.count -ne 0) { throw 'Size-control setup unexpectedly attached content.' }
-    Wait-SizeCondition -Description 'foreground' -Condition { [ZommiWindowsAcceptanceNative]::Foreground($window) }
-    $background = [ZommiSizeBackground]::new($window, [ZommiWindowsAcceptanceNative]::WorkArea($window))
+    Wait-SizeCondition -Description 'foreground' -Condition { [FocaletWindowsAcceptanceNative]::Foreground($window) }
+    $background = [FocaletSizeBackground]::new($window, [FocaletWindowsAcceptanceNative]::WorkArea($window))
     Click-SizeControl 'App settings'
-    if (@([ZommiWindowSizeAccess]::Read($view) | Where-Object Name -eq 'Window size').Count) { throw 'Window size remains in Settings.' }
+    if (@([FocaletWindowSizeAccess]::Read($view) | Where-Object Name -eq 'Window size').Count) { throw 'Window size remains in Settings.' }
     Click-SizeControl 'App settings'
-    $null = Get-SizeControl 'Maximize Zommi'
-    if (-not @([ZommiWindowSizeAccess]::Read($view) | Where-Object Name -eq 'Exact agent session bound').Count) {
+    $null = Get-SizeControl 'Maximize Focalet'
+    if (-not @([FocaletWindowSizeAccess]::Read($view) | Where-Object Name -eq 'Exact agent session bound').Count) {
         # An isolated profile may list history without an active conversation.
         # Create the blank chat through the same runtime menu as a new user.
         Click-SizeControl 'Create new chat'
         Click-SizeControl 'Codex' -RuntimeEntry
         $null = Get-SizeControl 'Exact agent session bound'
     }
-    $normal = [ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
-    [ZommiRenderedSizeProbe]::Area = [ZommiWindowsAcceptanceNative]::WorkArea($window)
+    $normal = [FocaletWindowsAcceptanceNative]::PhysicalBounds($window)
+    [FocaletRenderedSizeProbe]::Area = [FocaletWindowsAcceptanceNative]::WorkArea($window)
     # The send button is disabled until the runtime has finished connecting.
     # Wait for its real rendered color instead of assuming startup takes 5s.
-    [ZommiRenderedSizeProbe]::SaveMissingFrames = $false
+    [FocaletRenderedSizeProbe]::SaveMissingFrames = $false
     $markerDeadline = [DateTime]::UtcNow.AddSeconds(90)
     do {
-        $normalMarker = [ZommiRenderedSizeProbe]::Capture(0, $false)
+        $normalMarker = [FocaletRenderedSizeProbe]::Capture(0, $false)
         if ($null -ne $normalMarker) { break }
         Start-Sleep -Milliseconds 250
     } while ([DateTime]::UtcNow -lt $markerDeadline)
-    [ZommiRenderedSizeProbe]::SaveMissingFrames = $true
+    [FocaletRenderedSizeProbe]::SaveMissingFrames = $true
     if ($null -eq $normalMarker) {
-        $null = [ZommiRenderedSizeProbe]::Capture(0, $false)
+        $null = [FocaletRenderedSizeProbe]::Capture(0, $false)
         throw 'Rendered send control did not become ready after runtime startup.'
     }
-    Measure-SizeTransition 'Maximize Zommi' 'maximized'
+    Measure-SizeTransition 'Maximize Focalet' 'maximized'
     Measure-SizeTransition 'Restore' 'standard' -NativeRestore
-    Wait-SizeCondition -Description 'native Restore retains pre-Max placement' -Condition { ([ZommiWindowsAcceptanceNative]::PhysicalBounds($window) -join ',') -eq ($normal -join ',') }
+    Wait-SizeCondition -Description 'native Restore retains pre-Max placement' -Condition { ([FocaletWindowsAcceptanceNative]::PhysicalBounds($window) -join ',') -eq ($normal -join ',') }
     Wait-SizeCondition -Description 'native Restore redraws the previous panel' -Condition {
-        $marker = [ZommiRenderedSizeProbe]::Capture(0, $false)
+        $marker = [FocaletRenderedSizeProbe]::Capture(0, $false)
         if ($null -eq $marker -or $null -eq $normalMarker) { return $false }
         foreach ($axis in 0..3) { if ([Math]::Abs($marker[$axis] - $normalMarker[$axis]) -gt 3) { return $false } }
         return $true
     }
     $result.restorePlacementVerified = $true
-    Measure-SizeTransition 'Maximize Zommi' 'maximized'
-    Measure-SizeTransition 'Restore Zommi' 'standard'
-    Measure-SizeTransition 'Maximize Zommi' 'maximized'
-    Measure-SizeTransition 'Restore Zommi' 'standard'
-    $result.nativeErrors = @([ZommiWindowSizeAccess]::NativeErrors())
+    Measure-SizeTransition 'Maximize Focalet' 'maximized'
+    Measure-SizeTransition 'Restore Focalet' 'standard'
+    Measure-SizeTransition 'Maximize Focalet' 'maximized'
+    Measure-SizeTransition 'Restore Focalet' 'standard'
+    $result.nativeErrors = @([FocaletWindowSizeAccess]::NativeErrors())
     if (@($result.nativeErrors | Where-Object { $_ -match 'Failed to update ui::AXTree' }).Count) {
         throw 'Flutter rejected an accessibility tree update during the window-control gate.'
     }
@@ -425,10 +425,10 @@ try {
 } catch {
     $result.passed = $false
     $result.error = $_.Exception.Message
-    $result.nativeErrors = @([ZommiWindowSizeAccess]::NativeErrors())
+    $result.nativeErrors = @([FocaletWindowSizeAccess]::NativeErrors())
     if ($view) {
-        try { @([ZommiWindowSizeAccess]::Read($view)) | ConvertTo-Json -Depth 4 | Set-Content ($ResultPath + '.controls.json') } catch { }
-        try { $result.surfaceStatus = @([ZommiWindowSizeAccess]::Read($view) | Where-Object { $_.Name -like 'Agent status:*' } | ForEach-Object Name) } catch { }
+        try { @([FocaletWindowSizeAccess]::Read($view)) | ConvertTo-Json -Depth 4 | Set-Content ($ResultPath + '.controls.json') } catch { }
+        try { $result.surfaceStatus = @([FocaletWindowSizeAccess]::Read($view) | Where-Object { $_.Name -like 'Agent status:*' } | ForEach-Object Name) } catch { }
     }
     throw
 } finally {
@@ -436,11 +436,11 @@ try {
         $result | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ResultPath
         Write-Host "Native size evidence: $ResultPath"
     } finally {
-        [ZommiRenderedSizeProbe]::Dispose()
+        [FocaletRenderedSizeProbe]::Dispose()
         if ($background) { $background.Dispose() }
         if ($application) {
             Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($PackageDirectory + '\', [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
         }
-        Restore-SuspendedZommiApplications -ExecutablePaths $suspended
+        Restore-SuspendedFocaletApplications -ExecutablePaths $suspended
     }
 }

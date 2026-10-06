@@ -12,10 +12,10 @@ import threading
 
 
 def main():
-    helper = os.environ["ZOMMI_CAPTURE_TRACE_HELPER"]
+    helper = os.environ["FOCALET_CAPTURE_TRACE_HELPER"]
     if sys.argv[1:] != ["--capture-host"]:
         os.execv(helper, [helper, *sys.argv[1:]])
-    output = Path(os.environ["ZOMMI_CAPTURE_TRACE_DIR"])
+    output = Path(os.environ["FOCALET_CAPTURE_TRACE_DIR"])
     output.mkdir(parents=True, exist_ok=True)
     process = subprocess.Popen(
         [helper, *sys.argv[1:]], stdin=subprocess.PIPE, stdout=subprocess.PIPE

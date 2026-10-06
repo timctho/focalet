@@ -43,7 +43,7 @@ def verify(root: Path, commit: str) -> dict:
     required = {"Focalet.Capture.exe", "capture-tool-manifest.json", "LICENSE", "THIRD_PARTY_NOTICES.md", "README.md"}
     if not required.issubset(inventory):
         raise ValueError("Capture package is missing required files.")
-    forbidden = {"zommi.exe", "zommi.capture.exe", "zommi.capture.dll", "zommi-core-host.exe", "flutter_windows.dll"}
+    forbidden = {"focalet.exe", "focalet.capturehost.exe", "focalet.capturehost.dll", "focalet-core-host.exe", "flutter_windows.dll"}
     if any(PurePosixPath(name).name.lower() in forbidden for name in inventory):
         raise ValueError("Capture package unexpectedly contains a Desktop component.")
     with (root / manifest["entryPoint"]).open("rb") as executable:

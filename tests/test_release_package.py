@@ -37,31 +37,31 @@ class ReleasePackageTests(unittest.TestCase):
         abi_check = mock.patch.object(verify_release, "verify_ubuntu_abi", return_value={"ubuntu": "24.04"})
         self.abi_check = abi_check.start()
         self.addCleanup(abi_check.stop)
-        self.temporary = tempfile.TemporaryDirectory(prefix="zommi-release-test-")
+        self.temporary = tempfile.TemporaryDirectory(prefix="focalet-release-test-")
         self.root = Path(self.temporary.name)
-        (self.root / "zommi").write_text(
-            "#!/bin/sh\nLD_LIBRARY_PATH=lib exec ./zommi-bin\n", encoding="utf-8"
+        (self.root / "focalet").write_text(
+            "#!/bin/sh\nLD_LIBRARY_PATH=lib exec ./focalet-bin\n", encoding="utf-8"
         )
-        (self.root / "zommi-bin").write_text("flutter", encoding="utf-8")
-        (self.root / "zommi-core-host").write_text("rust", encoding="utf-8")
-        (self.root / "zommi-linux-capture").write_text("wayland", encoding="utf-8")
+        (self.root / "focalet-bin").write_text("flutter", encoding="utf-8")
+        (self.root / "focalet-core-host").write_text("rust", encoding="utf-8")
+        (self.root / "focalet-linux-capture").write_text("wayland", encoding="utf-8")
         for relative in verify_release.LINUX_RUNTIME_LIBRARIES:
             library = self.root / relative
             library.parent.mkdir(parents=True, exist_ok=True)
             library.write_text("runtime", encoding="utf-8")
         for relative in ('metadata.json', 'extension.js', 'schemas/gschemas.compiled'):
-            path = self.root / 'gnome-extension/zommi@zommi' / relative
+            path = self.root / 'gnome-extension/focalet@focalet' / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text('extension fixture')
         manifest = {
             "schemaVersion": 1,
-            "product": "Zommi",
+            "product": "Focalet",
             "gitCommit": "abc123",
             "platform": "linux",
             "architecture": "x64",
-            "entrypoint": "zommi",
-            "coreHost": "zommi-core-host",
-            "captureHost": "zommi-linux-capture",
+            "entrypoint": "focalet",
+            "coreHost": "focalet-core-host",
+            "captureHost": "focalet-linux-capture",
             "components": {
                 "desktopUi": "flutter",
                 "runtimeCore": "rust",
@@ -95,8 +95,8 @@ class ReleasePackageTests(unittest.TestCase):
             expected_commit="abc123",
             smoke_processes=False,
         )
-        self.assertEqual(result["entrypoint"], "zommi")
-        self.assertEqual(result["captureHost"], "zommi-linux-capture")
+        self.assertEqual(result["entrypoint"], "focalet")
+        self.assertEqual(result["captureHost"], "focalet-linux-capture")
         self.assertEqual(result["files"], 8 + len(verify_release.LINUX_RUNTIME_LIBRARIES))
         self.abi_check.assert_called_once_with(self.root)
         self.assertEqual(result["ubuntuCompatibility"]["ubuntu"], "24.04")
@@ -114,8 +114,8 @@ class ReleasePackageTests(unittest.TestCase):
             icon.write_bytes(content)
             assemble_release._write_manifest(
                 self.root, target_platform="windows", architecture="x64",
-                commit="a" * 40, entrypoint="Zommi.exe", core_host="zommi-core-host.exe",
-                capture_host="native/Zommi.Capture.exe", signing={"status": "unsigned"},
+                commit="a" * 40, entrypoint="Focalet.exe", core_host="focalet-core-host.exe",
+                capture_host="native/Focalet.CaptureHost.exe", signing={"status": "unsigned"},
             )
             name = json.loads((self.root / "release-manifest.json").read_text())["icon"]
             self.assertEqual((self.root / name).read_bytes(), content)
@@ -175,7 +175,7 @@ class ReleasePackageTests(unittest.TestCase):
         self._write_checksums()
         with self.assertRaisesRegex(verify_release.ReleaseValidationError, "Windows reset helper is missing"):
             verify_release.verify_package(self.root, smoke_processes=False)
-        for name in ("stop-zommi-relays.ps1", "stop-zommi-relay.sh"):
+        for name in ("stop-focalet-relays.ps1", "stop-focalet-relay.sh"):
             helper = self.root / "support" / name
             helper.parent.mkdir(exist_ok=True)
             helper.write_text("reset helper")
@@ -192,7 +192,7 @@ class ReleasePackageTests(unittest.TestCase):
             verify_release.verify_package(self.root, smoke_processes=False)
 
     def test_missing_linux_capture_host_is_rejected(self) -> None:
-        (self.root / "zommi-linux-capture").unlink()
+        (self.root / "focalet-linux-capture").unlink()
         self._write_checksums()
         with self.assertRaisesRegex(
             verify_release.ReleaseValidationError,
@@ -207,9 +207,9 @@ class ReleasePackageTests(unittest.TestCase):
             stderr="",
         )
         with mock.patch.object(verify_release.subprocess, "run", return_value=completed) as run:
-            verify_release._smoke_linux_capture(self.root / "zommi-linux-capture")
+            verify_release._smoke_linux_capture(self.root / "focalet-linux-capture")
         run.assert_called_once_with(
-            [str(self.root / "zommi-linux-capture"), "probe"],
+            [str(self.root / "focalet-linux-capture"), "probe"],
             text=True,
             capture_output=True,
             timeout=15,
@@ -217,7 +217,7 @@ class ReleasePackageTests(unittest.TestCase):
         )
 
     def test_linux_launcher_must_load_bundled_libraries(self) -> None:
-        (self.root / "zommi").write_text("#!/bin/sh\nexec ./zommi-bin\n", encoding="utf-8")
+        (self.root / "focalet").write_text("#!/bin/sh\nexec ./focalet-bin\n", encoding="utf-8")
         self._write_checksums()
         with self.assertRaisesRegex(
             verify_release.ReleaseValidationError,
@@ -226,7 +226,7 @@ class ReleasePackageTests(unittest.TestCase):
             verify_release.verify_package(self.root, smoke_processes=False)
 
     def test_tampered_file_fails_checksum_validation(self) -> None:
-        (self.root / "zommi-core-host").write_text("tampered", encoding="utf-8")
+        (self.root / "focalet-core-host").write_text("tampered", encoding="utf-8")
         with self.assertRaisesRegex(verify_release.ReleaseValidationError, "Checksum mismatch"):
             verify_release.verify_package(self.root, smoke_processes=False)
 
@@ -241,10 +241,10 @@ class ReleasePackageTests(unittest.TestCase):
     def test_windows_interactive_acceptance_restores_the_deployed_app(self) -> None:
         script = (SCRIPTS / "accept-windows-capture.ps1").read_text(encoding="utf-8")
         for contract in (
-            "Suspend-ConflictingZommiApplications",
-            "Restore-SuspendedZommiApplications",
+            "Suspend-ConflictingFocaletApplications",
+            "Restore-SuspendedFocaletApplications",
             "Remove-Item Env:RUNNER_TRACKING_ID",
-            "Restore-SuspendedZommiApplications -ExecutablePaths $suspendedApplications",
+            "Restore-SuspendedFocaletApplications -ExecutablePaths $suspendedApplications",
         ):
             self.assertIn(contract, script)
 
@@ -266,7 +266,7 @@ class ReleasePackageTests(unittest.TestCase):
             "native-max-restore: ok (rapid commands retain the last requested placement)",
             "Packaged taskbar window did not minimize",
             "Packaged taskbar window did not restore",
-            "Could not minimize Zommi before the Alt+A restore gate",
+            "Could not minimize Focalet before the Alt+A restore gate",
             "Cancelled Alt+A did not restore, show, and focus the minimized packaged taskbar window",
             "minimizedImageShortcutRestored = $true",
             "Packaged taskbar window unexpectedly remained always-on-top",
@@ -280,8 +280,8 @@ class ReleasePackageTests(unittest.TestCase):
         )[1].split("function Read-PngDimension {", 1)[0]
         for contract in (
             "$acceptanceProfile = Join-Path $env:TEMP",
-            "[IO.Directory]::CreateDirectory((Join-Path $acceptanceProfile 'Zommi'))",
-            "'Zommi\\settings.json'",
+            "[IO.Directory]::CreateDirectory((Join-Path $acceptanceProfile 'Focalet'))",
+            "'Focalet\\settings.json'",
             '\"runtimeSetupCompleted\":true',
             "$start.EnvironmentVariables['APPDATA'] = $acceptanceProfile",
             "Packaged application did not start in the isolated normal window mode",
@@ -295,7 +295,7 @@ class ReleasePackageTests(unittest.TestCase):
     def test_windows_maximize_respects_the_active_monitor_work_area(self) -> None:
         source = (
             SCRIPTS.parent
-            / "src/Zommi.Flutter/windows/runner/flutter_window.cpp"
+            / "src/Focalet.Flutter/windows/runner/flutter_window.cpp"
         ).read_text(encoding="utf-8")
         for contract in (
             "WM_GETMINMAXINFO",
@@ -323,17 +323,17 @@ class ReleasePackageTests(unittest.TestCase):
         for contract in (
             "-HelpersOnly",
             "Assert-DesktopCaptureSurface",
-            "[ZommiWindowsAcceptanceNative]::SendAltA($false)",
+            "[FocaletWindowsAcceptanceNative]::SendAltA($false)",
             "IsOwnedWindowAtPoint($window, $left, $top)",
-            "ZommiWindowSizeAccess]::Sample($window, 3000)",
+            "FocaletWindowSizeAccess]::Sample($window, 3000)",
             "retained-frame-without-animation",
             "Partial resized frame appeared",
             "$atOldFrame -and -not $atNewFrame",
             "NativeAnimationsEnabled()",
-            "[ZommiRenderedSizeProbe]::Area = $workArea",
+            "[FocaletRenderedSizeProbe]::Area = $workArea",
             "PhysicalClientBounds($window)",
-            "ZommiRenderedSizeProbe.CaptureDeferred()",
-            "ZommiRenderedSizeProbe.AnalyzeDeferred(pending[index], frames[index].elapsedMs)",
+            "FocaletRenderedSizeProbe.CaptureDeferred()",
+            "FocaletRenderedSizeProbe.AnalyzeDeferred(pending[index], frames[index].elapsedMs)",
             "foreach (var captured in pending) captured.Dispose()",
             "Rendered control disappeared",
             "Rendered control duplicated",
@@ -342,7 +342,7 @@ class ReleasePackageTests(unittest.TestCase):
             "Rendered control reversed direction",
             "windows-desktop-frame.cs",
             "dxgi-desktop-duplication",
-            "[ZommiRenderedSizeProbe]::Dispose()",
+            "[FocaletRenderedSizeProbe]::Dispose()",
             "did not settle within the sampled interval",
             "jumped outside its endpoints",
             "reversed direction",
@@ -350,7 +350,7 @@ class ReleasePackageTests(unittest.TestCase):
             "native Restore redraws the previous panel",
             "Measure-SizeTransition 'Restore' 'standard' -NativeRestore",
             "lost foreground ownership",
-            "Restore-SuspendedZommiApplications",
+            "Restore-SuspendedFocaletApplications",
         ):
             self.assertIn(contract, script)
         visual_probe = (SCRIPTS / "windows-size-visual-probe.cs").read_text(encoding="utf-8")
@@ -388,8 +388,8 @@ class ReleasePackageTests(unittest.TestCase):
         script = (SCRIPTS / "accept-windows-window-size.ps1").read_text(encoding="utf-8")
         for contract in (
             "windows-size-background.cs",
-            "[ZommiSizeBackground]::new",
-            "background = ZommiRenderedSizeProbe.LastBackground",
+            "[FocaletSizeBackground]::new",
+            "background = FocaletRenderedSizeProbe.LastBackground",
             "$maximumBackgroundChange -gt 3",
             "$firstMotionMs -gt 250",
             "$settledMs -gt 800",
@@ -416,7 +416,7 @@ class ReleasePackageTests(unittest.TestCase):
 
     def test_windows_size_capture_defers_readback_without_dropping_frames(self) -> None:
         script = (SCRIPTS / "accept-windows-window-size.ps1").read_text(encoding="utf-8")
-        self.assertLess(script.index("while (clock.ElapsedMilliseconds < duration)"), script.index("ZommiRenderedSizeProbe.AnalyzeDeferred"))
+        self.assertLess(script.index("while (clock.ElapsedMilliseconds < duration)"), script.index("FocaletRenderedSizeProbe.AnalyzeDeferred"))
         self.assertIn("for (var index = 0; index < pending.Count; index++)", script)
         self.assertIn("frames[index].processedMs = clock.ElapsedMilliseconds", script)
         capture = (SCRIPTS / "windows-desktop-frame.cs").read_text(encoding="utf-8")
@@ -461,7 +461,7 @@ class ReleasePackageTests(unittest.TestCase):
             self.assertIn(contract, background)
 
     def test_windows_pixel_capture_uses_the_verified_direct_gdi_path(self) -> None:
-        source = (SCRIPTS.parent / "src/Zommi.Capture.Windows/ScreenCapture.cs").read_text(
+        source = (SCRIPTS.parent / "src/Focalet.Capture.Windows/ScreenCapture.cs").read_text(
             encoding="utf-8"
         )
         for contract in (
@@ -476,7 +476,7 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertNotIn("graphics.CopyFromScreen", source)
 
     def test_windows_selector_forces_initial_foreground_and_stays_topmost(self) -> None:
-        native = SCRIPTS.parent / "src/Zommi.Capture.Windows"
+        native = SCRIPTS.parent / "src/Focalet.Capture.Windows"
         region = (native / "RegionSelectionForm.cs").read_text(encoding="utf-8")
         content = (native / "ContentSelectionForm.cs").read_text(encoding="utf-8")
         self.assertIn(": ContentSelectionForm(returnProcessId, capturedDesktop, 1, theme)", region)
@@ -495,10 +495,10 @@ class ReleasePackageTests(unittest.TestCase):
             self.assertIn(contract, source)
 
     def test_windows_point_context_uses_a_crosshair_and_clicked_target(self) -> None:
-        source = (SCRIPTS.parent / "src/Zommi.Capture.Windows/PointSelectionForm.cs").read_text(
+        source = (SCRIPTS.parent / "src/Focalet.Capture.Windows/PointSelectionForm.cs").read_text(
             encoding="utf-8"
         )
-        host = (SCRIPTS.parent / "src/Zommi.Windows/CaptureNativeHost.cs").read_text(
+        host = (SCRIPTS.parent / "src/Focalet.Windows/CaptureNativeHost.cs").read_text(
             encoding="utf-8"
         )
         acceptance = (SCRIPTS / "accept-windows-capture.ps1").read_text(
@@ -508,7 +508,7 @@ class ReleasePackageTests(unittest.TestCase):
             "Cursor = Cursors.Cross",
             "Result = Cursor.Position",
             "Click the content to select",
-            "Zommi context scope",
+            "Focalet context scope",
             "AttachThreadInput(currentThread, foregroundThread, true)",
             "ForceForeground();",
         ):
@@ -543,10 +543,10 @@ class ReleasePackageTests(unittest.TestCase):
 
 class ReleaseAssemblyTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory(prefix="zommi-assembly-test-")
+        self.temporary = tempfile.TemporaryDirectory(prefix="focalet-assembly-test-")
         self.root = Path(self.temporary.name)
         self.pending = self.root / "pending"
-        self.destination = self.root / "zommi-windows-x64"
+        self.destination = self.root / "focalet-windows-x64"
         self.pending.mkdir()
         self.destination.mkdir()
         (self.pending / "identity.txt").write_text("new", encoding="utf-8")
@@ -569,7 +569,7 @@ class ReleaseAssemblyTests(unittest.TestCase):
                 inputs = self.root / platform
                 flutter = inputs / "flutter"
                 flutter.mkdir(parents=True)
-                entrypoint = "Zommi.exe" if platform == "windows" else "zommi"
+                entrypoint = "Focalet.exe" if platform == "windows" else "focalet"
                 (flutter / entrypoint).write_text("flutter")
                 libraries = (
                     (*verify_release.WINDOWS_RUNTIME_LIBRARIES, "vcruntime140_1.dll")
@@ -583,11 +583,11 @@ class ReleaseAssemblyTests(unittest.TestCase):
                 core.write_text("rust")
                 capture = inputs / "capture"
                 capture.mkdir()
-                capture_binary = capture / "Zommi.Capture.exe"
+                capture_binary = capture / "Focalet.CaptureHost.exe"
                 capture_binary.write_text("capture")
                 browser = inputs / "browser"
                 browser.mkdir()
-                (browser / "zommi-browser-capture").write_text("browser")
+                (browser / "focalet-browser-capture").write_text("browser")
                 package, archive = assemble_release.assemble(SimpleNamespace(
                     platform=platform, architecture="x64", flutter_output=flutter,
                     core_host=core, capture_host=capture, linux_capture_host=capture_binary,
@@ -651,8 +651,8 @@ class ReleaseAssemblyTests(unittest.TestCase):
         sleep.assert_called_once_with(0.05)
 
     def test_macos_bundle_contains_flutter_core_manifest_and_archive(self) -> None:
-        flutter_app = self.root / "input" / "Zommi.app"
-        flutter_binary = flutter_app / "Contents" / "MacOS" / "Zommi"
+        flutter_app = self.root / "input" / "Focalet.app"
+        flutter_binary = flutter_app / "Contents" / "MacOS" / "Focalet"
         flutter_binary.parent.mkdir(parents=True)
         flutter_binary.write_text("flutter", encoding="utf-8")
         flutter_binary.chmod(0o755)
@@ -667,14 +667,14 @@ class ReleaseAssemblyTests(unittest.TestCase):
         )
         framework.parent.mkdir(parents=True)
         framework.write_text("framework", encoding="utf-8")
-        core_host = self.root / "zommi-core-host"
+        core_host = self.root / "focalet-core-host"
         core_host.write_text("rust", encoding="utf-8")
         document = self.root / "README.md"
         document.write_text("release", encoding="utf-8")
         output_root = self.root / "artifacts"
         browser = self.root / "browser"
         browser.mkdir()
-        (browser / "zommi-browser-capture").write_text("browser")
+        (browser / "focalet-browser-capture").write_text("browser")
         arguments = SimpleNamespace(
             browser_capture_host=browser,
             platform="macos",
@@ -708,10 +708,10 @@ class ReleaseAssemblyTests(unittest.TestCase):
             expected_commit="macos-contract-sha",
             smoke_processes=False,
         )
-        self.assertEqual(result["entrypoint"], "Zommi.app/Contents/MacOS/Zommi")
+        self.assertEqual(result["entrypoint"], "Focalet.app/Contents/MacOS/Focalet")
         self.assertEqual(
             result["coreHost"],
-            "Zommi.app/Contents/MacOS/zommi-core-host",
+            "Focalet.app/Contents/MacOS/focalet-core-host",
         )
         self.assertIsNone(result["captureHost"])
         self.assertEqual(result["signing"], {"status": "ad-hoc", "mechanism": "codesign"})
@@ -722,30 +722,30 @@ class ReleaseAssemblyTests(unittest.TestCase):
         self.assertTrue((package / manifest["browserCaptureHost"]).is_file())
         self.assertEqual((package / "docs" / "README.md").read_text(), "release")
         sign.assert_called_once()
-        self.assertEqual(sign.call_args.args[0].name, "Zommi.app")
+        self.assertEqual(sign.call_args.args[0].name, "Focalet.app")
         self.assertIsNone(sign.call_args.args[1])
-        self.assert_license_payload(package / "Zommi.app/Contents/Resources")
+        self.assert_license_payload(package / "Focalet.app/Contents/Resources")
 
         self.assertTrue(archive.is_file())
         self.assertTrue(Path(f"{archive}.sha256").is_file())
         with zipfile.ZipFile(archive) as zipped:
             names = set(zipped.namelist())
         self.assertIn(
-            "zommi-macos-x64/Zommi.app/Contents/MacOS/Zommi",
+            "focalet-macos-x64/Focalet.app/Contents/MacOS/Focalet",
             names,
         )
         self.assertIn(
-            "zommi-macos-x64/Zommi.app/Contents/MacOS/zommi-core-host",
+            "focalet-macos-x64/Focalet.app/Contents/MacOS/focalet-core-host",
             names,
         )
         for relative in verify_release.LICENSE_DOCUMENTS:
             self.assertIn(
-                f"zommi-macos-x64/Zommi.app/Contents/Resources/{relative}", names
+                f"focalet-macos-x64/Focalet.app/Contents/Resources/{relative}", names
             )
 
     def test_macos_distribution_signing_requests_hardened_runtime(self) -> None:
-        application = self.root / "Zommi.app"
-        identity = "Developer ID Application: Zommi Test"
+        application = self.root / "Focalet.app"
+        identity = "Developer ID Application: Focalet Test"
         with mock.patch.object(assemble_release.subprocess, "run") as run:
             run.return_value.stderr = f"Authority={identity}\nTeamIdentifier=TESTTEAM\n"
             result = assemble_release._sign_macos(application, identity)
@@ -777,8 +777,8 @@ class ReleaseAssemblyTests(unittest.TestCase):
         )
 
     def test_macos_browser_host_is_signed_before_the_app_with_jit_permission(self) -> None:
-        application = self.root / "Zommi.app"
-        browser = application / "Contents/MacOS/browser-capture/zommi-browser-capture"
+        application = self.root / "Focalet.app"
+        browser = application / "Contents/MacOS/browser-capture/focalet-browser-capture"
         browser.parent.mkdir(parents=True)
         browser.write_bytes(b"native-host")
         library = browser.parent / "libcoreclr.dylib"
@@ -799,13 +799,13 @@ class ReleaseAssemblyTests(unittest.TestCase):
                 "Authority=Apple Worldwide Developer Relations Certification Authority\n"
                 "TeamIdentifier=TESTTEAM\n"
             )
-            result = assemble_release._sign_macos(self.root / "Zommi.app", "certificate-hash")
+            result = assemble_release._sign_macos(self.root / "Focalet.app", "certificate-hash")
         self.assertEqual(result["status"], "development-signed")
         self.assertEqual(result["teamIdentifier"], "TESTTEAM")
         self.assertEqual(result["authority"], "Apple Development: Test (TESTTEAM)")
 
     def test_macos_without_identity_is_ad_hoc_signed_and_verified(self) -> None:
-        application = self.root / "Zommi.app"
+        application = self.root / "Focalet.app"
         with mock.patch.object(assemble_release.subprocess, "run") as run:
             result = assemble_release._sign_macos(application, None)
 

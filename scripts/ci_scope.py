@@ -12,8 +12,8 @@ ROOT_DOCUMENTS = {"README.md", "CONTRIBUTING.md", "AGENTS.md", "SECURITY.md", "L
 DOCUMENT_SUFFIXES = {".md", ".png", ".webp", ".svg", ".gif", ".mp4", ".css"}
 
 
-CAPTURE_PATHS = ("src/Zommi.CaptureTool/", "tests/clipboard-electron/")
-DESKTOP_PATHS = ("src/Zommi.Flutter/", "crates/zommi-core/", "crates/zommi-core-host/", "tests/runtime-clis/")
+CAPTURE_PATHS = ("src/Focalet.CaptureTool/", "tests/clipboard-electron/")
+DESKTOP_PATHS = ("src/Focalet.Flutter/", "crates/focalet-core/", "crates/focalet-core-host/", "tests/runtime-clis/")
 
 
 def required_products(paths: list[str] | None) -> tuple[bool, bool]:

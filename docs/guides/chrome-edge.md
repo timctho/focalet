@@ -1,6 +1,6 @@
 # Capture Chrome and Edge DOM context
 
-Zommi supports separate Chrome and Microsoft Edge connections. Both can remain
+Focalet supports separate Chrome and Microsoft Edge connections. Both can remain
 connected at once, and capture selects the browser that owns the chosen window.
 This works with the browser context helper on Windows, macOS and Ubuntu.
 
@@ -13,13 +13,13 @@ This works with the browser context helper on Windows, macOS and Ubuntu.
 4. Select a region in that browser and inspect the attachment's Details.
 
 Use **Reconnect** to retry one browser; it preserves the other browser's connection.
-Zommi does not restart a browser or change its profile to enable debugging.
+Focalet does not restart a browser or change its profile to enable debugging.
 
 ## Why DOM is sometimes unavailable
 
 Missing authorization, an unsupported debugging endpoint, ambiguous windows,
 changed content or unreliable screen-to-page alignment can prevent structured
-capture. Canvas content may exist only as pixels. Zommi preserves the selected
+capture. Canvas content may exist only as pixels. Focalet preserves the selected
 image and reports these limits instead of attaching unverified structure.
 
 Native accessibility may still supply context without a browser connection.

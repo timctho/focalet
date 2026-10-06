@@ -13,30 +13,30 @@ and `macos_draft_release: true` provides the ZIP and probe evidence through a
 private draft release, independent of Actions artifact quota. Alternatively use
 `upload_packages: true` for seven-day Actions artifacts. Download the matching
 architecture's ZIP, then check it with
-`shasum -a 256 -c zommi-macos-<arch>.zip.sha256` before extracting it.
-The ZIP includes the app, release identity and checksums. Move `Zommi.app` to
+`shasum -a 256 -c focalet-macos-<arch>.zip.sha256` before extracting it.
+The ZIP includes the app, release identity and checksums. Move `Focalet.app` to
 Applications before granting permissions so the app keeps a stable location.
 
 The default package is ad-hoc signed and is not notarized. For a trusted test
 build, use Finder's Open action and, if macOS blocks it, System Settings >
 Privacy & Security > Open Anyway. Developer ID signing can be supplied through
-`ZOMMI_MACOS_SIGNING_IDENTITY`; it does not itself notarize the app. For repeated
+`FOCALET_MACOS_SIGNING_IDENTITY`; it does not itself notarize the app. For repeated
 local builds, select an existing Apple Development or Developer ID certificate
 from `security find-identity -v -p codesigning`, then save its name or fingerprint:
 
 ```bash
-git config --local zommi.macosSigningIdentity '<chosen signing identity>'
+git config --local focalet.macosSigningIdentity '<chosen signing identity>'
 bash scripts/package-unix.sh macos
 ```
 
 The environment variable overrides this checkout-local setting. The package
 manifest records the actual signing authority and team. Keep the same identity
-and `/Applications/Zommi.app` path across updates. Ad-hoc signatures identify the
+and `/Applications/Focalet.app` path across updates. Ad-hoc signatures identify the
 binary by its hash, so every rebuild can invalidate Screen Recording and
-Accessibility grants even while System Settings still displays Zommi as enabled.
+Accessibility grants even while System Settings still displays Focalet as enabled.
 Switching from an ad-hoc build to a certificate-signed build needs a one-time
 grant for the new identity. If the old entry remains enabled but access is
-denied after reopening, remove that stale Zommi entry and add the installed app
+denied after reopening, remove that stale Focalet entry and add the installed app
 again using **+**. Subsequent builds must keep the saved signing identity.
 
 ## First launch
@@ -54,19 +54,19 @@ Finder launches also search Homebrew and the common user-local executable
 folders, passing that PATH to both the broker and its runtime children. Unusual
 locations can be added through Configure runtime.
 
-Zommi keeps authentication, models and history owned by the selected runtime.
+Focalet keeps authentication, models and history owned by the selected runtime.
 The welcome flow also checks Accessibility (application context and AX element capture) and
 Screen Recording (images). If screenshot access is missing, Select and Option+A
 show an explanation before capture. Click **Open System Settings**, then turn on
-**Zommi** under **Privacy & Security > Screen & System Audio Recording** (called
-**Screen Recording** on older macOS versions). If Zommi is missing, use **+** to
+**Focalet** under **Privacy & Security > Screen & System Audio Recording** (called
+**Screen Recording** on older macOS versions). If Focalet is missing, use **+** to
 add it from Applications. Choose **Quit & Reopen** if macOS asks. The dialog
 rechecks permission when you return, also offers **Check again**, and starts the
 picker only when you click **Start selecting**. **Not now** cancels without a
 permission request or capture. The Screen Recording Allow button in setup and
 App settings opens the same guide. Browser URLs may additionally trigger macOS
 Automation consent for System Events and the selected browser. Enable denied
-permissions under Privacy & Security, then restart Zommi when macOS requires it.
+permissions under Privacy & Security, then restart Focalet when macOS requires it.
 Permission checks and capture failures never open Settings themselves. Only
 the guide's explicit button requests Screen Recording, at most once per launch;
 later clicks can reopen the pane without repeating the system request.
@@ -80,7 +80,7 @@ also checks the restored app's visible pixels and retains its screenshot.
 
 The macOS CI job compiles Flutter and Rust on the selected Mac architecture,
 assembles and verifies the signed app/checksums, and runs the Rust core's actual
-initialize/shutdown exchange. It then launches the packaged Zommi to probe its
+initialize/shutdown exchange. It then launches the packaged Focalet to probe its
 native permission channel, window size, external TextEdit context and screen
 pixels when permission permits. It also verifies the app survives hiding its
 window for capture, then restores it. Evidence includes JSON, startup logs and a desktop screenshot if the runner
@@ -89,7 +89,7 @@ retain the evidence in a draft release or Actions artifact.
 
 A successful startup probe with `captureVerified: false` is **not** capture
 acceptance. Hosted runners may have no TCC grants. From the extracted package
-folder on your Mac, close Zommi, enable its permissions, then run:
+folder on your Mac, close Focalet, enable its permissions, then run:
 
 ```bash
 python3 docs/accept-macos.py . --output macos-acceptance --require-capture
@@ -98,10 +98,10 @@ python3 docs/accept-macos.py . --output macos-acceptance --require-capture
 The script opens a disposable TextEdit fixture and uses LaunchServices to start
 the app with its own macOS permission identity. Directly executing the binary
 can inherit the terminal or automation host's TCC identity instead. To test the
-copy already granted permission in Applications, add `--app /Applications/Zommi.app`.
+copy already granted permission in Applications, add `--app /Applications/Focalet.app`.
 The report identifies the process and executable. It requires the fixture's
 actual text in a region attachment, aligned Accessibility elements and captured
-pixels. This backend check does not inject mouse gestures. It closes only the Zommi process it started;
+pixels. This backend check does not inject mouse gestures. It closes only the Focalet process it started;
 it never changes permissions automatically. Temporary captured pixels are
 removed; the output desktop screenshot remains in your local evidence folder.
 
@@ -124,7 +124,7 @@ discard semantic metadata.
 
 The interactive probe drives the shared capture editor with CGEvents, verifies
 the PNG matches its region mapping, and cancels a second selection with Escape. This
-requires input permission for the driver as well as Zommi capture permissions.
+requires input permission for the driver as well as Focalet capture permissions.
 Run the same path with `--interactive` on an authorized test desktop. Use
 `--manual-interactive` to drive the two gestures yourself or through Computer
 Use without launching the CGEvent driver. Otherwise manually
@@ -144,9 +144,9 @@ verify these gestures:
    and image-coordinate bounds. Change the source while selecting: the image and
    drawings stay, and stale AX/DOM context must be discarded.
 3. Repeat and press Escape: cancellation must add no image.
-4. Deny Screen Recording and retry: Zommi should explain how to enable it.
+4. Deny Screen Recording and retry: Focalet should explain how to enable it.
    Grant it, restart if requested, and repeat selection successfully.
-5. Quit/reopen: the welcome flow should stay completed, and Zommi should discover
+5. Quit/reopen: the welcome flow should stay completed, and Focalet should discover
    and reconnect to the runtime normally.
 
 Record the commit from `release-manifest.json`, macOS version, architecture and

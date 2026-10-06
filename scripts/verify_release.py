@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate and smoke-test an assembled Zommi native release directory."""
+"""Validate and smoke-test an assembled Focalet native release directory."""
 
 from __future__ import annotations
 
@@ -198,13 +198,13 @@ def verify_package(
     manifest = _read_manifest(root)
     required = {
         "schemaVersion": 1,
-        "product": "Zommi",
+        "product": "Focalet",
         "components": {
             "desktopUi": "flutter",
             "runtimeCore": "rust",
         },
     }
-    if manifest.get("schemaVersion") != required["schemaVersion"] or manifest.get("product") != "Zommi":
+    if manifest.get("schemaVersion") != required["schemaVersion"] or manifest.get("product") != "Focalet":
         raise ReleaseValidationError("Release manifest identity is invalid.")
     components = manifest.get("components")
     if not isinstance(components, dict) or any(
@@ -217,7 +217,7 @@ def verify_package(
     ):
         raise ReleaseValidationError("Windows release does not identify the persistent WSL relay.")
     if components.get("windowsReset") == "owned-profile-reset":
-        for name in ("stop-zommi-relays.ps1", "stop-zommi-relay.sh"):
+        for name in ("stop-focalet-relays.ps1", "stop-focalet-relay.sh"):
             if not (root / "support" / name).is_file():
                 raise ReleaseValidationError(f"Windows reset helper is missing: {name}")
     if expected_platform and manifest.get("platform") != expected_platform:
@@ -244,8 +244,8 @@ def verify_package(
             _inside(root, "vcruntime140_1.dll", "Bundled Windows runtime library")
     if manifest.get("platform") == "linux":
         for relative in ("metadata.json", "extension.js", "schemas/gschemas.compiled"):
-            _inside(root, "gnome-extension/zommi@zommi/" + relative, "GNOME integration")
-        _inside(root, "zommi-bin", "Packaged Linux Flutter binary")
+            _inside(root, "gnome-extension/focalet@focalet/" + relative, "GNOME integration")
+        _inside(root, "focalet-bin", "Packaged Linux Flutter binary")
         capture_host = _inside(
             root,
             str(manifest.get("captureHost", "")),
@@ -255,7 +255,7 @@ def verify_package(
             launcher = entrypoint.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as error:
             raise ReleaseValidationError(f"Linux launcher is invalid: {error}") from error
-        if "LD_LIBRARY_PATH" not in launcher or "zommi-bin" not in launcher:
+        if "LD_LIBRARY_PATH" not in launcher or "focalet-bin" not in launcher:
             raise ReleaseValidationError("Linux launcher does not load bundled runtime libraries.")
         for relative in LINUX_RUNTIME_LIBRARIES:
             _inside(root, relative, "Bundled Linux runtime library")
@@ -263,7 +263,7 @@ def verify_package(
     if "license" in manifest:
         if manifest["license"] != "Apache-2.0":
             raise ReleaseValidationError("Unsupported project license in manifest.")
-        prefix = "Zommi.app/Contents/Resources/" if manifest["platform"] == "macos" else ""
+        prefix = "Focalet.app/Contents/Resources/" if manifest["platform"] == "macos" else ""
         for relative in LICENSE_DOCUMENTS:
             _inside(root, prefix + relative, "License document")
     file_count = _verify_checksums(root)

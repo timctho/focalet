@@ -13,7 +13,7 @@ import websocket
 
 class Browser:
     def __init__(self, executable, url, width=1920, height=1080):
-        self.profile = tempfile.TemporaryDirectory(prefix="zommi-demo-browser-")
+        self.profile = tempfile.TemporaryDirectory(prefix="focalet-demo-browser-")
         self.log = tempfile.TemporaryFile()
         self.socket = None
         self.sequence = 0

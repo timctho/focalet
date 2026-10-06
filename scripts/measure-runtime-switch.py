@@ -17,8 +17,8 @@ import time
 
 
 async def measure(args):
-    fixtures = Path(__file__).resolve().parent.parent / 'crates/zommi-core-host/tests'
-    with tempfile.TemporaryDirectory(prefix='zommi-runtime-switch-') as directory:
+    fixtures = Path(__file__).resolve().parent.parent / 'crates/focalet-core-host/tests'
+    with tempfile.TemporaryDirectory(prefix='focalet-runtime-switch-') as directory:
         root = Path(directory)
         log = root / 'requests.jsonl'
         process = await asyncio.create_subprocess_exec(
@@ -26,17 +26,17 @@ async def measure(args):
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
             limit=64 * 1024 * 1024,
             env={**os.environ,
-                 'ZOMMI_CODEX_COMMAND': sys.executable,
-                 'ZOMMI_CODEX_ARGS_JSON': json.dumps([str(fixtures / 'fake_codex_app_server.py')]),
-                 'ZOMMI_HERMES_COMMAND': sys.executable,
-                 'ZOMMI_HERMES_GATEWAY_ARGS_JSON': json.dumps([str(fixtures / 'fake_gateway_runtime.py'), '--mode', 'hermes']),
-                 'ZOMMI_CORE_STATE_PATH': str(root / 'binding.json'),
-                 'ZOMMI_RUNTIME_OVERRIDES_PATH': str(root / 'overrides.json'),
-                 'ZOMMI_RUNTIME_DISCOVERY_CACHE_PATH': str(root / 'discovery.json'),
-                 'ZOMMI_FAKE_REQUEST_LOG': str(log),
-                 'ZOMMI_FAKE_HISTORY_COUNT': '3',
-                 'ZOMMI_FAKE_CATALOG_DELAY': str(args.catalog_delay_ms / 1000),
-                 'ZOMMI_FAKE_REQUEST_DELAY_MS': str(args.delay_ms)})
+                 'FOCALET_CODEX_COMMAND': sys.executable,
+                 'FOCALET_CODEX_ARGS_JSON': json.dumps([str(fixtures / 'fake_codex_app_server.py')]),
+                 'FOCALET_HERMES_COMMAND': sys.executable,
+                 'FOCALET_HERMES_GATEWAY_ARGS_JSON': json.dumps([str(fixtures / 'fake_gateway_runtime.py'), '--mode', 'hermes']),
+                 'FOCALET_CORE_STATE_PATH': str(root / 'binding.json'),
+                 'FOCALET_RUNTIME_OVERRIDES_PATH': str(root / 'overrides.json'),
+                 'FOCALET_RUNTIME_DISCOVERY_CACHE_PATH': str(root / 'discovery.json'),
+                 'FOCALET_FAKE_REQUEST_LOG': str(log),
+                 'FOCALET_FAKE_HISTORY_COUNT': '3',
+                 'FOCALET_FAKE_CATALOG_DELAY': str(args.catalog_delay_ms / 1000),
+                 'FOCALET_FAKE_REQUEST_DELAY_MS': str(args.delay_ms)})
         sequence = 0
         async def request(operation, payload=None):
             nonlocal sequence
@@ -101,7 +101,7 @@ async def measure(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--core-host', default='target/debug/zommi-core-host')
+    parser.add_argument('--core-host', default='target/debug/focalet-core-host')
     parser.add_argument('--flow', choices=['before', 'after'], default='after')
     parser.add_argument('--delay-ms', type=float, default=20)
     parser.add_argument('--catalog-delay-ms', type=float, default=100)

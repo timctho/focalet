@@ -2,7 +2,7 @@
 {% block extrahead %}
 {{ super() }}
 <meta property="og:type" content="website">
-<meta property="og:title" content="{{ page.title | default(config.site_name, true) | e }} · Zommi">
+<meta property="og:title" content="{{ page.title | default(config.site_name, true) | e }} · Focalet">
 <meta property="og:description" content="{{ page.meta.description | default(config.site_description, true) | e }}">
 <meta property="og:url" content="{{ page.canonical_url | e }}">
 <meta property="og:image" content="{{ config.site_url }}assets/social-card.png">

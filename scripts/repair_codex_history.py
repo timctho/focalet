@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Restore missing Codex rollout lookups for one Zommi catalog runtime."""
+"""Restore missing Codex rollout lookups for one Focalet catalog runtime."""
 
 from __future__ import annotations
 
@@ -188,7 +188,7 @@ def apply_repair(report: dict) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--catalog", type=Path, required=True, help="Zommi session-catalog.sqlite"
+        "--catalog", type=Path, required=True, help="Focalet session-catalog.sqlite"
     )
     parser.add_argument(
         "--runtime-target-id",

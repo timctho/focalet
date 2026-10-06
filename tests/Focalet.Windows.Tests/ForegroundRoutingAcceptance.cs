@@ -1,0 +1,75 @@
+using Focalet.CaptureTool;
+using System.Diagnostics;
+using System.Drawing;
+using System.Windows.Forms;
+using Focalet.Capture;
+using Focalet.Windows;
+
+internal static class ForegroundRoutingAcceptance
+{
+    // Called with an earlier, real Chromium input focused. That browser must
+    // not remain the destination after visiting a custom chat or console.
+    public static async Task RunAsync(CaptureClipboardBatch batch, Func<Task> focusBrowserSource)
+    {
+        await focusBrowserSource();
+        using var chat = new Form { Text = "Synthetic custom chat", Size = new Size(650, 450), TopMost = true };
+        using var input = new OpaqueInput { Dock = DockStyle.Fill };
+        chat.Controls.Add(input);
+        chat.Show(); chat.Activate(); input.Focus();
+        await WaitFor(() => input.Focused, "Custom chat did not acquire native focus.");
+        var target = CapturePasteTarget.RememberWindow();
+        if (target?.Window != chat.Handle || target.Focus != input.Handle)
+            throw new InvalidOperationException("Explicit custom input paste selected the earlier browser.");
+        var result = await CapturePasteSequence.PasteAsync(batch, target, textOnly: true);
+        if (result.StoppedBecause is not null || input.Draft != "chat-before " + string.Concat(batch.TextParts) + "chat-after" || input.EnterCount != 0)
+            throw new InvalidOperationException("Custom chat paste changed its draft/caret or sent Enter: " + result);
+        chat.Close();
+        await focusBrowserSource();
+        await ConsoleRoutingAcceptance.RunAsync();
+        Console.WriteLine("PASS Explicit paste uses the focused custom input or Windows console, never an earlier browser.");
+    }
+
+    internal static async Task WaitFor(Func<bool> predicate, string failure, int milliseconds = 5000)
+    {
+        var wait = Stopwatch.StartNew();
+        while (!predicate())
+        {
+            if (wait.ElapsedMilliseconds > milliseconds) throw new InvalidOperationException(failure);
+            await Task.Delay(50);
+        }
+    }
+
+    // A native keyboard input with no UIA Edit, ValuePattern or text selection
+    // provider, like custom chat surfaces. Only the synthetic fixture reads text.
+    private sealed class OpaqueInput : Control
+    {
+        public string Draft { get; private set; } = "chat-before chat-after";
+        private int caret = "chat-before ".Length;
+        public int EnterCount { get; private set; }
+        public OpaqueInput()
+        {
+            SetStyle(ControlStyles.Selectable, true);
+            TabStop = true;
+            AccessibleRole = AccessibleRole.Grouping;
+            AccessibleName = "Synthetic custom keyboard input";
+        }
+        protected override bool ProcessCmdKey(ref Message message, Keys keys)
+        {
+            if (keys == (Keys.Control | Keys.V))
+            {
+                var text = Clipboard.GetText();
+                Draft = Draft.Insert(caret, text);
+                caret += text.Length;
+                Invalidate();
+                return true;
+            }
+            if (keys == Keys.Enter) EnterCount++;
+            return base.ProcessCmdKey(ref message, keys);
+        }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            TextRenderer.DrawText(e.Graphics, Draft, Font, ClientRectangle, ForeColor, TextFormatFlags.WordBreak);
+        }
+    }
+}

@@ -25,16 +25,16 @@ def main() -> int:
     metadata = json.loads(installer.with_name(installer.name + ".release.json").read_text())
     if metadata["gitCommit"] != args.expected_commit or metadata["sha256"] != _sha256(installer):
         raise ValueError("Installer identity or checksum does not match.")
-    keys = [r"Software\Zommi", r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Zommi"]
+    keys = [r"Software\Focalet", r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Focalet"]
     for key in keys:
         try:
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key):
-                raise RuntimeError("An existing Zommi installation is registered; do not overwrite it during acceptance.")
+                raise RuntimeError("An existing Focalet installation is registered; do not overwrite it during acceptance.")
         except FileNotFoundError:
             pass
-    shortcut = Path(os.environ["APPDATA"]) / "Microsoft/Windows/Start Menu/Programs/Zommi/Zommi.lnk"
+    shortcut = Path(os.environ["APPDATA"]) / "Microsoft/Windows/Start Menu/Programs/Focalet/Focalet.lnk"
     if shortcut.exists():
-        raise RuntimeError("An existing Zommi shortcut must not be overwritten during acceptance.")
+        raise RuntimeError("An existing Focalet shortcut must not be overwritten during acceptance.")
     output.mkdir(parents=True, exist_ok=True)
     target = output / "installed"
     if target.exists():
@@ -54,7 +54,7 @@ def main() -> int:
         if not shortcut.is_file():
             raise ValueError("The Start menu shortcut was not created.")
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, keys[1]) as key:
-            if winreg.QueryValueEx(key, "DisplayName")[0] != "Zommi":
+            if winreg.QueryValueEx(key, "DisplayName")[0] != "Focalet":
                 raise ValueError("Installed Apps registration is missing.")
             if winreg.QueryValueEx(key, "UninstallString")[0] != f'"{uninstaller}"':
                 raise ValueError("Installed Apps uninstall command is invalid.")

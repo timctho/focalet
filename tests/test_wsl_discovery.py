@@ -16,7 +16,7 @@ PROBE = ROOT / 'scripts/probe-wsl-runtimes.sh'
 @unittest.skipUnless(sys.platform.startswith('linux'), 'WSL shell fixture requires Linux')
 class WslDiscoveryTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix='zommi shell probe-')
+        self.temporary = tempfile.TemporaryDirectory(prefix='focalet shell probe-')
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.tools = self.root / 'tools'
@@ -48,9 +48,9 @@ class WslDiscoveryTests(unittest.TestCase):
         result = self.probe('codex')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn('shell startup banner', result.stdout)
-        self.assertIn('__ZOMMI_RUNTIME_PATH__codex\t' + str(self.runtime / 'codex'), result.stdout)
-        launch_path = next(line.removeprefix('__ZOMMI_RUNTIME_ENV_PATH__')
-                           for line in result.stdout.splitlines() if line.startswith('__ZOMMI_RUNTIME_ENV_PATH__'))
+        self.assertIn('__FOCALET_RUNTIME_PATH__codex\t' + str(self.runtime / 'codex'), result.stdout)
+        launch_path = next(line.removeprefix('__FOCALET_RUNTIME_ENV_PATH__')
+                           for line in result.stdout.splitlines() if line.startswith('__FOCALET_RUNTIME_ENV_PATH__'))
         node = shutil.which('node')
         self.assertIsNotNone(node, 'Node is required by the WSL relay tests')
         self.program(self.runtime / 'node', '#!/bin/sh\nexport SELECTED_NODE=hermes\nexec "' + node + '" "$@"\n')
@@ -68,8 +68,8 @@ class WslDiscoveryTests(unittest.TestCase):
         result = self.probe(*names, 'not-executable')
         self.assertEqual(result.returncode, 0, result.stderr)
         for name in names:
-            self.assertIn('__ZOMMI_RUNTIME_PATH__' + name + '\t', result.stdout)
-        self.assertNotIn('__ZOMMI_RUNTIME_PATH__not-executable', result.stdout)
+            self.assertIn('__FOCALET_RUNTIME_PATH__' + name + '\t', result.stdout)
+        self.assertNotIn('__FOCALET_RUNTIME_PATH__not-executable', result.stdout)
 
     def test_controlling_terminal_does_not_stop_interactive_shell_initialization(self):
         import fcntl
@@ -84,7 +84,7 @@ class WslDiscoveryTests(unittest.TestCase):
                                     stdin=slave, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                     text=True, preexec_fn=terminal_session, timeout=10)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn('__ZOMMI_RUNTIME_PATH__codex\t' + str(self.runtime / 'codex'), result.stdout)
+            self.assertIn('__FOCALET_RUNTIME_PATH__codex\t' + str(self.runtime / 'codex'), result.stdout)
         finally:
             os.close(slave)
             os.close(master)
@@ -114,7 +114,7 @@ class WslDiscoveryTests(unittest.TestCase):
         (self.root / '.zshrc').write_text('export PATH="$HOME/.hermes/node/bin:$PATH"\n')
         result = self.probe('codex')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('__ZOMMI_RUNTIME_PATH__codex\t' + str(self.runtime / 'codex'), result.stdout)
+        self.assertIn('__FOCALET_RUNTIME_PATH__codex\t' + str(self.runtime / 'codex'), result.stdout)
 
 
 if __name__ == '__main__':

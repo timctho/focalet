@@ -51,28 +51,28 @@ class Session:
             "XDG_SESSION_TYPE": "wayland",
             "XDG_CURRENT_DESKTOP": "GNOME",
             "XDG_SESSION_DESKTOP": "gnome",
-            "WAYLAND_DISPLAY": "zommi-test",
+            "WAYLAND_DISPLAY": "focalet-test",
             "GDK_BACKEND": "wayland",
             "LIBGL_ALWAYS_SOFTWARE": "1",
             "GSK_RENDERER": "cairo",
             "NO_AT_BRIDGE": "0",
             "DBUS_SYSTEM_BUS_ADDRESS": f"unix:path={root}/run/system-bus",
-            "ZOMMI_RUNTIME_DISCOVERY_MODE": "configured-only",
+            "FOCALET_RUNTIME_DISCOVERY_MODE": "configured-only",
         }
         self.env.pop("DISPLAY", None)
         self.env.pop("GSETTINGS_BACKEND", None)
         extensions = root / "data/gnome-shell/extensions"
         extensions.mkdir(parents=True)
         if extension is not None:
-            shutil.copytree(extension, extensions / "zommi@zommi")
-            self.run("glib-compile-schemas", str(extensions / "zommi@zommi/schemas"))
-        driver = extensions / "zommi-test@zommi"
+            shutil.copytree(extension, extensions / "focalet@focalet")
+            self.run("glib-compile-schemas", str(extensions / "focalet@focalet/schemas"))
+        driver = extensions / "focalet-test@focalet"
         driver.mkdir()
         (driver / "metadata.json").write_text(
             json.dumps(
                 {
-                    "uuid": "zommi-test@zommi",
-                    "name": "Zommi acceptance driver",
+                    "uuid": "focalet-test@focalet",
+                    "name": "Focalet acceptance driver",
                     "description": "Private test session only",
                     "shell-version": ["46"],
                 }
@@ -148,9 +148,9 @@ class Session:
 
     def driver(self, method, *args):
         return self.bus(
-            "com.zommi.TestDriver",
-            "/com/zommi/TestDriver",
-            "com.zommi.TestDriver." + method,
+            "com.focalet.TestDriver",
+            "/com/focalet/TestDriver",
+            "com.focalet.TestDriver." + method,
             *map(str, args),
         )
 
@@ -178,7 +178,7 @@ class Session:
             "set",
             "org.gnome.shell",
             "enabled-extensions",
-            "['zommi@zommi','zommi-test@zommi']",
+            "['focalet@focalet','focalet-test@focalet']",
         )
         self.run(
             "gsettings", "set", "org.gnome.shell", "disable-user-extensions", "false"
@@ -207,7 +207,7 @@ class Session:
                 "--virtual-monitor",
                 "1600x1000",
                 "--wayland-display",
-                "zommi-test",
+                "focalet-test",
             ],
         )
 
@@ -311,7 +311,7 @@ def desktop_status_without_gnome(session, helper):
     assert not status["ready"] and not status["canEnable"], status
     assert status["reason"] in ("gnome-unavailable", "wslg-without-gnome"), status
     disconnected = json.loads(session.run(
-        "env", "DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent-zommi-test-bus",
+        "env", "DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent-focalet-test-bus",
         helper, "status",
     ).stdout)
     assert disconnected["reason"] == "session-bus-unavailable", disconnected
@@ -349,7 +349,7 @@ def desktop_status_acceptance(session, helper):
         assert disconnected["canEnable"], disconnected
         assert status("enable-extension")["ready"]
         results["disconnected"] = disconnected
-        session.run("gnome-extensions", "disable", "zommi@zommi")
+        session.run("gnome-extensions", "disable", "focalet@focalet")
         disabled = status()
         assert disabled["reason"] == "extension-disabled", disabled
         assert disabled["canEnable"], disabled
@@ -372,7 +372,7 @@ def desktop_status_acceptance(session, helper):
 def native_acceptance(session, helper, toolkit="3.0"):
     from PIL import Image, ImageChops
 
-    token_path = Path(session.env["XDG_STATE_HOME"]) / "zommi/screencast-restore-token"
+    token_path = Path(session.env["XDG_STATE_HOME"]) / "focalet/screencast-restore-token"
     token_path.unlink(missing_ok=True)
 
     fixture = session.root / f"fixture-{toolkit}"
@@ -514,7 +514,7 @@ def native_acceptance(session, helper, toolkit="3.0"):
     renewed = session.request(host, "selectContent", authorize=True)
     assert renewed["ok"] and renewed["result"]["frames"], renewed
     session.request(host, "release")
-    session.run("gnome-extensions", "disable", "zommi@zommi")
+    session.run("gnome-extensions", "disable", "focalet@focalet")
     assert not json.loads(session.run(helper, "status").stdout)["ready"]
     unavailable = session.request(host, "selectContent")
     assert not unavailable["ok"] and "App settings" in unavailable["error"], unavailable
@@ -543,7 +543,7 @@ def native_acceptance(session, helper, toolkit="3.0"):
 
 def browser_acceptance(session, helper, browser, browser_host):
     page = session.root / "browser.html"
-    page.write_text("""<!doctype html><title>Zommi DOM fixture</title>
+    page.write_text("""<!doctype html><title>Focalet DOM fixture</title>
 <style>body{margin:0;background:#eef6fa;font:24px sans-serif}main{margin:30px;padding:40px;background:#acdcee;width:500px;height:320px}</style>
 <main><button>CAPTURE_DOM_SENTINEL</button><p>Native Wayland browser DOM</p></main>
 <div style="height:2200px">Below the crop</div>""")
@@ -605,7 +605,7 @@ def browser_acceptance(session, helper, browser, browser_host):
         pipes=True,
         env={
             **session.env,
-            "ZOMMI_BROWSER_CDP_ENDPOINT": "http://127.0.0.1:"
+            "FOCALET_BROWSER_CDP_ENDPOINT": "http://127.0.0.1:"
             + port.read_text().splitlines()[0],
         },
     )
@@ -666,7 +666,7 @@ body{background:#123344;color:#fff;font:24px sans-serif}section{display:none;pad
 section:target{display:grid;grid-template-columns:1fr 1fr;gap:24px}.card{background:#246080;padding:30px}
 </style><section id="slide-12"><div class="card">Ocean preview</div><div class="card">Styled grid</div></section>
 <script>document.title='Synthetic document'</script>""")
-    config = session.root / "document-config/zommi"
+    config = session.root / "document-config/focalet"
     config.mkdir(parents=True)
     (config / "settings.json").write_text('{"runtimeSetupCompleted":true}')
     report_path = session.evidence / "document-report.json"
@@ -675,14 +675,14 @@ section:target{display:grid;grid-template-columns:1fr 1fr;gap:24px}.card{backgro
     trace.unlink(missing_ok=True)
     app = session.start(
         "document",
-        [package / "zommi"],
+        [package / "focalet"],
         env={
             **session.env,
             "XDG_CONFIG_HOME": str(config.parent),
-            "ZOMMI_DOCUMENT_PREVIEW_PATH": fixture.as_uri() + "#slide-12",
-            "ZOMMI_DOCUMENT_PREVIEW_PROBE": str(report_path),
-            "ZOMMI_DOCUMENT_THUMBNAIL_PROBE": "1",
-            "ZOMMI_ACCEPTANCE_LOG": str(trace),
+            "FOCALET_DOCUMENT_PREVIEW_PATH": fixture.as_uri() + "#slide-12",
+            "FOCALET_DOCUMENT_PREVIEW_PROBE": str(report_path),
+            "FOCALET_DOCUMENT_THUMBNAIL_PROBE": "1",
+            "FOCALET_ACCEPTANCE_LOG": str(trace),
             **(
                 {"WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS": "1"}
                 if os.geteuid() == 0
@@ -773,19 +773,19 @@ def assert_app_surface(session, app, name, expected_size=None):
 def ui_acceptance(session, package, fixture_app):
     trace = session.evidence / "ui-events.jsonl"
     trace.unlink(missing_ok=True)
-    config = session.root / "ui-config/zommi"
+    config = session.root / "ui-config/focalet"
     config.mkdir(parents=True)
     (config / "settings.json").write_text('{"runtimeSetupCompleted":true,"themeMode":"light"}')
     app = session.start(
         "ui",
-        [package / "zommi"],
+        [package / "focalet"],
         env={
             **session.env,
             "XDG_CONFIG_HOME": str(config.parent),
-            "ZOMMI_ACCEPTANCE_LOG": str(trace),
-            "ZOMMI_LINUX_CAPTURE_HOST": str(ROOT / "tests/fixtures/trace-wayland-capture.py"),
-            "ZOMMI_CAPTURE_TRACE_HELPER": str(package / "zommi-linux-capture"),
-            "ZOMMI_CAPTURE_TRACE_DIR": str(session.evidence / "capture"),
+            "FOCALET_ACCEPTANCE_LOG": str(trace),
+            "FOCALET_LINUX_CAPTURE_HOST": str(ROOT / "tests/fixtures/trace-wayland-capture.py"),
+            "FOCALET_CAPTURE_TRACE_HELPER": str(package / "focalet-linux-capture"),
+            "FOCALET_CAPTURE_TRACE_DIR": str(session.evidence / "capture"),
         },
     )
     ready = wait("packaged desktop readiness", lambda: events(trace, "desktop.ready"))[
@@ -942,14 +942,14 @@ def main():
     parser.add_argument("--system-extension", action="store_true",
                         help="Test the .deb-installed GNOME extension instead of a temporary user copy")
     parser.add_argument(
-        "--helper", type=Path, default=ROOT / "target/debug/zommi-linux-capture"
+        "--helper", type=Path, default=ROOT / "target/debug/focalet-linux-capture"
     )
     parser.add_argument("--browser", type=Path)
     parser.add_argument(
         "--browser-host",
         type=Path,
         default=ROOT
-        / "src/Zommi.BrowserCapture/bin/Release/net8.0/zommi-browser-capture.dll",
+        / "src/Focalet.BrowserCapture/bin/Release/net8.0/focalet-browser-capture.dll",
     )
     parser.add_argument(
         "--output", type=Path, default=ROOT / "artifacts/wayland-acceptance"
@@ -970,14 +970,14 @@ def main():
     args.output = args.output.resolve()
     args.output.mkdir(parents=True, exist_ok=True)
     helper = (
-        args.package / "zommi-linux-capture" if args.package else args.helper
+        args.package / "focalet-linux-capture" if args.package else args.helper
     ).resolve()
     extension = (
-        args.package / "gnome-extension/zommi@zommi"
+        args.package / "gnome-extension/focalet@focalet"
         if args.package
-        else ROOT / "src/Zommi.Gnome"
+        else ROOT / "src/Focalet.Gnome"
     )
-    with tempfile.TemporaryDirectory(prefix="zommi-wayland-acceptance-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="focalet-wayland-acceptance-") as temporary:
         session = Session(Path(temporary), args.output, None if args.system_extension else extension)
         try:
             desktop_status_without_gnome(session, helper)
@@ -985,14 +985,14 @@ def main():
             desktop_status_acceptance(session, helper)
             if args.system_extension:
                 status = json.loads(session.run(helper, "status").stdout)
-                assert status["diagnostics"]["extensionPath"] == "/usr/share/gnome-shell/extensions/zommi@zommi", status
+                assert status["diagnostics"]["extensionPath"] == "/usr/share/gnome-shell/extensions/focalet@focalet", status
             fixture_app, _ = native_acceptance(session, helper)
             gtk4, _ = native_acceptance(session, helper, "4.0")
             gtk4.terminate()
             gtk4.wait(timeout=5)
             if args.browser:
                 browser_host = (
-                    args.package / "browser-capture/zommi-browser-capture"
+                    args.package / "browser-capture/focalet-browser-capture"
                     if args.package
                     else args.browser_host
                 )

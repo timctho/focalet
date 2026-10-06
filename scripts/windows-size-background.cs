@@ -1,4 +1,4 @@
-public sealed class ZommiSizeBackground : System.IDisposable {
+public sealed class FocaletSizeBackground : System.IDisposable {
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
     private struct Message { public System.IntPtr Window; public uint Kind; public System.UIntPtr Word; public System.IntPtr Data; public uint Time; public int Left, Top; public uint Private; }
     [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] private static extern System.IntPtr CreateWindowEx(uint extendedStyle, string className, string title, uint style, int left, int top, int width, int height, System.IntPtr parent, System.IntPtr menu, System.IntPtr instance, System.IntPtr parameter);
@@ -17,12 +17,12 @@ public sealed class ZommiSizeBackground : System.IDisposable {
     private uint threadId;
     private System.Exception startupFailure;
 
-    public ZommiSizeBackground(System.IntPtr application, int[] area) {
+    public FocaletSizeBackground(System.IntPtr application, int[] area) {
         thread = new System.Threading.Thread(() => {
             threadId = GetCurrentThreadId();
             var previous = SetThreadDpiAwarenessContext(new System.IntPtr(-4));
             try {
-                window = CreateWindowEx(0x08000080, "STATIC", "Zommi size contrast fixture", 0x80000004, area[0], area[1], area[2], area[3], System.IntPtr.Zero, System.IntPtr.Zero, System.IntPtr.Zero, System.IntPtr.Zero);
+                window = CreateWindowEx(0x08000080, "STATIC", "Focalet size contrast fixture", 0x80000004, area[0], area[1], area[2], area[3], System.IntPtr.Zero, System.IntPtr.Zero, System.IntPtr.Zero, System.IntPtr.Zero);
                 if (window == System.IntPtr.Zero || !SetWindowPos(window, application, area[0], area[1], area[2], area[3], 0x0050) || !UpdateWindow(window)) {
                     startupFailure = new System.InvalidOperationException("Could not show the isolated resize background.");
                     return;

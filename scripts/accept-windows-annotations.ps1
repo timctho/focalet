@@ -10,7 +10,7 @@ Add-Type -ReferencedAssemblies $references -Path (Join-Path $PSScriptRoot 'windo
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
-public static class ZommiAnnotationInput {
+public static class FocaletAnnotationInput {
     [DllImport("user32.dll")] private static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
     public static void Control(bool down) {
@@ -26,12 +26,12 @@ public static class ZommiAnnotationInput {
 Assert-DesktopCaptureSurface
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 function Click-Tool([IntPtr]$Window, [string]$Name) {
-    if (-not [ZommiWindowsAcceptanceNative]::ClickNamedButton($Window,$Name)) { throw "Drawing tool unavailable: $Name" }
+    if (-not [FocaletWindowsAcceptanceNative]::ClickNamedButton($Window,$Name)) { throw "Drawing tool unavailable: $Name" }
 }
 function Assert-ToolbarNearCrop([IntPtr]$Window, [int]$Bottom, [int]$Left = 175) {
     $watch = [Diagnostics.Stopwatch]::StartNew()
     do {
-        $bounds = [ZommiWindowsAcceptanceNative]::NamedButtonContainerBounds($Window,'Pen')
+        $bounds = [FocaletWindowsAcceptanceNative]::NamedButtonContainerBounds($Window,'Pen')
         if ($bounds.Length -eq 4 -and [Math]::Abs($bounds[0] - $Left) -le 64 -and
             $bounds[1] -gt $Bottom -and $bounds[1] -le $Bottom + 64) { return }
         Start-Sleep -Milliseconds 10
@@ -69,12 +69,12 @@ $results = @()
 foreach ($case in $(if ($HoverOnly) { @('hover-source') } else { @('tools','multiple-regions','ctrl-release','ctrl-once','ctrl-held-limit','hover-source','changed-source','cancel','image-selector') })) {
     $continuous = $case -in @('ctrl-once','ctrl-held-limit')
     $multiple = $continuous -or $case -in @('multiple-regions','ctrl-release')
-    $fixture = [ZommiContextFixture]::new()
+    $fixture = [FocaletContextFixture]::new()
     try {
         $fixture.ExpandForAnnotations()
         if ($case -eq 'hover-source') {
             $fixture.EnableHoverText()
-            [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(120,120) | Out-Null
+            [FocaletWindowsAcceptanceNative]::SetPhysicalCursorPos(120,120) | Out-Null
         }
         $fixture.Raise()
         Start-Sleep -Milliseconds 200
@@ -82,19 +82,19 @@ foreach ($case in $(if ($HoverOnly) { @('hover-source') } else { @('tools','mult
         $method = if ($case -eq 'image-selector') { 'selectImage' } else { 'selectContent' }
         $result = Invoke-CaptureRequest -Executable $CaptureHost -Method $method -Parameters @{browserPageDetails=$false} -Interact {
             param($process)
-            $title = if ($case -eq 'image-selector') { 'Zommi image selection' } else { 'Zommi content selection' }
+            $title = if ($case -eq 'image-selector') { 'Focalet image selection' } else { 'Focalet content selection' }
             $selector = Wait-ForWindow -ProcessId $process.Id -Title $title
             # HWND/title creation precedes the borderless selector's final layout.
             # Starting then offsets the first point by the temporary caption/frame.
             $shown = [Diagnostics.Stopwatch]::StartNew()
             $stableBounds = $null
             while ($true) {
-                $windowBounds = [ZommiWindowsAcceptanceNative]::PhysicalBounds($selector) -join ','
-                $clientBounds = [ZommiWindowsAcceptanceNative]::PhysicalClientBounds($selector) -join ','
-                $ready = [ZommiWindowsAcceptanceNative]::Visible($selector) -and
-                    [ZommiWindowsAcceptanceNative]::Foreground($selector) -and
-                    [ZommiWindowsAcceptanceNative]::TopMost($selector) -and
-                    [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Cancel') -and
+                $windowBounds = [FocaletWindowsAcceptanceNative]::PhysicalBounds($selector) -join ','
+                $clientBounds = [FocaletWindowsAcceptanceNative]::PhysicalClientBounds($selector) -join ','
+                $ready = [FocaletWindowsAcceptanceNative]::Visible($selector) -and
+                    [FocaletWindowsAcceptanceNative]::Foreground($selector) -and
+                    [FocaletWindowsAcceptanceNative]::TopMost($selector) -and
+                    [FocaletWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Cancel') -and
                     $windowBounds -eq $clientBounds
                 if ($ready -and $stableBounds -eq $clientBounds) { break }
                 if ($shown.ElapsedMilliseconds -gt 5000) { throw 'The borderless capture selector did not finish showing.' }
@@ -102,40 +102,40 @@ foreach ($case in $(if ($HoverOnly) { @('hover-source') } else { @('tools','mult
                 Start-Sleep -Milliseconds 50
             }
             if ($continuous) {
-                [ZommiAnnotationInput]::Control($true)
+                [FocaletAnnotationInput]::Control($true)
                 try {
                     for ($i=0; $i -lt 8; $i++) {
                         $x = 175 + 45 * $i
-                        [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,$x,195,($x+36),245)
+                        [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector,$x,195,($x+36),245)
                         # A single Ctrl-drag must allow B through H without another Ctrl press.
-                        if ($case -eq 'ctrl-once' -and $i -eq 0) { [ZommiAnnotationInput]::Control($false) }
+                        if ($case -eq 'ctrl-once' -and $i -eq 0) { [FocaletAnnotationInput]::Control($false) }
                     }
                     # The ninth drag must not add a region or accidentally draw.
-                    [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,540,195,576,245)
-                } finally { [ZommiAnnotationInput]::Control($false) }
+                    [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector,540,195,576,245)
+                } finally { [FocaletAnnotationInput]::Control($false) }
                 Assert-ToolbarNearCrop $selector 245 490
-                if ([ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Add region')) { throw "$case did not reach the eight-region limit." }
+                if ([FocaletWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Add region')) { throw "$case did not reach the eight-region limit." }
                 Save-Toolbar $case
             } elseif ($multiple) {
-                [ZommiAnnotationInput]::Control($true)
+                [FocaletAnnotationInput]::Control($true)
                 try {
-                    [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,175,195,535,245)
+                    [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector,175,195,535,245)
                     if ($case -eq 'ctrl-release') {
-                        [ZommiAnnotationInput]::Control($false)
+                        [FocaletAnnotationInput]::Control($false)
                         Assert-ToolbarNearCrop $selector 245
-                        [ZommiAnnotationInput]::Control($true)
+                        [FocaletAnnotationInput]::Control($true)
                     }
                     # This next crop overlaps the previous crop's toolbar position.
                     # Ctrl must make that area available for continuous selection.
-                    [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,175,270,535,315)
-                } finally { [ZommiAnnotationInput]::Control($false) }
+                    [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector,175,270,535,315)
+                } finally { [FocaletAnnotationInput]::Control($false) }
             } else {
-                [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,175,195,535,315)
+                [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector,175,195,535,315)
             }
             $watch = [Diagnostics.Stopwatch]::StartNew()
-            while (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Attach') -and $watch.ElapsedMilliseconds -lt 1000) { Start-Sleep -Milliseconds 10 }
+            while (-not [FocaletWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Attach') -and $watch.ElapsedMilliseconds -lt 1000) { Start-Sleep -Milliseconds 10 }
             $script:annotationReadyMs = $watch.ElapsedMilliseconds
-            if (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Attach')) { throw 'Selection did not stay open with its drawing toolbar.' }
+            if (-not [FocaletWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Attach')) { throw 'Selection did not stay open with its drawing toolbar.' }
             if ($multiple -and -not $continuous) { Assert-ToolbarNearCrop $selector 315; Save-Toolbar $case }
             if ($case -eq 'ctrl-once') {
                 # Explicit Add region must still add one crop and return to
@@ -143,26 +143,26 @@ foreach ($case in $(if ($HoverOnly) { @('hover-source') } else { @('tools','mult
                 Click-Tool $selector 'Blue'
                 Click-Tool $selector 'Remove region'
                 Click-Tool $selector 'Add region'
-                [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,490,195,526,245)
-                [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,496,210,518,234)
+                [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector,490,195,526,245)
+                [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector,496,210,518,234)
             }
             Click-Tool $selector 'Pen'
             Click-Tool $selector 'Coral'
             $firstStrokeEnd = if ($continuous) { 203 } else { 310 }
-            [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,190,210,$firstStrokeEnd,234)
+            [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector,190,210,$firstStrokeEnd,234)
             $strokeReady = [Diagnostics.Stopwatch]::StartNew()
-            while (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Undo') -and $strokeReady.ElapsedMilliseconds -lt 1000) { Start-Sleep -Milliseconds 10 }
-            if (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Undo')) { throw "The first annotation stroke was not recorded: $case" }
+            while (-not [FocaletWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Undo') -and $strokeReady.ElapsedMilliseconds -lt 1000) { Start-Sleep -Milliseconds 10 }
+            if (-not [FocaletWindowsAcceptanceNative]::NamedButtonEnabled($selector,'Undo')) { throw "The first annotation stroke was not recorded: $case" }
             if ($case -eq 'tools') {
                 Click-Tool $selector 'Arrow'
-                [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,320,210,425,250)
+                [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector,320,210,425,250)
                 Click-Tool $selector 'Rectangle'
-                [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,210,254,360,286)
+                [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector,210,254,360,286)
                 Click-Tool $selector 'Ellipse'
-                [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,370,258,505,302)
+                [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector,370,258,505,302)
                 Click-Tool $selector 'Highlighter'
                 Click-Tool $selector 'Amber'
-                [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,190,300,460,303)
+                [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector,190,300,460,303)
                 Click-Tool $selector 'Undo'
                 Click-Tool $selector 'Redo'
             }
@@ -172,22 +172,22 @@ foreach ($case in $(if ($HoverOnly) { @('hover-source') } else { @('tools','mult
                 $end = if ($case -eq 'ctrl-once') { 7 } else { 8 }
                 for ($i=1; $i -lt $end; $i++) {
                     $x = 175 + 45 * $i
-                    [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,($x+6),210,($x+28),234)
+                    [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector,($x+6),210,($x+28),234)
                 }
             } elseif ($multiple) {
                 Click-Tool $selector 'Arrow'
                 Click-Tool $selector 'Blue'
-                [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector,190,280,445,302)
+                [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector,190,280,445,302)
                 Click-Tool $selector 'Undo'
                 Click-Tool $selector 'Redo'
             }
             if ($case -eq 'changed-source') { $fixture.ChangeVisibleText() }
             if ($case -eq 'tools') { Save-Toolbar 'native' }
             if ($case -eq 'hover-source') {
-                [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(210,215) | Out-Null
-                [ZommiWindowsAcceptanceNative]::ConfirmSelection($selector)
+                [FocaletWindowsAcceptanceNative]::SetPhysicalCursorPos(210,215) | Out-Null
+                [FocaletWindowsAcceptanceNative]::ConfirmSelection($selector)
             }
-            elseif ($case -eq 'cancel') { [ZommiWindowsAcceptanceNative]::CancelSelection($selector) | Out-Null }
+            elseif ($case -eq 'cancel') { [FocaletWindowsAcceptanceNative]::CancelSelection($selector) | Out-Null }
             else { Click-Tool $selector 'Attach' }
         }
         if ($case -eq 'cancel') {

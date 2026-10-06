@@ -1,5 +1,5 @@
 name: Feature request
-description: Describe a task Zommi could support better.
+description: Describe a task Focalet could support better.
 body:
   - type: textarea
     id: task

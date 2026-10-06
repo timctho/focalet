@@ -16,17 +16,17 @@ import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-HOST = Path(os.environ.get('ZOMMI_TEST_CORE_HOST', ROOT / 'target/debug/zommi-core-host'))
+HOST = Path(os.environ.get('FOCALET_TEST_CORE_HOST', ROOT / 'target/debug/focalet-core-host'))
 
 
 @unittest.skipUnless(sys.platform.startswith('linux') and shutil.which('node'), 'Linux fixture host required')
 class WslStartupTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix='zommi wsl startup-')
+        self.temporary = tempfile.TemporaryDirectory(prefix='focalet wsl startup-')
         self.root = Path(self.temporary.name)
         self.bin = self.root / 'bin'
         self.bin.mkdir()
-        self.env = {k: v for k, v in os.environ.items() if not k.startswith('ZOMMI_')}
+        self.env = {k: v for k, v in os.environ.items() if not k.startswith('FOCALET_')}
         self.env.update(LOCALAPPDATA=str(self.root / 'appdata'),
                         PATH=str(self.bin) + os.pathsep + os.environ['PATH'])
         self.program('wslpath', 'import sys\nprint(sys.argv[-1])\n')
@@ -49,7 +49,7 @@ os.execvp(args[0], args)
         path.chmod(0o755)
 
     def endpoints(self):
-        return list((self.root / 'appdata/Zommi/wsl-relay').glob('v*/endpoints/*.json'))
+        return list((self.root / 'appdata/Focalet/wsl-relay').glob('v*/endpoints/*.json'))
 
     def endpoint(self):
         paths = self.endpoints()
@@ -91,7 +91,7 @@ os.execvp(args[0], args)
                 continue
             try:
                 command = (process / 'cmdline').read_bytes()
-                if str(self.root).encode() in command and b'zommi-wsl-relay.js' in command:
+                if str(self.root).encode() in command and b'focalet-wsl-relay.js' in command:
                     os.kill(int(process.name), signal.SIGKILL)
             except (OSError, ProcessLookupError):
                 pass

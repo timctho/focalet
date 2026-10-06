@@ -12,8 +12,8 @@ class RuntimeEnvironmentTests(unittest.TestCase):
         kept = {
             "HOME": "/home/example", "PATH": "/bin", "CODEX_HOME": "/home/example/.codex",
             "OPENAI_API_KEY": "fixture-provider-key", "AWS_SESSION_TOKEN": "fixture-token",
-            "ZOMMI_CODEX_HOME": "/home/example/.codex", "ZOMMI_RUNTIME_CHILD": "1",
-            "ZOMMI_FAKE_CODEX_HOME": "/fixture", "ZOMMI_FAKE_CODEX_HOME_LOG": "/fixture/log",
+            "FOCALET_CODEX_HOME": "/home/example/.codex", "FOCALET_RUNTIME_CHILD": "1",
+            "FOCALET_FAKE_CODEX_HOME": "/fixture", "FOCALET_FAKE_CODEX_HOME_LOG": "/fixture/log",
         }
         parent = {
             "DESKTOP_HOST_AGENT_HOOK_ENDPOINT": "http://127.0.0.1:1",

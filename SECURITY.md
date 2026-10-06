@@ -2,8 +2,8 @@
 
 ## Report a vulnerability privately
 
-Use [GitHub's private vulnerability reporting](https://github.com/timctho/zommi/security/advisories/new).
-Include the affected Zommi version and operating system, a minimal reproduction,
+Use [GitHub's private vulnerability reporting](https://github.com/timctho/focalet/security/advisories/new).
+Include the affected Focalet version and operating system, a minimal reproduction,
 the expected security boundary, and the impact. Remove credentials, private
 transcripts, personal screenshots and browser profile data from attachments.
 
@@ -19,7 +19,7 @@ as separate security branches.
 
 ## Relevant boundaries
 
-Zommi sends reviewed context to the agent selected by the user. Agent tools,
+Focalet sends reviewed context to the agent selected by the user. Agent tools,
 providers and enabled permissions determine what happens after submission.
 Full access is enabled by default; users can disable it in App settings.
 See the [privacy policy](docs/privacy.md), [runtime permissions](docs/install.md#2-choose-the-agent-you-already-have),

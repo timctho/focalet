@@ -6,7 +6,7 @@ import tempfile
 import threading
 import unittest
 
-SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/stop-zommi-relays.ps1'
+SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/stop-focalet-relays.ps1'
 
 
 @unittest.skipUnless(os.name == 'nt', 'Windows PowerShell 5.1')
@@ -23,8 +23,8 @@ class WindowsRelayResetTests(unittest.TestCase):
 
     def test_missing_cache_and_stale_corrupt_record_need_no_wsl(self):
         for architecture in ('System32', 'SysWOW64'):
-            with self.subTest(architecture=architecture), tempfile.TemporaryDirectory(prefix='zommi reset ') as directory:
-                data = Path(directory) / 'Zommi'
+            with self.subTest(architecture=architecture), tempfile.TemporaryDirectory(prefix='focalet reset ') as directory:
+                data = Path(directory) / 'Focalet'
                 missing = self.run_cleanup(data, architecture)
                 self.assertEqual(missing.returncode, 0, missing.stderr)
                 endpoint = data / 'wsl-relay/v4/endpoints/fixture.json'
@@ -37,8 +37,8 @@ class WindowsRelayResetTests(unittest.TestCase):
     def test_active_corrupt_record_keeps_data_and_reports_stage_without_token(self):
         secret = 'fixture-private-token-must-not-be-displayed'
         for architecture in ('System32', 'SysWOW64'):
-            with self.subTest(architecture=architecture), tempfile.TemporaryDirectory(prefix='zommi reset ') as directory:
-                data = Path(directory) / 'Zommi'
+            with self.subTest(architecture=architecture), tempfile.TemporaryDirectory(prefix='focalet reset ') as directory:
+                data = Path(directory) / 'Focalet'
                 endpoint = data / 'wsl-relay/v4/endpoints/fixture.json'
                 endpoint.parent.mkdir(parents=True)
                 endpoint.write_text('invalid active cache')

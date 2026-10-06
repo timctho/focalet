@@ -92,7 +92,7 @@ class ModelHandler(BaseHTTPRequestHandler):
 
 class RealCliTests(unittest.TestCase):
     def setUp(self):
-        directory = tempfile.TemporaryDirectory(prefix='zommi-real-cli-')
+        directory = tempfile.TemporaryDirectory(prefix='focalet-real-cli-')
         self.addCleanup(directory.cleanup)
         self.path = Path(directory.name)
         self.workspace = self.path / 'workspace'
@@ -105,10 +105,10 @@ class RealCliTests(unittest.TestCase):
         isolated_home = self.path / 'home'
         isolated_home.mkdir()
         self.env.update(HOME=str(isolated_home), USERPROFILE=str(isolated_home), XDG_CONFIG_HOME=str(isolated_home / '.config'))
-        self.env.update(ZOMMI_RUNTIME_DISCOVERY_MODE='configured-only',
-                        ZOMMI_CORE_STATE_PATH=str(self.path / 'binding.json'),
-                        ZOMMI_RUNTIME_OVERRIDES_PATH=str(self.path / 'overrides.json'),
-                        ZOMMI_RUNTIME_DISCOVERY_CACHE_PATH=str(self.path / 'discovery.json'))
+        self.env.update(FOCALET_RUNTIME_DISCOVERY_MODE='configured-only',
+                        FOCALET_CORE_STATE_PATH=str(self.path / 'binding.json'),
+                        FOCALET_RUNTIME_OVERRIDES_PATH=str(self.path / 'overrides.json'),
+                        FOCALET_RUNTIME_DISCOVERY_CACHE_PATH=str(self.path / 'discovery.json'))
         self.serial = 0
 
     def connect(self, runtime, preferred=None, *, full_access=False):
@@ -156,8 +156,8 @@ class RealCliTests(unittest.TestCase):
         ]))
         self.env.update(GEMINI_CLI_HOME=str(home), GEMINI_CLI_NO_RELAUNCH='1',
                         GEMINI_API_KEY='fixture-not-a-real-key', GOOGLE_GEMINI_BASE_URL='http://127.0.0.1:9',
-                        ZOMMI_GEMINI_COMMAND=shutil.which('node'),
-                        ZOMMI_GEMINI_ARGS_JSON=json.dumps([str(package / 'bundle/gemini.js'), '--acp', '--fake-responses-non-strict', str(fixture), '--model', 'gemini-2.5-flash']))
+                        FOCALET_GEMINI_COMMAND=shutil.which('node'),
+                        FOCALET_GEMINI_ARGS_JSON=json.dumps([str(package / 'bundle/gemini.js'), '--acp', '--fake-responses-non-strict', str(fixture), '--model', 'gemini-2.5-flash']))
         connection = self.connect('gemini')
         self.assertTrue(connection['models'])
         self.assertIn('input.image.v1', connection['capabilities'])
@@ -206,8 +206,8 @@ class RealCliTests(unittest.TestCase):
         self.env.update(CLAUDE_CONFIG_DIR=str(self.path / 'claude'),
                         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC='1', DISABLE_AUTOUPDATER='1',
                         ANTHROPIC_API_KEY='fixture-not-a-real-key', ANTHROPIC_BASE_URL=f'http://127.0.0.1:{server.server_port}',
-                        ZOMMI_CLAUDE_COMMAND=str(package / 'bin/claude.exe'),
-                        ZOMMI_CLAUDE_ARGS_JSON=json.dumps(['--print','--verbose','--input-format','stream-json','--output-format','stream-json',
+                        FOCALET_CLAUDE_COMMAND=str(package / 'bin/claude.exe'),
+                        FOCALET_CLAUDE_ARGS_JSON=json.dumps(['--print','--verbose','--input-format','stream-json','--output-format','stream-json',
                             '--include-partial-messages','--permission-prompt-tool','stdio','--setting-sources','','--strict-mcp-config','--mcp-config','{"mcpServers":{}}']))
         connection = self.connect('claude')
         self.assertTrue(connection['models'])
@@ -271,8 +271,8 @@ class RealCliTests(unittest.TestCase):
         self.env.update(CLAUDE_CONFIG_DIR=str(self.path / 'claude'),
                         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC='1', DISABLE_AUTOUPDATER='1',
                         ANTHROPIC_API_KEY='fixture-not-a-real-key', ANTHROPIC_BASE_URL=f'http://127.0.0.1:{server.server_port}',
-                        ZOMMI_CLAUDE_COMMAND=shutil.which('node'),
-                        ZOMMI_CLAUDE_ARGS_JSON=json.dumps([str(package / 'cli.js'),
+                        FOCALET_CLAUDE_COMMAND=shutil.which('node'),
+                        FOCALET_CLAUDE_ARGS_JSON=json.dumps([str(package / 'cli.js'),
                             '--print','--verbose','--input-format','stream-json','--output-format','stream-json',
                             '--include-partial-messages','--permission-prompt-tool','stdio']))
         connection = self.connect('claude')
@@ -304,8 +304,8 @@ class RealCliTests(unittest.TestCase):
                          'A legacy resume must not fork or modify saved conversations')
         self.core.close()
         self.env.update(
-            ZOMMI_CLAUDE_COMMAND=str(PACKAGES / '@anthropic-ai/claude-code/bin/claude.exe'),
-            ZOMMI_CLAUDE_ARGS_JSON=json.dumps([
+            FOCALET_CLAUDE_COMMAND=str(PACKAGES / '@anthropic-ai/claude-code/bin/claude.exe'),
+            FOCALET_CLAUDE_ARGS_JSON=json.dumps([
                 '--print', '--verbose', '--input-format', 'stream-json', '--output-format', 'stream-json',
                 '--include-partial-messages', '--permission-prompt-tool', 'stdio',
                 '--setting-sources', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}']))

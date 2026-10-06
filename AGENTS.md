@@ -1,20 +1,20 @@
 # Working on Focalet
 
 Focalet has a standalone Windows Capture tool and a Flutter Desktop app with a
-Rust agent broker. They share capture libraries; existing paths retain Zommi names.
+Rust agent broker. They share capture libraries and use Focalet identifiers throughout.
 Start with [CONTRIBUTING.md](CONTRIBUTING.md) for setup and validation, and the
 [component map](docs/desktop-reference.md) for source locations.
 
 ## Find the right component
 
-- Desktop UI, sessions, drafts and attachments: `src/Zommi.Flutter/lib`.
-- Runtime discovery, adapters and context handoff: `crates/zommi-core`.
-- JSONL broker and protocol fixtures: `crates/zommi-core-host`.
-- Capture tray, hotkeys and ordered paste: `src/Zommi.CaptureTool`.
-- Shared Windows capture: `src/Zommi.Capture.Windows` and `src/Zommi.Capture.Core`.
-- Desktop Windows JSONL adapter: `src/Zommi.Windows`.
-- Ubuntu capture: `crates/zommi-linux-capture` and `src/Zommi.Gnome`.
-- macOS capture: `src/Zommi.Flutter/macos/Runner`.
+- Desktop UI, sessions, drafts and attachments: `src/Focalet.Flutter/lib`.
+- Runtime discovery, adapters and context handoff: `crates/focalet-core`.
+- JSONL broker and protocol fixtures: `crates/focalet-core-host`.
+- Capture tray, hotkeys and ordered paste: `src/Focalet.CaptureTool`.
+- Shared Windows capture: `src/Focalet.Capture.Windows` and `src/Focalet.Capture.Core`.
+- Desktop Windows JSONL adapter: `src/Focalet.Windows`.
+- Ubuntu capture: `crates/focalet-linux-capture` and `src/Focalet.Gnome`.
+- macOS capture: `src/Focalet.Flutter/macos/Runner`.
 - Packaging and publication: `scripts/`; workflows: `.github/workflows/`.
 
 ## Validate a change
