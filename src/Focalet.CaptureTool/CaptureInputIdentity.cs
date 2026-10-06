@@ -32,7 +32,7 @@ internal sealed class CaptureInputIdentity
         var id = Id(editor);
         Replacement? replacement = null;
         var shape = Shape.Read(editor);
-        if (shape.Type == ControlType.Edit && (shape.AutomationId.Length > 0 || shape.ClassName.Length > 0))
+        if (shape.Type == ControlType.Edit)
         {
             var parent = automation.TreeWalkerFactory.GetRawViewWalker().GetParent(editor);
             if (parent is not null && parent.Properties.ControlType.ValueOrDefault is not (ControlType.Document or ControlType.Window))

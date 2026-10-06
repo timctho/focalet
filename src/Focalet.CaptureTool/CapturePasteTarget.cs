@@ -140,7 +140,7 @@ internal sealed record CapturePasteTarget(nint Window, nint Focus, uint ProcessI
 
     private static Input Key(ushort value, bool up = false) => new()
     {
-        Type = 1, Data = new InputData { Keyboard = new KeyboardInput { Key = value, Flags = up ? 2u : 0u } },
+        Type = 1, Data = new InputData { Keyboard = new KeyboardInput { Key = value, Flags = up ? 2u : 0u, Extra = CapturePasteActivity.PasteTag } },
     };
 
     [StructLayout(LayoutKind.Sequential)]

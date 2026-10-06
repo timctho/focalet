@@ -56,7 +56,8 @@ using fresh accessibility state after each paste. A rich editor rebuilt in place
 can continue only when it uniquely replaces the original editor in the same
 container. Capture never moves the caret or sends an accepted image again.
 A different input, container, window or replaced clipboard still stops the
-sequence. Presses while pasting do not queue another batch; briefly held shortcut
+sequence. Typing, navigating, clicking or scrolling during paste also stops it.
+Presses while pasting do not queue another batch; briefly held shortcut
 keys pause the current sequence until released.
 
 ## Menu and clipboard
