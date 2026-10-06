@@ -279,7 +279,10 @@ class Capture(Gtk.Application):
     def settle(self):
         elapsed = time.monotonic()-self.sent_at
         if elapsed < .04: return True  # Let injected modifier-up reach Mutter.
-        if not self.clipboard.owned or not self.ready():
+        owned, ready = self.clipboard.owned, self.ready()
+        if not owned or not ready:
+            if os.environ.get('FOCALET_CAPTURE_DIAGNOSTICS') == '1':
+                print(f'Paste guard: owned={owned}, ready={ready}, inputChanged={self.focus_changed}', flush=True)
             self.stop('Paste stopped. Focus the input and press Alt+A again.'); return False
         minimum = (3 if self.preferences.get('slowerImages') else .5) if self.image_step else .15
         read_at = self.clipboard.read_at

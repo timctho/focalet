@@ -20,7 +20,7 @@ events = []
 clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
 def pasted(widget, event):
     if event.keyval not in (Gdk.KEY_v, Gdk.KEY_V) or not event.state & Gdk.ModifierType.CONTROL_MASK: return False
-    def targets(board, atoms, _):
+    def targets(board, atoms, *_):
         formats = [a.name() for a in atoms]
         if 'image/png' in formats and not text_only:
             def image_received(board, selection, _):
