@@ -36,6 +36,49 @@ struct MacRegionSelectionState {
   }
 }
 
+
+struct MacCaptureStroke {
+  let tool: String
+  var points: [CGPoint]
+  let color: NSColor
+  func draw() {
+    guard let start = points.first, let end = points.last else { return }
+    color.setStroke()
+    let path: NSBezierPath
+    let rect = CGRect(x: min(start.x, end.x), y: min(start.y, end.y), width: abs(end.x-start.x), height: abs(end.y-start.y))
+    if tool == "Box" { path = NSBezierPath(rect: rect) }
+    else if tool == "Ellipse" { path = NSBezierPath(ovalIn: rect) }
+    else {
+      path = NSBezierPath(); path.move(to: start)
+      if tool == "Pen" { for point in points.dropFirst() { path.line(to: point) } }
+      else {
+        path.line(to: end)
+        let angle = atan2(end.y-start.y, end.x-start.x)
+        for offset in [-CGFloat.pi/6, CGFloat.pi/6] {
+          path.move(to: end); path.line(to: CGPoint(x: end.x-14*cos(angle+offset), y: end.y-14*sin(angle+offset)))
+        }
+      }
+    }
+    path.lineWidth = 3; path.lineCapStyle = .round; path.lineJoinStyle = .round; path.stroke()
+  }
+  func metadata(_ region: CGRect, _ width: Int, _ height: Int) -> [String: Any] {
+    ["tool": tool.lowercased(), "coordinateSpace": "image-pixels",
+     "points": points.map { ["x": ($0.x-region.minX)*CGFloat(width)/region.width, "y": ($0.y-region.minY)*CGFloat(height)/region.height] }]
+  }
+  static func render(_ crop: CGImage, _ region: CGRect, _ strokes: [MacCaptureStroke]) throws -> Data {
+    guard let context = CGContext(data: nil, width: crop.width, height: crop.height, bitsPerComponent: 8,
+      bytesPerRow: crop.width*4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { throw MacRegionSelectionError.captureUnavailable }
+    context.draw(crop, in: CGRect(x: 0, y: 0, width: crop.width, height: crop.height))
+    context.translateBy(x: 0, y: CGFloat(crop.height)); context.scaleBy(x: CGFloat(crop.width)/region.width, y: -CGFloat(crop.height)/region.height)
+    context.translateBy(x: -region.minX, y: -region.minY)
+    NSGraphicsContext.saveGraphicsState(); NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: true)
+    for stroke in strokes { stroke.draw() }
+    NSGraphicsContext.restoreGraphicsState()
+    guard let image = context.makeImage(), let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { throw MacRegionSelectionError.captureUnavailable }
+    return png
+  }
+}
+
 struct MacScreenSnapshot {
   let screen: NSScreen
   let image: CGImage
@@ -53,6 +96,13 @@ enum MacRegionSelectionError: LocalizedError {
 /// into attachments, and every box refers to the same observed screen state.
 @MainActor
 final class MacRegionSelector {
+  let actionTitle: String
+  private let captureContext: Bool
+  private var sourceWindows: [[String: Any]] = []
+  private(set) var drawings: [Int: [MacCaptureStroke]] = [:]
+  init(actionTitle: String = "Attach", captureContext: Bool = false) {
+    self.actionTitle = actionTitle; self.captureContext = captureContext
+  }
   private var snapshots: [MacScreenSnapshot] = []
   private var windows: [MacRegionOverlayWindow] = []
   private var completion: ((Result<[[String: Any]], Error>) -> Void)?
@@ -67,7 +117,10 @@ final class MacRegionSelector {
     ) { [weak self] _ in Task { @MainActor in self?.cancel() } }
     Task {
       do {
+        let before = captureContext ? MacRegionCaptureBackend.windows() : []
         let captured = try await Self.captureScreens()
+        sourceWindows = MacRegionCaptureBackend.stableWindows(before: before,
+          after: captureContext ? MacRegionCaptureBackend.windows() : [])
         guard self.completion != nil else { return }
         snapshots = captured
         showOverlays()
@@ -158,7 +211,15 @@ final class MacRegionSelector {
     refresh()
   }
 
-  func undo() { state.undo(); refresh() }
+  func addStroke(_ stroke: MacCaptureStroke, region: Int) {
+    guard state.regions.indices.contains(region), (drawings[region]?.count ?? 0) < 200 else { return }
+    drawings[region, default: []].append(stroke); refresh()
+  }
+  func undo() {
+    if let last = state.regions.indices.last, drawings[last]?.isEmpty == false { drawings[last]?.removeLast() }
+    else { drawings.removeValue(forKey: state.regions.count - 1); state.undo() }
+    refresh()
+  }
   func cancel() { finish(.success([])) }
 
   private func refresh() {
@@ -168,7 +229,7 @@ final class MacRegionSelector {
   func attach() {
     guard !state.regions.isEmpty else { return }
     do {
-      let results = try state.regions.map { region -> [String: Any] in
+      let results = try state.regions.enumerated().map { index, region -> [String: Any] in
         let snapshot = snapshots[region.displayIndex]
         let pixelRect = MacRegionSelectionState.pixelRect(region.rect, screenSize: snapshot.screen.frame.size,
                                                          imageSize: CGSize(width: snapshot.image.width, height: snapshot.image.height))
@@ -191,11 +252,17 @@ final class MacRegionSelector {
         ]
         let alignment: [String: Any] = ["status": "image-only", "screenBounds": bounds,
                                        "mapping": mapping, "reason": "No aligned text was exposed for this region."]
-        return ["dataUrl": "data:image/png;base64,\(png.base64EncodedString())",
+        let strokes = drawings[index] ?? []
+        let rendered = try MacCaptureStroke.render(crop, region.rect, strokes)
+        var result: [String: Any] = ["dataUrl": "data:image/png;base64,\(rendered.base64EncodedString())",
+                "originalDataUrl": "data:image/png;base64,\(png.base64EncodedString())",
                 "bounds": bounds, "alignment": alignment,
                 "snapshot": ["region": alignment,
                              "source": ["platform": "macos", "hostName": Host.current().localizedName ?? "Mac"],
-                             "application": "Screen"]]
+                             "application": "Screen",
+                             "annotations": strokes.map { $0.metadata(region.rect, crop.width, crop.height) }]]
+        result["candidateSource"] = MacRegionCaptureBackend.sourceAt(sourceWindows, MacRegionCaptureBackend.rect(bounds))
+        return result
       }
       finish(.success(results))
     } catch { finish(.failure(error)) }
@@ -209,6 +276,7 @@ final class MacRegionSelector {
     for window in windows { window.orderOut(nil); window.close() }
     windows.removeAll()
     snapshots.removeAll()
+    sourceWindows.removeAll(); drawings.removeAll()
     NSCursor.arrow.set()
     trace("closed")
     callback(result)
@@ -234,6 +302,12 @@ private final class MacRegionOverlayView: NSView {
   private weak var selector: MacRegionSelector?
   private var anchor: CGPoint?
   private var dragged: CGRect?
+  private var tool = "Select"
+  private var stroke: MacCaptureStroke?
+  private var drawingRegion: Int?
+  private var color = NSColor.systemRed
+  private let tools = NSSegmentedControl(labels: ["Select", "Pen", "Arrow", "Box", "Ellipse"], trackingMode: .selectOne, target: nil, action: nil)
+  private let colors = NSSegmentedControl(labels: ["Red", "Blue", "Yellow"], trackingMode: .selectOne, target: nil, action: nil)
   private let hint = NSTextField(labelWithString: "")
   private let attachButton = NSButton(title: "Attach", target: nil, action: nil)
   private let undoButton = NSButton(title: "Undo", target: nil, action: nil)
@@ -258,7 +332,10 @@ private final class MacRegionOverlayView: NSView {
     undoButton.target = self; undoButton.action = #selector(undo)
     for button in [attachButton, undoButton, cancelButton] { button.bezelStyle = .rounded }
     hint.font = .systemFont(ofSize: 13)
-    let stack = NSStackView(views: [hint, undoButton, cancelButton, attachButton])
+    attachButton.title = selector.actionTitle
+    tools.target = self; tools.action = #selector(changeTool); tools.selectedSegment = 0
+    colors.target = self; colors.action = #selector(changeColor); colors.selectedSegment = 0
+    let stack = NSStackView(views: [hint, tools, colors, undoButton, cancelButton, attachButton])
     stack.spacing = 12
     stack.translatesAutoresizingMaskIntoConstraints = false
     toolbar.addSubview(stack)
@@ -282,7 +359,7 @@ private final class MacRegionOverlayView: NSView {
 
   func refresh() {
     let count = selector?.state.regions.count ?? 0
-    hint.stringValue = count == 0 ? "Drag boxes · Enter to attach · Esc to cancel" : "\(count)/8 selected · Drag another box · Enter to attach"
+    hint.stringValue = count == 0 ? "Drag boxes · Enter to finish · Esc to cancel" : "\(count)/8 selected · Control adds regions"
     attachButton.isEnabled = count > 0
     undoButton.isEnabled = count > 0
     needsDisplay = true
@@ -301,15 +378,29 @@ private final class MacRegionOverlayView: NSView {
     }
   }
 
+  @objc private func changeTool() { tool = tools.label(forSegment: tools.selectedSegment) ?? "Select" }
+  @objc private func changeColor() { color = [NSColor.systemRed, .systemBlue, .systemYellow][colors.selectedSegment] }
+  override func flagsChanged(with event: NSEvent) {
+    if event.modifierFlags.contains(.control) { tool = "Select"; tools.selectedSegment = 0 }
+  }
   override func mouseDown(with event: NSEvent) {
     window?.makeFirstResponder(self)
     anchor = convert(event.locationInWindow, from: nil)
     dragged = nil
+    if event.modifierFlags.contains(.control) { tool = "Select"; tools.selectedSegment = 0 }
+    if tool != "Select", let start = anchor, let regions = selector?.state.regions,
+       let index = regions.indices.reversed().first(where: { regions[$0].displayIndex == displayIndex && regions[$0].rect.contains(start) }) {
+      drawingRegion = index; stroke = MacCaptureStroke(tool: tool, points: [start], color: color)
+    } else if tool != "Select" { anchor = nil }
   }
 
   override func mouseDragged(with event: NSEvent) {
     guard let start = anchor else { return }
     let end = convert(event.locationInWindow, from: nil)
+    if stroke != nil {
+      if stroke!.points.count < 4000 { stroke!.points.append(end) }
+      needsDisplay = true; return
+    }
     dragged = CGRect(x: min(start.x, end.x), y: min(start.y, end.y),
                      width: abs(end.x - start.x), height: abs(end.y - start.y)).intersection(bounds)
     needsDisplay = true
@@ -319,7 +410,10 @@ private final class MacRegionOverlayView: NSView {
     guard let start = anchor else { return }
     anchor = nil
     dragged = nil
-    selector?.append(displayIndex: displayIndex, start: start, end: convert(event.locationInWindow, from: nil))
+    if var finished = stroke, let index = drawingRegion {
+      finished.points.append(convert(event.locationInWindow, from: nil)); selector?.addStroke(finished, region: index)
+    } else { selector?.append(displayIndex: displayIndex, start: start, end: convert(event.locationInWindow, from: nil)) }
+    stroke = nil; drawingRegion = nil; needsDisplay = true
   }
 
   override func rightMouseDown(with event: NSEvent) { cancel() }
@@ -337,6 +431,8 @@ private final class MacRegionOverlayView: NSView {
       NSGraphicsContext.saveGraphicsState()
       NSBezierPath(rect: region.rect).addClip()
       drawSnapshot()
+      for drawing in selector?.drawings[index] ?? [] { drawing.draw() }
+      if drawingRegion == index { stroke?.draw() }
       NSGraphicsContext.restoreGraphicsState()
       drawBorder(region.rect, color: .systemCyan)
       let label = CGRect(x: region.rect.minX, y: max(0, region.rect.minY - 24), width: 28, height: 24)
@@ -378,7 +474,7 @@ enum MacRegionCaptureBackend {
     return CGRect(x: screen.frame.minX, y: top - screen.frame.maxY,
                   width: screen.frame.width, height: screen.frame.height)
   }
-  private static func windows() -> [[String: Any]] {
+  static func windows() -> [[String: Any]] {
     let entries = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
     return entries.compactMap { entry in
       guard let pid = entry[kCGWindowOwnerPID as String] as? Int32,

@@ -17,6 +17,8 @@ ASSETS = {
     ("linux", "x64"): "Focalet-Ubuntu-amd64.deb",
 }
 
+CAPTURE_ASSETS = {target: name.replace("Focalet-", "Focalet-Capture-", 1) for target, name in ASSETS.items()}
+
 PROFILES = {
     "windows": {("windows", "x64")},
     "ubuntu": {("linux", "x64")},
@@ -38,8 +40,9 @@ def validate_tag(tag: str, version: str, *, stable: bool = False) -> None:
         raise ValueError("A stable release needs the exact application version tag without a suffix.")
 
 
-def collect_assets(metadata: list[Path], commit: str, *, windows_only: bool = False,
-                   platforms: str | None = None, tag: str | None = None) -> tuple[list[Path], dict]:
+def _collect_product_assets(metadata: list[Path], commit: str, *, windows_only: bool = False,
+                   platforms: str | None = None, tag: str | None = None, product: str = "Focalet") -> tuple[list[Path], dict]:
+    names = ASSETS if product == "Focalet" else CAPTURE_ASSETS
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ValueError("A full source commit is required.")
     paths, records, targets = [], [], set()
@@ -49,9 +52,9 @@ def collect_assets(metadata: list[Path], commit: str, *, windows_only: bool = Fa
         target = (value.get("platform"), value.get("architecture"))
         if target not in ASSETS or target in targets:
             raise ValueError("Unknown or duplicate installer target.")
-        if value.get("product") != "Focalet" or value.get("gitCommit") != commit:
+        if value.get("product") != product or value.get("gitCommit") != commit:
             raise ValueError("Installer source revision does not match this release.")
-        if value.get("file") != ASSETS[target]:
+        if value.get("file") != names[target]:
             raise ValueError("Unexpected installer filename.")
         if target[0] == "linux" and tag is not None and value.get("releaseTag") != tag:
             raise ValueError("Ubuntu installer version does not match the release tag.")
@@ -60,7 +63,7 @@ def collect_assets(metadata: list[Path], commit: str, *, windows_only: bool = Fa
         if version is not None and value.get("version") != version:
             raise ValueError("Installer versions differ.")
         version = value.get("version")
-        asset = path.parent / ASSETS[target]
+        asset = path.parent / names[target]
         digest = hashlib.sha256(asset.read_bytes()).hexdigest()
         if digest != value.get("sha256"):
             raise ValueError(f"Installer checksum mismatch: {asset.name}")
@@ -77,6 +80,27 @@ def collect_assets(metadata: list[Path], commit: str, *, windows_only: bool = Fa
     elif not windows_only and not {("windows", "x64"), ("macos", "arm64")} <= targets:
         raise ValueError("A release needs Windows x64 and Mac Apple Silicon installers.")
     return paths, {"product": "Focalet", "version": version, "gitCommit": commit, "assets": records}
+
+
+def collect_assets(metadata: list[Path], commit: str, *, windows_only: bool = False,
+                   platforms: str | None = None, tag: str | None = None, include_capture: bool = False) -> tuple[list[Path], dict]:
+    if not include_capture:
+        return _collect_product_assets(metadata, commit, windows_only=windows_only, platforms=platforms, tag=tag)
+    groups = {"Focalet": [], "Focalet Capture": []}
+    for path in metadata:
+        product = json.loads(path.read_text(encoding="utf-8")).get("product")
+        if product not in groups: raise ValueError("Unknown installer product.")
+        groups[product].append(path)
+    paths, manifests = [], []
+    for product, selected in groups.items():
+        assets, manifest = _collect_product_assets(selected, commit, windows_only=windows_only,
+            platforms=platforms, tag=tag, product=product)
+        paths.extend(assets)
+        for record in manifest["assets"]: record["product"] = product
+        manifests.append(manifest)
+    if manifests[0]["version"] != manifests[1]["version"]:
+        raise ValueError("Desktop and Capture installer versions differ.")
+    return paths, {**manifests[0], "assets": [a for m in manifests for a in m["assets"]]}
 
 
 def gh(*arguments: str) -> str:
@@ -128,13 +152,14 @@ def main() -> int:
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--windows-only", action="store_true", help="Publish a preview with only the accepted Windows x64 installer")
     selection.add_argument("--platforms", choices=PROFILES, help="Require this exact set of installers")
+    parser.add_argument("--include-capture", action="store_true", help="Require both Desktop and Capture for every selected platform")
     parser.add_argument("--stable", action="store_true", help="Publish a stable version as the latest release")
     parser.add_argument("--publish", action="store_true", help="Upload and publish a preview release after validation")
     args = parser.parse_args()
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", args.repository):
         raise ValueError("Expected an owner/repository destination.")
     assets, manifest = collect_assets(args.metadata, args.expected_commit, windows_only=args.windows_only,
-                                      platforms=args.platforms, tag=args.tag)
+                                      platforms=args.platforms, tag=args.tag, include_capture=args.include_capture)
     validate_tag(args.tag, manifest["version"], stable=args.stable)
     args.output.mkdir(parents=True, exist_ok=True)
     manifest_path = args.output / "focalet-release.json"
@@ -142,22 +167,22 @@ def main() -> int:
     notes = args.output / "release-notes.md"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     checksums.write_text("".join(f"{item['sha256']}  {item['file']}\n" for item in manifest["assets"]), encoding="ascii")
-    lines = [f"Focalet {args.tag}", "", "| Computer | Download |", "| --- | --- |"]
+    lines = [f"Focalet {args.tag}", "", "| Product | Computer | Download |", "| --- | --- | --- |"]
     for item in manifest["assets"]:
         label = ("Windows 10/11 (x64)" if item["platform"] == "windows" else
                  "Ubuntu 24.04 LTS (x64)" if item["platform"] == "linux" else
                  "Mac Apple Silicon" if item["architecture"] == "arm64" else "Mac Intel")
-        lines.append(f"| {label} | [{item['file']}](https://github.com/{args.repository}/releases/download/{args.tag}/{item['file']}) |")
+        lines.append(f"| {item.get('product', 'Focalet')} | {label} | [{item['file']}](https://github.com/{args.repository}/releases/download/{args.tag}/{item['file']}) |")
     selected = {item["platform"] for item in manifest["assets"]}
     instructions = []
     if "windows" in selected:
         instructions.append("Windows: run Setup.")
     if "macos" in selected:
-        instructions.append("Mac: open the DMG and drag Focalet.app to Applications.")
+        instructions.append("Mac: open the DMG and drag the app to Applications.")
     if "linux" in selected:
-        instructions.append("Ubuntu: run `sudo apt install ./Focalet-Ubuntu-amd64.deb`, then open Focalet from the app menu.")
+        instructions.append("Ubuntu: run `sudo apt install ./Focalet-Ubuntu-amd64.deb` for Desktop or `sudo apt install ./Focalet-Capture-Ubuntu-amd64.deb` for Capture, then open the app from the applications menu.")
     lines += ["", " ".join(instructions),
-              "Choose your installed agent runtime in the first-launch setup.", "",
+              "Capture: Shift+Alt+A selects regions; focus your input and press Alt+A to paste (Option+A on Mac). Desktop: choose your installed agent runtime in first-launch setup.", "",
               "See the exact signing status in focalet-release.json; Windows/macOS may require opening confirmation.",
               "See the repository README for installation instructions. SHA256SUMS.txt verifies the downloads.", "",
               f"Source revision: `{args.expected_commit}`. Build identity and signing status: `focalet-release.json`."]

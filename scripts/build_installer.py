@@ -30,13 +30,13 @@ def nsis_string(value: str) -> str:
     return value.replace("$", "$$").replace('"', '$\\"')
 
 
-def windows_installer(package: Path, output: Path, manifest: dict, compiler: str) -> Path:
+def windows_installer(package: Path, output: Path, manifest: dict, compiler: str, *, capture: bool = False) -> Path:
     if manifest["architecture"] != "x64":
         raise ValueError("The Windows installer currently supports x64 packages.")
     version = manifest["version"]
     if not re.fullmatch(r"\d+\.\d+\.\d+", version):
         raise ValueError("Installer version must have three numeric components.")
-    asset = output / "Focalet-Setup-x64.exe"
+    asset = output / ("Focalet-Capture-Setup-x64.exe" if capture else "Focalet-Setup-x64.exe")
     with tempfile.TemporaryDirectory(prefix="focalet-nsis-") as temporary:
         temp = Path(temporary)
         install, uninstall, directories = [], [], set()
@@ -59,42 +59,44 @@ def windows_installer(package: Path, output: Path, manifest: dict, compiler: str
             "APP_VERSION": version,
             "APP_DISPLAY_VERSION": f"{version}+{manifest['gitCommit'][:8]}",
             "APP_ICON_RELATIVE": nsis_string(manifest.get("icon", "data/flutter_assets/windows/runner/resources/app_icon.ico").replace("/", "\\")),
-            "APP_ICON": str(package / "data/flutter_assets/windows/runner/resources/app_icon.ico"),
+            "APP_ICON": str(package / ("app.ico" if capture else "data/flutter_assets/windows/runner/resources/app_icon.ico")),
             "INSTALL_FILES": str(temp / "install.nsh"),
             "UNINSTALL_FILES": str(temp / "uninstall.nsh"),
         }
         prefix = "/" if platform.system() == "Windows" else "-"
         subprocess.run(
             [compiler, prefix + "WX", prefix + "V2", *[f"{prefix}D{key}={nsis_string(value)}" for key, value in definitions.items()],
-             str(Path(__file__).parent / "installer/windows.nsi")], check=True,
+             str(Path(__file__).parent / ("installer/capture-windows.nsi" if capture else "installer/windows.nsi"))], check=True,
         )
     return asset
 
 
-def macos_installer(package: Path, output: Path, manifest: dict) -> Path:
+def macos_installer(package: Path, output: Path, manifest: dict, *, capture: bool = False) -> Path:
     if platform.system() != "Darwin":
         raise ValueError("DMG creation and verification must run on macOS.")
-    asset = output / f"Focalet-macOS-{manifest['architecture']}.dmg"
-    application = package / "Focalet.app"
+    name = "Focalet Capture" if capture else "Focalet"
+    prefix = "Focalet-Capture" if capture else "Focalet"
+    asset = output / f"{prefix}-macOS-{manifest['architecture']}.dmg"
+    application = package / f"{name}.app"
     before = inventory(application)
     with tempfile.TemporaryDirectory(prefix="focalet-dmg-") as temporary:
         temp = Path(temporary)
         layout, mounted = temp / "layout", temp / "mounted"
         layout.mkdir()
-        subprocess.run(["ditto", str(application), str(layout / "Focalet.app")], check=True)
+        subprocess.run(["ditto", str(application), str(layout / f"{name}.app")], check=True)
         (layout / "Applications").symlink_to("/Applications")
-        shutil.copy2(Path(__file__).parents[1] / "docs/install.md", layout / "Install.txt")
-        subprocess.run(["hdiutil", "create", "-volname", "Focalet", "-srcfolder", str(layout),
+        shutil.copy2(Path(__file__).parents[1] / ("docs/capture-tool.md" if capture else "docs/install.md"), layout / "Install.txt")
+        subprocess.run(["hdiutil", "create", "-volname", name, "-srcfolder", str(layout),
                         "-format", "UDZO", "-ov", str(asset)], check=True)
         subprocess.run(["hdiutil", "verify", str(asset)], check=True)
         mounted.mkdir()
         subprocess.run(["hdiutil", "attach", "-readonly", "-nobrowse", "-mountpoint", str(mounted), str(asset)], check=True)
         try:
-            if inventory(mounted / "Focalet.app") != before:
+            if inventory(mounted / f"{name}.app") != before:
                 raise ValueError("Mounted DMG app differs from the verified package.")
             if os.readlink(mounted / "Applications") != "/Applications":
                 raise ValueError("The DMG Applications shortcut is invalid.")
-            subprocess.run(["codesign", "--verify", "--deep", "--strict", str(mounted / "Focalet.app")], check=True)
+            subprocess.run(["codesign", "--verify", "--deep", "--strict", str(mounted / f"{name}.app")], check=True)
         finally:
             subprocess.run(["hdiutil", "detach", str(mounted)], check=True)
     return asset

@@ -2,7 +2,7 @@ name: focalet_flutter
 description: Focalet's cross-platform floating UI.
 repository: https://github.com/timctho/focalet
 publish_to: 'none'
-version: 0.2.3+13
+version: 0.3.0+14
 
 environment:
   sdk: ^3.13.2

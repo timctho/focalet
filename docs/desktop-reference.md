@@ -7,7 +7,9 @@ Start with [Capture or Desktop](products.md) to choose an app, or
 
 | Product / layer | Location | Responsibility |
 | --- | --- | --- |
-| Focalet Capture | `src/Focalet.CaptureTool` | Windows tray app, capture/paste hotkeys, clipboard image/context sequence; builds `Focalet.Capture.exe` |
+| Mac Capture | `src/Focalet.Capture.Mac` | Swift/AppKit app, menu bar, hotkeys, AX and ordered native paste |
+| Ubuntu Capture | `src/Focalet.Capture.Linux`, `src/Focalet.Capture.Unix` | GTK selector, clipboard, context helpers and GNOME panel integration |
+| Windows Capture | `src/Focalet.CaptureTool` | Windows tray app, capture/paste hotkeys, clipboard image/context sequence; builds `Focalet.Capture.exe` |
 | Focalet Desktop | `src/Focalet.Flutter` | Desktop UI, sessions, composer, attachment previews, hotkeys and tray |
 | Desktop runtime | `crates/focalet-core` | Agent discovery, runtime adapters and context handoff |
 | Desktop runtime | `crates/focalet-core-host` | JSONL broker between Flutter and the runtime adapters |
@@ -21,10 +23,12 @@ Capture and the Windows Desktop adapter both reference the shared capture
 library. Neither references the other's executable. Clipboard injection and
 capture-tool hotkeys belong only to Capture; JSONL request handling belongs only
 to the Desktop adapter. Platform capture implementations on Linux and macOS
-remain part of Desktop; a standalone Capture product is currently Windows-only.
+are shared by Desktop and the independent native Capture apps. Capture builds
+without Flutter or the agent broker.
 
 `focalet-core` is an agent runtime library, not the shared capture library. Capture
-can build and run without Rust, Flutter, a broker or an installed agent. Build
+runs without Flutter, a broker or an installed agent. Ubuntu builds use Rust
+only for the native capture helper. Build
 Capture with `scripts/package-capture-tool.ps1`; build Desktop with
 `scripts/package-windows.ps1` or `scripts/package-unix.sh`. The two packages do
 not bundle each other's app.

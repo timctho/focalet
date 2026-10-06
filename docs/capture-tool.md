@@ -1,135 +1,101 @@
-# Focalet Capture for Windows
+# Focalet Capture
 
-Use Capture to share screen regions with the editor, terminal or chat app you
-already use. This prototype runs independently of Focalet Desktop and its agent
-broker. It needs no agent sign-in. The current public Focalet installer does
-not include this separate tool.
+Share selected screen regions with the editor, terminal or chat app you already
+use. Capture runs independently of Desktop and needs no agent sign-in.
 
-Build from a committed checkout on Windows with .NET 8 and PowerShell 7.
-Flutter, Rust and Desktop are not required to build or use this product:
+## Download and open
 
-```powershell
-./scripts/package-capture-tool.ps1
+Choose **Capture** for your platform in the [download table](https://github.com/timctho/focalet#download):
+
+| Platform | Install | Where to find Capture |
+| --- | --- | --- |
+| Windows 10/11 x64 | Run the Capture setup executable | Start menu and system tray |
+| macOS 12+ Apple Silicon or Intel | Open the matching DMG and drag **Focalet Capture** into Applications | Applications and menu bar |
+| Ubuntu 24.04 x64, GNOME Wayland | Install the Capture `.deb` with `sudo apt install ./Focalet-Capture-Ubuntu-amd64.deb` | Applications and GNOME panel |
+
+Windows packages include .NET. Mac packages include the browser context helper.
+Ubuntu's package manager installs the native dependencies. Flutter and agent
+runtimes are not required. Windows installers are unsigned; Mac apps are ad-hoc
+signed and DMGs are not notarized.
+
+On Mac, allow **Screen Recording** to select pixels and **Accessibility** to
+include context and paste. The menu's **Permissions** item opens these settings.
+On Ubuntu, choose **Enable desktop integration** on first launch. If GNOME has
+not loaded the extension, sign out and back in, then reopen Capture. Capture
+reuses a current Focalet extension; its independent installer does not overwrite
+files owned by Desktop. Screen sharing is authorized when you invoke capture.
+
+Both apps can be installed together. On Windows and Mac, quit Desktop or change
+its capture shortcut before opening Capture. On Ubuntu, Alt+A routes to Capture
+while it is running, and returns to Desktop when Capture quits.
+
+## Capture, then choose where to paste
+
+1. In the source window, press **Shift+Alt+A** (**Shift+Option+A** on Mac).
+2. Drag up to eight regions. **Ctrl** enters continuous selection; choose a
+   drawing tool to annotate. Pen, arrow, rectangle, ellipse, colors and undo are
+   available. Choose **Done** or press Enter.
+3. Switch to your destination and click its input at the intended caret.
+4. Press **Alt+A** (**Option+A** on Mac).
+
+Paste follows **image A → context A → image B → context B**. Images remain
+separate at their selected dimensions. Capture never submits the message.
+Successful pastes finish silently. Press the paste shortcut again to reuse the
+batch, including in a different app. Cancelling a new capture preserves the
+previous batch.
+
+Capture does not guess a previous destination. Paste uses the currently focused
+window, stops on focus or clipboard changes, and never retries interrupted steps
+automatically. Known protected fields are excluded. Destination accessibility
+checks inspect identity and state, not input text. The receiving app controls
+whether it accepts images and where attachments appear.
+
+## Menu and clipboard
+
+The system tray, menu bar or GNOME panel provides **Capture**, **Copy last batch**,
+**Copy text**, preferences, and **Quit**. Text-only and slower-image preferences
+are in the menu on Windows/Mac and **Preferences** on Ubuntu.
+
+Each automatic image step offers only image formats: PNG/DIB/RTF on Windows,
+PNG/TIFF on Mac, and PNG on Ubuntu. GNOME owns Ubuntu clipboard transfers
+so the receiving input keeps focus; Capture does not activate a hidden window
+to write the clipboard. Its following text step contains the region
+label, readable context and complete bounded snapshot JSON. Inputs that ignore
+images still receive the text. DOM, accessibility IDs, hierarchy, geometry,
+state, source and alignment remain available when captured reliably.
+
+Default minimum waits are **0.5 seconds per image** and **0.15 seconds per text
+step**, plus a brief period after clipboard reads. **Slower image paste** allows
+at least three seconds for apps that read a preview and fetch the image again
+later. A clipboard read cannot prove that the receiving app finished uploading
+an attachment. Use **Text only** to skip images entirely.
+
+**Copy last batch** offers a rich HTML document with separate images and complete
+plain-text fallback (also RTF on Windows). Manual paste depends on the receiving
+app's format support. No combined image is created.
+
+Capture retains batches in memory. Each region is limited to 32 megapixels and
+the images together to 32 MiB. **Quit** releases shortcuts, capture helpers and
+the batch. The app captures only after invocation. Frozen selected pixels are
+preserved; changed or unaligned source structure is reported as image-only.
+
+## Build and verify
+
+From a committed checkout on the target OS:
+
+```sh
+python3 scripts/package_capture.py linux
+# macOS: python3 scripts/package_capture.py macos
+# Windows: python scripts/package_capture.py windows
 ```
 
-Extract `artifacts/focalet-capture-win-x64.zip` and open
-`Focalet.Capture.exe`. The package includes its .NET runtime. This prototype
-is unsigned and Windows may require opening confirmation.
+Build prerequisites and regression suites are in [CONTRIBUTING.md](../CONTRIBUTING.md).
+Capture's native CI is independent of Flutter and the Rust agent broker. It
+checks image/context order, Unicode metadata, alignment, package inventories and
+installers. Windows tests include native editors, Chromium and an isolated
+Electron receiver. Ubuntu tests run real capture and ordered paste in a private
+GNOME Wayland desktop. Mac checks compile both architectures, verify native
+clipboard formats, selection geometry and the mounted DMG; OS permission and
+actual destination-app acceptance remain separate from these checks.
 
-## Capture first, then paste into the input you choose
-
-1. Quit Focalet Desktop or another tool using Alt+A. Open the capture tool.
-2. In the source window, press **Shift+Alt+A**. Drag a rectangle, then use
-   **Add region**, **S**, or **Ctrl-drag** for more regions, up to eight.
-   After a Ctrl-drag, you can release Ctrl and keep selecting more regions.
-   Choose a drawing tool or a region's letter to switch to annotation, then
-   choose **Done** (or Enter).
-   While Ctrl is held, the drawing toolbar stays hidden so it cannot block another
-   region. Release Ctrl to show it beside the latest selected region.
-3. Switch to the destination app and click its input at the intended caret.
-4. Press **Alt+A** to paste **image A → context A → image B → context B**.
-   Each image keeps its original pixels and dimensions. Images are never merged,
-   and Capture does not inject Enter into the destination.
-   Completed pastes finish without a notification, including text fallback.
-
-Capture only prepares a batch in memory. It does not choose a destination,
-change the clipboard or paste. There is no background input tracking or remembered
-window: Alt+A uses the window and control focused at that moment and leaves the
-app's caret alone. If focus changes while releasing the hotkey, paste is cancelled.
-Known password and read-only inputs are excluded. Accessibility checks inspect
-control identity, not input values or document text.
-
-The last capture stays ready until you finish a new capture or quit. Press
-**Alt+A** again to paste the same complete batch, either at the current caret or
-in a different input you choose. Presses during an active paste are ignored,
-never queued. An interrupted paste does not resume automatically; another Alt+A
-starts the whole batch again. **Copy text** and **Copy last batch** also remain
-available. Alt+A before your first capture asks you to capture first. Cancelling
-a new capture preserves the previous batch and clipboard.
-
-## Images and text
-
-Automatic paste uses separate clipboard transfers:
-
-- Each image step offers native PNG/DIB and an image-only RTF representation,
-  with no competing plain-text format. Each image is limited to 32 megapixels
-  and 32,767 pixels per dimension.
-- The next step offers only Unicode text for that region: its A/B/C label,
-  readable context and the complete bounded snapshot JSON, including DOM/UIA
-  IDs, hierarchy, geometry, state, source and alignment.
-
-Orca's terminal reads clipboard text before trying an image; separate image-only
-and text-only transfers let both reach the input. Orca's native chat obtains a
-preview and separately calls Electron's `clipboard.readImage()` to save the image.
-A first clipboard read alone does not establish that this second read completed.
-The receiving app controls attachment placement and multiline text insertion;
-client-specific attachment/upload completion remains separate from clipboard reads.
-
-By default, the tool waits at least **0.5 seconds per image** and 0.15 seconds per
-text step. It also waits for a clipboard read and a short settling period before
-continuing. These are minimum waits, not a guarantee of total paste duration.
-If your app loses images at this speed, enable **Slower image paste** in the tray
-menu. That mode keeps each image for at least three seconds to accommodate
-receivers that read a preview and then read the clipboard again later to save it.
-The choice lasts until the tool exits. A clipboard read does not prove that an
-app attached/uploaded an image, and the tool cannot automatically detect a slow
-second read. Later first reads get additional settling time, up to five seconds.
-Images unread after five seconds are skipped, while their context text is still
-pasted. If text is not read, or
-focus, modifiers or clipboard ownership changes, remaining steps stop. Already
-dispatched steps are never retried automatically. **Text only** in the tray skips
-image operations entirely.
-
-**Copy text** copies the complete context. **Copy last batch** offers a rich HTML/RTF document with separate images and a plain-text
-fallback; manual Ctrl+V still depends on the receiver's format support. They do
-not create a combined native image. The last batch remains in memory for manual
-reuse after completed or interrupted automatic paste. No image files or agent sessions
-are created by the tool. Cancelling selection leaves the clipboard and previous
-batch unchanged.
-
-The selector restores the source's original focus and pointer location and waits
-for the desktop compositor before reading context, so toolbar/drag hover changes
-are not mistaken for source changes. Captured pixels must still match the selected
-frozen image. Real content changes or unavailable source structure remain explicitly
-image-only; the tool does not invent OCR text or attach newer DOM to older pixels.
-
-**Quit** releases both hotkeys and discards the last batch. The OS
-clipboard retains its last payload until another application replaces it.
-
-## Verification
-
-`tests/Focalet.Capture.Tests` covers ordered per-region text with complete metadata,
-safe rich-document encoding, Unicode byte offsets and batch limits.
-`tests/Focalet.Windows.Tests` checks rich-document import and individual native
-image geometry/pixels.
-
-On a disposable Windows desktop, run the real clipboard/focus acceptance:
-
-```powershell
-dotnet run --project tests/Focalet.Windows.Tests --configuration Release -- --paste-acceptance
-```
-
-It uses synthetic native plain/rich inputs, a disposable Chromium profile, and a
-locked Electron fixture (`npm ci --prefix tests/clipboard-electron`). The Electron
-fixture exercises both a terminal's text-first native IPC route and a chat's DOM
-preview followed by a later native `clipboard.readImage()` save. It verifies
-image/context order, original dimensions/pixels, complete metadata, draft/caret
-preservation and no Enter. Both routes run at the default speed with asynchronous
-reads, and in slower mode with the existing 1.5-second delay between preview and
-save. Default-speed tests also reject an unnecessary two-second gap before context.
-The hotkey test invokes both real registered shortcuts,
-verifies capture leaves the clipboard untouched, changes to a different input,
-then confirms that Alt+A inserts the batch only there. Another deliberate Alt+A
-reuses the batch at the same or a different input. Busy presses do not queue;
-cancellation and interruption retain the batch without automatic retries. Focus
-and clipboard interruption tests stop remaining steps. Actual ChatGPT and Orca sessions remain
-separate from these isolated fixtures.
-
-The test replaces the clipboard and should run only on a disposable CI desktop.
-
-## Product boundary
-
-The entrypoint, tray, hotkeys and paste flow live in `src/Focalet.CaptureTool`.
-It references the shared `src/Focalet.Capture.Windows` library, not the Desktop
-helper executable or Flutter app. The capture package has its own manifest and
-checksums. [Compare Capture and Desktop use cases](https://timctho.github.io/focalet/products/).
+See [product use cases](products.md) and the [component map](desktop-reference.md).

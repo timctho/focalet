@@ -22,26 +22,37 @@ use, with an optional desktop app for managing agent conversations.
 | Use it for | Adding screen context to your existing editor, terminal or chat app | Managing agent chats, saved sessions, models and attachments in a dedicated window |
 | Examples | Show Cursor a UI bug; paste a chart into ChatGPT; give a terminal agent several annotated regions | Switch between project conversations; review captured attachments; respond to agent approvals |
 | Setup | No agent connection or sign-in in Capture | Connect an installed agent and use its existing account |
-| Platforms | Windows prototype | Windows, macOS and Ubuntu GNOME Wayland |
-| Get started | [Capture guide](docs/capture-tool.md) | [Desktop installation](docs/install.md) |
+| Platforms | Windows, macOS and Ubuntu GNOME Wayland | Windows, macOS and Ubuntu GNOME Wayland |
+
+### Download
+
+| Platform | Focalet Capture | Focalet Desktop |
+| --- | --- | --- |
+| Windows 10/11 · x64 | [Windows setup](https://github.com/timctho/focalet/releases) | [Windows setup](https://github.com/timctho/focalet/releases) |
+| macOS 12+ · Apple Silicon | [Apple Silicon DMG](https://github.com/timctho/focalet/releases) | [Apple Silicon DMG](https://github.com/timctho/focalet/releases) |
+| macOS 12+ · Intel | [Intel DMG](https://github.com/timctho/focalet/releases) | [Intel DMG](https://github.com/timctho/focalet/releases) |
+| Ubuntu 24.04 · x64 · GNOME Wayland | [Ubuntu package](https://github.com/timctho/focalet/releases) | [Ubuntu package](https://github.com/timctho/focalet/releases) |
+
+Install either app independently. Capture runs from the system tray or menu bar;
+Desktop opens an agent workspace. The next release includes both products on all
+four targets.
 
 ## Capture: stay in the tool you know
 
-1. Press **Shift+Alt+A** in the source window.
+1. Press **Shift+Alt+A** (**Shift+Option+A** on Mac) in the source window.
 2. Select and annotate up to eight regions. **Ctrl-drag** enters continuous
    selection; choose a drawing tool or region letter when ready to annotate.
 3. Finish the capture, click the destination input, and press **Alt+A**.
 
 Paste follows **image A → context A → image B → context B**. Each image stays
-separate at its original dimensions. Context includes available DOM or Windows
+separate at its original dimensions. Context includes available DOM or native
 accessibility details; inputs that ignore images still receive text.
 
 The batch remains ready for another deliberate paste. Successful pastes finish
 silently. The receiving app controls image support and attachment placement.
 
-Capture builds independently with .NET on Windows. It does not require Flutter,
-Rust or Desktop. [Build the portable tool and learn its controls](docs/capture-tool.md).
-The prototype is separate from the Desktop installers.
+Capture does not need an agent account or Desktop. Its tray menu provides capture,
+copy, text-only paste and slower image paste controls.
 
 ## Desktop: one place for your agent conversations
 
@@ -55,18 +66,6 @@ credentials, tools, permissions and canonical history.
 
 [Runtime support and setup](docs/install.md#2-choose-the-agent-you-already-have) ·
 [Runtime commands](docs/runtime-commands.md) · [Chrome and Edge context](docs/guides/chrome-edge.md)
-
-### Download Desktop
-
-| Platform | Architecture | Download |
-| --- | --- | --- |
-| Windows 10/11 | x64 | [Windows setup](https://github.com/timctho/focalet/releases/latest) |
-| macOS 12+ | Apple Silicon / Intel | [Mac DMG](https://github.com/timctho/focalet/releases/latest) |
-| Ubuntu 24.04 LTS · GNOME Wayland | x64 | [Ubuntu package](https://github.com/timctho/focalet/releases/latest) |
-
-Earlier release assets keep their original names and checksums. New builds use
-Focalet throughout. See [upgrade notes](docs/migration.md) and
-[installation and permissions](docs/install.md).
 
 ### See visual context in action
 

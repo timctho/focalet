@@ -5,5 +5,9 @@
       <default>['&lt;Alt&gt;a']</default>
       <summary>Select content for Focalet</summary>
     </key>
+    <key name="capture-content" type="as">
+      <default>['&lt;Shift&gt;&lt;Alt&gt;a']</default>
+      <summary>Capture regions with Focalet Capture</summary>
+    </key>
   </schema>
 </schemalist>

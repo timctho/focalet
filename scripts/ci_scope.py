@@ -12,7 +12,7 @@ ROOT_DOCUMENTS = {"README.md", "CONTRIBUTING.md", "AGENTS.md", "SECURITY.md", "L
 DOCUMENT_SUFFIXES = {".md", ".png", ".webp", ".svg", ".gif", ".mp4", ".css"}
 
 
-CAPTURE_PATHS = ("src/Focalet.CaptureTool/", "tests/clipboard-electron/")
+CAPTURE_PATHS = ("src/Focalet.CaptureTool/", "src/Focalet.Capture.Linux/", "src/Focalet.Capture.Unix/", "tests/clipboard-electron/")
 DESKTOP_PATHS = ("src/Focalet.Flutter/", "crates/focalet-core/", "crates/focalet-core-host/", "tests/runtime-clis/")
 
 

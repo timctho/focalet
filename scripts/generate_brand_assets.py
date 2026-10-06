@@ -90,6 +90,14 @@ def main() -> None:
         cairosvg.svg2png(bytestring=source, write_to=str(assets / name),
                         output_width=size, output_height=size)
 
+    # Native Capture resources do not depend on Flutter at build time.
+    mac = ROOT / "src/Focalet.Capture.Mac/Resources"
+    linux = ROOT / "src/Focalet.Capture.Linux/Resources"
+    mac.mkdir(parents=True, exist_ok=True); linux.mkdir(parents=True, exist_ok=True)
+    (mac / "tray-template.png").write_bytes((assets / "tray-template.png").read_bytes())
+    (linux / "app-icon.png").write_bytes((assets / "app-icon.png").read_bytes())
+    (ROOT / "src/Focalet.Gnome/focalet-symbolic.svg").write_bytes(mark)
+
     # Documentation uses the same identity as the installed apps.
     (ROOT / "docs/assets/focalet-icon.png").write_bytes((assets / "app-icon.png").read_bytes())
 
@@ -118,6 +126,12 @@ def main() -> None:
     for size in (16, 32, 64, 128, 256, 512, 1024):
         cairosvg.svg2png(bytestring=mac_icon, write_to=str(catalog / f"app_icon_{size}.png"),
                         output_width=size, output_height=size)
+    iconset = mac / "AppIcon.iconset"
+    iconset.mkdir(parents=True, exist_ok=True)
+    for size in (16, 32, 128, 256, 512):
+        for scale in (1, 2):
+            suffix = "@2x" if scale == 2 else ""
+            (iconset / f"icon_{size}x{size}{suffix}.png").write_bytes((catalog / f"app_icon_{size*scale}.png").read_bytes())
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="app.ico" LogicalName="Focalet.Capture.Icon" />
     <ProjectReference Include="../Focalet.Capture.Windows/Focalet.Capture.Windows.csproj" />
   </ItemGroup>
 </Project>

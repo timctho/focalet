@@ -42,6 +42,27 @@ class PublicReleaseTests(unittest.TestCase):
         self.assertEqual({item["file"] for item in manifest["assets"]}, set(publish.ASSETS.values()))
         self.assertNotIn(str(self.root), json.dumps(manifest))
 
+    def test_both_products_require_all_eight_installers_with_one_version(self):
+        metadata = self.metadata.copy()
+        for original in self.metadata:
+            value = json.loads(original.read_text())
+            value['product'] = 'Focalet Capture'
+            value['file'] = publish.CAPTURE_ASSETS[(value['platform'], value['architecture'])]
+            asset = self.root / value['file']
+            asset.write_bytes(b'capture installer fixture')
+            value['sha256'] = hashlib.sha256(asset.read_bytes()).hexdigest()
+            sidecar = self.root / (value['file'] + '.release.json')
+            sidecar.write_text(json.dumps(value)); metadata.append(sidecar)
+        paths, manifest = publish.collect_assets(metadata, self.commit, platforms='all', include_capture=True)
+        self.assertEqual(len(paths), 8)
+        self.assertEqual({a['product'] for a in manifest['assets']}, {'Focalet', 'Focalet Capture'})
+        for missing in metadata:
+            with self.assertRaisesRegex(ValueError, 'selected platforms'):
+                publish.collect_assets([p for p in metadata if p != missing], self.commit, platforms='all', include_capture=True)
+        value['version'] = '9.9.9'; sidecar.write_text(json.dumps(value))
+        with self.assertRaisesRegex(ValueError, 'versions differ'):
+            publish.collect_assets(metadata, self.commit, platforms='all', include_capture=True)
+
     def test_tampered_installer_is_rejected(self):
         (self.root / "Focalet-Setup-x64.exe").write_bytes(b"changed after acceptance")
         with self.assertRaisesRegex(ValueError, "checksum mismatch"):

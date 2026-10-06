@@ -7,7 +7,9 @@ stay with the user's selected agent.
 
 ## Work on Capture independently
 
-The Windows tray app is in `src/Focalet.CaptureTool`; the shared Windows capture
+Native Capture apps are in `src/Focalet.CaptureTool` (Windows),
+`src/Focalet.Capture.Mac` (Swift/AppKit) and `src/Focalet.Capture.Linux` (Python/GTK).
+The shared Windows capture
 library is in `src/Focalet.Capture.Windows`. Capture does not depend on Flutter, the
 Desktop helper executable or the Rust agent broker.
 
@@ -15,9 +17,17 @@ Install .NET SDK 8 and PowerShell 7 on Windows, then run:
 
 ```powershell
 dotnet build src/Focalet.CaptureTool/Focalet.CaptureTool.csproj --configuration Release
-# Build the self-contained prototype ZIP from committed source:
-./scripts/package-capture-tool.ps1
+# Build the self-contained package from committed source:
+python scripts/package_capture.py windows
 ```
+
+On macOS, use Xcode command-line tools and .NET 8, then run
+`python3 scripts/package_capture.py macos`. On Ubuntu 24.04, install Rust 1.93,
+.NET 8, a C compiler, GTK/GStreamer development packages, Python GI/Cairo and
+GNOME 46, then run `python3 scripts/package_capture.py linux`. Neither builds
+Flutter or the agent broker. `scripts/build_capture_installer.py` wraps a verified
+Capture package in an independent installer. The native Capture CI lists exact
+Ubuntu build and acceptance dependencies.
 
 For managed and Windows native tests, also install Python 3.10+ and run
 `python scripts/check.py --suite capture`. The interactive paste acceptance
@@ -180,7 +190,7 @@ The **PR checks** workflow runs for every PR, including forks, on disposable
 GitHub-hosted runners. Documentation and CI-policy checks always run. An explicit
 allowlist of Markdown and documentation media can skip native builds.
 Capture app, clipboard fixture or Capture packaging changes run the dedicated
-**Capture contracts (Windows)** job without Flutter or Rust. Desktop UI/runtime
+**Capture contracts** jobs on Windows, Ubuntu and both Mac architectures without Flutter or the agent broker. Desktop UI/runtime
 changes run Linux, Windows and both macOS Desktop jobs. Shared capture,
 dependency, workflow, build configuration and unknown changes run both products'
 native checks. A change touching both apps also runs both sets.

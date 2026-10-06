@@ -92,7 +92,7 @@ jobs:
         run: |
           sudo apt-get update
           # Keep the native GNOME test dependencies without optional desktop apps and wallpapers.
-          sudo apt-get install --no-install-recommends -y binutils libsqlite3-dev libgtk-3-dev libwebkit2gtk-4.1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-pipewire gstreamer1.0-plugins-base libepoxy-dev libayatana-appindicator3-dev libx11-dev clang cmake ninja-build pkg-config libasound2t64 ffmpeg dbus-x11 at-spi2-core dconf-gsettings-backend libgl1-mesa-dri gnome-shell xdg-desktop-portal-gnome pipewire wireplumber python3-pil python3-pyatspi python3-gi gir1.2-gtk-3.0 gir1.2-gtk-4.0
+          sudo apt-get install --no-install-recommends -y binutils libsqlite3-dev libgtk-3-dev libmutter-14-dev gobject-introspection libgirepository1.0-dev libwebkit2gtk-4.1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-pipewire gstreamer1.0-plugins-base libepoxy-dev libayatana-appindicator3-dev libx11-dev clang cmake ninja-build pkg-config libasound2t64 ffmpeg dbus-x11 at-spi2-core dconf-gsettings-backend libgl1-mesa-dri gnome-shell xdg-desktop-portal-gnome pipewire wireplumber python3-pil python3-pyatspi python3-gi gir1.2-gtk-3.0 gir1.2-gtk-4.0
           python -m pip install -r tests/requirements.txt
       - name: Check all contracts, widgets, processes and browser capture
         env:
@@ -171,7 +171,21 @@ jobs:
           ./scripts/package-capture-tool.ps1
           python scripts/verify_capture_package.py artifacts/focalet-capture-win-x64 --expected-commit $env:GITHUB_SHA --smoke
           if ($LASTEXITCODE -ne 0) { throw 'Capture package verification failed' }
-      - name: Retain Focalet Capture prototype and paste acceptance
+      - name: Build and accept the independent Capture installer
+        shell: pwsh
+        run: |
+          python scripts/package_capture.py windows
+          if ($LASTEXITCODE -ne 0) { throw 'Capture package failed' }
+          $compiler = Join-Path ${env:ProgramFiles(x86)} 'NSIS/makensis.exe'
+          if (-not (Test-Path $compiler)) {
+            choco install nsis --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'NSIS installation failed' }
+          }
+          python scripts/build_capture_installer.py artifacts/focalet-capture-win-x64 --expected-commit $env:GITHUB_SHA --output artifacts/capture-installers --makensis $compiler
+          if ($LASTEXITCODE -ne 0) { throw 'Capture installer failed' }
+          python scripts/accept_capture_windows_installer.py artifacts/capture-installers/Focalet-Capture-Setup-x64.exe --expected-commit $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'Capture installer acceptance failed' }
+      - name: Retain Focalet Capture package and paste acceptance
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: capture-tool-windows-${{ github.sha }}
@@ -185,6 +199,85 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: Ensure checks did not rewrite committed files
+        run: git diff --exit-code
+
+  capture_unix:
+    needs: documentation
+    if: needs.documentation.outputs.capture_required == 'true'
+    name: Capture contracts (${{ matrix.platform }} ${{ matrix.architecture }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            architecture: x64
+            runtime: linux-x64
+            os: ubuntu-24.04
+          - platform: macos
+            architecture: arm64
+            runtime: osx-arm64
+            os: macos-15
+          - platform: macos
+            architecture: x64
+            runtime: osx-x64
+            os: macos-15-intel
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      CARGO_BUILD_JOBS: '4'
+      CAPTURE_PLATFORM: ${{ matrix.platform }}
+      CAPTURE_RUNTIME: ${{ matrix.runtime }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: 8.0.x
+      - uses: dtolnay/rust-toolchain@283fb51ee3c8a49cd7c8ff30102f3fcf3cfbe0e1 # 1.93.0
+        if: runner.os == 'Linux'
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        if: runner.os == 'Linux'
+        with:
+          shared-key: native-${{ runner.os }}-${{ runner.arch }}
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      - name: Install native GNOME build and acceptance dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y build-essential pkg-config libgtk-3-dev libmutter-14-dev gobject-introspection libgirepository1.0-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-pipewire gstreamer1.0-plugins-base dpkg-dev desktop-file-utils dbus-x11 at-spi2-core dconf-gsettings-backend libgl1-mesa-dri gnome-shell xdg-desktop-portal-gnome pipewire wireplumber python3-pil python3-pyatspi python3-gi python3-gi-cairo gir1.2-atspi-2.0 gir1.2-gtk-3.0
+      - name: Check ordered payloads and context alignment
+        run: python3 -m unittest discover -s tests -p test_capture_unix.py -v
+      - name: Build and verify independent Capture package and installer
+        run: |
+          python3 scripts/package_capture.py "$CAPTURE_PLATFORM"
+          python3 scripts/verify_capture_package.py "artifacts/focalet-capture-$CAPTURE_RUNTIME" --expected-commit "$GITHUB_SHA"
+          python3 scripts/build_capture_installer.py "artifacts/focalet-capture-$CAPTURE_RUNTIME" --expected-commit "$GITHUB_SHA" --output artifacts/capture-installers
+      - name: Verify native macOS clipboard and selection geometry
+        if: runner.os == 'macOS'
+        run: |
+          python3 scripts/verify_capture_package.py "artifacts/focalet-capture-$CAPTURE_RUNTIME" --expected-commit "$GITHUB_SHA" --smoke
+          xcrun swiftc -swift-version 5 src/Focalet.Capture.Mac/MacRegionSelector.swift scripts/test-macos-region-selection.swift -o /tmp/focalet-capture-geometry
+          /tmp/focalet-capture-geometry
+      - name: Install and accept Capture on disposable GNOME
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install --no-install-recommends -y ./artifacts/capture-installers/Focalet-Capture-Ubuntu-amd64.deb
+          /usr/bin/python3 scripts/accept-linux-capture.py --package /opt/focalet-capture
+          sudo apt-get remove -y focalet-capture
+          test ! -e /usr/bin/focalet-capture
+      - name: Retain failed synthetic Capture evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: capture-unix-failure-${{ matrix.runtime }}-${{ github.sha }}
+          path: artifacts/capture-wayland/
+          if-no-files-found: ignore
+          retention-days: 3
+      - name: Ensure checks did not rewrite source
         run: git diff --exit-code
 
   windows:
@@ -293,7 +386,7 @@ jobs:
       - name: Test native macOS selection geometry
         run: |
           xcrun swiftc -swift-version 5 \
-            src/Focalet.Flutter/macos/Runner/MacRegionSelector.swift \
+            src/Focalet.Capture.Mac/MacRegionSelector.swift \
             scripts/test-macos-region-selection.swift \
             -o /tmp/focalet-macos-region-tests
           /tmp/focalet-macos-region-tests
@@ -315,7 +408,7 @@ jobs:
   required:
     name: PR checks passed
     if: always()
-    needs: [documentation, contracts, windows, macos, capture_windows]
+    needs: [documentation, contracts, windows, macos, capture_windows, capture_unix]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
@@ -324,6 +417,7 @@ jobs:
           DOCS_RESULT: ${{ needs.documentation.result }}
           DESKTOP_REQUIRED: ${{ needs.documentation.outputs.desktop_required }}
           CAPTURE_REQUIRED: ${{ needs.documentation.outputs.capture_required }}
+          CAPTURE_UNIX_RESULT: ${{ needs.capture_unix.result }}
           CAPTURE_RESULT: ${{ needs.capture_windows.result }}
           LINUX_RESULT: ${{ needs.contracts.result }}
           WINDOWS_RESULT: ${{ needs.windows.result }}
@@ -338,9 +432,9 @@ jobs:
             exit 1
           fi
           if [ "$CAPTURE_REQUIRED" = true ]; then
-            test "$CAPTURE_RESULT" = success
+            test "$CAPTURE_RESULT" = success && test "$CAPTURE_UNIX_RESULT" = success
           elif [ "$CAPTURE_REQUIRED" = false ]; then
-            test "$CAPTURE_RESULT" = skipped
+            test "$CAPTURE_RESULT" = skipped && test "$CAPTURE_UNIX_RESULT" = skipped
           else
             exit 1
           fi

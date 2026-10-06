@@ -15,9 +15,13 @@ def verify(root: Path, commit: str) -> dict:
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ValueError("Expected a full source commit SHA.")
     manifest = json.loads((root / "capture-tool-manifest.json").read_text(encoding="utf-8-sig"))
+    runtime = manifest.get("runtime")
+    entries = {"win-x64": "Focalet.Capture.exe", "win-arm64": "Focalet.Capture.exe",
+               "osx-arm64": "Focalet Capture.app/Contents/MacOS/Focalet Capture",
+               "osx-x64": "Focalet Capture.app/Contents/MacOS/Focalet Capture", "linux-x64": "focalet-capture"}
     if (manifest.get("product") != "Focalet Capture" or manifest.get("gitCommit") != commit
-            or manifest.get("runtime") not in {"win-x64", "win-arm64"}
-            or manifest.get("entryPoint") != "Focalet.Capture.exe"):
+            or runtime not in entries
+            or manifest.get("entryPoint") != entries.get(runtime)):
         raise ValueError("Capture product, source revision, runtime or entrypoint mismatch.")
     checksums = {}
     for line in (root / "SHA256SUMS.txt").read_text().splitlines():
@@ -40,14 +44,20 @@ def verify(root: Path, commit: str) -> dict:
     for name, digest in checksums.items():
         if hashlib.sha256((root / name).read_bytes()).hexdigest() != digest:
             raise ValueError(f"Checksum mismatch: {name}")
-    required = {"Focalet.Capture.exe", "capture-tool-manifest.json", "LICENSE", "THIRD_PARTY_NOTICES.md", "README.md"}
+    prefix = "Focalet Capture.app/Contents/Resources/" if runtime.startswith("osx-") else ""
+    required = {manifest["entryPoint"], "capture-tool-manifest.json", *[prefix+n for n in ("LICENSE", "THIRD_PARTY_NOTICES.md", "README.md")]}
+    if runtime == "linux-x64":
+        required |= {"capture.py", "selector.py", "capture_context.py", "gnome-extension/focalet@focalet/native/libfocalet-clipboard.so", "gnome-extension/focalet@focalet/native/FocaletClipboard-1.0.typelib", "app-icon.png",
+                     "native/focalet-linux-capture", "native/focalet-browser-capture", "gnome-extension/focalet@focalet/schemas/gschemas.compiled"}
+    elif runtime.startswith("osx-"):
+        required |= {prefix+name for name in ("AppIcon.icns", "tray-template.png", "native/focalet-browser-capture")}
     if not required.issubset(inventory):
         raise ValueError("Capture package is missing required files.")
-    forbidden = {"focalet.exe", "focalet.capturehost.exe", "focalet.capturehost.dll", "focalet-core-host.exe", "flutter_windows.dll"}
+    forbidden = {"focalet.exe", "focalet.capturehost.exe", "focalet.capturehost.dll", "focalet-core-host.exe", "flutter_windows.dll", "libflutter_linux_gtk.so", "fluttermacos", "focalet-core-host"}
     if any(PurePosixPath(name).name.lower() in forbidden for name in inventory):
         raise ValueError("Capture package unexpectedly contains a Desktop component.")
     with (root / manifest["entryPoint"]).open("rb") as executable:
-        if executable.read(2) != b"MZ":
+        if runtime.startswith("win-") and executable.read(2) != b"MZ":
             raise ValueError("Capture entrypoint is not a Windows executable.")
     return manifest
 
@@ -61,8 +71,12 @@ def main() -> None:
     root = args.package.resolve()
     manifest = verify(root, args.expected_commit)
     if args.smoke:
+        if manifest["runtime"].startswith("osx-"):
+            subprocess.run([str(root / manifest["entryPoint"]), "--self-test"], check=True, timeout=30)
+            print("Verified native macOS clipboard formats and Capture resources.")
+            return
         if os.name != "nt":
-            raise SystemExit("The tray startup check requires Windows.")
+            raise SystemExit("Use accept-linux-capture.py in a disposable GNOME desktop.")
         process = subprocess.Popen([str(root / manifest["entryPoint"])], cwd=root)
         try:
             time.sleep(2)
