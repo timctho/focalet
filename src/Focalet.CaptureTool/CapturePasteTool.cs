@@ -148,7 +148,6 @@ public static class CapturePasteTool
                 if (observation.Kind == CaptureInputKind.Protected)
                 { Notify("Paste cancelled", "The selected input is protected or read-only."); return; }
                 target = observation.Target;
-                if (!await target.IsInputCurrentAsync()) return;
                 // Retain the capture for another deliberate Alt+A at its current
                 // destination. Busy invocations are ignored, never queued or retried.
                 var result = await CapturePasteSequence.PasteAsync(batch, target, textOnly, slowerImages);

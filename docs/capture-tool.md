@@ -50,11 +50,14 @@ automatically. Known protected fields are excluded. Destination accessibility
 checks inspect identity and state, not input text. The receiving app controls
 whether it accepts images and where attachments appear.
 
-On Windows, attaching an image can briefly move focus to the containing page.
-Capture waits up to 1.5 seconds for the original input to regain focus, without
-moving the caret or sending the image again. A different input, window or replaced
-clipboard still stops the sequence. Presses while pasting do not queue another
-batch; briefly held shortcut keys pause the current sequence until released.
+On Windows, attaching an image can briefly move focus to the page or an upload
+control. Capture waits up to 1.5 seconds for the original editor to regain focus,
+using fresh accessibility state after each paste. A rich editor rebuilt in place
+can continue only when it uniquely replaces the original editor in the same
+container. Capture never moves the caret or sends an accepted image again.
+A different input, container, window or replaced clipboard still stops the
+sequence. Presses while pasting do not queue another batch; briefly held shortcut
+keys pause the current sequence until released.
 
 ## Menu and clipboard
 

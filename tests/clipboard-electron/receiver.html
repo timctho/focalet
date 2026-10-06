@@ -1,15 +1,50 @@
 <!doctype html><meta charset="utf-8"><title>Focalet Electron clipboard fixture</title>
-<style>body{font:16px sans-serif;margin:24px}textarea{width:95%;height:220px}img{margin:8px;border:1px solid #aaa}</style>
+<style>body{font:16px sans-serif;margin:24px}textarea,.fixture-rich{width:95%;height:220px;overflow:auto;border:1px solid #aaa}img{margin:8px;border:1px solid #aaa}</style>
 <h1>Native Electron image and context</h1>
-<textarea id="input" aria-label="Electron fixture input">draft-before draft-after</textarea><div id="images"></div>
+<div id="composer" role="group" aria-label="Original composer"><textarea id="input" aria-label="Electron fixture input">draft-before draft-after</textarea></div><div id="images"></div>
 <textarea id="other" aria-label="Other fixture input" hidden></textarea>
+<button id="upload" hidden>Preparing attachment</button>
 <script>
-const input = document.getElementById('input');
+let input = document.getElementById('input');
 let firstImage = true;
 let mode;
+let replacements = 0;
+const rich = () => mode.includes('-rich-');
+const draft = () => rich() ? input.textContent : input.value;
+function caret(offset) {
+  if (!rich()) { input.setSelectionRange(offset, offset); return; }
+  const node = input.firstChild;
+  const range = document.createRange(); range.setStart(node, offset); range.collapse(true);
+  const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+}
+function remount() {
+  const selection = window.getSelection();
+  const before = selection.getRangeAt(0).cloneRange(); before.selectNodeContents(input);
+  before.setEnd(selection.focusNode, selection.focusOffset);
+  const offset = before.toString().length;
+  const next = input.cloneNode(true);
+  if (mode === 'native-chat-rich-new-container') {
+    const container = document.getElementById('composer');
+    const replacement = container.cloneNode(false); replacement.appendChild(next); container.replaceWith(replacement);
+  } else if (mode === 'native-chat-rich-sibling') {
+    const sibling = input.nextElementSibling;
+    input.remove(); input = sibling; input.focus(); caret(offset); return;
+  } else if (mode === 'native-chat-rich-retained-editor') input.after(next);
+  else input.replaceWith(next);
+  input = next; bindInput(); input.focus(); caret(offset);
+  replacements++;
+}
 function text(value) {
-  input.setRangeText(value.replaceAll('\r\n', '\n'), input.selectionStart, input.selectionEnd, 'end');
-  fixture.result({ kind: 'text', value, draft: input.value });
+  const normalized = value.replaceAll('\r\n', '\n');
+  if (rich()) {
+    const selection = window.getSelection();
+    const before = selection.getRangeAt(0).cloneRange(); before.selectNodeContents(input);
+    before.setEnd(selection.focusNode, selection.focusOffset);
+    const offset = before.toString().length;
+    input.textContent = draft().slice(0, offset) + normalized + draft().slice(offset); caret(offset + normalized.length);
+  } else input.setRangeText(normalized, input.selectionStart, input.selectionEnd, 'end');
+  if (mode === 'native-chat-rich-remount') remount();
+  fixture.result({ kind: 'text', value, draft: draft(), replacements });
 }
 async function image() {
   try {
@@ -18,6 +53,10 @@ async function image() {
       setTimeout(() => input.focus(), 1200);
     }
     if (firstImage && mode === 'native-chat-other-input') document.getElementById('other').focus();
+    if (rich() && mode !== 'native-chat-rich-upload-focus') remount();
+    if (firstImage && mode === 'native-chat-rich-upload-focus') {
+      document.getElementById('upload').focus(); setTimeout(() => input.focus(), 1200);
+    }
     firstImage = false;
     const result = await fixture.image();
     const img = document.createElement('img'); img.src = result.dataUrl;
@@ -25,12 +64,10 @@ async function image() {
     const canvas = document.createElement('canvas'); canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
     const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0);
     fixture.result({ kind: 'image', width: img.naturalWidth, height: img.naturalHeight,
-      pixel: Array.from(ctx.getImageData(50, 30, 1, 1).data), draft: input.value });
+      pixel: Array.from(ctx.getImageData(50, 30, 1, 1).data), draft: draft(), replacements });
   } catch (error) { fixture.result({ kind: 'error', error: error.message }); }
 }
-(async () => {
-  mode = await fixture.mode();
-  document.getElementById('other').hidden = mode !== 'native-chat-other-input';
+function bindInput() {
   input.addEventListener('keydown', async event => {
     if (event.key === 'Enter') fixture.enter();
     if (mode !== 'terminal' || !event.ctrlKey || event.key.toLowerCase() !== 'v') return;
@@ -44,6 +81,20 @@ async function image() {
     const file = Array.from(event.clipboardData.items).find(item => item.type.startsWith('image/'));
     if (file) await image(); else text(event.clipboardData.getData('text/plain'));
   });
-  input.focus(); input.setSelectionRange(13, 13); fixture.ready();
+}
+(async () => {
+  mode = await fixture.mode();
+  document.getElementById('other').hidden = mode !== 'native-chat-other-input';
+  document.getElementById('upload').hidden = mode !== 'native-chat-rich-upload-focus';
+  if (rich()) {
+    const editor = document.createElement('div'); editor.className = 'fixture-rich';
+    editor.contentEditable = 'true'; editor.role = 'textbox'; editor.setAttribute('aria-multiline', 'true');
+    editor.setAttribute('aria-label', 'Electron fixture input'); editor.textContent = input.value;
+    input.replaceWith(editor); input = editor; // Deliberately no DOM id: real composers often omit it.
+    if (mode === 'native-chat-rich-sibling') {
+      const sibling = input.cloneNode(true); sibling.setAttribute('aria-label', 'Other fixture input'); input.after(sibling);
+    }
+  }
+  bindInput(); input.focus(); caret(13); fixture.ready();
 })();
 </script>
