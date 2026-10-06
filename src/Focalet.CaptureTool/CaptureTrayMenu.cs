@@ -15,6 +15,7 @@ internal sealed class CaptureTrayMenu : Form
     private int hovered = -1;
     private int dpi = 96;
     private bool painting;
+    private bool refreshingChecks;
 
     internal CaptureTrayMenu(params CaptureTrayItem[] items)
     {
@@ -37,7 +38,13 @@ internal sealed class CaptureTrayMenu : Form
             row.MouseLeave += (_, _) => { hovered = -1; PaintSurface(); };
             row.GotFocus += (_, _) => PaintSurface();
             row.LostFocus += (_, _) => PaintSurface();
-            row.Click += (_, _) => { Hide(); item.Invoke?.Invoke(); };
+            if (row is CheckBox check)
+                check.CheckedChanged += (_, _) =>
+                {
+                    if (refreshingChecks || !Visible) return;
+                    Hide(); item.Invoke?.Invoke();
+                };
+            else row.Click += (_, _) => { Hide(); item.Invoke?.Invoke(); };
             Controls.Add(row);
             return row;
         }).ToArray();
@@ -64,11 +71,16 @@ internal sealed class CaptureTrayMenu : Form
         }
         var width = Math.Max(Scale(280), rows.Max(row => TextRenderer.MeasureText(row.Text, Font).Width) + Scale(56));
         Size = new Size(width, Scale(10 + items.Length * 30));
-        for (var i = 0; i < rows.Length; i++)
+        refreshingChecks = true;
+        try
         {
-            rows[i].Bounds = new Rectangle(0, Scale(5 + i * 30), width, Scale(30));
-            if (rows[i] is CheckBox check) check.Checked = items[i].IsChecked?.Invoke() == true;
+            for (var i = 0; i < rows.Length; i++)
+            {
+                rows[i].Bounds = new Rectangle(0, Scale(5 + i * 30), width, Scale(30));
+                if (rows[i] is CheckBox check) check.Checked = items[i].IsChecked?.Invoke() == true;
+            }
         }
+        finally { refreshingChecks = false; }
         var work = Screen.FromPoint(pointer).WorkingArea;
         Location = new Point(Math.Clamp(pointer.X - Width, work.Left, Math.Max(work.Left, work.Right - Width)),
             Math.Clamp(pointer.Y - Height, work.Top, Math.Max(work.Top, work.Bottom - Height)));
@@ -186,7 +198,7 @@ internal sealed class CaptureTrayMenu : Form
     }
     private sealed class MenuCheckBox : CheckBox
     {
-        public MenuCheckBox() { AutoCheck = false; Appearance = Appearance.Button; SetStyle(ControlStyles.UserPaint, true); }
+        public MenuCheckBox() { Appearance = Appearance.Button; SetStyle(ControlStyles.UserPaint, true); }
         protected override void OnPaint(PaintEventArgs e) { }
         protected override void OnPaintBackground(PaintEventArgs e) { }
     }
