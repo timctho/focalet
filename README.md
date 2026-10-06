@@ -67,6 +67,7 @@ header. Sign in through your agent's own flow if needed.
 ## Desktop examples
 
 Animated previews play automatically; click one for the clearer video.
+These historical recordings retain their original UI; new builds use Focalet.
 
 ### Compare three products
 

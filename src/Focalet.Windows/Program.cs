@@ -35,7 +35,7 @@ internal static class Program
             return AcceptanceProbe.WindowOwnership();
         }
 
-        Console.Error.WriteLine("Focalet.Capture is a capture-only helper. Start the packaged Flutter Focalet application instead.");
+        Console.Error.WriteLine("Focalet.CaptureHost is a capture-only helper. Start the packaged Flutter Focalet application instead.");
         return 2;
     }
 }
