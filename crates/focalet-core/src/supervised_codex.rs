@@ -764,12 +764,37 @@ mod tests {
     #[tokio::test]
     async fn delayed_probes_do_not_restart_a_streaming_runtime_but_a_real_stall_does() {
         let fixture = Fixture::new();
-        let (runtime, mut events) = fixture.connect().await;
+        let (tx, mut events) = mpsc::unbounded_channel();
+        // This test crosses the OS scheduler twice (Python producer and Rust
+        // reader). A 50 ms fixture deadline can expire without either process
+        // running on a loaded native runner; production uses five seconds.
+        let runtime = SupervisedCodex::connect_with_policy(
+            fixture.config(),
+            tx,
+            HealthPolicy {
+                poll: Duration::from_millis(20),
+                probe_interval: Duration::from_millis(80),
+                probe_timeout: Duration::from_millis(500),
+                retry_base: Duration::from_millis(60),
+                retry_max: Duration::from_millis(240),
+            },
+        )
+        .await
+        .unwrap();
         hold_turn(&runtime, "/chosen/workspace").await;
         fixture.mark("stream-while-stalled", "1");
+        // Observe actual streaming before withholding probe replies. Startup
+        // events and the requested control-file write alone do not prove it.
+        loop {
+            let update = event(&mut events, "item.update").await;
+            if update.payload["itemId"] == "agent-fixture" {
+                break;
+            }
+        }
+        let first_probe = fixture.count("thread/loaded/list");
         fixture.mark("stall-probe-pid", fixture.pids()[0]);
-        timeout(Duration::from_secs(5), async {
-            while fixture.count("thread/loaded/list") < 4 {
+        timeout(Duration::from_secs(8), async {
+            while fixture.count("thread/loaded/list") < first_probe + 4 {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         })

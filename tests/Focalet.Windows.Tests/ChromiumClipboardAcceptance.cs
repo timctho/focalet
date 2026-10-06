@@ -41,10 +41,11 @@ internal static class ChromiumClipboardAcceptance
               if(text){order.push('text');return;}
               const file=Array.from(e.clipboardData.items).find(i=>i.type.startsWith('image/'))?.getAsFile();
               if(!file)return; e.preventDefault(); order.push('image');
+              const index=imageResult.length; imageResult.push(null);
               await new Promise(r=>setTimeout(r,400));
               const image=await createImageBitmap(file), canvas=document.createElement('canvas');
               canvas.width=image.width;canvas.height=image.height;const ctx=canvas.getContext('2d');ctx.drawImage(image,0,0);
-              imageResult.push({width:image.width,height:image.height,pixel:Array.from(ctx.getImageData(50,30,1,1).data)});
+              imageResult[index]={width:image.width,height:image.height,pixel:Array.from(ctx.getImageData(50,30,1,1).data)};
               const preview=document.createElement('img');preview.src=URL.createObjectURL(file);previews.appendChild(preview);
             });
             </script>
@@ -165,9 +166,15 @@ internal static class ChromiumClipboardAcceptance
             var result = await CapturePasteSequence.PasteAsync(batch, target, false);
             if (result.StoppedBecause is not null || result.StepsSent != 4)
                 throw new InvalidOperationException("Browser sequence failed: " + result);
+            // Native clipboard reads finish before this receiver's deliberately
+            // asynchronous decode. Observe completion without slowing production
+            // paste or mistaking an unfinished bitmap for a missing image.
+            var decoded = Stopwatch.StartNew();
+            while ((await Evaluate("imageResult.filter(Boolean).length")).GetInt32() < 2 && decoded.ElapsedMilliseconds < 5000)
+                await Task.Delay(25, token);
             var actual = await Evaluate("imageResult");
             var colors = new[] { new[] {255,127,80,255}, new[] {0,0,255,255} };
-            if (actual.GetArrayLength() != 2) throw new InvalidOperationException("Browser did not receive two separate images: " + actual);
+            if (actual.GetArrayLength() != 2 || actual.EnumerateArray().Any(item => item.ValueKind != JsonValueKind.Object)) throw new InvalidOperationException("Browser did not receive two separate images: " + actual);
             for (var index = 0; index < 2; index++)
             {
                 var item = actual[index];
