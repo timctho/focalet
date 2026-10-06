@@ -201,7 +201,7 @@ export default class FocaletExtension extends Extension {
     }
     CaptureClipboardStateAsync([token], invocation) {
         const source = this._authorized(invocation) && this._clipboardToken === token ? this._captureClipboard : null;
-        invocation.return_value(new GLib.Variant('(s)', [JSON.stringify({owned: Boolean(source?.is_active()), readAt: source?.get_read_at() ?? 0})]));
+        invocation.return_value(new GLib.Variant('(s)', [JSON.stringify({owned: Boolean(source?.is_active()), readAt: source?.get_read_at() ?? 0, targetCurrent: this._pasteValid(token, invocation)})]));
     }
     SetCaptureBusyAsync([busy], invocation) {
         if (this._authorized(invocation)) this._captureBusy = busy;
@@ -222,14 +222,18 @@ export default class FocaletExtension extends Extension {
         }
         invocation.return_value(new GLib.Variant('(b)', [Boolean(valid)]));
     }
-    _pasteReady(token, invocation) {
+    _pasteValid(token, invocation) {
+        if (!this._authorized(invocation)) return false;
         const state = this._lease;
+        const valid = state?.token === token && this._status().available &&
+            state.until > GLib.get_monotonic_time() && state.window === global.display.focus_window;
+        if (!valid) this._lease = null;
+        return Boolean(valid);
+    }
+    _pasteReady(token, invocation) {
         const mask = Clutter.ModifierType.SHIFT_MASK | Clutter.ModifierType.CONTROL_MASK |
             Clutter.ModifierType.MOD1_MASK | Clutter.ModifierType.SUPER_MASK;
-        const valid = this._authorized(invocation) && state?.token === token && this._status().available &&
-            state.until > GLib.get_monotonic_time() && state.window === global.display.focus_window;
-        if (!valid) { this._lease = null; return false; }
-        return (global.get_pointer()[2] & mask) === 0;
+        return this._pasteValid(token, invocation) && (global.get_pointer()[2] & mask) === 0;
     }
     PasteReadyAsync([token], invocation) {
         invocation.return_value(new GLib.Variant('(b)', [this._pasteReady(token, invocation)]));

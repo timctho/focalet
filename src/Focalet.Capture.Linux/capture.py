@@ -76,7 +76,6 @@ class Capture(Gtk.Application):
             Atspi.init()
             Atspi.set_timeout(200, 200)
             self.listener = Atspi.EventListener.new(self.focus_event, None)
-            self.listener.register('object:state-changed:focused')
             GLib.timeout_add_seconds(3, self.reconnect)
         if not self.reconnect():
             return
@@ -237,6 +236,7 @@ class Capture(Gtk.Application):
         if self.batch is None:
             self.report('Capture first with Shift+Alt+A'); return
         self.busy, self.token, self.focus_changed = True, token, False
+        self.listener.register('object:state-changed:focused')
         self.focused = self.focused_element()
         if self.focused is not None and self.focused.get_role() == Atspi.Role.PASSWORD_TEXT:
             self.stop('Choose an editable destination.'); return
@@ -274,16 +274,26 @@ class Capture(Gtk.Application):
         except GLib.Error:
             self.stop('Desktop integration disconnected.'); return
         self.sent_at = time.monotonic()
+        self.modifier_wait = None
         GLib.timeout_add(20, self.settle)
 
     def settle(self):
         elapsed = time.monotonic()-self.sent_at
         if elapsed < .04: return True  # Let injected modifier-up reach Mutter.
-        owned, ready = self.clipboard.owned, self.ready()
-        if not owned or not ready:
+        owned = self.clipboard.owned
+        current = self.clipboard.state.get('targetCurrent', False) and not self.focus_changed
+        if not owned or not current:
             if os.environ.get('FOCALET_CAPTURE_DIAGNOSTICS') == '1':
-                print(f'Paste guard: owned={owned}, ready={ready}, inputChanged={self.focus_changed}', flush=True)
+                print(f'Paste guard: owned={owned}, targetCurrent={current}, inputChanged={self.focus_changed}', flush=True)
             self.stop('Paste stopped. Focus the input and press Alt+A again.'); return False
+        if not self.ready():
+            # A second hotkey is ignored by GNOME. Wait for its modifiers to
+            # come up without replacing the active payload or queuing a paste.
+            if self.modifier_wait is None: self.modifier_wait = time.monotonic()
+            if time.monotonic()-self.modifier_wait > 2:
+                self.stop('Paste stopped. Release the shortcut keys and try again.'); return False
+            return True
+        self.modifier_wait = None
         minimum = (3 if self.preferences.get('slowerImages') else .5) if self.image_step else .15
         read_at = self.clipboard.read_at
         if read_at and elapsed >= minimum and time.monotonic()-read_at >= .12:
@@ -295,6 +305,7 @@ class Capture(Gtk.Application):
         return True
 
     def stop(self, message=None):
+        self.listener.deregister('object:state-changed:focused')
         self.busy, self.token, self.focused = False, '', None
         if message: self.report(message)
         # Successful repeatable paste is silent.
