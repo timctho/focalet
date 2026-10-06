@@ -28,13 +28,13 @@ use, with an optional desktop app for managing agent conversations.
 
 | Platform | Focalet Capture | Focalet Desktop |
 | --- | --- | --- |
-| Windows 10/11 · x64 | [Windows setup](https://github.com/timctho/focalet/releases/download/v0.3.0/Focalet-Capture-Setup-x64.exe) | [Windows setup](https://github.com/timctho/focalet/releases/download/v0.3.0/Focalet-Setup-x64.exe) |
-| macOS 12+ · Apple Silicon | [Apple Silicon DMG](https://github.com/timctho/focalet/releases/download/v0.3.0/Focalet-Capture-macOS-arm64.dmg) | [Apple Silicon DMG](https://github.com/timctho/focalet/releases/download/v0.3.0/Focalet-macOS-arm64.dmg) |
-| macOS 12+ · Intel | [Intel DMG](https://github.com/timctho/focalet/releases/download/v0.3.0/Focalet-Capture-macOS-x64.dmg) | [Intel DMG](https://github.com/timctho/focalet/releases/download/v0.3.0/Focalet-macOS-x64.dmg) |
-| Ubuntu 24.04 · x64 · GNOME Wayland | [Ubuntu package](https://github.com/timctho/focalet/releases/download/v0.3.0/Focalet-Capture-Ubuntu-amd64.deb) | [Ubuntu package](https://github.com/timctho/focalet/releases/download/v0.3.0/Focalet-Ubuntu-amd64.deb) |
+| Windows 10/11 · x64 | [Windows setup](https://github.com/timctho/focalet/releases/download/v0.3.1/Focalet-Capture-Setup-x64.exe) | [Windows setup](https://github.com/timctho/focalet/releases/download/v0.3.1/Focalet-Setup-x64.exe) |
+| macOS 12+ · Apple Silicon | [Apple Silicon DMG](https://github.com/timctho/focalet/releases/download/v0.3.1/Focalet-Capture-macOS-arm64.dmg) | [Apple Silicon DMG](https://github.com/timctho/focalet/releases/download/v0.3.1/Focalet-macOS-arm64.dmg) |
+| macOS 12+ · Intel | [Intel DMG](https://github.com/timctho/focalet/releases/download/v0.3.1/Focalet-Capture-macOS-x64.dmg) | [Intel DMG](https://github.com/timctho/focalet/releases/download/v0.3.1/Focalet-macOS-x64.dmg) |
+| Ubuntu 24.04 · x64 · GNOME Wayland | [Ubuntu package](https://github.com/timctho/focalet/releases/download/v0.3.1/Focalet-Capture-Ubuntu-amd64.deb) | [Ubuntu package](https://github.com/timctho/focalet/releases/download/v0.3.1/Focalet-Ubuntu-amd64.deb) |
 
 Install either app independently. Capture runs from the system tray or menu bar;
-Desktop opens an agent workspace. All downloads above are **v0.3.0**.
+Desktop opens an agent workspace. All downloads above are **v0.3.1**.
 
 ## Capture: stay in the tool you know
 
