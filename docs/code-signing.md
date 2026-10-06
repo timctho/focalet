@@ -2,7 +2,7 @@
 
 ## Current status
 
-The v0.3.0 Windows applications and installers for Capture and Desktop are
+The v0.3.1 Windows applications and installers for Capture and Desktop are
 unsigned. No SignPath certificate has been approved or connected to the release
 workflow. A checksum verifies that
 a download matches a published file; it does not establish publisher identity.
