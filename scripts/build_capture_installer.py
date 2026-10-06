@@ -33,7 +33,7 @@ def ubuntu(package, output, manifest):
             f'Package: focalet-capture\nVersion: {version}\nArchitecture: amd64\nSection: utils\nPriority: optional\n'
             'Maintainer: Focalet contributors <noreply@github.com>\n'
             'Depends: libc6 (>= 2.39), libgcc-s1, libstdc++6 (>= 13.2), python3, python3-gi, python3-gi-cairo, '
-            'gir1.2-gtk-3.0, gir1.2-atspi-2.0, at-spi2-core, libgtk-3-0t64, libicu74, libssl3t64, libgssapi-krb5-2, zlib1g, '
+            'gir1.2-gtk-3.0, gir1.2-atspi-2.0, librsvg2-common, at-spi2-core, libgtk-3-0t64, libicu74, libssl3t64, libgssapi-krb5-2, zlib1g, '
             'gnome-shell (>= 46), gnome-shell (<< 47), xdg-desktop-portal, xdg-desktop-portal-gnome, '
             'pipewire, wireplumber, gstreamer1.0-pipewire, gstreamer1.0-plugins-base, libgstreamer1.0-0 (>= 1.24), libgstreamer-plugins-base1.0-0 (>= 1.24)\n'
             'Homepage: https://github.com/timctho/focalet\n'

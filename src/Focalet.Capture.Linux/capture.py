@@ -199,14 +199,21 @@ class Capture(Gtk.Application):
     def focused_element(self):
         try:
             desktop = Atspi.get_desktop(0)
-            stack = [desktop]; count = 0; deadline = time.monotonic()+.4
+            # Expand one child at a time so a slow accessibility provider cannot
+            # multiply the per-call timeout by a whole subtree on the GTK thread.
+            stack = [(desktop, -1)]; count = 0; deadline = time.monotonic()+.4
             while stack and count < 800 and time.monotonic() < deadline:
-                element = stack.pop(); count += 1
-                states = element.get_state_set()
-                if states.contains(Atspi.StateType.FOCUSED): return element
-                # Do not inspect text, selections or values in a paste destination.
-                if element.get_role() == Atspi.Role.PASSWORD_TEXT: continue
-                stack.extend(element.get_child_at_index(i) for i in range(min(200, element.get_child_count())))
+                element, index = stack.pop(); count += 1
+                if index == -1:
+                    states = element.get_state_set()
+                    if states.contains(Atspi.StateType.FOCUSED): return element
+                    if element.get_role() == Atspi.Role.PASSWORD_TEXT: continue
+                    children = min(200, element.get_child_count())
+                    if children: stack.append((element, children-1))
+                else:
+                    if index: stack.append((element, index-1))
+                    child = element.get_child_at_index(index)
+                    if child is not None: stack.append((child, -1))
         except (GLib.Error, AttributeError):
             pass
         return None
