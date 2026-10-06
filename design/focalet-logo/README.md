@@ -13,7 +13,7 @@ Editable geometry is in `masters/`; the wordmark is outlined Manrope at weight 6
 the supplied proportions and leave at least one symbol stroke width of clear
 space. The font's [SIL Open Font License](Manrope-OFL.txt) is retained here.
 
-The README uses transparent 980 × 264 PNG exports displayed at 240 px wide.
+The README uses transparent 980 × 264 PNG exports displayed at 360 px wide.
 They are rendered from the same vectors with supersampling for smooth edges
 on standard and high-DPI screens; light and dark variants match the page theme.
 
