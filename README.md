@@ -15,6 +15,18 @@ use, with an optional desktop app for managing agent conversations.
 
 [Documentation](https://timctho.github.io/focalet/) · [Releases](https://github.com/timctho/focalet/releases) · [Build from source](CONTRIBUTING.md)
 
+## See visual context in action
+
+Sketch a chart redesign, compare separate product listings, or select the part
+of a dashboard that needs investigation.
+
+[![Sketch a chart redesign and ask an agent to rebuild it](docs/demos/frontend-preview.webp)](docs/demos/frontend.mp4)
+
+[Watch the chart demo](docs/demos/frontend.mp4) · [More recorded examples](docs/demos/README.md)
+
+These historical recordings preserve their original UI and source provenance;
+current builds display Focalet.
+
 ## Choose your workflow
 
 | | Focalet Capture | Focalet Desktop |
@@ -65,18 +77,6 @@ credentials, tools, permissions and canonical history.
 
 [Runtime support and setup](docs/install.md#2-choose-the-agent-you-already-have) ·
 [Runtime commands](docs/runtime-commands.md) · [Chrome and Edge context](docs/guides/chrome-edge.md)
-
-### See visual context in action
-
-Sketch a chart redesign, compare separate product listings, or select the part
-of a dashboard that needs investigation.
-
-[![Sketch a chart redesign and ask an agent to rebuild it](docs/demos/frontend-preview.webp)](docs/demos/frontend.mp4)
-
-[Watch the chart demo](docs/demos/frontend.mp4) · [More recorded examples](docs/demos/README.md)
-
-These historical recordings preserve their original UI and source provenance;
-current builds display Focalet.
 
 ## What gets shared
 
