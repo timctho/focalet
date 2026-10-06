@@ -11,21 +11,21 @@ from test_runtime_commands import Core, FIXTURES
 
 class AcpStartupTests(unittest.TestCase):
     def test_openclaw_gateway_failure_keeps_other_chats_and_can_retry(self):
-        with tempfile.TemporaryDirectory(prefix='zommi-acp-startup-') as directory:
+        with tempfile.TemporaryDirectory(prefix='focalet-acp-startup-') as directory:
             root = Path(directory)
             marker = root / 'gateway-failure.txt'
             marker.write_text('ACP bridge failed: Opening handshake has timed out')
-            env = {k: v for k, v in os.environ.items() if not k.startswith('ZOMMI_')}
+            env = {k: v for k, v in os.environ.items() if not k.startswith('FOCALET_')}
             env.update(
-                ZOMMI_RUNTIME_DISCOVERY_MODE='configured-only',
-                ZOMMI_OPENCLAW_COMMAND=sys.executable,
-                ZOMMI_OPENCLAW_ARGS_JSON=json.dumps([str(FIXTURES / 'fake_acp_runtime.py')]),
-                ZOMMI_CODEX_COMMAND=sys.executable,
-                ZOMMI_CODEX_ARGS_JSON=json.dumps([str(FIXTURES / 'fake_codex_app_server.py')]),
-                ZOMMI_FAKE_ACP_STARTUP_FAILURE=str(marker),
-                ZOMMI_CORE_STATE_PATH=str(root / 'binding.json'),
-                ZOMMI_RUNTIME_OVERRIDES_PATH=str(root / 'overrides.json'),
-                ZOMMI_RUNTIME_DISCOVERY_CACHE_PATH=str(root / 'targets.json'),
+                FOCALET_RUNTIME_DISCOVERY_MODE='configured-only',
+                FOCALET_OPENCLAW_COMMAND=sys.executable,
+                FOCALET_OPENCLAW_ARGS_JSON=json.dumps([str(FIXTURES / 'fake_acp_runtime.py')]),
+                FOCALET_CODEX_COMMAND=sys.executable,
+                FOCALET_CODEX_ARGS_JSON=json.dumps([str(FIXTURES / 'fake_codex_app_server.py')]),
+                FOCALET_FAKE_ACP_STARTUP_FAILURE=str(marker),
+                FOCALET_CORE_STATE_PATH=str(root / 'binding.json'),
+                FOCALET_RUNTIME_OVERRIDES_PATH=str(root / 'overrides.json'),
+                FOCALET_RUNTIME_DISCOVERY_CACHE_PATH=str(root / 'targets.json'),
             )
             core = Core(env)
             try:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create an empty Zommi profile connected to a real, already installed agent.
+"""Create an empty Focalet profile connected to a real, already installed agent.
 
 No model prompts are sent here. Agent credentials stay in the agent's home.
 The profile and bindings are local recording inputs and must never be published.
@@ -40,19 +40,19 @@ def main():
     if args.wsl_distribution and (os.name != "nt" or not args.agent_executable):
         parser.error("--wsl-distribution requires Windows and --agent-executable")
     args.profile.mkdir(parents=True, exist_ok=False)
-    settings = args.profile / ("Zommi" if os.name == "nt" else "config/zommi")
+    settings = args.profile / ("Focalet" if os.name == "nt" else "config/focalet")
     settings.mkdir(parents=True)
     environment = dict(
         os.environ,
         APPDATA=str(args.profile),
         LOCALAPPDATA=str(args.profile),
-        ZOMMI_CORE_STATE_PATH=str(args.profile / "binding.json"),
-        ZOMMI_RUNTIME_OVERRIDES_PATH=str(args.profile / "overrides.json"),
-        ZOMMI_RUNTIME_DISCOVERY_CACHE_PATH=str(args.profile / "targets.json"),
+        FOCALET_CORE_STATE_PATH=str(args.profile / "binding.json"),
+        FOCALET_RUNTIME_OVERRIDES_PATH=str(args.profile / "overrides.json"),
+        FOCALET_RUNTIME_DISCOVERY_CACHE_PATH=str(args.profile / "targets.json"),
     )
     # A recording is a real app session, not one of the contract-test fixtures.
     for key in list(environment):
-        if key.startswith("ZOMMI_FAKE_") or key == "ZOMMI_RUNTIME_DISCOVERY_MODE":
+        if key.startswith("FOCALET_FAKE_") or key == "FOCALET_RUNTIME_DISCOVERY_MODE":
             del environment[key]
     environment.update(
         XDG_CONFIG_HOME=str(args.profile / "config"),
@@ -78,10 +78,10 @@ def main():
         )
     elif args.agent_executable:
         environment.update(
-            ZOMMI_CODEX_COMMAND=args.agent_executable,
-            ZOMMI_RUNTIME_DISCOVERY_MODE="configured-only",
+            FOCALET_CODEX_COMMAND=args.agent_executable,
+            FOCALET_RUNTIME_DISCOVERY_MODE="configured-only",
         )
-    core_name = "zommi-core-host.exe" if os.name == "nt" else "zommi-core-host"
+    core_name = "focalet-core-host.exe" if os.name == "nt" else "focalet-core-host"
     core = subprocess.Popen(
         [str(args.package / core_name)],
         env=environment,
@@ -180,14 +180,14 @@ def main():
                     for key in (
                         "APPDATA",
                         "LOCALAPPDATA",
-                        "ZOMMI_CORE_STATE_PATH",
-                        "ZOMMI_RUNTIME_OVERRIDES_PATH",
-                        "ZOMMI_RUNTIME_DISCOVERY_CACHE_PATH",
+                        "FOCALET_CORE_STATE_PATH",
+                        "FOCALET_RUNTIME_OVERRIDES_PATH",
+                        "FOCALET_RUNTIME_DISCOVERY_CACHE_PATH",
                         "XDG_CONFIG_HOME",
                         "XDG_STATE_HOME",
                         "XDG_CACHE_HOME",
                         *(
-                            ["ZOMMI_CODEX_COMMAND", "ZOMMI_RUNTIME_DISCOVERY_MODE"]
+                            ["FOCALET_CODEX_COMMAND", "FOCALET_RUNTIME_DISCOVERY_MODE"]
                             if args.agent_executable and not args.wsl_distribution
                             else []
                         ),

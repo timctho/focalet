@@ -34,7 +34,7 @@ def on_page_markdown(markdown, page, config, files):
         if destination:
             address = posixpath.relpath(destination, posixpath.dirname(page.file.src_uri) or ".")
         else:
-            address = "https://github.com/timctho/zommi/blob/main/" + relative
+            address = "https://github.com/timctho/focalet/blob/main/" + relative
         if url.fragment:
             address += "#" + url.fragment
         return prefix + address + suffix

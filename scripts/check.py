@@ -12,38 +12,38 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-FLUTTER = ROOT / "src/Zommi.Flutter"
+FLUTTER = ROOT / "src/Focalet.Flutter"
 SUITES = ("rust", "flutter", "contracts", "capture", "browser", "windows")
 _check_environment = None
 
 
 def isolated_runtime_environment(directory, inherited):
     # Retain toolchain/OS variables while removing runtime overrides inherited
-    # from the developer's interactive Zommi session. Each fixture opts in its
+    # from the developer's interactive Focalet session. Each fixture opts in its
     # own command/endpoint; automatic PATH and WSL discovery are disabled.
     environment = {
         key: value
         for key, value in inherited.items()
         if not key.startswith(
             (
-                "ZOMMI_CODEX_",
-                "ZOMMI_PI_",
-                "ZOMMI_HERMES_",
-                "ZOMMI_OPENCLAW_",
-                "ZOMMI_OPENCODE_",
-                "ZOMMI_GEMINI_",
-                "ZOMMI_CLAUDE_",
-                "ZOMMI_FAKE_",
+                "FOCALET_CODEX_",
+                "FOCALET_PI_",
+                "FOCALET_HERMES_",
+                "FOCALET_OPENCLAW_",
+                "FOCALET_OPENCODE_",
+                "FOCALET_GEMINI_",
+                "FOCALET_CLAUDE_",
+                "FOCALET_FAKE_",
             )
         )
     }
     environment.update(
         {
-            "ZOMMI_RUNTIME_DISCOVERY_MODE": "configured-only",
-            "ZOMMI_CORE_STATE_PATH": str(Path(directory, "binding.json")),
-            "ZOMMI_RUNTIME_OVERRIDES_PATH": str(Path(directory, "overrides.json")),
-            "ZOMMI_RUNTIME_DISCOVERY_CACHE_PATH": str(Path(directory, "targets.json")),
-            "ZOMMI_OPENCLAW_DEVICE_IDENTITY_PATH": str(Path(directory, "device.json")),
+            "FOCALET_RUNTIME_DISCOVERY_MODE": "configured-only",
+            "FOCALET_CORE_STATE_PATH": str(Path(directory, "binding.json")),
+            "FOCALET_RUNTIME_OVERRIDES_PATH": str(Path(directory, "overrides.json")),
+            "FOCALET_RUNTIME_DISCOVERY_CACHE_PATH": str(Path(directory, "targets.json")),
+            "FOCALET_OPENCLAW_DEVICE_IDENTITY_PATH": str(Path(directory, "device.json")),
         }
     )
     return environment
@@ -77,7 +77,7 @@ def flutter_environment():
             "SQLite is missing. Install libsqlite3-dev (see CONTRIBUTING.md)."
         )
     # Minimal distributions may have libsqlite3.so.0 but no linker alias.
-    with tempfile.TemporaryDirectory(prefix="zommi-test-sqlite-") as directory:
+    with tempfile.TemporaryDirectory(prefix="focalet-test-sqlite-") as directory:
         Path(directory, "libsqlite3.so").symlink_to(library)
         # A relative symlink to a soname is not resolvable by the loader: use its
         # actual location from ldconfig when only the versioned library exists.
@@ -108,7 +108,7 @@ def flutter_environment():
 
 def check_rust():
     packages = (
-        ["-p", "zommi-core", "-p", "zommi-core-host"]
+        ["-p", "focalet-core", "-p", "focalet-core-host"]
         if sys.platform != "linux"
         else ["--workspace"]
     )
@@ -130,15 +130,15 @@ def check_rust():
         "build",
         "--locked",
         "-p",
-        "zommi-core-host",
+        "focalet-core-host",
         "--bin",
-        "zommi-core-host",
+        "focalet-core-host",
     )
 
 
 def check_flutter(*tests):
     suffix = ".exe" if os.name == "nt" else ""
-    if not (ROOT / f"target/debug/zommi-core-host{suffix}").is_file():
+    if not (ROOT / f"target/debug/focalet-core-host{suffix}").is_file():
         raise RuntimeError(
             "Build the broker first: python scripts/check.py --suite rust"
         )
@@ -179,7 +179,7 @@ def check_contracts():
         "test_*.py",
         "-v",
     )
-    run("node", "--check", "scripts/zommi-wsl-relay.js")
+    run("node", "--check", "scripts/focalet-wsl-relay.js")
     run("node", "--test", "tests/wsl_relay.test.mjs")
     check_shell_scripts()
 
@@ -195,14 +195,14 @@ def check_capture():
         "dotnet",
         "run",
         "--project",
-        "tests/Zommi.Capture.Tests",
+        "tests/Focalet.Capture.Tests",
         "--configuration",
         "Release",
     )
     run(
         "dotnet",
         "build",
-        "src/Zommi.Windows/Zommi.Windows.csproj",
+        "src/Focalet.Windows/Focalet.Windows.csproj",
         "--configuration",
         "Release",
     )
@@ -210,7 +210,7 @@ def check_capture():
         "dotnet",
         "run" if os.name == "nt" else "build",
         *(["--project"] if os.name == "nt" else []),
-        "tests/Zommi.Windows.Tests/Zommi.Windows.Tests.csproj",
+        "tests/Focalet.Windows.Tests/Focalet.Windows.Tests.csproj",
         "--configuration",
         "Release",
     )
@@ -270,7 +270,7 @@ def main():
         "windows": check_windows,
     }
     try:
-        with tempfile.TemporaryDirectory(prefix="zommi-checks-") as directory:
+        with tempfile.TemporaryDirectory(prefix="focalet-checks-") as directory:
             _check_environment = isolated_runtime_environment(directory, os.environ)
             for suite in suites:
                 print(f"\nChecking {suite}", flush=True)

@@ -10,18 +10,18 @@ the package is Authenticode-signed.
 
 ## Package identity
 
-1. Extract the complete `zommi-windows-x64.zip` to a local folder.
+1. Extract the complete `focalet-windows-x64.zip` to a local folder.
 2. Run:
 
    ```powershell
    python .\scripts\verify_release.py `
-     .\artifacts\zommi-windows-x64 `
+     .\artifacts\focalet-windows-x64 `
      --expected-platform windows `
      --expected-commit <40-character-sha>
    ```
 
-3. Confirm the package contains `Zommi.exe`, `zommi-core-host.exe`,
-   `native\Zommi.Capture.exe`, manifest, and checksums, with no Electron or
+3. Confirm the package contains `Focalet.exe`, `focalet-core-host.exe`,
+   `native\Focalet.CaptureHost.exe`, manifest, and checksums, with no Electron or
    Node payload.
 4. If signing is required, verify all three executable signatures and require
    manifest status `distribution-signed`.
@@ -30,7 +30,7 @@ Before the physical walkthrough, run the packaged helper gate:
 
 ```powershell
 .\scripts\accept-windows-capture.ps1 `
-  -PackageDirectory .\artifacts\zommi-windows-x64
+  -PackageDirectory .\artifacts\focalet-windows-x64
 ```
 
 It verifies an exact selected-text UIA fixture, selector cancellation, native
@@ -74,7 +74,7 @@ delivery; they are still not physical keyboard evidence.
 
 ## Window and interaction
 
-1. Start the exact extracted `Zommi.exe`.
+1. Start the exact extracted `Focalet.exe`.
 2. Confirm one complete chat window appears in the taskbar and is not topmost.
 3. Click its taskbar icon to minimize it, then click again to restore it.
 4. Expand and restore the large window without moving its bottom-center anchor.
@@ -90,7 +90,7 @@ delivery; they are still not physical keyboard evidence.
    appears only after selection and the chat returns without jumping to the pointer.
 3. Confirm the preview shows the intended selection/window/URL evidence.
 4. Repeat on a second surface and confirm chips accumulate with unique labels.
-5. Minimize Zommi, invoke `Alt+A`, then cancel. Verify no attachment is added and
+5. Minimize Focalet, invoke `Alt+A`, then cancel. Verify no attachment is added and
    chat returns to the foreground with the composer ready.
 6. Invoke `Alt+A` and drag a region. Verify the image, dimensions, preview,
    removal, and aligned context (or explicit image-only result).
@@ -179,7 +179,7 @@ the exact image size, screen rectangle, stable source and coordinate formula.
 
 1. Confirm runtime discovery shows the exact native/WSL host and protocol.
 2. If authentication is missing, use the runtime-owned sign-in action and
-   verify no credential is copied into Zommi settings.
+   verify no credential is copied into Focalet settings.
 3. Send a turn with context and confirm thinking/tool/final blocks stream once.
 4. Draft while streaming, interrupt the exact active turn, switch sessions,
    and verify background running/unread state.
@@ -202,7 +202,7 @@ and hardware-composited capture require their own direct evidence.
 - Verification also caught native Restore being discarded while the Max frame was pending. Native Max/Restore commands now retain the latest request and replay it after the handoff, rather than returning a swallowed busy error. Hide, minimize, and destruction discard pending commands. The packaged capture gate checks Max/Restore followed by an immediate Max/Restore/Max/Restore burst without waiting for frame completion between commands.
 - Message paragraphs, lists, and code use regular weight. Explicit Markdown emphasis and headings retain their formatting. The compact maximize choice is `Max` and must remain on one line.
 - Exercise Standard -> Wide -> Standard -> Max -> Wide -> Max -> Standard. Inspect the rendered content, not just `GetWindowRect`: native bounds can be monotonic while stale client pixels move backward or clip. Max must respect the monitor work area, and native Restore must return to the previous normal bounds.
-- Run `pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts/accept-windows-window-size.ps1 -PackageDirectory artifacts/zommi-windows-x64 -ExpectedCommit <packaged-sha> -CaptureBackend Gdi` with PowerShell 7 on an attached desktop. The isolated profile sets a light violet theme, creates a blank chat through the Codex runtime menu when needed, and waits for the rendered send control to become ready. MSAA locates the real controls; the violet send button must not disappear, reverse, or leave its endpoints. A controlled contrast window sits behind Zommi; background RGB from the same bitmap must match the corresponding complete old or new layout within three levels per channel. The glass gradient can have different endpoint colors; intermediate flashes still fail. First visible movement must be captured within 250 ms of mouse release, and content and native bounds must settle within 800 ms. Native Restore is sampled as a transition, not just checked at its endpoint. Foreground ownership must remain with Zommi. Captured frames, coordinates, background measurements, and timings are retained beside the result JSON, including failures. CI selects this CPU observer before deployment when `run_shared_runners=true` and `windows_interactive=true`.
+- Run `pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts/accept-windows-window-size.ps1 -PackageDirectory artifacts/focalet-windows-x64 -ExpectedCommit <packaged-sha> -CaptureBackend Gdi` with PowerShell 7 on an attached desktop. The isolated profile sets a light violet theme, creates a blank chat through the Codex runtime menu when needed, and waits for the rendered send control to become ready. MSAA locates the real controls; the violet send button must not disappear, reverse, or leave its endpoints. A controlled contrast window sits behind Focalet; background RGB from the same bitmap must match the corresponding complete old or new layout within three levels per channel. The glass gradient can have different endpoint colors; intermediate flashes still fail. First visible movement must be captured within 250 ms of mouse release, and content and native bounds must settle within 800 ms. Native Restore is sampled as a transition, not just checked at its endpoint. Foreground ownership must remain with Focalet. Captured frames, coordinates, background measurements, and timings are retained beside the result JSON, including failures. CI selects this CPU observer before deployment when `run_shared_runners=true` and `windows_interactive=true`.
 - GDI capture-start and copy-completion times are QPC-based observation bounds, not presentation timestamps. `captureStartedMs`, `captureCompletedMs`, and the later `processedMs` remain distinct; GDI reports no invented presentation timestamp. The capture region includes both expected marker endpoints and adjacent background, with margins; a missing marker fails instead of being predicted or dropped. Every retained sample is checked without smoothing. GDI can combine rows from different presentations, so inspect saved images when diagnosing a partial frame and do not claim exhaustive per-presentation coverage from these samples.
 - `-CaptureBackend DesktopDuplication` explicitly selects the existing presentation-timestamp observer. It requires an unrotated output containing the sampled area, fails rather than silently changing backends, and reuses an unchanged previous image only for pointer-only notifications or timeouts. Its presentation times are not interchangeable with GDI copy-completion times.
 - Windows resizes the real HWND and Flutter child using the stock runner's `WM_SIZE`/`MoveWindow` path. A snapshot temporarily covers the union of old and target bounds in an opaque, non-activating owned window. On a supported single output, Desktop Duplication copies the image directly into a DirectComposition swap chain, avoiding a GPU-to-CPU-to-GPU round trip. The visual is committed before resizing, without waiting an additional desktop refresh. The capture device is initialized at startup, but images are acquired only for a requested resize. If duplication/composition is unavailable, a CPU bitmap uses DXGI readback or GDI capture and `ULW_OPAQUE` to avoid double alpha composition. The original Flutter window is never hidden or cloaked. Flutter keeps its default UI task runner, and physical-metrics feedback arms the official next-frame callback during resize. The callback already runs on that thread and completes the handoff directly; a two-second timer, minimize/hide, and destruction all clean up the mask. Snapshot textures and bitmaps stay in memory and are released when the handoff finishes. The product never saves or sends them. Flutter uses its stock engine and resize path; the separate swap chain displays only the temporary snapshot.

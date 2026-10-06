@@ -19,7 +19,7 @@ import time
 
 async def measure(args):
     repository = pathlib.Path(__file__).resolve().parent.parent
-    with tempfile.TemporaryDirectory(prefix="zommi-switch-benchmark-") as directory:
+    with tempfile.TemporaryDirectory(prefix="focalet-switch-benchmark-") as directory:
         temporary = pathlib.Path(directory)
         request_log = temporary / "requests.jsonl"
         process = await asyncio.create_subprocess_exec(
@@ -30,16 +30,16 @@ async def measure(args):
             limit=64 * 1024 * 1024,
             env={
                 **os.environ,
-                "ZOMMI_CODEX_COMMAND": sys.executable,
-                "ZOMMI_CODEX_ARGS_JSON": json.dumps([
-                    str(repository / "crates/zommi-core-host/tests/fake_codex_app_server.py")
+                "FOCALET_CODEX_COMMAND": sys.executable,
+                "FOCALET_CODEX_ARGS_JSON": json.dumps([
+                    str(repository / "crates/focalet-core-host/tests/fake_codex_app_server.py")
                 ]),
-                "ZOMMI_CORE_STATE_PATH": str(temporary / "binding.json"),
-                "ZOMMI_RUNTIME_OVERRIDES_PATH": str(temporary / "overrides.json"),
-                "ZOMMI_RUNTIME_DISCOVERY_CACHE_PATH": str(temporary / "discovery.json"),
-                "ZOMMI_FAKE_REQUEST_LOG": str(request_log),
-                "ZOMMI_FAKE_HISTORY_COUNT": str(args.turns),
-                "ZOMMI_FAKE_REQUEST_DELAY_MS": str(args.delay_ms),
+                "FOCALET_CORE_STATE_PATH": str(temporary / "binding.json"),
+                "FOCALET_RUNTIME_OVERRIDES_PATH": str(temporary / "overrides.json"),
+                "FOCALET_RUNTIME_DISCOVERY_CACHE_PATH": str(temporary / "discovery.json"),
+                "FOCALET_FAKE_REQUEST_LOG": str(request_log),
+                "FOCALET_FAKE_HISTORY_COUNT": str(args.turns),
+                "FOCALET_FAKE_REQUEST_DELAY_MS": str(args.delay_ms),
             },
         )
         sequence = 0
@@ -112,7 +112,7 @@ async def measure(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--core-host", default="target/debug/zommi-core-host")
+    parser.add_argument("--core-host", default="target/debug/focalet-core-host")
     parser.add_argument("--chats", type=int, default=6)
     parser.add_argument("--turns", type=int, default=60)
     parser.add_argument("--switches", type=int, default=12)

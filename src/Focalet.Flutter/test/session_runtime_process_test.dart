@@ -1,0 +1,215 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:focalet_flutter/core/core_bridge.dart';
+import 'package:focalet_flutter/desktop/desktop_bridge.dart';
+import 'package:focalet_flutter/state/focalet_controller.dart';
+
+void main() {
+  test('Codex switches transfer only the selected history with one backend request', () async {
+    final temporary = await Directory.systemTemp.createTemp(
+      'focalet-switch-history-',
+    );
+    addTearDown(() => temporary.delete(recursive: true));
+    final requestLog = File('${temporary.path}/requests.jsonl');
+    final bridge = ProcessCoreBridge(
+      executablePath: File(
+        '../../target/debug/focalet-core-host${Platform.isWindows ? '.exe' : ''}',
+      ).absolute.path,
+      environment: {
+        'FOCALET_CODEX_COMMAND': await _findPython(),
+        'FOCALET_CODEX_ARGS_JSON': jsonEncode([
+          File('../../crates/focalet-core-host/tests/fake_codex_app_server.py')
+              .absolute
+              .path,
+        ]),
+        'FOCALET_CORE_STATE_PATH': '${temporary.path}/binding.json',
+        'FOCALET_RUNTIME_OVERRIDES_PATH': '${temporary.path}/overrides.json',
+        'FOCALET_RUNTIME_DISCOVERY_CACHE_PATH':
+            '${temporary.path}/discovery.json',
+        'FOCALET_FAKE_REQUEST_LOG': requestLog.path,
+        'FOCALET_FAKE_HISTORY_COUNT': '60',
+      },
+    );
+    final controller = FocaletController(
+      core: bridge,
+      desktop: const NoopDesktopBridge(),
+      catalogStartupDelay: const Duration(days: 1),
+    );
+    addTearDown(controller.close);
+    await controller.initialize();
+    final codex = controller.runtimeTargets.firstWhere(
+      (target) =>
+          target.adapterId == 'codex-app-server' &&
+          target.executionHost['kind'] == 'native',
+    );
+    await controller.selectRuntime(codex.id);
+    final before = (await requestLog.readAsLines()).length;
+    for (final session in ['chat-a', 'chat-b', 'chat-c', 'chat-a']) {
+      await controller.switchSession(session);
+      expect(controller.activeSessionId, session, reason: controller.status);
+      expect(controller.turns, hasLength(60));
+      expect(controller.turns.first.id, '$session-turn-0');
+    }
+    final methods = (await requestLog.readAsLines())
+        .skip(before)
+        .map((line) => (jsonDecode(line) as Map)['method'])
+        .where(
+          (method) =>
+              ['thread/resume', 'thread/read', 'thread/list'].contains(method),
+        );
+    expect(methods, List.filled(4, 'thread/resume'));
+    final connection = await bridge.openSession(
+      runtimeTargetId: codex.id,
+      sessionId: 'chat-b',
+    );
+    expect(connection.history!['thread'], isA<Map>());
+    expect(
+      connection.sessions.every((session) => !session.containsKey('turns')),
+      isTrue,
+    );
+    expect(jsonEncode(connection.sessions).length, lessThan(2000));
+
+    // Running chats must use read, never resume (which could interrupt them).
+    await controller.switchSession('chat-c');
+    await controller.submit('hold-for-interrupt');
+    await controller.switchSession('chat-a');
+    final runningBefore = (await requestLog.readAsLines()).length;
+    await controller.switchSession('chat-c');
+    final runningMethods = (await requestLog.readAsLines())
+        .skip(runningBefore)
+        .map((line) => (jsonDecode(line) as Map)['method'])
+        .where(
+          (method) =>
+              ['thread/resume', 'thread/read', 'thread/list'].contains(method),
+        );
+    expect(runningMethods, ['thread/read']);
+    expect(controller.turnActive, isTrue);
+  });
+
+  test('mixed Codex and Hermes chats route through the Rust host', () async {
+    final temporary = await Directory.systemTemp.createTemp(
+      'focalet-mixed-chats-',
+    );
+    addTearDown(() => temporary.delete(recursive: true));
+    final python = await _findPython();
+    // Windows append writes from separate runtimes can overlap in one file.
+    final codexLog = File('${temporary.path}/codex-requests.jsonl');
+    final hermesLog = File('${temporary.path}/hermes-requests.jsonl');
+    final bridge = ProcessCoreBridge(
+      executablePath: File(
+        '../../target/debug/focalet-core-host${Platform.isWindows ? '.exe' : ''}',
+      ).absolute.path,
+      environment: {
+        'FOCALET_CODEX_COMMAND': python,
+        'FOCALET_CODEX_ARGS_JSON': jsonEncode([
+          File('../../crates/focalet-core-host/tests/fake_codex_app_server.py')
+              .absolute
+              .path,
+        ]),
+        'FOCALET_HERMES_COMMAND': python,
+        'FOCALET_OPENCLAW_COMMAND': python,
+        for (final adapter in ['HERMES_ACP', 'OPENCLAW_ACP'])
+          'FOCALET_${adapter}_ARGS_JSON': jsonEncode([
+            File('../../crates/focalet-core-host/tests/fake_acp_runtime.py')
+                .absolute
+                .path,
+          ]),
+        'FOCALET_HERMES_GATEWAY_ARGS_JSON': jsonEncode([
+          File('../../crates/focalet-core-host/tests/fake_gateway_runtime.py')
+              .absolute
+              .path,
+          '--mode',
+          'hermes',
+        ]),
+        'FOCALET_CORE_STATE_PATH': '${temporary.path}/binding.json',
+        'FOCALET_RUNTIME_OVERRIDES_PATH': '${temporary.path}/overrides.json',
+        'FOCALET_FAKE_CODEX_REQUEST_LOG': codexLog.path,
+        'FOCALET_FAKE_GATEWAY_REQUEST_LOG': hermesLog.path,
+        'FOCALET_FAKE_FRESH_THREAD_ID': 'created-codex-chat',
+      },
+    );
+    final controller = FocaletController(
+      core: bridge,
+      desktop: const NoopDesktopBridge(),
+    );
+    addTearDown(controller.close);
+    await controller.initialize();
+    final codex = controller.runtimeTargets.firstWhere(
+      (r) => r.adapterId == 'codex-app-server',
+    );
+    final hermes = controller.runtimeTargets.firstWhere(
+      (r) => r.adapterId == 'hermes-gateway',
+    );
+    await controller.selectRuntime(codex.id);
+    await controller.createSession(runtimeTargetId: codex.id);
+    final codexSession = controller.activeSessionId!;
+    expect(codexSession, 'created-codex-chat');
+    controller.updateComposerValue(
+      const TextEditingValue(text: 'Message for Codex'),
+    );
+    await controller.createSession(runtimeTargetId: hermes.id);
+    expect(controller.activeRuntime?.id, hermes.id, reason: controller.status);
+    final hermesSession = controller.activeSessionId!;
+    expect(
+      controller.sessions.any(
+        (s) => s.runtimeTargetId == codex.id && s.id == codexSession,
+      ),
+      isTrue,
+    );
+    expect(
+      controller.sessions.any(
+        (s) => s.runtimeTargetId == hermes.id && s.id == hermesSession,
+      ),
+      isTrue,
+    );
+
+    var completed = bridge.events.firstWhere(
+      (e) => e.name == 'turn.completed' && e.runtimeTargetId == hermes.id,
+    );
+    await controller.submit('Message for Hermes');
+    await completed.timeout(const Duration(seconds: 15));
+    await controller.switchSession(codexSession, runtimeTargetId: codex.id);
+    expect(controller.activeRuntime?.id, codex.id, reason: controller.status);
+    completed = bridge.events.firstWhere(
+      (e) => e.name == 'turn.completed' && e.runtimeTargetId == codex.id,
+    );
+    await controller.submit('Message for Codex');
+    await completed.timeout(const Duration(seconds: 15));
+    await controller.switchSession(hermesSession, runtimeTargetId: hermes.id);
+    expect(controller.activeRuntime?.id, hermes.id, reason: controller.status);
+    expect(controller.activeSessionId, hermesSession);
+
+    final codexRequests = (await codexLog.readAsLines()).map(
+      (line) => jsonDecode(line) as Map,
+    );
+    final hermesRequests = (await hermesLog.readAsLines()).map(
+      (line) => jsonDecode(line) as Map,
+    );
+    final codexPrompt =
+        codexRequests.singleWhere((r) => r['method'] == 'turn/start')['params']
+            as Map;
+    expect(codexPrompt['threadId'], codexSession);
+    expect(jsonEncode(codexPrompt), contains('Message for Codex'));
+    final hermesPrompt =
+        hermesRequests.singleWhere(
+              (r) => r['method'] == 'prompt.submit',
+            )['params']
+            as Map;
+    expect(jsonEncode(hermesPrompt), contains('Message for Hermes'));
+  });
+}
+
+Future<String> _findPython() async {
+  for (final candidate in ['python3', 'python']) {
+    try {
+      if ((await Process.run(candidate, ['--version'])).exitCode == 0) {
+        return candidate;
+      }
+    } on ProcessException {
+      // Try the other common Python executable.
+    }
+  }
+  throw StateError('Python is required for runtime fixtures.');
+}

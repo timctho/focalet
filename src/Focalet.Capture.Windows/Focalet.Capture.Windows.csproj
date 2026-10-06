@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <RootNamespace>Focalet.Windows</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Focalet.Capture.Core/Focalet.Capture.Core.csproj" />
+    <PackageReference Include="FlaUI.Core" Version="5.0.0" />
+    <PackageReference Include="FlaUI.UIA3" Version="5.0.0" />
+  </ItemGroup>
+</Project>

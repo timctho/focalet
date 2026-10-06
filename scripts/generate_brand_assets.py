@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export the selected Relay identity for desktop platforms (CairoSVG/Pillow)."""
+"""Export the selected Focalet focus identity for desktop platforms (CairoSVG/Pillow)."""
 from pathlib import Path
 from io import BytesIO
 import html
@@ -9,9 +9,9 @@ import cairosvg
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
-FLUTTER = ROOT / "src/Zommi.Flutter"
-DESIGN = ROOT / "design/zommi-logo"
-OCEAN = "#387DA8"  # ZommiThemeColor.ocean
+FLUTTER = ROOT / "src/Focalet.Flutter"
+DESIGN = ROOT / "design/focalet-logo"
+OCEAN = "#387DA8"  # FocaletThemeColor.ocean
 OCEAN_LIGHT = "#ACCEE6"
 
 
@@ -42,13 +42,13 @@ def rect(x, y, w, h, fill, radius=0, stroke=None):
 
 def lockup(name, color=OCEAN):
     return document(490, 132, nested(name, 0, 2, 128, 128, color) +
-                    nested('wordmark', 157, 27, 321, 78, color), 'Zommi logo')
+                    nested('wordmark', 157, 27, 321, 78, color), 'Focalet logo')
 
 
 def app_icon(name, background=OCEAN, foreground="#FFFFFF", size=1024):
     return document(size, size, rect(0, 0, size, size, background, size * .235) +
                     nested(name, size * .08, size * .08, size * .84, size * .84, foreground),
-                    f'Zommi {name} app icon')
+                    f'Focalet {name} app icon')
 
 
 def ocean_exports() -> Path:
@@ -56,7 +56,7 @@ def ocean_exports() -> Path:
     folder = DESIGN / "exports/ocean"
     folder.mkdir(parents=True, exist_ok=True)
     for tone, color in (("light", OCEAN), ("dark", OCEAN_LIGHT)):
-        logo = lockup("relay", color)
+        logo = lockup("focus", color)
         (folder / f"lockup-{tone}.svg").write_text(logo)
         # Supersample the README image, then filter its transparent edges.
         # Keep ample resolution for the 240 px lockup on high-DPI displays.
@@ -66,13 +66,13 @@ def ocean_exports() -> Path:
             rendered.resize((980, 264), Image.Resampling.LANCZOS).save(
                 folder / f"lockup-{tone}.png", optimize=True)
     (folder / "mark.svg").write_text(document(
-        128, 128, nested("relay", 0, 0, 128, 128, OCEAN), "Zommi Ocean"))
-    (folder / "app.svg").write_text(app_icon("relay", OCEAN, "#FFFFFF"))
-    for name, source in (("zommi-mark.svg", "mark.svg"),
-                         ("zommi-wordmark.svg", None),
-                         ("zommi-logo.svg", "lockup-light.svg")):
+        128, 128, nested("focus", 0, 0, 128, 128, OCEAN), "Focalet Ocean"))
+    (folder / "app.svg").write_text(app_icon("focus", OCEAN, "#FFFFFF"))
+    for name, source in (("focalet-mark.svg", "mark.svg"),
+                         ("focalet-wordmark.svg", None),
+                         ("focalet-logo.svg", "lockup-light.svg")):
         content = (folder / source).read_text() if source else document(
-            321, 78, nested("wordmark", 0, 0, 321, 78, OCEAN), "Zommi")
+            321, 78, nested("wordmark", 0, 0, 321, 78, OCEAN), "Focalet")
         (DESIGN / "exports" / name).write_text(content)
     return folder
 
@@ -80,7 +80,7 @@ def ocean_exports() -> Path:
 def main() -> None:
     assets = FLUTTER / "assets/branding"
     assets.mkdir(parents=True, exist_ok=True)
-    mark = (DESIGN / "masters/relay.svg").read_bytes()
+    mark = (DESIGN / "masters/focus.svg").read_bytes()
     app_icon = (ocean_exports() / "app.svg").read_bytes()
     for name, source, size in (
         ("app-icon.png", app_icon, 256),
@@ -90,11 +90,17 @@ def main() -> None:
         cairosvg.svg2png(bytestring=source, write_to=str(assets / name),
                         output_width=size, output_height=size)
 
+    # Documentation uses the same identity as the installed apps.
+    (ROOT / "docs/assets/focalet-icon.png").write_bytes((assets / "app-icon.png").read_bytes())
+
     # Supply native frames rather than asking Windows to resize a large bitmap.
     sizes = (16, 24, 32, 48, 64, 128, 256)
     frames = [Image.open(BytesIO(cairosvg.svg2png(
         bytestring=app_icon, output_width=size, output_height=size))) for size in sizes]
     try:
+        frames[-1].save(ROOT / "src/Focalet.CaptureTool/app.ico",
+                       format="ICO", sizes=[(n, n) for n in sizes],
+                       append_images=frames[:-1])
         frames[-1].save(FLUTTER / "windows/runner/resources/app_icon.ico",
                        format="ICO", sizes=[(n, n) for n in sizes],
                        append_images=frames[:-1])

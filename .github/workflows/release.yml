@@ -3,7 +3,7 @@ name: Build and publish release
 on:
   push:
     branches: [main]
-    paths: [src/Zommi.Flutter/pubspec.yaml]
+    paths: [src/Focalet.Flutter/pubspec.yaml]
   workflow_dispatch:
     inputs:
       platforms:
@@ -112,24 +112,24 @@ jobs:
           TARGET_ARCHITECTURE: ${{ matrix.architecture }}
         run: |
           bash scripts/package-unix.sh "$TARGET_PLATFORM"
-          python3 scripts/build_installer.py "artifacts/zommi-$TARGET_PLATFORM-$TARGET_ARCHITECTURE" --expected-commit "$GITHUB_SHA" --release-tag "$RELEASE_TAG" --output artifacts/installers
+          python3 scripts/build_installer.py "artifacts/focalet-$TARGET_PLATFORM-$TARGET_ARCHITECTURE" --expected-commit "$GITHUB_SHA" --release-tag "$RELEASE_TAG" --output artifacts/installers
       - name: Test installed Ubuntu package and removal
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get install --no-install-recommends -y ./artifacts/installers/Zommi-Ubuntu-amd64.deb
-          python3 scripts/verify_release.py /opt/zommi --expected-platform linux --expected-commit "$GITHUB_SHA"
-          desktop-file-validate /usr/share/applications/com.zommi.desktop.desktop
-          test -x /usr/bin/zommi
-          /usr/bin/python3 scripts/accept-linux-wayland.py --package /opt/zommi --system-extension --browser /usr/bin/google-chrome
-          sudo apt-get remove -y zommi
-          test ! -e /opt/zommi/zommi
-          test ! -e /usr/bin/zommi
-          test ! -e /usr/share/applications/com.zommi.desktop.desktop
+          sudo apt-get install --no-install-recommends -y ./artifacts/installers/Focalet-Ubuntu-amd64.deb
+          python3 scripts/verify_release.py /opt/focalet --expected-platform linux --expected-commit "$GITHUB_SHA"
+          desktop-file-validate /usr/share/applications/com.focalet.desktop.desktop
+          test -x /usr/bin/focalet
+          /usr/bin/python3 scripts/accept-linux-wayland.py --package /opt/focalet --system-extension --browser /usr/bin/google-chrome
+          sudo apt-get remove -y focalet
+          test ! -e /opt/focalet/focalet
+          test ! -e /usr/bin/focalet
+          test ! -e /usr/share/applications/com.focalet.desktop.desktop
       - name: Test native macOS selection geometry
         if: runner.os == 'macOS'
         run: |
-          xcrun swiftc -swift-version 5 src/Zommi.Flutter/macos/Runner/MacRegionSelector.swift scripts/test-macos-region-selection.swift -o /tmp/zommi-macos-region-tests
-          /tmp/zommi-macos-region-tests
+          xcrun swiftc -swift-version 5 src/Focalet.Flutter/macos/Runner/MacRegionSelector.swift scripts/test-macos-region-selection.swift -o /tmp/focalet-macos-region-tests
+          /tmp/focalet-macos-region-tests
       - name: Build Windows desktop package and installer
         if: runner.os == 'Windows'
         shell: pwsh
@@ -141,11 +141,11 @@ jobs:
             choco install nsis --yes --no-progress
             if ($LASTEXITCODE -ne 0) { throw 'NSIS installation failed' }
           }
-          python scripts/build_installer.py artifacts/zommi-windows-x64 --expected-commit $env:GITHUB_SHA --output artifacts/installers --makensis $compiler
+          python scripts/build_installer.py artifacts/focalet-windows-x64 --expected-commit $env:GITHUB_SHA --output artifacts/installers --makensis $compiler
           if ($LASTEXITCODE -ne 0) { throw 'Windows installer failed' }
       - name: Test Windows capture contracts from the package
         if: runner.os == 'Windows'
-        run: ./scripts/accept-windows-capture.ps1 -PackageDirectory artifacts/zommi-windows-x64 -NonVisualOnly
+        run: ./scripts/accept-windows-capture.ps1 -PackageDirectory artifacts/focalet-windows-x64 -NonVisualOnly
       - name: Ensure checks and builds did not rewrite source
         run: git diff --exit-code
       - name: Save failed synthetic Wayland acceptance
@@ -161,7 +161,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: golden-failures-${{ matrix.platform }}-${{ matrix.architecture }}-${{ github.sha }}
-          path: src/Zommi.Flutter/test/failures/*.png
+          path: src/Focalet.Flutter/test/failures/*.png
           if-no-files-found: ignore
           retention-days: 3
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

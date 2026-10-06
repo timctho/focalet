@@ -53,33 +53,33 @@ def ubuntu_installer(package: Path, output: Path, manifest: dict, tag: str | Non
     icon = package / "data/flutter_assets/assets/branding/app-icon.png"
     if not icon.is_file():
         raise ValueError("The Ubuntu launcher icon is missing from the package.")
-    asset = output / "Zommi-Ubuntu-amd64.deb"
-    with tempfile.TemporaryDirectory(prefix="zommi-deb-") as temporary:
+    asset = output / "Focalet-Ubuntu-amd64.deb"
+    with tempfile.TemporaryDirectory(prefix="focalet-deb-") as temporary:
         root = Path(temporary) / "root"
-        destination = root / "opt/zommi"
+        destination = root / "opt/focalet"
         shutil.copytree(package, destination, symlinks=True)
-        extension = package / "gnome-extension/zommi@zommi"
+        extension = package / "gnome-extension/focalet@focalet"
         if not (extension / "schemas/gschemas.compiled").is_file():
             raise ValueError("The Ubuntu GNOME integration is missing from the bundle.")
-        shutil.copytree(extension, root / "usr/share/gnome-shell/extensions/zommi@zommi")
+        shutil.copytree(extension, root / "usr/share/gnome-shell/extensions/focalet@focalet")
         for directory in ("DEBIAN", "usr/bin", "usr/share/applications",
-                          "usr/share/icons/hicolor/256x256/apps", "usr/share/doc/zommi"):
+                          "usr/share/icons/hicolor/256x256/apps", "usr/share/doc/focalet"):
             (root / directory).mkdir(parents=True, exist_ok=True)
         # A symlink in /usr/bin would make the bundle's dirname($0) resolve there.
-        launcher = root / "usr/bin/zommi"
-        launcher.write_text('#!/bin/sh\nexec /opt/zommi/zommi "$@"\n', encoding="utf-8")
+        launcher = root / "usr/bin/focalet"
+        launcher.write_text('#!/bin/sh\nexec /opt/focalet/focalet "$@"\n', encoding="utf-8")
         launcher.chmod(0o755)
-        (root / "usr/share/applications/com.zommi.desktop.desktop").write_text(
-            "[Desktop Entry]\nType=Application\nName=Zommi\n"
-            "Comment=Show your agent what you mean\nExec=/usr/bin/zommi\n"
-            "Icon=zommi\nTerminal=false\nCategories=Utility;Development;\n"
-            "StartupWMClass=com.zommi.desktop\n", encoding="utf-8")
-        shutil.copy2(icon, root / "usr/share/icons/hicolor/256x256/apps/zommi.png")
-        shutil.copy2(package / "LICENSE", root / "usr/share/doc/zommi/copyright")
+        (root / "usr/share/applications/com.focalet.desktop.desktop").write_text(
+            "[Desktop Entry]\nType=Application\nName=Focalet\n"
+            "Comment=Show your agent what you mean\nExec=/usr/bin/focalet\n"
+            "Icon=focalet\nTerminal=false\nCategories=Utility;Development;\n"
+            "StartupWMClass=com.focalet.desktop\n", encoding="utf-8")
+        shutil.copy2(icon, root / "usr/share/icons/hicolor/256x256/apps/focalet.png")
+        shutil.copy2(package / "LICENSE", root / "usr/share/doc/focalet/copyright")
         size = sum(p.stat().st_size for p in root.rglob("*") if p.is_file())
         (root / "DEBIAN/control").write_text(
-            f"Package: zommi\nVersion: {version}\nArchitecture: amd64\n"
-            "Maintainer: Zommi contributors <noreply@github.com>\n"
+            f"Package: focalet\nVersion: {version}\nArchitecture: amd64\n"
+            "Maintainer: Focalet contributors <noreply@github.com>\n"
             "Section: utils\nPriority: optional\n"
             f"Installed-Size: {(size + 1023) // 1024}\n"
             f"Depends: libc6 (>= {GLIBC_MINIMUM}), libgcc-s1, libstdc++6 (>= {LIBSTDCXX_MINIMUM}), "
@@ -90,7 +90,7 @@ def ubuntu_installer(package: Path, output: Path, manifest: dict, tag: str | Non
             "pipewire, wireplumber, gstreamer1.0-pipewire, gstreamer1.0-plugins-base, "
             "libgstreamer1.0-0 (>= 1.24), libgstreamer-plugins-base1.0-0 (>= 1.24)\n"
             "Recommends: gnome-shell-extension-appindicator\n"
-            "Homepage: https://github.com/timctho/zommi\n"
+            "Homepage: https://github.com/timctho/focalet\n"
             "Description: Desktop companion for your existing agent\n"
             f" Select screen context and send it to an agent. Ubuntu {UBUNTU_VERSION} LTS x64.\n",
             encoding="utf-8")

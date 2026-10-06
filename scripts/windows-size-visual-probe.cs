@@ -1,4 +1,4 @@
-public static class ZommiRenderedSizeProbe {
+public static class FocaletRenderedSizeProbe {
     public static int[] Area;
     public static string EvidenceDirectory;
     public static bool SaveMissingFrames = true;
@@ -6,23 +6,23 @@ public static class ZommiRenderedSizeProbe {
     public static int[][] LastMarkers;
     public static long LastPresentationTimestamp;
     private static int sequence;
-    private static ZommiDesktopFrameCapture desktop;
+    private static FocaletDesktopFrameCapture desktop;
     private static readonly System.Collections.Generic.List<System.Drawing.Bitmap> images = new System.Collections.Generic.List<System.Drawing.Bitmap>();
     private static readonly System.Collections.Generic.List<long> timestamps = new System.Collections.Generic.List<long>();
 
     private static void EnsureCapture() {
         if (desktop == null || !desktop.Matches(Area)) {
             if (desktop != null) desktop.Dispose();
-            desktop = new ZommiDesktopFrameCapture(Area);
+            desktop = new FocaletDesktopFrameCapture(Area);
         }
     }
 
-    public static ZommiDesktopFrameCapture.DeferredFrame CaptureDeferred() {
+    public static FocaletDesktopFrameCapture.DeferredFrame CaptureDeferred() {
         EnsureCapture();
         return desktop.CaptureDeferred();
     }
 
-    public static int[] AnalyzeDeferred(ZommiDesktopFrameCapture.DeferredFrame frame, long elapsed) {
+    public static int[] AnalyzeDeferred(FocaletDesktopFrameCapture.DeferredFrame frame, long elapsed) {
         LastPresentationTimestamp = frame.PresentationTimestamp;
         return Analyze(desktop.ReadFrame(frame), elapsed, true);
     }

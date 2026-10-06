@@ -12,13 +12,13 @@ commands action. A failed or unsupported discovery request does not prevent chat
 | Pi RPC | `get_commands` | `prompt`, preserving command text. Extension commands that finish without agent events receive a completed turn after the runtime confirms it is idle. |
 | Hermes Gateway | `commands.catalog` | `slash.exec`, or `command.dispatch` for skills and quick commands; runtime-produced skill/prompt expansions go to `prompt.submit`. Plain command output is rendered without a model prompt. |
 | OpenClaw Gateway | `commands.list` for the session's agent and text scope | `chat.send`, preserving command text. |
-| Claude Code | Commands advertised by stream-json initialization | Runtime-owned commands; use Zommi controls for session/model changes and Claude's terminal for account or permission settings. |
+| Claude Code | Commands advertised by stream-json initialization | Runtime-owned commands; use Focalet controls for session/model changes and Claude's terminal for account or permission settings. |
 
 Catalogs describe the commands available through each protocol, not every command
 in the runtime's terminal application. Pi explicitly omits built-in terminal
 commands. Hermes terminal commands and session actions requiring a separate
 client workflow remain visible but disabled. Model/provider/profile/workspace and
-reasoning commands use Zommi's settings controls until adapters can synchronize
+reasoning commands use Focalet's settings controls until adapters can synchronize
 authoritative post-command settings; otherwise the next prompt could overwrite
 the command's changes. Unexpected interactive result types return an explicit
 error. Codex does not expose a universal built-in command

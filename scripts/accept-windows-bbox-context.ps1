@@ -1,12 +1,12 @@
 [CmdletBinding()]
 param([Parameter(Mandatory=$true)][string]$CaptureHost, [string]$ResultPath)
 $ErrorActionPreference = 'Stop'
-if (-not ('ZommiWindowsAcceptanceNative' -as [type])) {
+if (-not ('FocaletWindowsAcceptanceNative' -as [type])) {
     . (Join-Path $PSScriptRoot 'accept-windows-capture.ps1') -PackageDirectory (Split-Path $CaptureHost) -HelpersOnly -ResultPath $ResultPath
 }
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
-if (-not ('ZommiContextFixture' -as [type])) {
+if (-not ('FocaletContextFixture' -as [type])) {
     $references = @([System.Windows.Forms.Form].Assembly.Location, [System.Drawing.Bitmap].Assembly.Location)
     if ($PSVersionTable.PSEdition -eq 'Core') { $references += Get-ChildItem (Join-Path $PSHOME 'ref') -Filter '*.dll' | ForEach-Object FullName }
     Add-Type -ReferencedAssemblies $references -Path (Join-Path $PSScriptRoot 'windows-context-fixture.cs')
@@ -16,54 +16,54 @@ $cases = @('drag', 'partial', 'empty', 'click-then-drag', 'thin-then-drag', 'rev
 $results = @()
 $timings = @{}
 foreach ($case in $cases) {
-    $fixture = [ZommiContextFixture]::new()
+    $fixture = [FocaletContextFixture]::new()
     try {
         $fixture.Raise()
         $deadline = [DateTime]::UtcNow.AddSeconds(3)
-        while (-not [ZommiWindowsAcceptanceNative]::IsOwnedWindowAtPoint($fixture.Window, 220, 220) -and [DateTime]::UtcNow -lt $deadline) {
+        while (-not [FocaletWindowsAcceptanceNative]::IsOwnedWindowAtPoint($fixture.Window, 220, 220) -and [DateTime]::UtcNow -lt $deadline) {
             $fixture.Raise()
             Start-Sleep -Milliseconds 50
         }
-        if (-not [ZommiWindowsAcceptanceNative]::IsOwnedWindowAtPoint($fixture.Window, 220, 220)) { throw "The fixture is covered before capture: $([ZommiWindowsAcceptanceNative]::DescribeWindowAtPoint(220,220))" }
+        if (-not [FocaletWindowsAcceptanceNative]::IsOwnedWindowAtPoint($fixture.Window, 220, 220)) { throw "The fixture is covered before capture: $([FocaletWindowsAcceptanceNative]::DescribeWindowAtPoint(220,220))" }
         Start-Sleep -Milliseconds 200
         if ($case -eq 'controls') { $fixture.ShowControls() }
         if ($case -eq 'overlap-back') { $fixture.BringBackToFront() }
         # Pin contrasting probe colors; responsiveness must not depend on the default theme.
         $result = Invoke-CaptureRequest -Executable $CaptureHost -Method 'selectContent' -Parameters @{browserPageDetails=$false;theme=@{accent=0xffc5ecd4L;outline=0xff8eb09dL;surface=0xff191f1eL}} -Interact {
             param($process)
-            $selector = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi content selection'
+            $selector = Wait-ForWindow -ProcessId $process.Id -Title 'Focalet content selection'
             $deadline = [DateTime]::UtcNow.AddSeconds(5)
-            while (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector, 'Cancel') -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 25 }
-            if (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector, 'Cancel')) { throw 'Rectangle selector did not become ready.' }
-            if ([ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector, 'Larger') -or
-                [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector, 'Whole window')) { throw 'Element scope controls remain in the user selector.' }
+            while (-not [FocaletWindowsAcceptanceNative]::NamedButtonEnabled($selector, 'Cancel') -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 25 }
+            if (-not [FocaletWindowsAcceptanceNative]::NamedButtonEnabled($selector, 'Cancel')) { throw 'Rectangle selector did not become ready.' }
+            if ([FocaletWindowsAcceptanceNative]::NamedButtonEnabled($selector, 'Larger') -or
+                [FocaletWindowsAcceptanceNative]::NamedButtonEnabled($selector, 'Whole window')) { throw 'Element scope controls remain in the user selector.' }
             # Use the same physical-coordinate message path as the drag cases,
             # keeping press/release at one point for the zero-area selection.
-            if ($case -eq 'click-then-drag') { [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector, 220, 220, 220, 220) }
-            if ($case -eq 'thin-then-drag') { [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector, 220, 220, 300, 222) }
+            if ($case -eq 'click-then-drag') { [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector, 220, 220, 220, 220) }
+            if ($case -eq 'thin-then-drag') { [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector, 220, 220, 300, 222) }
             if ($case -in @('click-then-drag', 'thin-then-drag')) {
                 Start-Sleep -Milliseconds 100
-                if (-not [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($selector, 'Cancel')) { throw 'Click or thin drag selected an element.' }
+                if (-not [FocaletWindowsAcceptanceNative]::NamedButtonEnabled($selector, 'Cancel')) { throw 'Click or thin drag selected an element.' }
             }
-            if ($case -eq 'empty') { [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector, 555, 430, 615, 470) }
-            elseif ($case -eq 'controls') { [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector, 170, 170, 520, 310) }
-            elseif ($case -like 'overlap-*') { [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector, 195, 445, 285, 470) }
+            if ($case -eq 'empty') { [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector, 555, 430, 615, 470) }
+            elseif ($case -eq 'controls') { [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector, 170, 170, 520, 310) }
+            elseif ($case -like 'overlap-*') { [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector, 195, 445, 285, 470) }
             elseif ($case -eq 'busy') {
                 $fixture.PauseProvider(1200)
-                $latency = [ZommiWindowsAcceptanceNative]::BeginSelectionDrag($selector, 175, 195, 535, 315)
+                $latency = [FocaletWindowsAcceptanceNative]::BeginSelectionDrag($selector, 175, 195, 535, 315)
                 $timings.busyProviderDragInputMilliseconds = $latency
                 if ($latency -gt 200) { throw "Drag input waited ${latency}ms for UIA." }
                 $deadline = [DateTime]::UtcNow.AddMilliseconds(250)
-                while (-not [ZommiWindowsAcceptanceNative]::HasSelectionEdge(535, 300) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 10 }
-                if (-not [ZommiWindowsAcceptanceNative]::HasSelectionEdge(535, 300)) { throw 'Busy provider blocked rectangle painting.' }
+                while (-not [FocaletWindowsAcceptanceNative]::HasSelectionEdge(535, 300) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 10 }
+                if (-not [FocaletWindowsAcceptanceNative]::HasSelectionEdge(535, 300)) { throw 'Busy provider blocked rectangle painting.' }
                 $fixture.WaitForProvider()
-                [ZommiWindowsAcceptanceNative]::EndSelectionDrag($selector, 535, 315)
-            } elseif ($case -eq 'reverse') { [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector, 535, 315, 175, 195) }
+                [FocaletWindowsAcceptanceNative]::EndSelectionDrag($selector, 535, 315)
+            } elseif ($case -eq 'reverse') { [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector, 535, 315, 175, 195) }
             else {
                 $top = if ($case -eq 'partial') { 210 } else { 195 }
-                [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector, 175, $top, 535, 315)
+                [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector, 175, $top, 535, 315)
             }
-            [ZommiWindowsAcceptanceNative]::ConfirmSelection($selector)
+            [FocaletWindowsAcceptanceNative]::ConfirmSelection($selector)
         }
         if ($result.cancelled -or $result.dataUrl -notlike 'data:image/png;base64,*') { throw "$case did not attach the selected image." }
         if ($result.snapshot.source.nativeWindowId -ne $fixture.Window.ToString() -or
@@ -101,7 +101,7 @@ foreach ($case in $cases) {
         Write-Host "bbox-${case}: ok"
     } finally { $fixture.Dispose() }
 }
-$implementation = Join-Path (Split-Path $CaptureHost) 'Zommi.Capture.dll'
+$implementation = Join-Path (Split-Path $CaptureHost) 'Focalet.CaptureHost.dll'
 if (-not (Test-Path -LiteralPath $implementation)) { $implementation = $CaptureHost }
 $evidence = @{captureHelper=$CaptureHost; cases=$cases; timings=$timings; captures=$results
     implementationSha256=(Get-FileHash $implementation -Algorithm SHA256).Hash.ToLowerInvariant()}

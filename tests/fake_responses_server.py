@@ -11,21 +11,21 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 
-PROBE_URL = "https://windows-runtime-probe.example/zommi"
+PROBE_URL = "https://windows-runtime-probe.example/focalet"
 
 
-def find_zommi_url(value: object) -> str | None:
-    if isinstance(value, str) and "ZOMMI LIVE CONTEXT" in value:
+def find_focalet_url(value: object) -> str | None:
+    if isinstance(value, str) and "FOCALET LIVE CONTEXT" in value:
         match = re.search(r"(?:^|\r?\n)URL: ([^\r\n]+)", value)
         return match.group(1).strip() if match else None
     if isinstance(value, dict):
         for child in value.values():
-            found = find_zommi_url(child)
+            found = find_focalet_url(child)
             if found:
                 return found
     if isinstance(value, list):
         for child in value:
-            found = find_zommi_url(child)
+            found = find_focalet_url(child)
             if found:
                 return found
     return None
@@ -43,7 +43,7 @@ def response_object(response_id: str, status: str, output: list[dict], usage: di
         "instructions": None,
         "max_output_tokens": None,
         "max_tool_calls": None,
-        "model": "zommi-acceptance-model",
+        "model": "focalet-acceptance-model",
         "output": output,
         "parallel_tool_calls": True,
         "previous_response_id": None,
@@ -76,9 +76,9 @@ class Handler(BaseHTTPRequestHandler):
             json.dumps(request, indent=2, sort_keys=True), encoding="utf-8"
         )
 
-        text = find_zommi_url(request) or "READY"
-        response_id = "resp_zommi_acceptance"
-        message_id = "msg_zommi_acceptance"
+        text = find_focalet_url(request) or "READY"
+        response_id = "resp_focalet_acceptance"
+        message_id = "msg_focalet_acceptance"
         message = {
             "id": message_id,
             "type": "message",

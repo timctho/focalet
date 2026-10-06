@@ -34,19 +34,19 @@ class ContributorChecksTests(unittest.TestCase):
         inherited = {
             "PATH": "/toolchains",
             "HOME": "/personal",
-            "ZOMMI_CODEX_COMMAND": "/personal/codex",
-            "ZOMMI_OPENCLAW_GATEWAY_URL": "ws://127.0.0.1:9999",
-            "ZOMMI_CORE_STATE_PATH": "/personal/chat.json",
-            "ZOMMI_TEST_CHROMIUM": "/tools/chrome",
+            "FOCALET_CODEX_COMMAND": "/personal/codex",
+            "FOCALET_OPENCLAW_GATEWAY_URL": "ws://127.0.0.1:9999",
+            "FOCALET_CORE_STATE_PATH": "/personal/chat.json",
+            "FOCALET_TEST_CHROMIUM": "/tools/chrome",
         }
         environment = checks.isolated_runtime_environment("/isolated", inherited)
-        self.assertEqual(environment["ZOMMI_RUNTIME_DISCOVERY_MODE"], "configured-only")
-        self.assertNotIn("ZOMMI_CODEX_COMMAND", environment)
-        self.assertNotIn("ZOMMI_OPENCLAW_GATEWAY_URL", environment)
-        self.assertEqual(environment["ZOMMI_CORE_STATE_PATH"], "/isolated/binding.json")
+        self.assertEqual(environment["FOCALET_RUNTIME_DISCOVERY_MODE"], "configured-only")
+        self.assertNotIn("FOCALET_CODEX_COMMAND", environment)
+        self.assertNotIn("FOCALET_OPENCLAW_GATEWAY_URL", environment)
+        self.assertEqual(environment["FOCALET_CORE_STATE_PATH"], "/isolated/binding.json")
         self.assertEqual(environment["HOME"], inherited["HOME"])
-        self.assertEqual(environment["ZOMMI_TEST_CHROMIUM"], "/tools/chrome")
-        self.assertEqual(inherited["ZOMMI_CORE_STATE_PATH"], "/personal/chat.json")
+        self.assertEqual(environment["FOCALET_TEST_CHROMIUM"], "/tools/chrome")
+        self.assertEqual(inherited["FOCALET_CORE_STATE_PATH"], "/personal/chat.json")
 
     def test_external_prs_get_all_platforms_without_secrets_or_persistent_runners(
         self,
@@ -64,39 +64,44 @@ class ContributorChecksTests(unittest.TestCase):
             self.assertNotIn("permissions", job)
             if name in {"contracts", "windows", "macos"}:
                 self.assertEqual(job["needs"], "documentation")
-                self.assertEqual(job["if"], "needs.documentation.outputs.native_required == 'true'")
+                self.assertEqual(job["if"], "needs.documentation.outputs.desktop_required == 'true'")
             for step in job["steps"]:
                 if "uses" in step:
                     self.assertRegex(step["uses"], r"^[\w-]+/[\w-]+@[0-9a-f]{40}$")
                     if step["uses"].startswith("actions/checkout@"):
                         self.assertEqual(step["with"]["persist-credentials"], "false")
         gate = workflow["jobs"]["required"]
-        self.assertEqual(set(gate["needs"]), {"documentation", "contracts", "windows", "macos"})
+        self.assertEqual(set(gate["needs"]), {"documentation", "contracts", "windows", "macos", "capture_windows"})
         self.assertEqual(gate["if"], "always()")
         command = gate["steps"][0]["run"]
-        for docs, native, linux, windows, macos in itertools.product(
-            ["success", "failure", "skipped", "cancelled"],
-            ["true", "false", ""],
-            ["success", "failure", "skipped", "cancelled"],
-            ["success", "failure", "skipped", "cancelled"],
-            ["success", "failure", "skipped", "cancelled"],
+        capture_job = workflow["jobs"]["capture_windows"]
+        self.assertEqual(capture_job["if"], "needs.documentation.outputs.capture_required == 'true'")
+        # Exercise the gate across both product scopes, including unknown scope,
+        # failed/cancelled jobs and jobs incorrectly skipped or run.
+        for desktop, capture, linux, windows, macos, capture_result in itertools.product(
+            ["true", "false", ""], ["true", "false", ""],
+            *([["success", "failure", "skipped", "cancelled"]] * 4),
         ):
-            result = subprocess.run(
-                ["bash", "-c", command],
-                env={
-                    "DOCS_RESULT": docs,
-                    "NATIVE_REQUIRED": native,
-                    "LINUX_RESULT": linux,
-                    "WINDOWS_RESULT": windows,
-                    "MACOS_RESULT": macos,
-                },
-                capture_output=True,
+            environment = {
+                "DOCS_RESULT": "success", "DESKTOP_REQUIRED": desktop, "CAPTURE_REQUIRED": capture,
+                "LINUX_RESULT": linux, "WINDOWS_RESULT": windows, "MACOS_RESULT": macos,
+                "CAPTURE_RESULT": capture_result,
+            }
+            result = subprocess.run(["bash", "-c", command], env=environment, capture_output=True)
+            expected = (
+                ((desktop == "true" and linux == windows == macos == "success")
+                 or (desktop == "false" and linux == windows == macos == "skipped"))
+                and ((capture == "true" and capture_result == "success")
+                     or (capture == "false" and capture_result == "skipped"))
             )
-            self.assertEqual(
-                result.returncode == 0,
-                docs == "success" and ((native == "true" and linux == windows == macos == "success")
-                                       or (native == "false" and linux == windows == macos == "skipped"))
-            )
+            self.assertEqual(result.returncode == 0, expected, environment)
+        for docs in ["failure", "skipped", "cancelled", ""]:
+            result = subprocess.run(["bash", "-c", command], env={
+                "DOCS_RESULT": docs, "DESKTOP_REQUIRED": "true", "CAPTURE_REQUIRED": "true",
+                "LINUX_RESULT": "success", "WINDOWS_RESULT": "success", "MACOS_RESULT": "success",
+                "CAPTURE_RESULT": "success",
+            }, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
 
     def test_native_release_workflow_is_explicitly_operator_invoked(self):
         workflow = yaml.load(
@@ -105,7 +110,7 @@ class ContributorChecksTests(unittest.TestCase):
         self.assertEqual(set(workflow["on"]), {"workflow_dispatch"})
 
     def test_runner_preserves_arguments_and_propagates_failure(self):
-        with tempfile.TemporaryDirectory(prefix="zommi check ") as directory:
+        with tempfile.TemporaryDirectory(prefix="focalet check ") as directory:
             script = Path(directory, "failure script.py")
             script.write_text(
                 "import sys\nassert sys.argv[1] == 'argument with spaces'\nsys.exit(23)\n"
@@ -120,7 +125,7 @@ class ContributorChecksTests(unittest.TestCase):
                 checks.run("flutter", "test")
 
     def test_shell_syntax_error_after_the_first_script_fails_checks(self):
-        with tempfile.TemporaryDirectory(prefix="zommi shell checks ") as directory:
+        with tempfile.TemporaryDirectory(prefix="focalet shell checks ") as directory:
             root = Path(directory)
             scripts = root / "scripts"
             scripts.mkdir()

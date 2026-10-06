@@ -1,8 +1,8 @@
 [workspace]
 members = [
-    "crates/zommi-core",
-    "crates/zommi-core-host",
-    "crates/zommi-linux-capture",
+    "crates/focalet-core",
+    "crates/focalet-core-host",
+    "crates/focalet-linux-capture",
 ]
 resolver = "3"
 
@@ -11,7 +11,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.93"
 license = "Apache-2.0"
-repository = "https://github.com/timctho/zommi"
+repository = "https://github.com/timctho/focalet"
 
 [workspace.dependencies]
 ashpd = { version = "0.13.13", default-features = false, features = ["screencast", "tokio"] }

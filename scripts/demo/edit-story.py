@@ -71,7 +71,7 @@ def main():
     for suffix in (".mp4", ".gif"):
         if args.output.with_suffix(suffix).exists():
             raise ValueError("Use a fresh output stem")
-    with tempfile.TemporaryDirectory(prefix="zommi-story-edit-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="focalet-story-edit-") as temporary:
         directory = Path(temporary)
         evidence = directory / "proof.json"
         evidence.write_text(json.dumps(proof))

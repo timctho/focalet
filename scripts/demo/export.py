@@ -26,7 +26,7 @@ def main():
     if not raw_video.exists() and (len(frames) != len(times) or len(frames) < 2):
         raise ValueError("Incomplete recording")
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="zommi-demo-export-") as directory:
+    with tempfile.TemporaryDirectory(prefix="focalet-demo-export-") as directory:
         if raw_video.exists():
             input_args = ["-i", str(raw_video)]
             # Remove browser chrome, retaining the entire native app and source.

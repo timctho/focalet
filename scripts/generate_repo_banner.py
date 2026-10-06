@@ -17,7 +17,7 @@ def main():
         return ImageFont.truetype("DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf", size)
     def text(x, y, value, size=20, bold=False, fill="#183c4d"):
         draw.text((x, y), value, font=font(size, bold), fill=fill)
-    logo = Image.open(ROOT / "design/zommi-logo/exports/ocean/lockup-light.png").convert("RGBA")
+    logo = Image.open(ROOT / "design/focalet-logo/exports/ocean/lockup-light.png").convert("RGBA")
     logo.thumbnail((180, 55), Image.Resampling.LANCZOS)
     card.paste(logo, (40, 34), logo)
     text(264, 29, "Sketch the chart. See it change.", 30, True)

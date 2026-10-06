@@ -3,7 +3,7 @@ param(
     [Parameter(Mandatory=$true)][string]$PackageDirectory,
     [Parameter(Mandatory=$true)][string]$OutputDirectory,
     [ValidateSet('compare','error','dashboard','amazon','sheets','frontend')][string]$Scene='compare',
-    [string]$Workspace='/tmp/zommi-demo-workspace',
+    [string]$Workspace='/tmp/focalet-demo-workspace',
     [string]$DashboardUrl='http://127.0.0.1:8765/',
     [string]$RuntimeTargetId,
     [string]$AgentExecutable,
@@ -114,7 +114,7 @@ function Snapshot([string]$name) {
 try {
  $bounds=[Windows.Forms.Screen]::PrimaryScreen.Bounds
  if($bounds.Width -ne 2400 -or $bounds.Height -ne 1600){throw 'This storyboard is calibrated for a 2400x1600 desktop. Recalibrate and inspect before recording.'}
- $previous=@(Suspend-ConflictingZommiApplications -EntryPoint (Join-Path $OutputDirectory 'not-running.exe'))
+ $previous=@(Suspend-ConflictingFocaletApplications -EntryPoint (Join-Path $OutputDirectory 'not-running.exe'))
  if(-not $BrowserEndpoint){
  $browserStart=[Diagnostics.ProcessStartInfo]::new((Join-Path $env:ProgramFiles 'Google/Chrome/Application/chrome.exe'))
  $browserStart.UseShellExecute=$false
@@ -126,19 +126,19 @@ try {
  Start-Sleep -Seconds 3
  if($browser.HasExited -or -not (Test-Path (Join-Path $OutputDirectory 'browser'))){throw 'Chrome did not open an isolated profile.'}
  }
- $start=[Diagnostics.ProcessStartInfo]::new((Join-Path $PackageDirectory 'Zommi.exe'))
+ $start=[Diagnostics.ProcessStartInfo]::new((Join-Path $PackageDirectory 'Focalet.exe'))
  $start.UseShellExecute=$false;$start.WorkingDirectory=$PackageDirectory
  foreach($entry in $environment.PSObject.Properties){$start.Environment[$entry.Name]=[string]$entry.Value}
  if($BrowserEndpoint){
-  $start.Environment['ZOMMI_BROWSER_CDP_ENDPOINT']=$BrowserEndpoint
+  $start.Environment['FOCALET_BROWSER_CDP_ENDPOINT']=$BrowserEndpoint
  }elseif($Scene -eq 'dashboard'){
   $portFile=Join-Path $OutputDirectory 'browser/DevToolsActivePort'
   if(-not (Test-Path $portFile)){throw 'The isolated browser did not expose its authorized debugging endpoint.'}
   $port=(Get-Content $portFile)[0]
   if($port -notmatch '^\d+$'){throw 'Invalid local browser port.'}
-  $start.Environment['ZOMMI_BROWSER_CDP_ENDPOINT']='http://127.0.0.1:'+$port
+  $start.Environment['FOCALET_BROWSER_CDP_ENDPOINT']='http://127.0.0.1:'+$port
  }
- $start.Environment['ZOMMI_ACCEPTANCE_LOG']=Join-Path $OutputDirectory 'private-desktop.jsonl'
+ $start.Environment['FOCALET_ACCEPTANCE_LOG']=Join-Path $OutputDirectory 'private-desktop.jsonl'
  $app=[Diagnostics.Process]::Start($start)
  $deadline=[DateTime]::UtcNow.AddSeconds(30)
  do{$app.Refresh();Start-Sleep -Milliseconds 100}while($app.MainWindowHandle -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $deadline)
@@ -149,7 +149,7 @@ try {
  do {
   $entries=ReadUi
   $ready=@($entries|Where-Object {$_.Name -eq 'New agent' -and ($_.State -band 1) -eq 0}).Count
-  $starting=@($entries|Where-Object Name -match '^Waking Zommi').Count
+  $starting=@($entries|Where-Object Name -match '^Waking Focalet').Count
   if($ready -and -not $starting){break}
   Start-Sleep -Milliseconds 150
  }while([DateTime]::UtcNow -lt $deadline)
@@ -302,5 +302,5 @@ try {
  if($recorder){$recorder.Dispose()}
  if($app -and -not $app.HasExited){[void]$app.CloseMainWindow();if(-not $app.WaitForExit(5000)){$app.Kill($true)}}
  if($browser -and -not $browser.HasExited){$browser.Kill($true);$browser.WaitForExit(5000)|Out-Null}
- Restore-SuspendedZommiApplications -ExecutablePaths $previous
+ Restore-SuspendedFocaletApplications -ExecutablePaths $previous
 }

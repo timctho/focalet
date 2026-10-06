@@ -19,7 +19,7 @@ using System;
 using System.Runtime.InteropServices;
 using System.Text;
 
-public static class ZommiWindowsAcceptanceNative
+public static class FocaletWindowsAcceptanceNative
 {
     private delegate bool EnumWindowsProc(IntPtr window, IntPtr state);
 
@@ -46,6 +46,12 @@ public static class ZommiWindowsAcceptanceNative
     }
 
     public static bool NamedButtonEnabled(IntPtr parent, string name) => FindEnabledButton(parent, name) != IntPtr.Zero;
+
+    public static int[] NamedButtonContainerBounds(IntPtr parent, string name)
+    {
+        var button = FindEnabledButton(parent, name);
+        return button == IntPtr.Zero ? new int[0] : PhysicalBounds(GetParent(button));
+    }
 
     public static bool ClickNamedButton(IntPtr parent, string name)
     {
@@ -87,6 +93,9 @@ public static class ZommiWindowsAcceptanceNative
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetWindow(IntPtr window, uint command);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetParent(IntPtr window);
 
     [DllImport("user32.dll")]
     private static extern bool IsIconic(IntPtr window);
@@ -468,7 +477,7 @@ public static class ZommiWindowsAcceptanceNative
             topMost | toolWindow | noActivate,
             // WindowFromPoint skips STATIC controls; use a hit-testable cover.
             "BUTTON",
-            "Zommi acceptance competing topmost",
+            "Focalet acceptance competing topmost",
             popup | visible,
             x,
             y,
@@ -810,7 +819,7 @@ function Wait-ForWindow {
 
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
     while ([DateTime]::UtcNow -lt $deadline) {
-        $window = [ZommiWindowsAcceptanceNative]::FindWindow($ProcessId, $Title)
+        $window = [FocaletWindowsAcceptanceNative]::FindWindow($ProcessId, $Title)
         if ($window -ne [IntPtr]::Zero) {
             return $window
         }
@@ -827,7 +836,7 @@ function Wait-ForVisibleProcessWindow {
 
     $deadline = [DateTime]::UtcNow.AddSeconds(15)
     while ([DateTime]::UtcNow -lt $deadline) {
-        $window = [ZommiWindowsAcceptanceNative]::FindVisibleWindow($ProcessId)
+        $window = [FocaletWindowsAcceptanceNative]::FindVisibleWindow($ProcessId)
         if ($window -ne [IntPtr]::Zero) {
             return $window
         }
@@ -851,16 +860,16 @@ function Wait-ForPackagedSelector {
             $_.ExecutablePath -eq $CaptureExecutable
         }
         foreach ($helper in $helpers) {
-            $window = [ZommiWindowsAcceptanceNative]::FindWindow(
+            $window = [FocaletWindowsAcceptanceNative]::FindWindow(
                 $helper.ProcessId,
-                'Zommi content selection'
+                'Focalet content selection'
             )
             if ($window -ne [IntPtr]::Zero) {
                 $lastWindow = $window
-                $lastTopMost = [ZommiWindowsAcceptanceNative]::TopMost($window)
-                $lastForeground = [ZommiWindowsAcceptanceNative]::Foreground($window)
+                $lastTopMost = [FocaletWindowsAcceptanceNative]::TopMost($window)
+                $lastForeground = [FocaletWindowsAcceptanceNative]::Foreground($window)
                 if ($lastTopMost -and $lastForeground -and
-                    [ZommiWindowsAcceptanceNative]::NamedButtonEnabled($window, 'Cancel')) {
+                    [FocaletWindowsAcceptanceNative]::NamedButtonEnabled($window, 'Cancel')) {
                     return $window
                 }
             }
@@ -972,7 +981,7 @@ function Invoke-CaptureRequest {
         if ($process.ExitCode -ne 0) {
             throw "Capture helper exited $($process.ExitCode): $($process.StandardError.ReadToEnd())"
         }
-        if ($env:ZOMMI_CAPTURE_DIAGNOSTICS -eq '1') {
+        if ($env:FOCALET_CAPTURE_DIAGNOSTICS -eq '1') {
             $diagnostics = $process.StandardError.ReadToEnd()
             if ($diagnostics) { Write-Host $diagnostics }
         }
@@ -1101,7 +1110,7 @@ function Assert-DesktopCaptureSurface {
     $lastError = $null
     foreach ($attempt in 1..20) {
         $errorCode = 0
-        if ([ZommiWindowsAcceptanceNative]::TryCopyDesktopPixel([ref] $errorCode)) {
+        if ([FocaletWindowsAcceptanceNative]::TryCopyDesktopPixel([ref] $errorCode)) {
             if ($attempt -gt 1) {
                 Write-Host "desktop-surface: recovered on attempt $attempt"
             }
@@ -1141,7 +1150,7 @@ function Assert-ProbeRegionSize {
     }
 }
 
-function Suspend-ConflictingZommiApplications {
+function Suspend-ConflictingFocaletApplications {
     param(
         [Parameter(Mandatory = $true)]
         [string] $EntryPoint
@@ -1149,7 +1158,7 @@ function Suspend-ConflictingZommiApplications {
 
     $normalizedEntryPoint = [IO.Path]::GetFullPath($EntryPoint)
     $applications = @(Get-CimInstance Win32_Process | Where-Object {
-        $_.Name -eq 'Zommi.exe' -and
+        $_.Name -eq 'Focalet.exe' -and
         $_.ExecutablePath -and
         -not [string]::Equals(
             [IO.Path]::GetFullPath($_.ExecutablePath),
@@ -1189,7 +1198,7 @@ function Suspend-ConflictingZommiApplications {
     $deadline = [DateTime]::UtcNow.AddSeconds(5)
     do {
         $remaining = @(Get-CimInstance Win32_Process | Where-Object {
-            $_.Name -eq 'Zommi.exe' -and $_.ExecutablePath -and
+            $_.Name -eq 'Focalet.exe' -and $_.ExecutablePath -and
             $applicationPaths -contains ([IO.Path]::GetFullPath($_.ExecutablePath))
         })
         if ($remaining.Count -eq 0) {
@@ -1198,13 +1207,13 @@ function Suspend-ConflictingZommiApplications {
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $deadline)
     if ($remaining.Count -ne 0) {
-        throw "Could not suspend conflicting Zommi process: $($remaining.ProcessId -join ',')."
+        throw "Could not suspend conflicting Focalet process: $($remaining.ProcessId -join ',')."
     }
     Start-Sleep -Milliseconds 300
     return $applicationPaths
 }
 
-function Restore-SuspendedZommiApplications {
+function Restore-SuspendedFocaletApplications {
     param(
         [string[]] $ExecutablePaths
     )
@@ -1235,7 +1244,7 @@ function Restore-SuspendedZommiApplications {
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
     do {
         $runningPaths = @(Get-CimInstance Win32_Process | Where-Object {
-            $_.Name -eq 'Zommi.exe' -and $_.ExecutablePath -and
+            $_.Name -eq 'Focalet.exe' -and $_.ExecutablePath -and
             $expectedPaths -contains ([IO.Path]::GetFullPath($_.ExecutablePath))
         } | ForEach-Object {
             [IO.Path]::GetFullPath($_.ExecutablePath)
@@ -1245,7 +1254,7 @@ function Restore-SuspendedZommiApplications {
         }
         Start-Sleep -Milliseconds 200
     } while ([DateTime]::UtcNow -lt $deadline)
-    throw "Could not restore suspended Zommi application: $($expectedPaths -join ',')."
+    throw "Could not restore suspended Focalet application: $($expectedPaths -join ',')."
 }
 
 function Invoke-PackagedApplicationAcceptance {
@@ -1257,8 +1266,8 @@ function Invoke-PackagedApplicationAcceptance {
         [string] $CaptureExecutable
     )
 
-    $entrypoint = Join-Path $Package 'Zommi.exe'
-    $core = Join-Path $Package 'zommi-core-host.exe'
+    $entrypoint = Join-Path $Package 'Focalet.exe'
+    $core = Join-Path $Package 'focalet-core-host.exe'
     foreach ($required in @($entrypoint, $core, $CaptureExecutable)) {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
             throw "Packaged application input is missing: $required"
@@ -1267,26 +1276,26 @@ function Invoke-PackagedApplicationAcceptance {
     $packageExecutables = @($entrypoint, $core, $CaptureExecutable)
 
     # The product deliberately owns one global mutex and two global hotkeys.
-    # An already deployed Zommi would redirect this probe to itself, so an
+    # An already deployed Focalet would redirect this probe to itself, so an
     # explicit interactive gate temporarily suspends it and restores the exact
     # executable after the isolated package has been cleaned up.
     $suspendedApplications = @(
-        Suspend-ConflictingZommiApplications -EntryPoint $entrypoint
+        Suspend-ConflictingFocaletApplications -EntryPoint $entrypoint
     )
 
     $existing = @(Get-CimInstance Win32_Process | Where-Object {
         $_.ExecutablePath -in $packageExecutables
     })
     if ($existing.Count -ne 0) {
-        Restore-SuspendedZommiApplications -ExecutablePaths $suspendedApplications
+        Restore-SuspendedFocaletApplications -ExecutablePaths $suspendedApplications
         throw "Package already has running processes: $($existing.ProcessId -join ',')."
     }
 
     $acceptanceLog = Join-Path $env:TEMP (
-        "zommi-windows-acceptance-$([Guid]::NewGuid().ToString('N')).jsonl"
+        "focalet-windows-acceptance-$([Guid]::NewGuid().ToString('N')).jsonl"
     )
     $acceptanceProfile = Join-Path $env:TEMP (
-        "zommi-windows-acceptance-profile-$([Guid]::NewGuid().ToString('N'))"
+        "focalet-windows-acceptance-profile-$([Guid]::NewGuid().ToString('N'))"
     )
     $start = [System.Diagnostics.ProcessStartInfo]::new()
     $start.FileName = $entrypoint
@@ -1295,26 +1304,26 @@ function Invoke-PackagedApplicationAcceptance {
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
     $start.EnvironmentVariables['APPDATA'] = $acceptanceProfile
-    $start.EnvironmentVariables['ZOMMI_ACCEPTANCE_LOG'] = $acceptanceLog
+    $start.EnvironmentVariables['FOCALET_ACCEPTANCE_LOG'] = $acceptanceLog
     $application = [System.Diagnostics.Process]::new()
     $application.StartInfo = $start
     try {
-        $null = [IO.Directory]::CreateDirectory((Join-Path $acceptanceProfile 'Zommi'))
+        $null = [IO.Directory]::CreateDirectory((Join-Path $acceptanceProfile 'Focalet'))
         # This gate exercises an already-configured capture workflow.
-        [IO.File]::WriteAllText((Join-Path $acceptanceProfile 'Zommi\settings.json'), '{"runtimeSetupCompleted":true}')
+        [IO.File]::WriteAllText((Join-Path $acceptanceProfile 'Focalet\settings.json'), '{"runtimeSetupCompleted":true}')
         if (-not $application.Start()) {
             throw "Could not start packaged Flutter application $entrypoint."
         }
     }
     catch {
         $application.Dispose()
-        Restore-SuspendedZommiApplications -ExecutablePaths $suspendedApplications
+        Restore-SuspendedFocaletApplications -ExecutablePaths $suspendedApplications
         throw
     }
 
     try {
         $window = Wait-ForVisibleProcessWindow -ProcessId $application.Id
-        $firstVisibleBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
+        $firstVisibleBounds = [FocaletWindowsAcceptanceNative]::Bounds($window)
         if ($firstVisibleBounds.Count -ne 4 -or
             $firstVisibleBounds[2] -lt 640 -or
             $firstVisibleBounds[3] -lt 500) {
@@ -1328,27 +1337,27 @@ function Invoke-PackagedApplicationAcceptance {
             throw "Expected only the Alt+A content shortcut to be registered: $($ready | ConvertTo-Json -Compress)"
         }
 
-        $taskbarBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
-        if ([ZommiWindowsAcceptanceNative]::IsZoomed($window)) {
+        $taskbarBounds = [FocaletWindowsAcceptanceNative]::Bounds($window)
+        if ([FocaletWindowsAcceptanceNative]::IsZoomed($window)) {
             throw 'Packaged application did not start in the isolated normal window mode.'
         }
-        if (-not [ZommiWindowsAcceptanceNative]::Visible($window) -or
-            -not [ZommiWindowsAcceptanceNative]::TaskbarEligible($window)) {
+        if (-not [FocaletWindowsAcceptanceNative]::Visible($window) -or
+            -not [FocaletWindowsAcceptanceNative]::TaskbarEligible($window)) {
             throw 'Packaged Flutter window is not visible and taskbar eligible.'
         }
-        if (-not [ZommiWindowsAcceptanceNative]::NativeTaskbarToggleAvailable($window)) {
+        if (-not [FocaletWindowsAcceptanceNative]::NativeTaskbarToggleAvailable($window)) {
             throw 'Packaged taskbar window has no native minimize/system-menu styles.'
         }
-        if ([ZommiWindowsAcceptanceNative]::TopMost($window)) {
+        if ([FocaletWindowsAcceptanceNative]::TopMost($window)) {
             throw 'Packaged taskbar window unexpectedly remained always-on-top.'
         }
 
-        [ZommiWindowsAcceptanceNative]::Maximize($window)
+        [FocaletWindowsAcceptanceNative]::Maximize($window)
         $maximizeDeadline = [DateTime]::UtcNow.AddSeconds(5)
         do {
-            $maximizedBounds = [ZommiWindowsAcceptanceNative]::PhysicalClientBounds($window)
-            $monitorWorkArea = [ZommiWindowsAcceptanceNative]::WorkArea($window)
-            $maximizedToWorkArea = [ZommiWindowsAcceptanceNative]::IsZoomed($window) -and
+            $maximizedBounds = [FocaletWindowsAcceptanceNative]::PhysicalClientBounds($window)
+            $monitorWorkArea = [FocaletWindowsAcceptanceNative]::WorkArea($window)
+            $maximizedToWorkArea = [FocaletWindowsAcceptanceNative]::IsZoomed($window) -and
                 ($maximizedBounds -join ',') -eq ($monitorWorkArea -join ',')
             if ($maximizedToWorkArea) { break }
             Start-Sleep -Milliseconds 50
@@ -1356,11 +1365,11 @@ function Invoke-PackagedApplicationAcceptance {
         if (-not $maximizedToWorkArea) {
             throw "Maximize did not respect the active monitor work area: bounds=$($maximizedBounds -join ',') workArea=$($monitorWorkArea -join ',')."
         }
-        [ZommiWindowsAcceptanceNative]::Restore($window)
+        [FocaletWindowsAcceptanceNative]::Restore($window)
         $normalDeadline = [DateTime]::UtcNow.AddSeconds(5)
         do {
-            $normalBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
-            $normalRestored = -not [ZommiWindowsAcceptanceNative]::IsZoomed($window) -and
+            $normalBounds = [FocaletWindowsAcceptanceNative]::Bounds($window)
+            $normalRestored = -not [FocaletWindowsAcceptanceNative]::IsZoomed($window) -and
                 ($normalBounds[2..3] -join ',') -eq ($taskbarBounds[2..3] -join ',')
             if ($normalRestored) { break }
             Start-Sleep -Milliseconds 50
@@ -1369,14 +1378,14 @@ function Invoke-PackagedApplicationAcceptance {
             throw "Restoring Maximize did not retain the previous normal window size: before=$($taskbarBounds -join ',') after=$($normalBounds -join ',')."
         }
 
-        [ZommiWindowsAcceptanceNative]::Maximize($window)
-        [ZommiWindowsAcceptanceNative]::Restore($window)
-        [ZommiWindowsAcceptanceNative]::Maximize($window)
-        [ZommiWindowsAcceptanceNative]::Restore($window)
+        [FocaletWindowsAcceptanceNative]::Maximize($window)
+        [FocaletWindowsAcceptanceNative]::Restore($window)
+        [FocaletWindowsAcceptanceNative]::Maximize($window)
+        [FocaletWindowsAcceptanceNative]::Restore($window)
         $rapidRestoreDeadline = [DateTime]::UtcNow.AddSeconds(5)
         do {
-            $rapidBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
-            $rapidRestored = -not [ZommiWindowsAcceptanceNative]::IsZoomed($window) -and
+            $rapidBounds = [FocaletWindowsAcceptanceNative]::Bounds($window)
+            $rapidRestored = -not [FocaletWindowsAcceptanceNative]::IsZoomed($window) -and
                 ($rapidBounds -join ',') -eq ($taskbarBounds -join ',')
             if ($rapidRestored) { break }
             Start-Sleep -Milliseconds 50
@@ -1386,32 +1395,32 @@ function Invoke-PackagedApplicationAcceptance {
         }
         Write-Host 'native-max-restore: ok (rapid commands retain the last requested placement)'
 
-        $physicalBounds = [ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
+        $physicalBounds = [FocaletWindowsAcceptanceNative]::PhysicalBounds($window)
         if ($physicalBounds.Count -ne 4) {
             throw 'Could not read the packaged taskbar window physical bounds.'
         }
         $centerX = [int]($physicalBounds[0] + $physicalBounds[2] / 2.0)
         $centerY = [int]($physicalBounds[1] + $physicalBounds[3] / 2.0)
-        if (-not [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos($centerX, $centerY)) {
+        if (-not [FocaletWindowsAcceptanceNative]::SetPhysicalCursorPos($centerX, $centerY)) {
             throw 'Could not hover the packaged taskbar window.'
         }
         Start-Sleep -Milliseconds 750
-        $hoverBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
+        $hoverBounds = [FocaletWindowsAcceptanceNative]::Bounds($window)
         if (($hoverBounds -join ',') -ne ($taskbarBounds -join ',')) {
             throw "Taskbar window resized on hover: before=$($taskbarBounds -join ',') after=$($hoverBounds -join ',')."
         }
-        if (-not [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(300, 300)) {
+        if (-not [FocaletWindowsAcceptanceNative]::SetPhysicalCursorPos(300, 300)) {
             throw 'Could not move the pointer away from the packaged taskbar window.'
         }
         Start-Sleep -Milliseconds 750
-        $leaveBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
+        $leaveBounds = [FocaletWindowsAcceptanceNative]::Bounds($window)
         if (($leaveBounds -join ',') -ne ($taskbarBounds -join ',')) {
             throw "Taskbar window resized after pointer exit: before=$($taskbarBounds -join ',') after=$($leaveBounds -join ',')."
         }
 
         $dragStartX = [int]($physicalBounds[0] + $physicalBounds[2] / 2.0)
         $dragStartY = [int]($physicalBounds[1] + 28)
-        if (-not [ZommiWindowsAcceptanceNative]::DragWindowFromTitlebar(
+        if (-not [FocaletWindowsAcceptanceNative]::DragWindowFromTitlebar(
             $dragStartX,
             $dragStartY,
             $dragStartX + 48,
@@ -1422,7 +1431,7 @@ function Invoke-PackagedApplicationAcceptance {
         $dragDeadline = [DateTime]::UtcNow.AddSeconds(5)
         do {
             Start-Sleep -Milliseconds 50
-            $draggedBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
+            $draggedBounds = [FocaletWindowsAcceptanceNative]::Bounds($window)
         } while (($draggedBounds[0] -eq $taskbarBounds[0]) -and
                  ($draggedBounds[1] -eq $taskbarBounds[1]) -and
                  [DateTime]::UtcNow -lt $dragDeadline)
@@ -1431,36 +1440,36 @@ function Invoke-PackagedApplicationAcceptance {
             throw "Packaged custom titlebar did not move the window: before=$($taskbarBounds -join ',') after=$($draggedBounds -join ',')."
         }
 
-        [ZommiWindowsAcceptanceNative]::Minimize($window)
+        [FocaletWindowsAcceptanceNative]::Minimize($window)
         $minimizeDeadline = [DateTime]::UtcNow.AddSeconds(5)
-        while (-not [ZommiWindowsAcceptanceNative]::Minimized($window) -and
+        while (-not [FocaletWindowsAcceptanceNative]::Minimized($window) -and
                [DateTime]::UtcNow -lt $minimizeDeadline) {
             Start-Sleep -Milliseconds 50
         }
-        if (-not [ZommiWindowsAcceptanceNative]::Minimized($window)) {
+        if (-not [FocaletWindowsAcceptanceNative]::Minimized($window)) {
             throw 'Packaged taskbar window did not minimize.'
         }
-        [ZommiWindowsAcceptanceNative]::Restore($window)
+        [FocaletWindowsAcceptanceNative]::Restore($window)
         $restoreDeadline = [DateTime]::UtcNow.AddSeconds(5)
-        while (([ZommiWindowsAcceptanceNative]::Minimized($window) -or
-                -not [ZommiWindowsAcceptanceNative]::Visible($window)) -and
+        while (([FocaletWindowsAcceptanceNative]::Minimized($window) -or
+                -not [FocaletWindowsAcceptanceNative]::Visible($window)) -and
                [DateTime]::UtcNow -lt $restoreDeadline) {
             Start-Sleep -Milliseconds 50
         }
-        if ([ZommiWindowsAcceptanceNative]::Minimized($window) -or
-            -not [ZommiWindowsAcceptanceNative]::Visible($window)) {
+        if ([FocaletWindowsAcceptanceNative]::Minimized($window) -or
+            -not [FocaletWindowsAcceptanceNative]::Visible($window)) {
             throw 'Packaged taskbar window did not restore.'
         }
 
-        $contentFixture = [ZommiContextFixture]::new()
+        $contentFixture = [FocaletContextFixture]::new()
         try {
             $contentFixture.Raise()
-            [ZommiWindowsAcceptanceNative]::SendAltA($false)
+            [FocaletWindowsAcceptanceNative]::SendAltA($false)
             $selector = Wait-ForPackagedSelector -CaptureExecutable $CaptureExecutable
             # The content picker instructs the user to draw a rectangle; a
             # single click intentionally leaves it open without an attachment.
-            [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector, 180, 200, 530, 240)
-            [ZommiWindowsAcceptanceNative]::ConfirmSelection($selector)
+            [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector, 180, 200, 530, 240)
+            [FocaletWindowsAcceptanceNative]::ConfirmSelection($selector)
             $contextResult = Wait-ForAcceptanceEvent `
                 -Path $acceptanceLog `
                 -Name 'selection.content' `
@@ -1474,34 +1483,34 @@ function Invoke-PackagedApplicationAcceptance {
             throw "Packaged content shortcut did not attach a selection: $($context | ConvertTo-Json -Compress)"
         }
         $contextFocusDeadline = [DateTime]::UtcNow.AddSeconds(5)
-        while (-not [ZommiWindowsAcceptanceNative]::Foreground($window) -and
+        while (-not [FocaletWindowsAcceptanceNative]::Foreground($window) -and
                [DateTime]::UtcNow -lt $contextFocusDeadline) {
             Start-Sleep -Milliseconds 50
         }
-        if (-not [ZommiWindowsAcceptanceNative]::Foreground($window)) {
+        if (-not [FocaletWindowsAcceptanceNative]::Foreground($window)) {
             throw 'Alt+A did not restore and focus the packaged taskbar window.'
         }
-        $shortcutBounds = [ZommiWindowsAcceptanceNative]::Bounds($window)
+        $shortcutBounds = [FocaletWindowsAcceptanceNative]::Bounds($window)
         if (($shortcutBounds[2..3] -join ',') -ne ($taskbarBounds[2..3] -join ',')) {
             throw "Context shortcut resized the taskbar chat window: before=$($taskbarBounds -join ',') after=$($shortcutBounds -join ',')."
         }
 
-        [ZommiWindowsAcceptanceNative]::Minimize($window)
+        [FocaletWindowsAcceptanceNative]::Minimize($window)
         $imageShortcutMinimizeDeadline = [DateTime]::UtcNow.AddSeconds(5)
-        while (-not [ZommiWindowsAcceptanceNative]::Minimized($window) -and
+        while (-not [FocaletWindowsAcceptanceNative]::Minimized($window) -and
                [DateTime]::UtcNow -lt $imageShortcutMinimizeDeadline) {
             Start-Sleep -Milliseconds 50
         }
-        if (-not [ZommiWindowsAcceptanceNative]::Minimized($window)) {
-            throw 'Could not minimize Zommi before the Alt+A restore gate.'
+        if (-not [FocaletWindowsAcceptanceNative]::Minimized($window)) {
+            throw 'Could not minimize Focalet before the Alt+A restore gate.'
         }
 
-        [ZommiWindowsAcceptanceNative]::SendAltA($false)
+        [FocaletWindowsAcceptanceNative]::SendAltA($false)
         $selector = Wait-ForPackagedSelector -CaptureExecutable $CaptureExecutable
-        $selectorBounds = [ZommiWindowsAcceptanceNative]::Bounds($selector)
+        $selectorBounds = [FocaletWindowsAcceptanceNative]::Bounds($selector)
         $probeX = $selectorBounds[0] + 40
         $probeY = $selectorBounds[1] + 40
-        $competitor = [ZommiWindowsAcceptanceNative]::CreateCompetingTopMost(
+        $competitor = [FocaletWindowsAcceptanceNative]::CreateCompetingTopMost(
             $selectorBounds[0],
             $selectorBounds[1],
             160,
@@ -1512,7 +1521,7 @@ function Invoke-PackagedApplicationAcceptance {
         }
         try {
             Start-Sleep -Milliseconds 400
-            if (-not [ZommiWindowsAcceptanceNative]::IsWindowAtPoint(
+            if (-not [FocaletWindowsAcceptanceNative]::IsWindowAtPoint(
                 $selector,
                 $probeX,
                 $probeY
@@ -1521,9 +1530,9 @@ function Invoke-PackagedApplicationAcceptance {
             }
         }
         finally {
-            [ZommiWindowsAcceptanceNative]::CloseCompetingWindow($competitor)
+            [FocaletWindowsAcceptanceNative]::CloseCompetingWindow($competitor)
         }
-        if (-not [ZommiWindowsAcceptanceNative]::CancelSelection($selector)) {
+        if (-not [FocaletWindowsAcceptanceNative]::CancelSelection($selector)) {
             throw 'Could not cancel the packaged application region selector.'
         }
         $cancelResult = Wait-ForAcceptanceEvent `
@@ -1533,31 +1542,31 @@ function Invoke-PackagedApplicationAcceptance {
         $eventCount = $cancelResult.Count
         if ($cancelResult.Event.count -ne 0) { throw 'Cancelled selection attached content.' }
         $cancelFocusDeadline = [DateTime]::UtcNow.AddSeconds(5)
-        while (([ZommiWindowsAcceptanceNative]::Minimized($window) -or
-                -not [ZommiWindowsAcceptanceNative]::Visible($window) -or
-                -not [ZommiWindowsAcceptanceNative]::Foreground($window)) -and
+        while (([FocaletWindowsAcceptanceNative]::Minimized($window) -or
+                -not [FocaletWindowsAcceptanceNative]::Visible($window) -or
+                -not [FocaletWindowsAcceptanceNative]::Foreground($window)) -and
                [DateTime]::UtcNow -lt $cancelFocusDeadline) {
             Start-Sleep -Milliseconds 50
         }
-        if ([ZommiWindowsAcceptanceNative]::Minimized($window) -or
-            -not [ZommiWindowsAcceptanceNative]::Visible($window) -or
-            -not [ZommiWindowsAcceptanceNative]::Foreground($window)) {
+        if ([FocaletWindowsAcceptanceNative]::Minimized($window) -or
+            -not [FocaletWindowsAcceptanceNative]::Visible($window) -or
+            -not [FocaletWindowsAcceptanceNative]::Foreground($window)) {
             throw 'Cancelled Alt+A did not restore, show, and focus the minimized packaged taskbar window.'
         }
 
         # Keep the size probe over a known, responsive source window. A crop
         # of the user's desktop can hit an unrelated browser/UIA provider.
-        $imageFixture = [ZommiContextFixture]::new()
+        $imageFixture = [FocaletContextFixture]::new()
         try {
             $imageFixture.Raise()
-            [ZommiWindowsAcceptanceNative]::SendAltA($false)
+            [FocaletWindowsAcceptanceNative]::SendAltA($false)
             $selector = Wait-ForPackagedSelector -CaptureExecutable $CaptureExecutable
-            if (-not [ZommiWindowsAcceptanceNative]::TopMost($selector) -or
-                -not [ZommiWindowsAcceptanceNative]::Foreground($selector)) {
+            if (-not [FocaletWindowsAcceptanceNative]::TopMost($selector) -or
+                -not [FocaletWindowsAcceptanceNative]::Foreground($selector)) {
                 throw 'Packaged image selector lost its topmost foreground state.'
             }
-            [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($selector, 180, 200, 220, 230)
-            [ZommiWindowsAcceptanceNative]::ConfirmSelection($selector)
+            [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($selector, 180, 200, 220, 230)
+            [FocaletWindowsAcceptanceNative]::ConfirmSelection($selector)
             $imageResult = Wait-ForAcceptanceEvent `
                 -Path $acceptanceLog `
                 -Name 'selection.content' `
@@ -1576,16 +1585,16 @@ function Invoke-PackagedApplicationAcceptance {
             throw "Packaged content selection contract failed: $($image | ConvertTo-Json -Compress)"
         }
         $imageFocusDeadline = [DateTime]::UtcNow.AddSeconds(5)
-        while (-not [ZommiWindowsAcceptanceNative]::Foreground($window) -and
+        while (-not [FocaletWindowsAcceptanceNative]::Foreground($window) -and
                [DateTime]::UtcNow -lt $imageFocusDeadline) {
             Start-Sleep -Milliseconds 50
         }
-        if (-not [ZommiWindowsAcceptanceNative]::Foreground($window)) {
+        if (-not [FocaletWindowsAcceptanceNative]::Foreground($window)) {
             throw 'Alt+A did not restore and focus the packaged taskbar window.'
         }
 
         Start-Sleep -Milliseconds 300
-        if ($application.HasExited -or -not [ZommiWindowsAcceptanceNative]::Visible($window)) {
+        if ($application.HasExited -or -not [FocaletWindowsAcceptanceNative]::Visible($window)) {
             throw 'Packaged Flutter application did not survive capture acceptance.'
         }
         # Capture can finish while startup is still probing runtimes. Require
@@ -1663,7 +1672,7 @@ function Invoke-PackagedApplicationAcceptance {
             }
         }
         finally {
-            Restore-SuspendedZommiApplications -ExecutablePaths $suspendedApplications
+            Restore-SuspendedFocaletApplications -ExecutablePaths $suspendedApplications
         }
     }
 }
@@ -1705,7 +1714,7 @@ function Write-AcceptanceResult {
 if ($HelpersOnly) { return }
 
 $package = (Resolve-Path -LiteralPath $PackageDirectory).ProviderPath
-$capture = Join-Path $package 'native/Zommi.Capture.exe'
+$capture = Join-Path $package 'native/Focalet.CaptureHost.exe'
 if (-not (Test-Path -LiteralPath $capture -PathType Leaf)) {
     throw "Packaged capture helper is missing: $capture"
 }
@@ -1735,8 +1744,8 @@ Write-Host 'window-ownership: ok (same-process sibling rejected)'
 
 $cancelled = Invoke-CaptureRequest -Executable $capture -Method 'selectImage' -Interact {
     param($process)
-    $window = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi image selection'
-    if (-not [ZommiWindowsAcceptanceNative]::CancelSelection($window)) {
+    $window = Wait-ForWindow -ProcessId $process.Id -Title 'Focalet image selection'
+    if (-not [FocaletWindowsAcceptanceNative]::CancelSelection($window)) {
         throw 'Could not post Escape to the region selector.'
     }
 }
@@ -1747,8 +1756,8 @@ Write-Host 'region-cancel: ok'
 
 $contentCancelled = Invoke-CaptureRequest -Executable $capture -Method 'selectContent' -Interact {
     param($process)
-    $window = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi content selection'
-    if (-not [ZommiWindowsAcceptanceNative]::CancelSelection($window)) { throw 'Could not cancel unified selection.' }
+    $window = Wait-ForWindow -ProcessId $process.Id -Title 'Focalet content selection'
+    if (-not [FocaletWindowsAcceptanceNative]::CancelSelection($window)) { throw 'Could not cancel unified selection.' }
 }
 if ($contentCancelled.cancelled -ne $true) { throw 'Unified selection did not preserve cancellation.' }
 Write-Host 'content-cancel: ok'
@@ -1767,58 +1776,58 @@ if ($NonVisualOnly) {
 
 Assert-DesktopCaptureSurface
 
-$scopeFixture = [ZommiContextFixture]::new()
+$scopeFixture = [FocaletContextFixture]::new()
 try {
 $scopeTargetWindow = $scopeFixture.Window.ToInt64().ToString()
-if (-not [ZommiWindowsAcceptanceNative]::IsOwnedWindowAtPoint($scopeFixture.Window, 220, 220)) {
-    throw "The context scope fixture is covered before capture: $([ZommiWindowsAcceptanceNative]::DescribeWindowAtPoint(220,220))"
+if (-not [FocaletWindowsAcceptanceNative]::IsOwnedWindowAtPoint($scopeFixture.Window, 220, 220)) {
+    throw "The context scope fixture is covered before capture: $([FocaletWindowsAcceptanceNative]::DescribeWindowAtPoint(220,220))"
 }
 $pointContext = Invoke-CaptureRequest -Executable $capture -Method 'selectContext' -Interact {
     param($process)
-    $window = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi context selection'
+    $window = Wait-ForWindow -ProcessId $process.Id -Title 'Focalet context selection'
     $activationDeadline = [DateTime]::UtcNow.AddSeconds(5)
-    while ((-not [ZommiWindowsAcceptanceNative]::TopMost($window) -or
-            -not [ZommiWindowsAcceptanceNative]::Foreground($window)) -and
+    while ((-not [FocaletWindowsAcceptanceNative]::TopMost($window) -or
+            -not [FocaletWindowsAcceptanceNative]::Foreground($window)) -and
            [DateTime]::UtcNow -lt $activationDeadline) {
         Start-Sleep -Milliseconds 50
     }
-    if (-not [ZommiWindowsAcceptanceNative]::TopMost($window) -or
-        -not [ZommiWindowsAcceptanceNative]::Foreground($window)) {
+    if (-not [FocaletWindowsAcceptanceNative]::TopMost($window) -or
+        -not [FocaletWindowsAcceptanceNative]::Foreground($window)) {
         throw 'Context point selector was not the active topmost window.'
     }
-    $bounds = [ZommiWindowsAcceptanceNative]::PhysicalBounds($window)
+    $bounds = [FocaletWindowsAcceptanceNative]::PhysicalBounds($window)
     if ($bounds.Count -ne 4 -or
-        -not [ZommiWindowsAcceptanceNative]::SetPhysicalCursorPos(
+        -not [FocaletWindowsAcceptanceNative]::SetPhysicalCursorPos(
             $bounds[0] + 220,
             $bounds[1] + 220
         )) {
         throw 'Could not position the pointer inside the context selector.'
     }
     $cursorClock = [Diagnostics.Stopwatch]::StartNew()
-    while (-not [ZommiWindowsAcceptanceNative]::CrosshairCursorActive() -and
+    while (-not [FocaletWindowsAcceptanceNative]::CrosshairCursorActive() -and
            $cursorClock.ElapsedMilliseconds -lt 5000) {
         Start-Sleep -Milliseconds 25
     }
-    if (-not [ZommiWindowsAcceptanceNative]::CrosshairCursorActive()) {
+    if (-not [FocaletWindowsAcceptanceNative]::CrosshairCursorActive()) {
         throw 'Context point selector did not expose its crosshair cursor.'
     }
     Write-Host "point-context: crosshair ready after $($cursorClock.ElapsedMilliseconds) ms"
     foreach ($sample in 1..10) {
         Start-Sleep -Milliseconds 100
-        if (-not [ZommiWindowsAcceptanceNative]::IsOwnedWindowAtPoint($window, $bounds[0] + 220, $bounds[1] + 220) -or
-            -not [ZommiWindowsAcceptanceNative]::CrosshairCursorActive()) {
+        if (-not [FocaletWindowsAcceptanceNative]::IsOwnedWindowAtPoint($window, $bounds[0] + 220, $bounds[1] + 220) -or
+            -not [FocaletWindowsAcceptanceNative]::CrosshairCursorActive()) {
             throw 'Context point selector lost pointer ownership after painting.'
         }
     }
-    if (-not [ZommiWindowsAcceptanceNative]::ClickSelection($window, 220, 220)) {
+    if (-not [FocaletWindowsAcceptanceNative]::ClickSelection($window, 220, 220)) {
         throw 'Could not click the context point selector.'
     }
-    $scope = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi context scope'
+    $scope = Wait-ForWindow -ProcessId $process.Id -Title 'Focalet context scope'
     $scopeDeadline = [DateTime]::UtcNow.AddSeconds(5)
-    while (-not [ZommiWindowsAcceptanceNative]::Foreground($scope) -and [DateTime]::UtcNow -lt $scopeDeadline) {
+    while (-not [FocaletWindowsAcceptanceNative]::Foreground($scope) -and [DateTime]::UtcNow -lt $scopeDeadline) {
         Start-Sleep -Milliseconds 50
     }
-    if (-not [ZommiWindowsAcceptanceNative]::Foreground($scope)) {
+    if (-not [FocaletWindowsAcceptanceNative]::Foreground($scope)) {
         throw 'The selected element scope was not visible and focused.'
     }
     Add-Type -AssemblyName System.Windows.Forms
@@ -1845,13 +1854,13 @@ $bboxEvidence = & (Join-Path $PSScriptRoot 'accept-windows-bbox-context.ps1') -C
 $contentGestures = $bboxEvidence.cases
 $contentTimings = $bboxEvidence.timings
 
-$imageFixture = [ZommiContextFixture]::new()
+$imageFixture = [FocaletContextFixture]::new()
 try {
     $selected = Invoke-CaptureRequest -Executable $capture -Method 'selectImage' -Interact {
         param($process)
-        $window = Wait-ForWindow -ProcessId $process.Id -Title 'Zommi image selection'
-        [ZommiWindowsAcceptanceNative]::DragPhysicalSelection($window, 200, 200, 240, 230)
-        [ZommiWindowsAcceptanceNative]::ConfirmSelection($window)
+        $window = Wait-ForWindow -ProcessId $process.Id -Title 'Focalet image selection'
+        [FocaletWindowsAcceptanceNative]::DragPhysicalSelection($window, 200, 200, 240, 230)
+        [FocaletWindowsAcceptanceNative]::ConfirmSelection($window)
     }
 } finally {
     $imageFixture.Dispose()

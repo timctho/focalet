@@ -7,12 +7,12 @@ param(
 
     [switch] $DeployToDownloads,
 
-    [string] $SigningThumbprint = $env:ZOMMI_WINDOWS_SIGNING_THUMBPRINT
+    [string] $SigningThumbprint = $env:FOCALET_WINDOWS_SIGNING_THUMBPRINT
 )
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$flutterDirectory = Join-Path $repositoryRoot 'src/Zommi.Flutter'
+$flutterDirectory = Join-Path $repositoryRoot 'src/Focalet.Flutter'
 $architecture = if ($Runtime -eq 'win-arm64') { 'arm64' } else { 'x64' }
 $rustTarget = if ($Runtime -eq 'win-arm64') { 'aarch64-pc-windows-msvc' } else { 'x86_64-pc-windows-msvc' }
 $flutterOutput = Join-Path $flutterDirectory "build/windows/$architecture/runner/Release"
@@ -22,9 +22,9 @@ $cargoTargetRoot = if ([string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
 else {
     [IO.Path]::GetFullPath($env:CARGO_TARGET_DIR)
 }
-$rustCore = Join-Path $cargoTargetRoot "$rustTarget/release/zommi-core-host.exe"
-$captureOutput = Join-Path $repositoryRoot "artifacts/zommi-capture-$Runtime"
-$packageDirectory = Join-Path $repositoryRoot "artifacts/zommi-windows-$architecture"
+$rustCore = Join-Path $cargoTargetRoot "$rustTarget/release/focalet-core-host.exe"
+$captureOutput = Join-Path $repositoryRoot "artifacts/focalet-capture-host-$Runtime"
+$packageDirectory = Join-Path $repositoryRoot "artifacts/focalet-windows-$architecture"
 $gitCommit = (git -C $repositoryRoot rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $gitCommit -notmatch '^[0-9a-f]{40}$') {
     throw 'Could not resolve the exact source revision for the release manifest.'
@@ -52,7 +52,7 @@ if (-not $SkipBuild) {
         if ($LASTEXITCODE -ne 0) {
             throw "Flutter dependency restore failed with exit code $LASTEXITCODE."
         }
-        $flutterArguments = @('build', 'windows', '--release', '--no-pub', "--dart-define=ZOMMI_BUILD_REVISION=$gitCommit")
+        $flutterArguments = @('build', 'windows', '--release', '--no-pub', "--dart-define=FOCALET_BUILD_REVISION=$gitCommit")
         if ($Runtime -eq 'win-arm64') {
             $flutterArguments += '--target-platform=windows-arm64'
         }
@@ -121,7 +121,7 @@ if (-not $SkipBuild) {
     cargo build `
         --manifest-path (Join-Path $repositoryRoot 'Cargo.toml') `
         --release `
-        --bin zommi-core-host `
+        --bin focalet-core-host `
         --target $rustTarget
     if ($LASTEXITCODE -ne 0) {
         throw "Rust core build failed with exit code $LASTEXITCODE."
@@ -133,10 +133,10 @@ if (-not $SkipBuild) {
     # Keep runner-level disabled sources from silently removing the repository
     # feed, while allowing managed hosts to select their approved feed proxy.
     $nuGetArguments = @('--configfile', (Join-Path $repositoryRoot 'NuGet.config'))
-    if (-not [string]::IsNullOrWhiteSpace($env:ZOMMI_NUGET_SOURCE)) {
-        $nuGetArguments += @('--source', $env:ZOMMI_NUGET_SOURCE)
+    if (-not [string]::IsNullOrWhiteSpace($env:FOCALET_NUGET_SOURCE)) {
+        $nuGetArguments += @('--source', $env:FOCALET_NUGET_SOURCE)
     }
-    dotnet publish (Join-Path $repositoryRoot 'src/Zommi.Windows/Zommi.Windows.csproj') `
+    dotnet publish (Join-Path $repositoryRoot 'src/Focalet.Windows/Focalet.Windows.csproj') `
         @nuGetArguments `
         --configuration Release `
         --runtime $Runtime `
@@ -149,7 +149,7 @@ if (-not $SkipBuild) {
     }
 }
 
-$captureExecutable = Join-Path $captureOutput 'Zommi.Capture.exe'
+$captureExecutable = Join-Path $captureOutput 'Focalet.CaptureHost.exe'
 foreach ($required in @($flutterOutput, $rustCore, $captureExecutable)) {
     if (-not (Test-Path -LiteralPath $required)) {
         throw "Release input is missing: $required"
@@ -210,7 +210,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 if ($signingStatus -eq 'distribution-signed') {
-    foreach ($relative in @('Zommi.exe', 'zommi-core-host.exe', 'native/Zommi.Capture.exe')) {
+    foreach ($relative in @('Focalet.exe', 'focalet-core-host.exe', 'native/Focalet.CaptureHost.exe')) {
         $signature = Get-AuthenticodeSignature (Join-Path $packageDirectory $relative)
         if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
             throw "Authenticode verification failed for ${relative}: $($signature.Status)."

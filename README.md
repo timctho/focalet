@@ -1,132 +1,108 @@
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="design/zommi-logo/exports/ocean/lockup-dark.png">
-  <img src="design/zommi-logo/exports/ocean/lockup-light.png" alt="Zommi" width="240">
+  <source media="(prefers-color-scheme: dark)" srcset="design/focalet-logo/exports/ocean/lockup-dark.png">
+  <img src="design/focalet-logo/exports/ocean/lockup-light.png" alt="Focalet" width="360">
 </picture>
 
-# Zommi — visual context for AI agents
+# Give your agent the context on your screen
 
-**Show your agent what you mean.** Zommi is an open-source desktop companion for
-Codex, Claude Code and other AI agents. Select and annotate screen regions, then
-share screenshots and available browser or accessibility context with your agent.
+Select what matters, add a sketch, and share the images with available text,
+links and UI structure. Focalet brings visual context to the tools you already
+use, with an optional desktop app for managing agent conversations.
 
-[![CI](https://github.com/timctho/zommi/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/timctho/zommi/actions/workflows/checks.yml)
-[![Latest release](https://img.shields.io/github/v/release/timctho/zommi)](https://github.com/timctho/zommi/releases/latest)
+[![CI](https://github.com/timctho/focalet/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/timctho/focalet/actions/workflows/checks.yml)
+[![Latest release](https://img.shields.io/github/v/release/timctho/focalet)](https://github.com/timctho/focalet/releases/latest)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
-[![Sketch a stacked chart and trend line, then watch the agent rebuild them](docs/demos/frontend-preview.webp)](docs/demos/frontend.mp4)
+[Documentation](https://timctho.github.io/focalet/) · [Releases](https://github.com/timctho/focalet/releases) · [Build from source](CONTRIBUTING.md)
 
-**Redesign a chart with a sketch.** Turn one chart into a channel breakdown and trend.
+## Choose your workflow
 
-> Same six months: stacked channels left, revenue trend right.
+| | Focalet Capture | Focalet Desktop |
+| --- | --- | --- |
+| Use it for | Adding screen context to your existing editor, terminal or chat app | Managing agent chats, saved sessions, models and attachments in a dedicated window |
+| Examples | Show Cursor a UI bug; paste a chart into ChatGPT; give a terminal agent several annotated regions | Switch between project conversations; review captured attachments; respond to agent approvals |
+| Setup | No agent connection or sign-in in Capture | Connect an installed agent and use its existing account |
+| Platforms | Windows prototype | Windows, macOS and Ubuntu GNOME Wayland |
+| Get started | [Capture guide](docs/capture-tool.md) | [Desktop installation](docs/install.md) |
 
-[Watch the frontend demo](docs/demos/frontend.mp4) · [Documentation](https://timctho.github.io/zommi/)
+## Capture: stay in the tool you know
 
-## Download
+1. Press **Shift+Alt+A** in the source window.
+2. Select and annotate up to eight regions. **Ctrl-drag** enters continuous
+   selection; choose a drawing tool or region letter when ready to annotate.
+3. Finish the capture, click the destination input, and press **Alt+A**.
+
+Paste follows **image A → context A → image B → context B**. Each image stays
+separate at its original dimensions. Context includes available DOM or Windows
+accessibility details; inputs that ignore images still receive text.
+
+The batch remains ready for another deliberate paste. Successful pastes finish
+silently. The receiving app controls image support and attachment placement.
+
+Capture builds independently with .NET on Windows. It does not require Flutter,
+Rust or Desktop. [Build the portable tool and learn its controls](docs/capture-tool.md).
+The prototype is separate from the Desktop installers.
+
+## Desktop: one place for your agent conversations
+
+Connect Codex, Claude Code, OpenCode, Gemini CLI, Hermes, OpenClaw or Pi. Choose
+among the models and commands each runtime exposes, manage sessions, and keep
+separate drafts and attachments for each chat.
+
+Press **Alt+A** (**⌥ A** on Mac) to select and annotate screen regions, then review
+the attachments in your draft before sending. The selected agent owns
+credentials, tools, permissions and canonical history.
+
+[Runtime support and setup](docs/install.md#2-choose-the-agent-you-already-have) ·
+[Runtime commands](docs/runtime-commands.md) · [Chrome and Edge context](docs/guides/chrome-edge.md)
+
+### Download Desktop
 
 | Platform | Architecture | Download |
 | --- | --- | --- |
-| Windows 10/11 | x64 | [Setup](https://github.com/timctho/zommi/releases/latest/download/Zommi-Setup-x64.exe) |
-| macOS 12+ | Apple Silicon (M1 or later) | [DMG](https://github.com/timctho/zommi/releases/latest/download/Zommi-macOS-arm64.dmg) |
-| macOS 12+ | Intel | [DMG](https://github.com/timctho/zommi/releases/latest/download/Zommi-macOS-x64.dmg) |
-| Ubuntu 24.04 LTS · GNOME Wayland | x64 | [.deb](https://github.com/timctho/zommi/releases/latest/download/Zommi-Ubuntu-amd64.deb) |
+| Windows 10/11 | x64 | [Windows setup](https://github.com/timctho/focalet/releases/latest) |
+| macOS 12+ | Apple Silicon / Intel | [Mac DMG](https://github.com/timctho/focalet/releases/latest) |
+| Ubuntu 24.04 LTS · GNOME Wayland | x64 | [Ubuntu package](https://github.com/timctho/focalet/releases/latest) |
 
-[Latest release and checksums](https://github.com/timctho/zommi/releases/latest)
+Earlier release assets keep their original names and checksums. New builds use
+Focalet throughout. See [upgrade notes](docs/migration.md) and
+[installation and permissions](docs/install.md).
 
-Uses your existing agent account. [Installation guide](docs/install.md) ·
-[Build from source](CONTRIBUTING.md)
+### See visual context in action
 
-Connect your agent, press **Alt+A** (**⌥ A** on Mac), select a region, and review
-the attachment before sending. [Chrome and Edge setup](docs/guides/chrome-edge.md) ·
-[Claude Code guide](docs/guides/claude-code.md) · [Ubuntu Wayland guide](docs/guides/ubuntu-wayland.md)
+Sketch a chart redesign, compare separate product listings, or select the part
+of a dashboard that needs investigation.
 
-## Connect your agent
+[![Sketch a chart redesign and ask an agent to rebuild it](docs/demos/frontend-preview.webp)](docs/demos/frontend.mp4)
 
-Choose an installed agent, or use **Configure runtime → Add runtime** to add a
-CLI. Repeat for additional runtimes, connect, then choose a model from the chat
-header. Sign in through your agent's own flow if needed.
+[Watch the chart demo](docs/demos/frontend.mp4) · [More recorded examples](docs/demos/README.md)
 
-[![Configure agent runtimes, connect, and see the full Zommi window](docs/demos/setup-preview.webp)](docs/demos/setup.mp4)
+These historical recordings preserve their original UI and source provenance;
+current builds display Focalet.
 
-| Agent | Support |
-| --- | --- |
-| **Codex** | Chats, images, saved sessions, models, approvals and native skills |
-| **Claude Code** | Chats, images, models, tool approvals and session resume through stream-json |
-| **OpenCode** | Chats, images, saved sessions, models, approvals and advertised commands through ACP |
-| **Gemini CLI** | Chats, images, models, approvals and advertised commands through ACP; [resume limitations](docs/install.md#2-choose-the-agent-you-already-have) |
-| **Hermes** | Chats and commands exposed by its ACP or Gateway profile |
-| **OpenClaw** | Chats and commands exposed by its ACP or local Gateway configuration |
-| **Pi** | Chats, images, models and runtime commands through RPC |
+## What gets shared
 
-## See it in action
+Capture starts when you invoke it. Selected pixels are retained; browser or
+accessibility context is added only when available and reliably aligned.
+Otherwise the selection is marked **Image only** with an explanation.
 
-Animated previews play automatically; click one for the clearer video.
+Review what you share: source metadata can extend beyond the selected pixels.
+The receiving app or selected agent's provider policies apply.
+[Capture limits](docs/browser-context.md) · [Privacy](docs/privacy.md)
 
-### Compare three products
+Desktop's **Full access (YOLO)** setting is on by default. Turn it off to follow
+each agent's permission policy and display its approval requests.
+[Agent permissions](docs/install.md#2-choose-the-agent-you-already-have)
 
-Hold **Ctrl** while drawing three separate boxes, one per product, then attach
-them together. Each selection keeps its own product link.
+## Develop Focalet
 
-> Which of these three would let my M1 MacBook Air run two independent monitors?
-> Check the exact listings.
+Both apps live in this repository, with separate entrypoints, packages and CI
+lanes. They share native capture components. Desktop adds Flutter and the Rust
+agent broker; Capture owns its tray, hotkeys and clipboard flow.
 
-[![Three separate product selections become a sourced compatibility comparison](docs/demos/amazon-preview.webp)](docs/demos/amazon.mp4)
+[Contributing](CONTRIBUTING.md) · [Component map](docs/desktop-reference.md) ·
+[Product use cases](docs/products.md) · [Brand assets](design/focalet-logo/README.md)
 
-### Investigate a latency spike
-
-Select the interval that looks wrong. This chart exposes its query and data
-points, giving the agent context to investigate the source database.
-
-> Why did latency spike here? Check the underlying query and source data.
-
-[![Select a latency spike and investigate its cause](docs/demos/dashboard-preview.webp)](docs/demos/dashboard.mp4)
-
-### Sketch two quotes across a sheet
-
-Use the **Pen** to loop items across three tables, connect them to two quote
-boxes, and cross out an option. The agent turns the sketch into linked formulas.
-
-> Turn my sketch into the two quotes. Each loop feeds the box it points to;
-> skip the crossed-out option. Link to source cells and calculate subtotal,
-> tax and total. Leave source data alone.
-
-[![Freehand groups, connections and an exclusion become two linked quotes](docs/demos/sheets-preview.webp)](docs/demos/sheets.mp4)
-
-## Capture and share
-
-Press **Alt+A** (**⌥ A** on Mac), select a region, review the attachment and ask your question.
-On Windows and Mac, use the drawing toolbar to annotate or add more regions, then press
-**Attach**. Multiple attachments keep their **A**, **B**, **C** references.
-
-On Windows, Ubuntu Wayland and macOS, attachments can include source identity, text, links, element
-structure and coordinates through accessibility and an optional authorized
-browser connection. When reliable alignment is unavailable, Zommi attaches
-**Image only** with an explanation.
-
-Capture happens when you invoke it. Review what you share: source metadata can
-extend beyond the selected pixels. Your selected agent's provider and data
-policies apply. [Capture controls and limitations](docs/browser-context.md)
-
-First launch and App settings include **Full access (YOLO)**, enabled by default.
-Turn it off to follow each agent’s permission policy and show its approval
-requests. [Runtime permissions](docs/install.md#2-choose-the-agent-you-already-have)
-
-## Platforms
-
-| Platform | Capture support |
-| --- | --- |
-| **Windows 10/11 · x64** | Multiple regions, drawing, accessibility and optional browser context |
-| **macOS 12+ · Apple Silicon / Intel** | Multiple regions, drawing, native Accessibility and optional browser context |
-| **Ubuntu 24.04 LTS · x64 · GNOME Wayland** | Multiple regions, drawing, AT-SPI and optional browser context; requires the bundled desktop integration and screen-sharing authorization; [install and test](docs/ubuntu-testing.md) |
-
-Linux support targets Ubuntu 24.04's GNOME Wayland desktop. Enable **Zommi
-Desktop Integration** in App settings for Alt+A and aligned app context.
-
-[Releases](https://github.com/timctho/zommi/releases) ·
-[Installation and permissions](docs/install.md) ·
-[Contributing](CONTRIBUTING.md) · [Privacy](docs/privacy.md) ·
-[Security](SECURITY.md) · [Code signing policy](docs/code-signing.md)
-
-## License
-
-Zommi is licensed under [Apache 2.0](LICENSE).
-[Third-party components](THIRD_PARTY_NOTICES.md) retain their respective licenses.
+Focalet is licensed under [Apache 2.0](LICENSE).
+[Third-party notices](THIRD_PARTY_NOTICES.md) · [Security](SECURITY.md) ·
+[Code signing](docs/code-signing.md)

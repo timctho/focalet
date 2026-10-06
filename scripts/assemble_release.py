@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assemble one native Flutter + Rust Zommi release directory and archive."""
+"""Assemble one native Flutter + Rust Focalet release directory and archive."""
 
 from __future__ import annotations
 
@@ -24,8 +24,8 @@ LICENSE_FILES = {
     "LICENSE": "LICENSE",
     "THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
     "third_party/hotkey_manager_linux/LICENSE": "licenses/hotkey_manager_linux-LICENSE.txt",
-    "src/Zommi.Flutter/assets/runtime_icons/SOURCES.md": "licenses/runtime-icons-NOTICES.md",
-    "design/zommi-logo/Manrope-OFL.txt": "licenses/Manrope-OFL.txt",
+    "src/Focalet.Flutter/assets/runtime_icons/SOURCES.md": "licenses/runtime-icons-NOTICES.md",
+    "design/focalet-logo/Manrope-OFL.txt": "licenses/Manrope-OFL.txt",
 }
 
 
@@ -82,7 +82,7 @@ def _sign_macos(application: Path, identity: str | None) -> dict[str, str]:
     selected = identity or "-"
     identity_signed = selected != "-"
     browser_directory = application / "Contents/MacOS/browser-capture"
-    browser = browser_directory / "zommi-browser-capture"
+    browser = browser_directory / "focalet-browser-capture"
     if browser.is_file():
         # Sign the .NET libraries before their host. Only that host needs JIT;
         # do not grant executable-memory entitlements to the Flutter app.
@@ -144,10 +144,10 @@ def _write_manifest(
     signing: dict[str, str],
     browser_capture_host: str | None = None,
 ) -> None:
-    identity = read_version(REPOSITORY / "src/Zommi.Flutter/pubspec.yaml")
+    identity = read_version(REPOSITORY / "src/Focalet.Flutter/pubspec.yaml")
     manifest = {
         "schemaVersion": 1,
-        "product": "Zommi",
+        "product": "Focalet",
         "version": identity["version"],
         "releaseTag": identity["tag"],
         "license": "Apache-2.0",
@@ -176,7 +176,7 @@ def _write_manifest(
     if target_platform == "windows":
         icon = root / "data/flutter_assets/windows/runner/resources/app_icon.ico"
         if icon.is_file():
-            icon_name = f"zommi-icon-{_sha256(icon)[:16]}.ico"
+            icon_name = f"focalet-icon-{_sha256(icon)[:16]}.ico"
             shutil.copy2(icon, root / icon_name)
             manifest["icon"] = icon_name
     (root / "release-manifest.json").write_text(
@@ -286,7 +286,7 @@ def _replace_directory(pending: Path, destination: Path) -> None:
 def assemble(args: argparse.Namespace) -> tuple[Path, Path]:
     output_root = args.output_root.resolve()
     output_root.mkdir(parents=True, exist_ok=True)
-    package_name = f"zommi-{args.platform}-{args.architecture}"
+    package_name = f"focalet-{args.platform}-{args.architecture}"
     destination = output_root / package_name
     pending = Path(tempfile.mkdtemp(prefix=f".{package_name}-", dir=output_root))
     try:
@@ -298,17 +298,17 @@ def assemble(args: argparse.Namespace) -> tuple[Path, Path]:
         browser_relative: str | None = None
         if args.platform != "windows":
             browser_source = getattr(args, "browser_capture_host", None)
-            if browser_source is None or not (browser_source / "zommi-browser-capture").is_file():
+            if browser_source is None or not (browser_source / "focalet-browser-capture").is_file():
                 raise ValueError("Unix releases require --browser-capture-host with a published native helper.")
         if args.platform == "macos":
-            application = pending / "Zommi.app"
+            application = pending / "Focalet.app"
             shutil.copytree(args.flutter_output, application, symlinks=True)
-            core_relative = "Zommi.app/Contents/MacOS/zommi-core-host"
-            entrypoint = "Zommi.app/Contents/MacOS/Zommi"
+            core_relative = "Focalet.app/Contents/MacOS/focalet-core-host"
+            entrypoint = "Focalet.app/Contents/MacOS/Focalet"
             core_destination = pending / core_relative
             shutil.copy2(args.core_host, core_destination)
             core_destination.chmod(core_destination.stat().st_mode | 0o111)
-            browser_relative = "Zommi.app/Contents/MacOS/browser-capture/zommi-browser-capture"
+            browser_relative = "Focalet.app/Contents/MacOS/browser-capture/focalet-browser-capture"
             shutil.copytree(browser_source, (pending / browser_relative).parent)
             (pending / browser_relative).chmod(0o755)
             # Keep notices with the installed app and include them in its signature.
@@ -317,40 +317,40 @@ def assemble(args: argparse.Namespace) -> tuple[Path, Path]:
         else:
             _copy_contents(args.flutter_output, pending)
             if args.platform == "windows":
-                entrypoint = "Zommi.exe"
-                core_relative = "zommi-core-host.exe"
-                capture_relative = "native/Zommi.Capture.exe"
+                entrypoint = "Focalet.exe"
+                core_relative = "focalet-core-host.exe"
+                capture_relative = "native/Focalet.CaptureHost.exe"
                 if args.capture_host is None:
                     raise ValueError("Windows releases require --capture-host.")
                 shutil.copytree(args.capture_host, pending / "native", symlinks=True)
                 support = pending / "support"
                 support.mkdir()
-                for name in ("stop-zommi-relays.ps1", "stop-zommi-relay.sh"):
+                for name in ("stop-focalet-relays.ps1", "stop-focalet-relay.sh"):
                     shutil.copy2(Path(__file__).parent / name, support / name)
             else:
-                entrypoint = "zommi"
-                browser_relative = "browser-capture/zommi-browser-capture"
+                entrypoint = "focalet"
+                browser_relative = "browser-capture/focalet-browser-capture"
                 shutil.copytree(browser_source, (pending / browser_relative).parent)
                 (pending / browser_relative).chmod(0o755)
-                core_relative = "zommi-core-host"
-                capture_relative = "zommi-linux-capture"
+                core_relative = "focalet-core-host"
+                capture_relative = "focalet-linux-capture"
                 if args.linux_capture_host is None:
                     raise ValueError("Linux releases require --linux-capture-host.")
                 capture_destination = pending / capture_relative
                 shutil.copy2(args.linux_capture_host, capture_destination)
                 capture_destination.chmod(capture_destination.stat().st_mode | 0o111)
-                extension = pending / "gnome-extension/zommi@zommi"
-                shutil.copytree(REPOSITORY / "src/Zommi.Gnome", extension)
+                extension = pending / "gnome-extension/focalet@focalet"
+                shutil.copytree(REPOSITORY / "src/Focalet.Gnome", extension)
                 subprocess.run(["glib-compile-schemas", str(extension / "schemas")], check=True)
-                flutter_binary = pending / "zommi"
-                packaged_binary = pending / "zommi-bin"
+                flutter_binary = pending / "focalet"
+                packaged_binary = pending / "focalet-bin"
                 flutter_binary.replace(packaged_binary)
                 flutter_binary.write_text(
                     "#!/usr/bin/env sh\n"
                     "set -eu\n"
                     'app_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
                     'export LD_LIBRARY_PATH="$app_dir/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\n'
-                    'exec "$app_dir/zommi-bin" "$@"\n',
+                    'exec "$app_dir/focalet-bin" "$@"\n',
                     encoding="utf-8",
                 )
                 flutter_binary.chmod(0o755)

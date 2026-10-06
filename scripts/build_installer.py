@@ -36,8 +36,8 @@ def windows_installer(package: Path, output: Path, manifest: dict, compiler: str
     version = manifest["version"]
     if not re.fullmatch(r"\d+\.\d+\.\d+", version):
         raise ValueError("Installer version must have three numeric components.")
-    asset = output / "Zommi-Setup-x64.exe"
-    with tempfile.TemporaryDirectory(prefix="zommi-nsis-") as temporary:
+    asset = output / "Focalet-Setup-x64.exe"
+    with tempfile.TemporaryDirectory(prefix="focalet-nsis-") as temporary:
         temp = Path(temporary)
         install, uninstall, directories = [], [], set()
         for relative in inventory(package):
@@ -74,27 +74,27 @@ def windows_installer(package: Path, output: Path, manifest: dict, compiler: str
 def macos_installer(package: Path, output: Path, manifest: dict) -> Path:
     if platform.system() != "Darwin":
         raise ValueError("DMG creation and verification must run on macOS.")
-    asset = output / f"Zommi-macOS-{manifest['architecture']}.dmg"
-    application = package / "Zommi.app"
+    asset = output / f"Focalet-macOS-{manifest['architecture']}.dmg"
+    application = package / "Focalet.app"
     before = inventory(application)
-    with tempfile.TemporaryDirectory(prefix="zommi-dmg-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="focalet-dmg-") as temporary:
         temp = Path(temporary)
         layout, mounted = temp / "layout", temp / "mounted"
         layout.mkdir()
-        subprocess.run(["ditto", str(application), str(layout / "Zommi.app")], check=True)
+        subprocess.run(["ditto", str(application), str(layout / "Focalet.app")], check=True)
         (layout / "Applications").symlink_to("/Applications")
         shutil.copy2(Path(__file__).parents[1] / "docs/install.md", layout / "Install.txt")
-        subprocess.run(["hdiutil", "create", "-volname", "Zommi", "-srcfolder", str(layout),
+        subprocess.run(["hdiutil", "create", "-volname", "Focalet", "-srcfolder", str(layout),
                         "-format", "UDZO", "-ov", str(asset)], check=True)
         subprocess.run(["hdiutil", "verify", str(asset)], check=True)
         mounted.mkdir()
         subprocess.run(["hdiutil", "attach", "-readonly", "-nobrowse", "-mountpoint", str(mounted), str(asset)], check=True)
         try:
-            if inventory(mounted / "Zommi.app") != before:
+            if inventory(mounted / "Focalet.app") != before:
                 raise ValueError("Mounted DMG app differs from the verified package.")
             if os.readlink(mounted / "Applications") != "/Applications":
                 raise ValueError("The DMG Applications shortcut is invalid.")
-            subprocess.run(["codesign", "--verify", "--deep", "--strict", str(mounted / "Zommi.app")], check=True)
+            subprocess.run(["codesign", "--verify", "--deep", "--strict", str(mounted / "Focalet.app")], check=True)
         finally:
             subprocess.run(["hdiutil", "detach", str(mounted)], check=True)
     return asset
@@ -131,7 +131,7 @@ def main() -> int:
     if inventory(package) != before:
         raise ValueError("The source package changed while creating the installer.")
     result = {
-        "product": "Zommi", "version": manifest["version"], "gitCommit": args.expected_commit,
+        "product": "Focalet", "version": manifest["version"], "gitCommit": args.expected_commit,
         "platform": manifest["platform"], "architecture": manifest["architecture"],
         "file": asset.name, "sha256": _sha256(asset), "packageFiles": before,
         "applicationSigning": manifest["signing"],

@@ -4,7 +4,7 @@ Import-Module (Join-Path $PSScriptRoot 'windows-deployment-helpers.psm1') -Force
 
 $acceptanceSource = Get-Content -Raw (Join-Path $PSScriptRoot 'accept-windows-capture.ps1')
 $acceptanceSyntax = [Management.Automation.Language.Parser]::ParseInput($acceptanceSource, [ref]$null, [ref]$null)
-$suspendFunction = $acceptanceSyntax.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Suspend-ConflictingZommiApplications' }, $true).Extent.Text
+$suspendFunction = $acceptanceSyntax.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Suspend-ConflictingFocaletApplications' }, $true).Extent.Text
 foreach ($stillRunning in @($false, $true)) {
     & {
         param([bool] $StillRunning, [string] $Definition)
@@ -14,7 +14,7 @@ foreach ($stillRunning in @($false, $true)) {
             param([string] $ClassName)
             $script:cleanupQueries++
             if ($script:cleanupQueries -le 2) {
-                [pscustomobject]@{ Name = 'Zommi.exe'; ProcessId = 100001; ExecutablePath = 'C:\zommi-cleanup-fixture\Zommi.exe' }
+                [pscustomobject]@{ Name = 'Focalet.exe'; ProcessId = 100001; ExecutablePath = 'C:\focalet-cleanup-fixture\Focalet.exe' }
             }
         }
         function Stop-Process {
@@ -26,7 +26,7 @@ foreach ($stillRunning in @($false, $true)) {
             if ($StillRunning) { [pscustomobject]@{ Id = $Id } }
         }
         $failure = $null
-        try { $paths = @(Suspend-ConflictingZommiApplications -EntryPoint 'C:\zommi-probe\Zommi.exe') }
+        try { $paths = @(Suspend-ConflictingFocaletApplications -EntryPoint 'C:\focalet-probe\Focalet.exe') }
         catch { $failure = $_.Exception.Message }
         if ($StillRunning -and $failure -ne 'Simulated stop failure') { throw 'A live process failure was suppressed.' }
         if (-not $StillRunning -and ($failure -or $paths.Count -ne 1)) { throw 'An already exited process blocked acceptance cleanup.' }
@@ -35,7 +35,7 @@ foreach ($stillRunning in @($false, $true)) {
 
 $processes = @(
     [pscustomobject]@{ ProcessId = 50; ParentProcessId = 1; Name = 'runner' }
-    [pscustomobject]@{ ProcessId = 100; ParentProcessId = 50; Name = 'Zommi' }
+    [pscustomobject]@{ ProcessId = 100; ParentProcessId = 50; Name = 'Focalet' }
     [pscustomobject]@{ ProcessId = 101; ParentProcessId = 100; Name = 'core' }
     [pscustomobject]@{ ProcessId = 102; ParentProcessId = 100; Name = 'capture' }
     [pscustomobject]@{ ProcessId = 103; ParentProcessId = 101; Name = 'wsl' }
@@ -52,11 +52,11 @@ if (($tree | Sort-Object) -join ',' -ne '100,101,102,103,104') {
 }
 
 $runtimeRoots = @(
-    Get-ZommiRuntimeRootProcessIds -Processes @(
+    Get-FocaletRuntimeRootProcessIds -Processes @(
         [pscustomobject]@{
             ProcessId = 301
             Name = 'wsl.exe'
-            CommandLine = 'wsl.exe -e env ZOMMI_RUNTIME_CHILD=1 codex app-server'
+            CommandLine = 'wsl.exe -e env FOCALET_RUNTIME_CHILD=1 codex app-server'
         }
         [pscustomobject]@{
             ProcessId = 302
@@ -71,7 +71,7 @@ $runtimeRoots = @(
         [pscustomobject]@{
             ProcessId = 304
             Name = 'pwsh.exe'
-            CommandLine = 'ZOMMI_RUNTIME_CHILD=1'
+            CommandLine = 'FOCALET_RUNTIME_CHILD=1'
         }
     )
 )
@@ -85,7 +85,7 @@ foreach ($edge in @(@(104, 103), @(103, 101), @(101, 100), @(102, 100))) {
     }
 }
 
-$testRoot = Join-Path $env:TEMP "zommi-deployment-test-$([Guid]::NewGuid().ToString('N'))"
+$testRoot = Join-Path $env:TEMP "focalet-deployment-test-$([Guid]::NewGuid().ToString('N'))"
 $source = Join-Path $testRoot 'source'
 $destination = Join-Path $testRoot 'destination'
 $heldFile = Join-Path $source 'held.txt'

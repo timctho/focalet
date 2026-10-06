@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible problem in Zommi.
+description: Report a reproducible problem in Focalet.
 body:
   - type: markdown
     attributes:
@@ -7,7 +7,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: Zommi version
+      label: Focalet version
       placeholder: 0.2.1
     validations:
       required: true

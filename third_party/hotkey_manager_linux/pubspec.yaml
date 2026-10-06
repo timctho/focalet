@@ -1,6 +1,6 @@
 name: hotkey_manager_linux
-description: Zommi's X11 implementation of the hotkey_manager Linux plugin.
-version: 0.2.0+zommi.1
+description: Focalet's X11 implementation of the hotkey_manager Linux plugin.
+version: 0.2.0+focalet.1
 publish_to: none
 
 environment:

@@ -14,14 +14,14 @@ from ubuntu_installer import debian_version, payload_identity, ubuntu_installer
 @unittest.skipUnless(shutil.which("dpkg-deb"), "Debian packaging tools required")
 class UbuntuInstallerTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="zommi-deb-test-")
+        self.temp = tempfile.TemporaryDirectory(prefix="focalet-deb-test-")
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.package, self.output = self.root / "package", self.root / "output"
         self.package.mkdir()
         self.package.chmod(0o700)
         self.output.mkdir()
-        for name in ("zommi", "zommi-bin", "zommi-core-host", "zommi-linux-capture"):
+        for name in ("focalet", "focalet-bin", "focalet-core-host", "focalet-linux-capture"):
             path = self.package / name
             path.write_text("#!/bin/sh\nexit 0\n")
             path.chmod(0o755)
@@ -32,7 +32,7 @@ class UbuntuInstallerTests(unittest.TestCase):
         (self.package / "lib").mkdir()
         (self.package / "lib/libsqlite3.so.0").write_bytes(b"library fixture")
         (self.package / "lib/libsqlite3.so").symlink_to("libsqlite3.so.0")
-        extension = self.package / 'gnome-extension/zommi@zommi/schemas'
+        extension = self.package / 'gnome-extension/focalet@focalet/schemas'
         extension.mkdir(parents=True)
         (extension / 'gschemas.compiled').write_bytes(b'schema fixture')
         self.manifest = {"platform": "linux", "architecture": "x64", "version": "0.1.0", "gitCommit": "a" * 40}
@@ -45,16 +45,16 @@ class UbuntuInstallerTests(unittest.TestCase):
         asset = self.build()
         extracted = self.root / "extracted"
         subprocess.run(["dpkg-deb", "-x", str(asset), str(extracted)], check=True)
-        self.assertEqual(payload_identity(extracted / "opt/zommi"), before)
-        self.assertEqual((extracted / "opt/zommi").stat().st_mode & 0o777, 0o755)
+        self.assertEqual(payload_identity(extracted / "opt/focalet"), before)
+        self.assertEqual((extracted / "opt/focalet").stat().st_mode & 0o777, 0o755)
         self.assertEqual(self.package.stat().st_mode & 0o777, 0o700)
         self.assertEqual(payload_identity(self.package), before)
-        self.assertFalse((extracted / "usr/bin/zommi").is_symlink())
-        self.assertIn('exec /opt/zommi/zommi "$@"', (extracted / "usr/bin/zommi").read_text())
-        self.assertTrue(os.access(extracted / "usr/bin/zommi", os.X_OK))
-        entry = (extracted / "usr/share/applications/com.zommi.desktop.desktop").read_text()
-        self.assertIn("Exec=/usr/bin/zommi\n", entry)
-        self.assertIn("Icon=zommi\n", entry)
+        self.assertFalse((extracted / "usr/bin/focalet").is_symlink())
+        self.assertIn('exec /opt/focalet/focalet "$@"', (extracted / "usr/bin/focalet").read_text())
+        self.assertTrue(os.access(extracted / "usr/bin/focalet", os.X_OK))
+        entry = (extracted / "usr/share/applications/com.focalet.desktop.desktop").read_text()
+        self.assertIn("Exec=/usr/bin/focalet\n", entry)
+        self.assertIn("Icon=focalet\n", entry)
         fields = subprocess.check_output(["dpkg-deb", "-f", str(asset)], text=True)
         for value in ("Architecture: amd64", "Version: 0.1.0~preview.8", "libc6 (>= 2.39)",
                       "libstdc++6 (>= 13.2)", "libgtk-3-0t64", "Ubuntu 24.04 LTS x64"):
@@ -75,16 +75,16 @@ class UbuntuInstallerTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
         dpkg("--install", self.build())
-        settings = install / "home/user/.config/zommi/settings.json"
+        settings = install / "home/user/.config/focalet/settings.json"
         settings.parent.mkdir(parents=True)
         settings.write_text('{"themeColor":"ocean"}')
-        unrelated = install / "opt/zommi/keep-me.txt"
+        unrelated = install / "opt/focalet/keep-me.txt"
         unrelated.write_text("user file")
-        (self.package / "zommi-bin").write_text("#!/bin/sh\n# upgraded\nexit 0\n")
+        (self.package / "focalet-bin").write_text("#!/bin/sh\n# upgraded\nexit 0\n")
         dpkg("--install", self.build("v0.1.0-preview.9"))
-        self.assertIn("upgraded", (install / "opt/zommi/zommi-bin").read_text())
-        dpkg("--purge", "zommi")
-        for name in ("opt/zommi/zommi", "usr/bin/zommi", "usr/share/applications/com.zommi.desktop.desktop"):
+        self.assertIn("upgraded", (install / "opt/focalet/focalet-bin").read_text())
+        dpkg("--purge", "focalet")
+        for name in ("opt/focalet/focalet", "usr/bin/focalet", "usr/share/applications/com.focalet.desktop.desktop"):
             self.assertFalse((install / name).exists())
         self.assertEqual(unrelated.read_text(), "user file")
         self.assertEqual(settings.read_text(), '{"themeColor":"ocean"}')

@@ -12,8 +12,8 @@ import time
 import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
-HOST = ROOT / "target/debug" / ("zommi-core-host.exe" if os.name == "nt" else "zommi-core-host")
-FIXTURES = ROOT / "crates/zommi-core-host/tests"
+HOST = ROOT / "target/debug" / ("focalet-core-host.exe" if os.name == "nt" else "focalet-core-host")
+FIXTURES = ROOT / "crates/focalet-core-host/tests"
 
 
 class Core:
@@ -79,14 +79,14 @@ class Core:
 
 class RuntimeCommandsTests(unittest.TestCase):
     def test_added_runtime_is_selected_without_replacing_the_saved_chat(self):
-        with tempfile.TemporaryDirectory(prefix="zommi-runtime-add-") as directory:
+        with tempfile.TemporaryDirectory(prefix="focalet-runtime-add-") as directory:
             path = Path(directory)
-            env = {key: value for key, value in os.environ.items() if not key.startswith("ZOMMI_")}
+            env = {key: value for key, value in os.environ.items() if not key.startswith("FOCALET_")}
             env.update(
-                ZOMMI_RUNTIME_DISCOVERY_MODE="configured-only",
-                ZOMMI_CORE_STATE_PATH=str(path / "binding.json"),
-                ZOMMI_RUNTIME_OVERRIDES_PATH=str(path / "overrides.json"),
-                ZOMMI_RUNTIME_DISCOVERY_CACHE_PATH=str(path / "targets.json"),
+                FOCALET_RUNTIME_DISCOVERY_MODE="configured-only",
+                FOCALET_CORE_STATE_PATH=str(path / "binding.json"),
+                FOCALET_RUNTIME_OVERRIDES_PATH=str(path / "overrides.json"),
+                FOCALET_RUNTIME_DISCOVERY_CACHE_PATH=str(path / "targets.json"),
             )
             core = Core(env)
             try:
@@ -117,33 +117,33 @@ class RuntimeCommandsTests(unittest.TestCase):
                 core.close()
 
     def exercise(self, adapter, fixture, command, wire_method):
-        with tempfile.TemporaryDirectory(prefix="zommi-runtime-commands-") as directory:
+        with tempfile.TemporaryDirectory(prefix="focalet-runtime-commands-") as directory:
             path = Path(directory)
             log = path / "requests.jsonl"
             env = dict(os.environ,
-                       ZOMMI_CORE_STATE_PATH=str(path / "binding.json"),
-                       ZOMMI_RUNTIME_OVERRIDES_PATH=str(path / "overrides.json"),
-                       ZOMMI_RUNTIME_DISCOVERY_CACHE_PATH=str(path / "targets.json"),
-                       ZOMMI_OPENCLAW_DEVICE_IDENTITY_PATH=str(path / "device.json"),
-                       ZOMMI_FAKE_REQUEST_LOG=str(log))
+                       FOCALET_CORE_STATE_PATH=str(path / "binding.json"),
+                       FOCALET_RUNTIME_OVERRIDES_PATH=str(path / "overrides.json"),
+                       FOCALET_RUNTIME_DISCOVERY_CACHE_PATH=str(path / "targets.json"),
+                       FOCALET_OPENCLAW_DEVICE_IDENTITY_PATH=str(path / "device.json"),
+                       FOCALET_FAKE_REQUEST_LOG=str(log))
             gateway = None
             if adapter == "openclaw-gateway":
                 gateway = subprocess.Popen([sys.executable, str(FIXTURES / fixture), "--mode", "openclaw"],
                                            env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
                 endpoint = gateway.stdout.readline().strip().split(" ", 1)[1]
-                env.update(ZOMMI_OPENCLAW_GATEWAY_URL=endpoint, ZOMMI_OPENCLAW_GATEWAY_AGENT_ID="main",
+                env.update(FOCALET_OPENCLAW_GATEWAY_URL=endpoint, FOCALET_OPENCLAW_GATEWAY_AGENT_ID="main",
                            OPENCLAW_GATEWAY_TOKEN="fixture-runtime-owned-token")
             else:
                 runtime = {"codex-app-server":"CODEX", "pi-rpc":"PI", "opencode-acp":"OPENCODE", "gemini-acp":"GEMINI"}.get(adapter, "HERMES")
                 if adapter == "gemini-acp":
-                    env["ZOMMI_FAKE_ACP_GEMINI"] = "1"
+                    env["FOCALET_FAKE_ACP_GEMINI"] = "1"
                 args = [str(FIXTURES / fixture)]
                 suffix = "ARGS_JSON"
                 if adapter == "hermes-gateway":
                     args += ["--mode", "hermes"]
                     suffix = "GATEWAY_ARGS_JSON"
-                env[f"ZOMMI_{runtime}_COMMAND"] = sys.executable
-                env[f"ZOMMI_{runtime}_{suffix}"] = json.dumps(args)
+                env[f"FOCALET_{runtime}_COMMAND"] = sys.executable
+                env[f"FOCALET_{runtime}_{suffix}"] = json.dumps(args)
             core = Core(env)
             try:
                 core.request("core.initialize")

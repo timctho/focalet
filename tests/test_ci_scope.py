@@ -16,11 +16,28 @@ class ScopeTests(unittest.TestCase):
         self.assertFalse(ci_scope.requires_native(["README.md", "docs/install.md", "docs/assets/social-card.png"]))
 
     def test_unknown_empty_and_executable_changes_require_native_checks(self):
-        for paths in [[], ["README.md", "src/Zommi.Flutter/pubspec.yaml"], ["docs/hook.py"],
+        for paths in [[], ["README.md", "src/Focalet.Flutter/pubspec.yaml"], ["docs/hook.py"],
                       ["docs/demo.json"], [".github/workflows/checks.yml"], ["scripts/ci_scope.py"],
                       ["docs/../src/main.rs"], ["Cargo.lock"], ["tests/test_ci_scope.py"]]:
             with self.subTest(paths=paths):
                 self.assertTrue(ci_scope.requires_native(paths))
+
+    def test_product_local_changes_select_only_their_native_lane(self):
+        for paths, expected in [
+            (["README.md", "docs/capture-tool.md"], (False, False)),
+            (["src/Focalet.CaptureTool/CapturePasteTool.cs", "docs/capture-tool.md"], (False, True)),
+            (["scripts/package-capture-tool.ps1"], (False, True)),
+            (["src/Focalet.Flutter/lib/main.dart"], (True, False)),
+            (["crates/focalet-core/src/lib.rs"], (True, False)),
+            (["src/Focalet.Capture.Core/CaptureModels.cs"], (True, True)),
+            (["src/Focalet.Capture.Windows/ContentSelectionForm.cs"], (True, True)),
+            (["src/Focalet.CaptureTool/A.cs", "src/Focalet.Flutter/lib/main.dart"], (True, True)),
+            (["src/Focalet.CaptureTool/../../something"], (True, True)),
+            ([".github/workflows/checks.yml"], (True, True)),
+            (None, (True, True)), ([], (True, True)), ([""], (True, True)),
+        ]:
+            with self.subTest(paths=paths):
+                self.assertEqual(ci_scope.required_products(paths), expected)
 
     def test_move_from_source_to_docs_still_requires_native_checks(self):
         with tempfile.TemporaryDirectory() as directory:

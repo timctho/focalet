@@ -10,18 +10,18 @@ from test_runtime_commands import Core, FIXTURES
 
 class RuntimePermissionTests(unittest.TestCase):
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory(prefix='zommi-permissions-')
+        temporary = tempfile.TemporaryDirectory(prefix='focalet-permissions-')
         self.addCleanup(temporary.cleanup)
         self.path = Path(temporary.name)
-        env = {k: v for k, v in os.environ.items() if not k.startswith('ZOMMI_')}
-        env.update(ZOMMI_RUNTIME_DISCOVERY_MODE='configured-only',
-                   ZOMMI_CODEX_COMMAND=sys.executable,
-                   ZOMMI_CODEX_ARGS_JSON=json.dumps([str(FIXTURES / 'fake_codex_app_server.py')]),
-                   ZOMMI_FAKE_UNIQUE_THREADS='1',
-                   ZOMMI_FAKE_REQUEST_LOG=str(self.path / 'wire.jsonl'),
-                   ZOMMI_CORE_STATE_PATH=str(self.path / 'binding.json'),
-                   ZOMMI_RUNTIME_OVERRIDES_PATH=str(self.path / 'overrides.json'),
-                   ZOMMI_RUNTIME_DISCOVERY_CACHE_PATH=str(self.path / 'targets.json'))
+        env = {k: v for k, v in os.environ.items() if not k.startswith('FOCALET_')}
+        env.update(FOCALET_RUNTIME_DISCOVERY_MODE='configured-only',
+                   FOCALET_CODEX_COMMAND=sys.executable,
+                   FOCALET_CODEX_ARGS_JSON=json.dumps([str(FIXTURES / 'fake_codex_app_server.py')]),
+                   FOCALET_FAKE_UNIQUE_THREADS='1',
+                   FOCALET_FAKE_REQUEST_LOG=str(self.path / 'wire.jsonl'),
+                   FOCALET_CORE_STATE_PATH=str(self.path / 'binding.json'),
+                   FOCALET_RUNTIME_OVERRIDES_PATH=str(self.path / 'overrides.json'),
+                   FOCALET_RUNTIME_DISCOVERY_CACHE_PATH=str(self.path / 'targets.json'))
         self.env = env
         self.core = Core(env)
         self.addCleanup(self.core.close)
@@ -192,9 +192,9 @@ class RuntimePermissionTests(unittest.TestCase):
 
     def test_acp_full_access_grants_the_runtime_offered_once_option(self):
         self.core.close()
-        env = {k: v for k, v in self.env.items() if not k.startswith('ZOMMI_CODEX_')}
-        env.update(ZOMMI_HERMES_COMMAND=sys.executable,
-                   ZOMMI_HERMES_ARGS_JSON=json.dumps([str(FIXTURES / 'fake_acp_runtime.py')]))
+        env = {k: v for k, v in self.env.items() if not k.startswith('FOCALET_CODEX_')}
+        env.update(FOCALET_HERMES_COMMAND=sys.executable,
+                   FOCALET_HERMES_ARGS_JSON=json.dumps([str(FIXTURES / 'fake_acp_runtime.py')]))
         self.core = Core(env)
         self.addCleanup(self.core.close)
         self.core.request('core.initialize')

@@ -1,0 +1,8 @@
+{
+  "name": "focalet-clipboard-electron-fixture",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "electron": "43.7.5"
+  }
+}

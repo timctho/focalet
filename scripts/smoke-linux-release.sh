@@ -2,9 +2,9 @@
 set -euo pipefail
 
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-package_directory=${1:-"$repository_root/artifacts/zommi-linux-x64"}
-application="$package_directory/zommi"
-core_host="$package_directory/zommi-core-host"
+package_directory=${1:-"$repository_root/artifacts/focalet-linux-x64"}
+application="$package_directory/focalet"
+core_host="$package_directory/focalet-core-host"
 if [[ ! -x "$application" || ! -x "$core_host" ]]; then
   echo "Linux startup smoke requires executable Flutter and Rust hosts in $package_directory." >&2
   exit 2
@@ -14,8 +14,8 @@ if [[ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
   exit 2
 fi
 
-temporary_directory=$(mktemp -d -p "${RUNNER_TEMP:-/tmp}" zommi-linux-smoke.XXXXXX)
-runtime_log="$temporary_directory/zommi.log"
+temporary_directory=$(mktemp -d -p "${RUNNER_TEMP:-/tmp}" focalet-linux-smoke.XXXXXX)
+runtime_log="$temporary_directory/focalet.log"
 application_pid=
 core_pid=
 
@@ -85,8 +85,8 @@ if grep -Eiq 'Unhandled Exception|MissingPluginException|ERROR:flutter/runtime' 
   exit 1
 fi
 
-if [[ "${ZOMMI_VERIFY_SQLITE_CACHE:-0}" == 1 ]]; then
-  python3 - "$temporary_directory/state/zommi/session-catalog.sqlite" <<'PY'
+if [[ "${FOCALET_VERIFY_SQLITE_CACHE:-0}" == 1 ]]; then
+  python3 - "$temporary_directory/state/focalet/session-catalog.sqlite" <<'PY'
 import pathlib, sqlite3, sys
 path = pathlib.Path(sys.argv[1])
 assert path.is_file(), "Packaged Flutter did not initialize its SQLite cache"

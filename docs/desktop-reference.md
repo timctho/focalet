@@ -1,35 +1,51 @@
-# Desktop reference
+# Components and local state
 
-Start with [installation](install.md) to use Zommi or
+Start with [Capture or Desktop](products.md) to choose an app, or
 [contributing](../CONTRIBUTING.md) to build it.
 
 ## Components
 
-| Location | Responsibility |
-| --- | --- |
-| `src/Zommi.Flutter` | Desktop UI, sessions, composer, attachment previews, hotkeys and tray |
-| `crates/zommi-core` | Agent discovery, runtime adapters and context handoff |
-| `crates/zommi-core-host` | JSONL broker between Flutter and the runtime adapters |
-| `src/Zommi.Windows` and `src/Zommi.Capture.Core` | Windows selection, annotations, accessibility and browser capture |
-| `crates/zommi-linux-capture` | GNOME Wayland ScreenCast and AT-SPI capture |
-| `src/Zommi.Gnome` | GNOME window geometry, identity and Alt+A integration |
-| `src/Zommi.Flutter/macos/Runner` | macOS selection and platform integration |
+| Product / layer | Location | Responsibility |
+| --- | --- | --- |
+| Focalet Capture | `src/Focalet.CaptureTool` | Windows tray app, capture/paste hotkeys, clipboard image/context sequence; builds `Focalet.Capture.exe` |
+| Focalet Desktop | `src/Focalet.Flutter` | Desktop UI, sessions, composer, attachment previews, hotkeys and tray |
+| Desktop runtime | `crates/focalet-core` | Agent discovery, runtime adapters and context handoff |
+| Desktop runtime | `crates/focalet-core-host` | JSONL broker between Flutter and the runtime adapters |
+| Desktop Windows adapter | `src/Focalet.Windows` | JSONL capture host and acceptance probes; builds `Focalet.CaptureHost.exe` |
+| Shared capture | `src/Focalet.Capture.Windows` | Windows selection, annotations, screen pixels, accessibility, browser capture and invocation-time window identity |
+| Shared capture | `src/Focalet.Capture.Core` | Context models, extraction, alignment and clipboard representations without an app dependency |
+| Desktop Linux capture | `crates/focalet-linux-capture`, `src/Focalet.Gnome` | GNOME Wayland ScreenCast, AT-SPI, geometry, identity and shortcut integration |
+| Desktop macOS capture | `src/Focalet.Flutter/macos/Runner` | macOS selection and platform integration |
+
+Capture and the Windows Desktop adapter both reference the shared capture
+library. Neither references the other's executable. Clipboard injection and
+capture-tool hotkeys belong only to Capture; JSONL request handling belongs only
+to the Desktop adapter. Platform capture implementations on Linux and macOS
+remain part of Desktop; a standalone Capture product is currently Windows-only.
+
+`focalet-core` is an agent runtime library, not the shared capture library. Capture
+can build and run without Rust, Flutter, a broker or an installed agent. Build
+Capture with `scripts/package-capture-tool.ps1`; build Desktop with
+`scripts/package-windows.ps1` or `scripts/package-unix.sh`. The two packages do
+not bundle each other's app.
+
+## Desktop agent boundary
 
 The selected agent owns authentication, tools, permissions and canonical chat
-history. Zommi binds each chat to an exact runtime target and session; runtime
+history. Focalet binds each chat to an exact runtime target and session; runtime
 targets distinguish native hosts, WSL distributions and connection modes.
 Adapters normalize streaming replies, approvals, questions and artifacts.
 See [runtime commands](runtime-commands.md) and [capture context](browser-context.md).
 
 ## Local state and recovery
 
-Zommi stores preferences and a rebuildable session metadata cache in:
+Focalet stores preferences and a rebuildable session metadata cache in:
 
 | Platform | State directory |
 | --- | --- |
-| Windows | `%APPDATA%\Zommi` |
-| Linux | `$XDG_STATE_HOME/zommi` or `~/.local/state/zommi` |
-| macOS | `~/Library/Application Support/Zommi` |
+| Windows | `%APPDATA%\Focalet` |
+| Linux | `$XDG_STATE_HOME/focalet` or `~/.local/state/focalet` |
+| macOS | `~/Library/Application Support/Focalet` |
 
 `session-catalog.sqlite` holds session IDs, titles, workspaces, runtime labels and
 activity timestamps. Transcripts and credentials stay with the agent. Inactive
@@ -43,13 +59,13 @@ requests. A Codex thread held by another writer opens read-only and retries
 ownership while preserving its draft. For missing Codex history, check the
 [runtime home and history lookup](codex-history-repair.md).
 
-## Native packages
+## Desktop native packages
 
 | Platform | Archive | Entrypoint |
 | --- | --- | --- |
-| Windows x64 | `zommi-windows-x64.zip` | `Zommi.exe` |
-| Ubuntu 24.04 LTS x64 | `Zommi-Ubuntu-amd64.deb` / `zommi-linux-x64.tar.gz` | `zommi` |
-| macOS x64/arm64 | `zommi-macos-<arch>.zip` | `Zommi.app` |
+| Windows x64 | `focalet-windows-x64.zip` | `Focalet.exe` |
+| Ubuntu 24.04 LTS x64 | `Focalet-Ubuntu-amd64.deb` / `focalet-linux-x64.tar.gz` | `focalet` |
+| macOS x64/arm64 | `focalet-macos-<arch>.zip` | `Focalet.app` |
 
 Packages include the Rust host, platform capture helper, licenses,
 `release-manifest.json` and `SHA256SUMS.txt`. macOS embeds the host in
@@ -59,3 +75,14 @@ acceptance is separate from headless contract tests.
 
 See [release preparation](public-releases.md), [Windows acceptance](windows-acceptance.md)
 and [macOS testing](macos-testing.md) for packaging and platform checks.
+
+## Capture package and state
+
+Capture builds `artifacts/focalet-capture-win-x64.zip` independently. It includes
+`Focalet.Capture.exe`, its .NET runtime, licenses, usage notes,
+`capture-tool-manifest.json` and `SHA256SUMS.txt`. It contains no Flutter UI or
+Rust agent broker. `scripts/verify_capture_package.py` checks the exact source
+revision, file inventory and hashes; Windows CI also launches the packaged app.
+
+The tray app keeps its current batch and paste-mode choices in memory until it
+exits. It has no session catalog or agent credentials. See [Capture use](capture-tool.md).

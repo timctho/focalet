@@ -8,31 +8,31 @@ the session with:
 echo "$XDG_SESSION_TYPE"
 ```
 
-Use `wayland` for desktop acceptance. Zommi targets GNOME 46 on Ubuntu 24.04;
+Use `wayland` for desktop acceptance. Focalet targets GNOME 46 on Ubuntu 24.04;
 X11 sessions and other desktop environments are outside the supported scope.
 A headless server or WSL terminal can run the isolated GNOME checks below, but
 real monitor scaling, tray behavior and permissions should also be tested on a
 desktop installation.
 
-Zommi uses ScreenCast/PipeWire for monitor pixels, the bundled GNOME extension
+Focalet uses ScreenCast/PipeWire for monitor pixels, the bundled GNOME extension
 for window identity, geometry and Alt+A, and AT-SPI for accessibility. Authorized
 browser connections add DOM details. The extension supports GNOME 46; new GNOME
 major versions need explicit compatibility testing.
 
 ## Install a release
 
-When an Ubuntu asset is listed in [Releases](https://github.com/timctho/zommi/releases),
-download `Zommi-Ubuntu-amd64.deb` and check it against `SHA256SUMS.txt`, then run:
+When an Ubuntu asset is listed in [Releases](https://github.com/timctho/focalet/releases),
+download `Focalet-Ubuntu-amd64.deb` and check it against `SHA256SUMS.txt`, then run:
 
 ```sh
-sudo apt install ./Zommi-Ubuntu-amd64.deb
-zommi
+sudo apt install ./Focalet-Ubuntu-amd64.deb
+focalet
 ```
 
-`sudo dpkg -i Zommi-Ubuntu-amd64.deb` also works, but does not fetch dependencies;
+`sudo dpkg -i Focalet-Ubuntu-amd64.deb` also works, but does not fetch dependencies;
 follow it with `sudo apt-get -f install` if needed. The package installs under
-`/opt/zommi` with an app-menu entry. You do not need Flutter, Rust or .NET to run
-it. Enable **Zommi Desktop Integration** in first-run setup or App settings.
+`/opt/focalet` with an app-menu entry. You do not need Flutter, Rust or .NET to run
+it. Enable **Focalet Desktop Integration** in first-run setup or App settings.
 If GNOME has not loaded a newly installed extension, sign out and sign in, then
 retry Enable. The app remains available while desktop integration is disabled.
 The [release workflow](public-releases.md#run-a-release-from-github-actions)
@@ -41,7 +41,7 @@ require a source build.
 
 ## If desktop integration fails
 
-Open **App settings → Ubuntu desktop integration** and recheck. Zommi queries
+Open **App settings → Ubuntu desktop integration** and recheck. Focalet queries
 the running GNOME compositor; an inherited `XDG_SESSION_TYPE` value alone does
 not decide whether capture is supported. **Copy desktop diagnostics** includes
 the detected session, GNOME version, loaded extension path and failure reason.
@@ -52,7 +52,7 @@ the detected session, GNOME version, loaded extension path and failure reason.
 - **WSLg without GNOME:** WSL app windows do not provide a GNOME desktop.
   Use the Windows build to capture Windows, or use an Ubuntu 24.04 desktop/VM.
 - **Extensions disabled globally:** turn on extensions in Ubuntu's **Extensions**
-  app. If only Zommi is disabled, choose **Enable desktop integration** in Zommi.
+  app. If only Focalet is disabled, choose **Enable desktop integration** in Focalet.
 - **Disconnected integration:** choose **Repair desktop integration**. This
   disables and re-enables the integration without losing your chat.
 - **Extension load error:** inspect the reported error and installation path.
@@ -64,11 +64,11 @@ the detected session, GNOME version, loaded extension path and failure reason.
   the copied diagnostics: a copy under your user data directory can override the
   system extension. Back up that older copy outside `gnome-shell/extensions`,
   then sign out once and recheck.
-- **Session bus unavailable:** launch Zommi from Ubuntu's app menu as your normal
+- **Session bus unavailable:** launch Focalet from Ubuntu's app menu as your normal
   user, without `sudo` or SSH.
 
 If it still fails, include the copied diagnostics in your report. They are not
-uploaded automatically. Repeatedly restarting Zommi or signing out without
+uploaded automatically. Repeatedly restarting Focalet or signing out without
 addressing the reported condition will not repair it.
 
 ## Build and launch from source
@@ -89,22 +89,22 @@ From the repository root:
 
 ```sh
 bash scripts/package-unix.sh linux
-bash scripts/install-gnome-extension.sh artifacts/zommi-linux-x64
-./artifacts/zommi-linux-x64/zommi
+bash scripts/install-gnome-extension.sh artifacts/focalet-linux-x64
+./artifacts/focalet-linux-x64/focalet
 ```
 
-The output includes `artifacts/zommi-linux-x64.tar.gz` and its SHA-256 sidecar.
+The output includes `artifacts/focalet-linux-x64.tar.gz` and its SHA-256 sidecar.
 Keep the extracted directory together: the app needs its adjacent libraries,
 Rust broker and capture helper. To create the Debian installer locally, install
 `dpkg-dev` and run:
 
 ```sh
-python3 scripts/build_installer.py artifacts/zommi-linux-x64 \
+python3 scripts/build_installer.py artifacts/focalet-linux-x64 \
   --expected-commit "$(git rev-parse HEAD)" \
   --output artifacts/installers
 ```
 
-The package retains the release version from `src/Zommi.Flutter/pubspec.yaml`;
+The package retains the release version from `src/Focalet.Flutter/pubspec.yaml`;
 no manual tag is needed. Windows release assets cannot run as the Ubuntu app.
 
 ## Package compatibility
@@ -130,28 +130,28 @@ ABI limits and Debian dependencies together when changing the baseline.
 ## Try the desktop flow
 
 Install and sign in to a supported agent CLI in Ubuntu, and verify that it works
-from the same terminal before launching Zommi. For a first-run test without
-changing existing Zommi settings, launch with separate data directories:
+from the same terminal before launching Focalet. For a first-run test without
+changing existing Focalet settings, launch with separate data directories:
 
 ```sh
-zommi_test_profile=$(mktemp -d /tmp/zommi-ubuntu-test.XXXXXX)
-XDG_CONFIG_HOME="$zommi_test_profile/config" \
-XDG_STATE_HOME="$zommi_test_profile/state" \
-XDG_CACHE_HOME="$zommi_test_profile/cache" \
-  ./artifacts/zommi-linux-x64/zommi
+focalet_test_profile=$(mktemp -d /tmp/focalet-ubuntu-test.XXXXXX)
+XDG_CONFIG_HOME="$focalet_test_profile/config" \
+XDG_STATE_HOME="$focalet_test_profile/state" \
+XDG_CACHE_HOME="$focalet_test_profile/cache" \
+  ./artifacts/focalet-linux-x64/focalet
 ```
 
-For a `.deb` installation, replace the last line with `zommi`.
+For a `.deb` installation, replace the last line with `focalet`.
 
-This isolates Zommi preferences, detection and local history metadata. Agent CLIs
+This isolates Focalet preferences, detection and local history metadata. Agent CLIs
 inherit these XDG directories too, so agents that use them may need sign-in or
 configuration in the test profile. Sending a message creates a real agent
 conversation; the automated checks below use fake agents instead.
 
-1. In **Welcome to Zommi**, confirm the installed agent appears, connect, and
+1. In **Welcome to Focalet**, confirm the installed agent appears, connect, and
    send a message. After signing in or changing providers, use **Refresh agents**
    and check the model list.
-2. Open a native Wayland app. Press **Alt+A** or choose **Select** in Zommi,
+2. Open a native Wayland app. Press **Alt+A** or choose **Select** in Focalet,
    then authorize the monitors to share with **Remember this selection** enabled.
    Confirm later captures and a restarted app reuse the grant without another
    Share prompt. Select several regions, draw, undo/redo
@@ -199,9 +199,9 @@ user's session or settings:
 ```sh
 sudo apt-get install -y gnome-shell xdg-desktop-portal-gnome pipewire wireplumber \
   dbus-x11 python3-pyatspi python3-gi gir1.2-gtk-3.0 gir1.2-gtk-4.0 python3-pil
-cargo build --locked --bin zommi-linux-capture
+cargo build --locked --bin focalet-linux-capture
 /usr/bin/python3 scripts/accept-linux-wayland.py
-/usr/bin/python3 scripts/accept-linux-wayland.py --package artifacts/zommi-linux-x64 \
+/usr/bin/python3 scripts/accept-linux-wayland.py --package artifacts/focalet-linux-x64 \
   --browser /usr/bin/google-chrome
 ```
 
@@ -210,7 +210,7 @@ unavailable desktops, extension recovery, GTK 3/4 pixels and accessibility
 geometry, password filtering, portal cancellation, packaged selection/drawing, and floating
 HTML previews. `--browser` adds native Wayland Chromium DOM alignment. GTK 4 text
 input values are intentionally omitted when masked fields cannot be distinguished.
-For an installed `.deb`, use `--package /opt/zommi --system-extension` to also
+For an installed `.deb`, use `--package /opt/focalet --system-extension` to also
 verify that GNOME discovers the extension from its system installation path.
 
 Evidence goes to `artifacts/wayland-acceptance`. CI uses the same test. Real GNOME

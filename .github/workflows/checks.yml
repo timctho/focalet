@@ -20,7 +20,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
-      native_required: ${{ steps.scope.outputs.native_required }}
+      desktop_required: ${{ steps.scope.outputs.desktop_required }}
+      capture_required: ${{ steps.scope.outputs.capture_required }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -40,6 +41,8 @@ jobs:
         run: |
           python scripts/check_docs.py
           python -m unittest discover -s tests -p test_ci_scope.py -v
+          python -m unittest discover -s tests -p test_product_boundaries.py -v
+          python -m unittest discover -s tests -p test_branding.py -v
           python -m unittest discover -s tests -p test_contributor_checks.py -v
           python -m unittest discover -s tests -p test_release_workflow.py -v
       - name: Verify changed demo media
@@ -52,7 +55,7 @@ jobs:
 
   contracts:
     needs: documentation
-    if: needs.documentation.outputs.native_required == 'true'
+    if: needs.documentation.outputs.desktop_required == 'true'
     name: Linux contracts
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -93,7 +96,7 @@ jobs:
           python -m pip install -r tests/requirements.txt
       - name: Check all contracts, widgets, processes and browser capture
         env:
-          ZOMMI_TEST_CHROMIUM: /usr/bin/google-chrome
+          FOCALET_TEST_CHROMIUM: /usr/bin/google-chrome
         run: python scripts/check.py
       - name: Install pinned Gemini and Claude CLIs for integration tests
         run: |
@@ -105,7 +108,7 @@ jobs:
       - name: Compile and verify the Linux desktop package
         run: bash scripts/package-unix.sh linux
       - name: Verify GNOME Wayland capture, context and recovery
-        run: /usr/bin/python3 scripts/accept-linux-wayland.py --package artifacts/zommi-linux-x64 --browser /usr/bin/google-chrome
+        run: /usr/bin/python3 scripts/accept-linux-wayland.py --package artifacts/focalet-linux-x64 --browser /usr/bin/google-chrome
       - name: Ensure checks did not rewrite committed files
         run: git diff --exit-code
       - name: Save failed synthetic Wayland acceptance
@@ -121,13 +124,72 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: golden-failures-linux-${{ github.sha }}
-          path: src/Zommi.Flutter/test/failures/*.png
+          path: src/Focalet.Flutter/test/failures/*.png
           if-no-files-found: ignore
           retention-days: 3
 
+  capture_windows:
+    needs: documentation
+    if: needs.documentation.outputs.capture_required == 'true'
+    name: Capture contracts (Windows)
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: 8.0.x
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+      - name: Check shared capture and both Windows consumers
+        run: python scripts/check.py --suite capture
+      - name: Verify standalone capture batch paste on native editors
+        # Exercise Electron's main-process clipboard.readImage as well as DOM paste.
+        # The fixture uses a fresh profile and synthetic content without agent accounts.
+        run: |
+          npm ci --prefix tests/clipboard-electron --ignore-scripts --no-audit --no-fund
+          node tests/clipboard-electron/node_modules/electron/install.js
+          dotnet run --project tests/Focalet.Windows.Tests --configuration Release -- --paste-acceptance
+      - name: Verify capture source context after selection and hover
+        run: ./scripts/accept-windows-annotations.ps1 -CaptureHost ./src/Focalet.Windows/bin/Release/net8.0-windows10.0.19041.0/Focalet.CaptureHost.exe -OutputDirectory ./artifacts/capture-annotations
+      - name: Retain failed capture paste evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: capture-paste-failure-${{ github.sha }}
+          path: artifacts/capture-*.png
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Build and verify standalone capture tool
+        run: |
+          ./scripts/package-capture-tool.ps1
+          python scripts/verify_capture_package.py artifacts/focalet-capture-win-x64 --expected-commit $env:GITHUB_SHA --smoke
+          if ($LASTEXITCODE -ne 0) { throw 'Capture package verification failed' }
+      - name: Retain Focalet Capture prototype and paste acceptance
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: capture-tool-windows-${{ github.sha }}
+          path: |
+            artifacts/focalet-capture-win-x64.zip
+            artifacts/capture-paste-acceptance.png
+            artifacts/capture-native-clipboard.png
+            artifacts/capture-browser-paste.png
+            artifacts/capture-electron-*.png
+            artifacts/capture-annotations/toolbar-*.png
+          if-no-files-found: error
+          retention-days: 7
+      - name: Ensure checks did not rewrite committed files
+        run: git diff --exit-code
+
   windows:
     needs: documentation
-    if: needs.documentation.outputs.native_required == 'true'
+    if: needs.documentation.outputs.desktop_required == 'true'
     name: Windows contracts
     runs-on: windows-2025
     timeout-minutes: 45
@@ -137,6 +199,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: 8.0.x
       - uses: dtolnay/rust-toolchain@283fb51ee3c8a49cd7c8ff30102f3fcf3cfbe0e1 # 1.93.0
         with:
           components: clippy,rustfmt
@@ -154,9 +219,6 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.13'
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
-        with:
-          dotnet-version: 8.0.x
       - name: Check Windows process, path, SQLite and capture contracts
         run: python scripts/check.py --suite windows
       - name: Compile and verify the Windows desktop package
@@ -169,7 +231,7 @@ jobs:
             choco install nsis --yes --no-progress
             if ($LASTEXITCODE -ne 0) { throw 'NSIS installation failed' }
           }
-          python scripts/build_installer.py artifacts/zommi-windows-x64 --expected-commit $env:GITHUB_SHA --output artifacts/installers --makensis $compiler
+          python scripts/build_installer.py artifacts/focalet-windows-x64 --expected-commit $env:GITHUB_SHA --output artifacts/installers --makensis $compiler
           if ($LASTEXITCODE -ne 0) { throw 'Windows installer failed' }
       - name: Ensure checks did not rewrite committed files
         run: git diff --exit-code
@@ -178,13 +240,13 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: golden-failures-windows-${{ github.sha }}
-          path: src/Zommi.Flutter/test/failures/*.png
+          path: src/Focalet.Flutter/test/failures/*.png
           if-no-files-found: ignore
           retention-days: 3
 
   macos:
     needs: documentation
-    if: needs.documentation.outputs.native_required == 'true'
+    if: needs.documentation.outputs.desktop_required == 'true'
     name: macOS contracts (${{ matrix.architecture }})
     strategy:
       fail-fast: false
@@ -231,10 +293,10 @@ jobs:
       - name: Test native macOS selection geometry
         run: |
           xcrun swiftc -swift-version 5 \
-            src/Zommi.Flutter/macos/Runner/MacRegionSelector.swift \
+            src/Focalet.Flutter/macos/Runner/MacRegionSelector.swift \
             scripts/test-macos-region-selection.swift \
-            -o /tmp/zommi-macos-region-tests
-          /tmp/zommi-macos-region-tests
+            -o /tmp/focalet-macos-region-tests
+          /tmp/focalet-macos-region-tests
       - name: Install locked CocoaPods version
         run: sudo gem install cocoapods --version 1.17.0 --no-document
       - name: Compile and verify the macOS desktop package
@@ -246,30 +308,39 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: golden-failures-macos-${{ matrix.architecture }}-${{ github.sha }}
-          path: src/Zommi.Flutter/test/failures/*.png
+          path: src/Focalet.Flutter/test/failures/*.png
           if-no-files-found: ignore
           retention-days: 3
 
   required:
     name: PR checks passed
     if: always()
-    needs: [documentation, contracts, windows, macos]
+    needs: [documentation, contracts, windows, macos, capture_windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
       - name: Require documentation and every applicable platform to pass
         env:
           DOCS_RESULT: ${{ needs.documentation.result }}
-          NATIVE_REQUIRED: ${{ needs.documentation.outputs.native_required }}
+          DESKTOP_REQUIRED: ${{ needs.documentation.outputs.desktop_required }}
+          CAPTURE_REQUIRED: ${{ needs.documentation.outputs.capture_required }}
+          CAPTURE_RESULT: ${{ needs.capture_windows.result }}
           LINUX_RESULT: ${{ needs.contracts.result }}
           WINDOWS_RESULT: ${{ needs.windows.result }}
           MACOS_RESULT: ${{ needs.macos.result }}
         run: |
           test "$DOCS_RESULT" = success || exit 1
-          if [ "$NATIVE_REQUIRED" = true ]; then
-            test "$LINUX_RESULT" = success && test "$WINDOWS_RESULT" = success && test "$MACOS_RESULT" = success
-          elif [ "$NATIVE_REQUIRED" = false ]; then
-            test "$LINUX_RESULT" = skipped && test "$WINDOWS_RESULT" = skipped && test "$MACOS_RESULT" = skipped
+          if [ "$DESKTOP_REQUIRED" = true ]; then
+            test "$LINUX_RESULT" = success && test "$WINDOWS_RESULT" = success && test "$MACOS_RESULT" = success || exit 1
+          elif [ "$DESKTOP_REQUIRED" = false ]; then
+            test "$LINUX_RESULT" = skipped && test "$WINDOWS_RESULT" = skipped && test "$MACOS_RESULT" = skipped || exit 1
+          else
+            exit 1
+          fi
+          if [ "$CAPTURE_REQUIRED" = true ]; then
+            test "$CAPTURE_RESULT" = success
+          elif [ "$CAPTURE_REQUIRED" = false ]; then
+            test "$CAPTURE_RESULT" = skipped
           else
             exit 1
           fi

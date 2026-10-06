@@ -1,0 +1,48 @@
+[CmdletBinding()]
+param([ValidateSet('win-x64', 'win-arm64')][string]$Runtime = 'win-x64')
+
+$ErrorActionPreference = 'Stop'
+$root = Split-Path -Parent $PSScriptRoot
+$commit = (git -C $root rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0) { throw 'Could not read the source revision.' }
+git -C $root diff --quiet HEAD
+if ($LASTEXITCODE -ne 0) {
+    git -C $root diff --name-only HEAD
+    throw 'Commit tracked source changes before packaging.'
+}
+$output = Join-Path $root "artifacts/focalet-capture-$Runtime"
+if (Test-Path -LiteralPath $output) { Remove-Item -LiteralPath $output -Recurse -Force }
+$temporary = Join-Path ([IO.Path]::GetTempPath()) "focalet-capture-build-$([Guid]::NewGuid().ToString('N'))"
+New-Item -ItemType Directory -Path $temporary | Out-Null
+try {
+    # Build only committed files, independent of untracked test output or local files.
+    $sourceArchive = Join-Path $temporary 'source.zip'
+    git -C $root archive --format=zip --output=$sourceArchive $commit
+    if ($LASTEXITCODE -ne 0) { throw 'Could not export the committed source.' }
+    $source = Join-Path $temporary 'source'
+    Expand-Archive -LiteralPath $sourceArchive -DestinationPath $source
+    $nuget = @('--configfile', (Join-Path $source 'NuGet.config'))
+    if ($env:FOCALET_NUGET_SOURCE) { $nuget += @('--source', $env:FOCALET_NUGET_SOURCE) }
+    dotnet publish (Join-Path $source 'src/Focalet.CaptureTool/Focalet.CaptureTool.csproj') @nuget `
+        --configuration Release --runtime $Runtime --self-contained true `
+        -p:PublishSingleFile=true -p:DebugType=None --output $output
+    if ($LASTEXITCODE -ne 0) { throw 'Capture tool build failed.' }
+    foreach ($name in @('LICENSE', 'THIRD_PARTY_NOTICES.md')) { Copy-Item (Join-Path $source $name) $output }
+    Copy-Item (Join-Path $source 'docs/capture-tool.md') (Join-Path $output 'README.md')
+} finally {
+    Remove-Item -LiteralPath $temporary -Recurse -Force
+}
+$manifest = @{
+    product = 'Focalet Capture'; channel = 'prototype'; gitCommit = $commit; runtime = $Runtime
+    entryPoint = 'Focalet.Capture.exe'; signing = 'unsigned'
+}
+$manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output 'capture-tool-manifest.json') -Encoding utf8
+$files = Get-ChildItem -LiteralPath $output -File -Recurse | Sort-Object FullName
+$hashes = foreach ($file in $files) {
+    $relative = [IO.Path]::GetRelativePath($output, $file.FullName).Replace('\', '/')
+    "$( (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant() )  $relative"
+}
+$hashes | Set-Content -LiteralPath (Join-Path $output 'SHA256SUMS.txt') -Encoding ascii
+$archive = "$output.zip"
+Compress-Archive -LiteralPath $output -DestinationPath $archive -Force
+Write-Host "Capture tool: $archive"

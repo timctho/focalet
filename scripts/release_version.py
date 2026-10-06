@@ -5,7 +5,7 @@ import argparse
 from pathlib import Path
 import re
 
-PUBSPEC = Path(__file__).resolve().parents[1] / "src/Zommi.Flutter/pubspec.yaml"
+PUBSPEC = Path(__file__).resolve().parents[1] / "src/Focalet.Flutter/pubspec.yaml"
 NUMBER = r"(?:0|[1-9][0-9]*)"
 IDENTIFIER = r"(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)"
 VERSION = re.compile(

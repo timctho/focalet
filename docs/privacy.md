@@ -1,6 +1,6 @@
 # Privacy policy
 
-Zommi connects desktop context to an agent you choose. This page describes the
+Focalet connects desktop context to an agent you choose. This page describes the
 desktop application's data handling; your selected agent, model provider and
 connected services have their own policies.
 
@@ -10,7 +10,7 @@ Capture starts when you invoke a selection. An attachment can contain selected
 pixels, your annotations, text, links, element structure, coordinates, window
 titles, application and process identity, and the capture host name. Context
 from an intersecting element can extend beyond the selected pixels. Reliable
-alignment is not always available; Zommi explains image-only fallbacks.
+alignment is not always available; Focalet explains image-only fallbacks.
 
 Review an attachment and its Details before submitting. Remove it from the draft
 if it contains information you do not want to share. Attaching a selection does
@@ -19,10 +19,10 @@ describe the fields and capture budgets.
 
 ## Where information goes
 
-When you send a message, Zommi hands the message and attachments to the selected
+When you send a message, Focalet hands the message and attachments to the selected
 agent runtime. Depending on that runtime's configuration, it may send them to a
 cloud model provider, a configured gateway, or other services through agent tools.
-Zommi does not operate a hosted service for collecting your conversations and
+Focalet does not operate a hosted service for collecting your conversations and
 does not include application analytics or advertising telemetry.
 
 The runtime owns sign-in and canonical conversation history. Authentication,
@@ -32,14 +32,14 @@ you configure; an agent can support more than one provider.
 
 ## Local information
 
-Zommi stores preferences, runtime connection metadata and a session metadata cache
+Focalet stores preferences, runtime connection metadata and a session metadata cache
 on your machine. The cache contains items such as session IDs, titles, workspaces
 and activity timestamps. Inactive cached metadata expires after seven days;
 current and running chats are retained. Capture helpers can use local temporary
 files to deliver attachments. Agent runtimes may retain their own copies.
 
 See [local state and recovery](desktop-reference.md#local-state-and-recovery)
-for platform locations. Clearing Zommi's cache does not delete agent or provider
+for platform locations. Clearing Focalet's cache does not delete agent or provider
 history. Follow the [uninstall guide](install.md#update-uninstall-and-verify) to
 remove the app and its optional local state.
 
@@ -47,7 +47,7 @@ remove the app and its optional local state.
 
 Optional browser context uses a browser debugging connection you authorize.
 Edge and Chrome have separate connection controls. Disconnecting a browser or
-disabling browser context stops Zommi's browser context access; agent-owned
+disabling browser context stops Focalet's browser context access; agent-owned
 browser tools have separate connections and permissions.
 
 Full access (YOLO) is on by default and allows agent actions without individual

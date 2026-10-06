@@ -1,4 +1,4 @@
-public sealed class ZommiDesktopFrameCapture : System.IDisposable {
+public sealed class FocaletDesktopFrameCapture : System.IDisposable {
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
     private struct OutputDescription {
         [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.ByValTStr, SizeConst = 32)] public string DeviceName;
@@ -59,7 +59,7 @@ public sealed class ZommiDesktopFrameCapture : System.IDisposable {
         value = System.IntPtr.Zero;
     }
 
-    public ZommiDesktopFrameCapture(int[] captureArea) {
+    public FocaletDesktopFrameCapture(int[] captureArea) {
         area = (int[])captureArea.Clone();
         var previous = SetThreadDpiAwarenessContext(new System.IntPtr(-4));
         try { Initialize(); } catch { Dispose(); throw; }

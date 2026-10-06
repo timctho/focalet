@@ -1,4 +1,4 @@
 self-hosted-runner:
   labels:
-    - zommi-ci
-    - zommi-release
+    - focalet-ci
+    - focalet-release

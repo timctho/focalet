@@ -1,17 +1,20 @@
-# Working on Zommi
+# Working on Focalet
 
-Zommi is a Flutter desktop app with a Rust agent broker and native capture helpers.
+Focalet has a standalone Windows Capture tool and a Flutter Desktop app with a
+Rust agent broker. They share capture libraries and use Focalet identifiers throughout.
 Start with [CONTRIBUTING.md](CONTRIBUTING.md) for setup and validation, and the
 [component map](docs/desktop-reference.md) for source locations.
 
 ## Find the right component
 
-- Desktop UI, sessions, drafts and attachments: `src/Zommi.Flutter/lib`.
-- Runtime discovery, adapters and context handoff: `crates/zommi-core`.
-- JSONL broker and protocol fixtures: `crates/zommi-core-host`.
-- Windows capture: `src/Zommi.Windows` and `src/Zommi.Capture.Core`.
-- Ubuntu capture: `crates/zommi-linux-capture` and `src/Zommi.Gnome`.
-- macOS capture: `src/Zommi.Flutter/macos/Runner`.
+- Desktop UI, sessions, drafts and attachments: `src/Focalet.Flutter/lib`.
+- Runtime discovery, adapters and context handoff: `crates/focalet-core`.
+- JSONL broker and protocol fixtures: `crates/focalet-core-host`.
+- Capture tray, hotkeys and ordered paste: `src/Focalet.CaptureTool`.
+- Shared Windows capture: `src/Focalet.Capture.Windows` and `src/Focalet.Capture.Core`.
+- Desktop Windows JSONL adapter: `src/Focalet.Windows`.
+- Ubuntu capture: `crates/focalet-linux-capture` and `src/Focalet.Gnome`.
+- macOS capture: `src/Focalet.Flutter/macos/Runner`.
 - Packaging and publication: `scripts/`; workflows: `.github/workflows/`.
 
 ## Validate a change
@@ -31,6 +34,9 @@ The full check runner is `python3 scripts/check.py`; CI also verifies native pac
 Choose tests by the behavior affected, using the regression-test table in CONTRIBUTING.md.
 
 ## Preserve product boundaries
+
+- Capture must build without Flutter or the Rust broker. Both Windows apps
+  reference shared capture libraries, never each other's executable.
 
 - Keep authentication, canonical history and tools with the selected agent.
 - Match both runtime and session identity. Never replay an accepted or uncertain turn.

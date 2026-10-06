@@ -1,8 +1,40 @@
-# Contributing to Zommi
+# Contributing to Focalet
 
-Zommi connects a desktop selection to an existing agent. Keep credentials,
-canonical history, tools and permissions with that agent. See the
-[desktop reference](docs/desktop-reference.md) for the source layout.
+Focalet Capture and Focalet Desktop live in one repository with shared capture
+libraries. See [product use cases](docs/products.md) and the
+[component map](docs/desktop-reference.md). Credentials, canonical history, tools and permissions
+stay with the user's selected agent.
+
+## Work on Capture independently
+
+The Windows tray app is in `src/Focalet.CaptureTool`; the shared Windows capture
+library is in `src/Focalet.Capture.Windows`. Capture does not depend on Flutter, the
+Desktop helper executable or the Rust agent broker.
+
+Install .NET SDK 8 and PowerShell 7 on Windows, then run:
+
+```powershell
+dotnet build src/Focalet.CaptureTool/Focalet.CaptureTool.csproj --configuration Release
+# Build the self-contained prototype ZIP from committed source:
+./scripts/package-capture-tool.ps1
+```
+
+For managed and Windows native tests, also install Python 3.10+ and run
+`python scripts/check.py --suite capture`. The interactive paste acceptance
+additionally uses Node.js 22 and the pinned Electron fixture:
+
+```powershell
+npm ci --prefix tests/clipboard-electron --ignore-scripts --no-audit --no-fund
+node tests/clipboard-electron/node_modules/electron/install.js
+dotnet run --project tests/Focalet.Windows.Tests --configuration Release -- --paste-acceptance
+```
+
+Run interactive acceptance on a disposable Windows desktop: it controls focus,
+keyboard input and the clipboard. The PR Capture job provides that environment
+without a personal browser profile or agent account. No Rust or Flutter setup is
+needed for these Capture checks. On Linux, the capture suite runs portable
+contracts and cross-compiles the Windows consumers; native interaction still
+requires Windows.
 
 ## Set up
 
@@ -12,7 +44,7 @@ Clone the repository and install:
 - Flutter **3.47.2**, including its Dart SDK, on `PATH`.
 - Python **3.10+**, Node.js **22+**, .NET SDK **8**, and FFmpeg (including
   `ffprobe`, for reviewed demo metadata).
-- Chromium, Chrome or Edge for browser capture tests. Set `ZOMMI_TEST_CHROMIUM`
+- Chromium, Chrome or Edge for browser capture tests. Set `FOCALET_TEST_CHROMIUM`
   to the executable if it is not on `PATH`.
 - Ubuntu 24.04 LTS x64 (the supported Linux target): SQLite, GTK and Chromium's runtime dependencies:
   `sudo apt-get install binutils libsqlite3-dev libgtk-3-0t64 libwebkit2gtk-4.1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-pipewire libepoxy-dev libasound2t64 ffmpeg`.
@@ -51,7 +83,7 @@ sudo --preserve-env=PATH unshare --net -- bash -c 'ip link set lo up; exec runus
 The runtime fixture tests cover failure recovery, cancellation and approval
 identity on all platforms. Update the pinned CLI version and its acceptance
 assertion together; Gemini's fake-response switches are upstream test interfaces.
-The check runner enables `ZOMMI_RUNTIME_DISCOVERY_MODE=configured-only` and
+The check runner enables `FOCALET_RUNTIME_DISCOVERY_MODE=configured-only` and
 temporary binding/discovery/override stores for its child processes. This
 disables automatic native/WSL discovery only in that test invocation. Individual
 fixtures supply explicit commands; ordinary app launches still discover agents.
@@ -123,9 +155,9 @@ headers, X11 and Ayatana AppIndicator. See [Ubuntu testing](docs/ubuntu-testing.
 
 | Change | Tests to extend |
 | --- | --- |
-| Runtime protocol, identity, history or recovery | Rust adapter tests; Dart `*_process_test.dart` against `crates/zommi-core-host/tests` fixtures |
+| Runtime protocol, identity, history or recovery | Rust adapter tests; Dart `*_process_test.dart` against `crates/focalet-core-host/tests` fixtures |
 | Session switches, late replies, drafts or edit/resend | `session_*`, `background_runtime_*`, `message_rewind_*`, `chat_switch_recovery_*` |
-| Capture fidelity and privacy | `tests/Zommi.Capture.Tests`, `tests/Zommi.Browser.Tests`, Rust `context_handoff` tests and `core_bridge_process_test.dart` |
+| Capture fidelity and privacy | `tests/Focalet.Capture.Tests`, `tests/Focalet.Browser.Tests`, Rust `context_handoff` tests and `core_bridge_process_test.dart` |
 | UI layout, streaming, hotkeys or notification behavior | Flutter widget/desktop tests; packaged native acceptance when the OS is involved |
 | Packaging, installers or publishing | Python `test_release_package.py` and `test_public_release.py` |
 | Contributor workflows | `test_contributor_checks.py` |
@@ -138,7 +170,7 @@ must not be automatically sent again after an uncertain transport failure.
 Use temporary data and loopback-only fixtures. Close child processes before
 deleting their temporary directories. Use bounded waits for events; avoid
 `pumpAndSettle` while an animation or stream intentionally remains active.
-Screenshot baselines are OS-specific: [golden guidance](src/Zommi.Flutter/test/goldens/README.md).
+Screenshot baselines are OS-specific: [golden guidance](src/Focalet.Flutter/test/goldens/README.md).
 Inspect changed images before committing them; updating goldens is not a fix for
 an unexplained regression.
 
@@ -146,15 +178,19 @@ an unexplained regression.
 
 The **PR checks** workflow runs for every PR, including forks, on disposable
 GitHub-hosted runners. Documentation and CI-policy checks always run. An explicit
-allowlist of Markdown and documentation media changes can skip native builds;
-source, dependency, workflow, build and unknown changes require Linux, Windows
-and both macOS architectures. It uses read-only repository access,
-no deployment secrets and pinned action revisions. It does not run fork code on
-maintainers' self-hosted machines. **PR checks passed** requires documentation to
-succeed and every applicable platform job to succeed. Native skips are accepted
-only when the scope job explicitly identified a documentation-only change.
-Unknown scope, failure and cancellation fail the gate. Rust and Flutter caches
-are separated by OS/toolchain; dependency lockfiles participate in cache keys.
+allowlist of Markdown and documentation media can skip native builds.
+Capture app, clipboard fixture or Capture packaging changes run the dedicated
+**Capture contracts (Windows)** job without Flutter or Rust. Desktop UI/runtime
+changes run Linux, Windows and both macOS Desktop jobs. Shared capture,
+dependency, workflow, build configuration and unknown changes run both products'
+native checks. A change touching both apps also runs both sets.
+
+**PR checks passed** requires documentation and each selected product's jobs to
+succeed. A skip is accepted only when the scope job explicitly excluded that
+product; missing scope, failure and cancellation fail the gate. CI uses read-only
+repository access, no deployment secrets and pinned action revisions. It does
+not run fork code on maintainers' persistent machines. Rust and Flutter caches
+are separated by OS/toolchain and dependency lockfiles.
 
 Repository maintainers should require **PR checks passed** in the `main` branch
 rules and require review for workflow changes. This file does not enable GitHub

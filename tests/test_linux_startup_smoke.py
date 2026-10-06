@@ -17,11 +17,11 @@ SCRIPT = Path(__file__).parents[1] / "scripts" / "smoke-linux-release.sh"
 
 class LinuxStartupSmokeTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory(prefix="zommi-linux-smoke-test-")
+        self.temporary = tempfile.TemporaryDirectory(prefix="focalet-linux-smoke-test-")
         self.package = Path(self.temporary.name)
         sleep = shutil.which("sleep")
         assert sleep
-        (self.package / "zommi-core-host").symlink_to(sleep)
+        (self.package / "focalet-core-host").symlink_to(sleep)
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -29,7 +29,7 @@ class LinuxStartupSmokeTests(unittest.TestCase):
     def _write_application(
         self, *, error: str = "", sqlite_version: int | None = None
     ) -> None:
-        application = self.package / "zommi"
+        application = self.package / "focalet"
         lines = ["#!/usr/bin/env bash\n", "set -eu\n"]
         if error:
             lines.append(f"printf '%s\\n' {shlex.quote(error)}\n")
@@ -41,7 +41,7 @@ class LinuxStartupSmokeTests(unittest.TestCase):
                         f"""\
                         import os, sqlite3
                         from pathlib import Path
-                        path = Path(os.environ["XDG_STATE_HOME"]) / "zommi" / "session-catalog.sqlite"
+                        path = Path(os.environ["XDG_STATE_HOME"]) / "focalet" / "session-catalog.sqlite"
                         path.parent.mkdir(parents=True, exist_ok=True)
                         with sqlite3.connect(path) as db:
                             db.execute("PRAGMA user_version = {sqlite_version}")
@@ -58,7 +58,7 @@ class LinuxStartupSmokeTests(unittest.TestCase):
             )
         lines.extend(
             [
-                '"$(dirname "$0")/zommi-core-host" 60 &\n',
+                '"$(dirname "$0")/focalet-core-host" 60 &\n',
                 "child=$!\n",
                 "trap 'kill -TERM \"$child\" 2>/dev/null || true; wait \"$child\" 2>/dev/null || true; exit 0' TERM INT\n",
                 'wait "$child"\n',
@@ -71,7 +71,7 @@ class LinuxStartupSmokeTests(unittest.TestCase):
         self, *, display: bool = True, verify_sqlite: bool = False
     ) -> subprocess.CompletedProcess[str]:
         environment = os.environ.copy()
-        environment["ZOMMI_VERIFY_SQLITE_CACHE"] = "1" if verify_sqlite else "0"
+        environment["FOCALET_VERIFY_SQLITE_CACHE"] = "1" if verify_sqlite else "0"
         if display:
             environment["DISPLAY"] = ":99"
         else:
@@ -87,7 +87,7 @@ class LinuxStartupSmokeTests(unittest.TestCase):
         )
 
     def _write_orphaning_application(self, *, terminate_core: bool) -> None:
-        application = self.package / "zommi"
+        application = self.package / "focalet"
         application.write_text(
             f"#!{sys.executable}\n"
             + textwrap.dedent(
@@ -98,7 +98,7 @@ class LinuxStartupSmokeTests(unittest.TestCase):
                 import subprocess
 
                 package = Path(__file__).parent
-                core = subprocess.Popen([str(package / "zommi-core-host"), "60"])
+                core = subprocess.Popen([str(package / "focalet-core-host"), "60"])
                 (package / "core.pid").write_text(str(core.pid))
 
                 def stop(signum, frame):

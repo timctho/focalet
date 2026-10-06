@@ -13,7 +13,7 @@ from publish_release import ASSETS, PROFILES, validate_tag
 from release_version import parse_version, read_version
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION_FILE = "src/Zommi.Flutter/pubspec.yaml"
+VERSION_FILE = "src/Focalet.Flutter/pubspec.yaml"
 AUTOMATIC_PLATFORMS = "all"
 RUNNERS = {
     ("windows", "x64"): "windows-2025",
@@ -47,8 +47,16 @@ def release_request(commit: str, tag: str) -> tuple[bool, str, str]:
         raise ValueError("The push must match the workflow's exact source revision.")
     if not isinstance(before, str) or not re.fullmatch(r"[0-9a-f]{40}", before) or before == "0" * 40:
         raise ValueError("A version-changing push needs an existing main revision to compare.")
+    # The first renamed release may compare against a pre-rename main revision.
+    # Do not suppress malformed versions or unknown commits; only probe the
+    # former path when the current path did not exist in that exact revision.
+    previous_file = VERSION_FILE
+    exists = subprocess.run(["git", "cat-file", "-e", f"{before}:{previous_file}"],
+                            cwd=ROOT, capture_output=True).returncode == 0
+    if not exists:
+        previous_file = "src/Zommi.Flutter/pubspec.yaml"
     previous = parse_version(subprocess.check_output(
-        ["git", "show", f"{before}:{VERSION_FILE}"], cwd=ROOT, text=True,
+        ["git", "show", f"{before}:{previous_file}"], cwd=ROOT, text=True,
     ))
     return previous["tag"] != tag, AUTOMATIC_PLATFORMS, "true"
 

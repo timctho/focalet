@@ -12,20 +12,20 @@ from test_runtime_commands import Core, FIXTURES
 
 class AllRuntimePermissionTests(unittest.TestCase):
     def setup_runtime(self, adapter, **environment):
-        directory = tempfile.TemporaryDirectory(prefix='zommi-all-permissions-')
+        directory = tempfile.TemporaryDirectory(prefix='focalet-all-permissions-')
         self.addCleanup(directory.cleanup)
         self.path = Path(directory.name)
-        self.env = {k: v for k, v in os.environ.items() if not k.startswith('ZOMMI_')}
-        self.env.update(ZOMMI_RUNTIME_DISCOVERY_MODE='configured-only',
-                        ZOMMI_CORE_STATE_PATH=str(self.path / 'binding.json'),
-                        ZOMMI_RUNTIME_OVERRIDES_PATH=str(self.path / 'overrides.json'),
-                        ZOMMI_RUNTIME_DISCOVERY_CACHE_PATH=str(self.path / 'targets.json'),
-                        ZOMMI_OPENCLAW_DEVICE_IDENTITY_PATH=str(self.path / 'device.json'),
-                        ZOMMI_FAKE_REQUEST_LOG=str(self.path / 'wire.jsonl'),
-                        ZOMMI_FAKE_UNIQUE_SESSIONS='1',
-                        ZOMMI_FAKE_HERMES_LEGACY_SESSION_LIST='1',
-                        ZOMMI_FAKE_GATEWAY_SESSIONS=str(self.path / 'gateway-sessions.json'),
-                        ZOMMI_FAKE_CLAUDE_STORE=str(self.path / 'claude-sessions'))
+        self.env = {k: v for k, v in os.environ.items() if not k.startswith('FOCALET_')}
+        self.env.update(FOCALET_RUNTIME_DISCOVERY_MODE='configured-only',
+                        FOCALET_CORE_STATE_PATH=str(self.path / 'binding.json'),
+                        FOCALET_RUNTIME_OVERRIDES_PATH=str(self.path / 'overrides.json'),
+                        FOCALET_RUNTIME_DISCOVERY_CACHE_PATH=str(self.path / 'targets.json'),
+                        FOCALET_OPENCLAW_DEVICE_IDENTITY_PATH=str(self.path / 'device.json'),
+                        FOCALET_FAKE_REQUEST_LOG=str(self.path / 'wire.jsonl'),
+                        FOCALET_FAKE_UNIQUE_SESSIONS='1',
+                        FOCALET_FAKE_HERMES_LEGACY_SESSION_LIST='1',
+                        FOCALET_FAKE_GATEWAY_SESSIONS=str(self.path / 'gateway-sessions.json'),
+                        FOCALET_FAKE_CLAUDE_STORE=str(self.path / 'claude-sessions'))
         self.env.update(environment)
         runtime = adapter.split('-')[0].upper()
         if adapter == 'openclaw-gateway':
@@ -37,9 +37,9 @@ class AllRuntimePermissionTests(unittest.TestCase):
                 gateway.stdout.close()
             self.addCleanup(stop_gateway)
             endpoint = gateway.stdout.readline().strip().split(' ', 1)[1]
-            self.env.update(ZOMMI_OPENCLAW_GATEWAY_URL=endpoint, OPENCLAW_GATEWAY_TOKEN='fixture-token')
+            self.env.update(FOCALET_OPENCLAW_GATEWAY_URL=endpoint, OPENCLAW_GATEWAY_TOKEN='fixture-token')
         else:
-            self.env[f'ZOMMI_{runtime}_COMMAND'] = sys.executable
+            self.env[f'FOCALET_{runtime}_COMMAND'] = sys.executable
             if adapter.endswith('-acp'):
                 args = [str(FIXTURES / 'fake_acp_runtime.py')]
             elif adapter == 'hermes-gateway':
@@ -48,7 +48,7 @@ class AllRuntimePermissionTests(unittest.TestCase):
                 args = [str(FIXTURES / 'fake_pi_rpc.py')]
             else:
                 args = [str(FIXTURES / 'fake_claude_runtime.py')]
-            self.env[f'ZOMMI_{adapter.upper().replace("-", "_")}_ARGS_JSON'] = json.dumps(args)
+            self.env[f'FOCALET_{adapter.upper().replace("-", "_")}_ARGS_JSON'] = json.dumps(args)
         self.adapter = adapter
         self.restart()
 
@@ -191,14 +191,14 @@ class AllRuntimePermissionTests(unittest.TestCase):
     def test_gateway_rejected_automatic_approval_returns_to_the_ui(self):
         for adapter in ['hermes-gateway', 'openclaw-gateway']:
             with self.subTest(adapter=adapter):
-                self.setup_runtime(adapter, ZOMMI_FAKE_REJECT_AUTOMATIC_APPROVAL='1')
+                self.setup_runtime(adapter, FOCALET_FAKE_REJECT_AUTOMATIC_APPROVAL='1')
                 self.select('runtime.connect', fullAccess=True, newSession=True)
                 self.gateway_approval(False)
                 decisions = [v['params']['decision'] for v in self.wire() if v.get('method') in ('approval.respond', 'approval.resolve')]
                 self.assertEqual(decisions, ['once' if adapter == 'hermes-gateway' else 'allow-once', 'deny'])
 
     def test_gateway_broadcast_without_chat_identity_needs_manual_approval(self):
-        self.setup_runtime('openclaw-gateway', ZOMMI_FAKE_UNSCOPED_APPROVAL='1')
+        self.setup_runtime('openclaw-gateway', FOCALET_FAKE_UNSCOPED_APPROVAL='1')
         self.select('runtime.connect', fullAccess=True, newSession=True)
         self.gateway_approval(False)
         self.assertEqual([v['params']['decision'] for v in self.wire() if v.get('method') == 'approval.resolve'], ['deny'])

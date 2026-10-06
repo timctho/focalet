@@ -1,5 +1,10 @@
 # Demos
 
+These are historical recordings made before the Focalet rename. Their original
+UI labels, source revisions and checksums are preserved; the current app uses
+Focalet. See [upgrade notes](../migration.md).
+
+
 Select a preview in the [README](../../README.md) to open its video.
 
 | Example | Video | Still |

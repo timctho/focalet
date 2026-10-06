@@ -54,7 +54,7 @@ jobs:
     # Shared runners are paused. Local checks cover these contracts until an
     # operator explicitly opts in on a manual dispatch.
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_shared_runners && !inputs.macos_only }}
-    runs-on: [self-hosted, Linux, X64, zommi-ci]
+    runs-on: [self-hosted, Linux, X64, focalet-ci]
     timeout-minutes: 20
     steps:
       - name: Check out source
@@ -92,7 +92,7 @@ jobs:
     env:
       CARGO_BUILD_JOBS: '4'
     needs: test
-    runs-on: [self-hosted, Linux, X64, zommi-release]
+    runs-on: [self-hosted, Linux, X64, focalet-release]
     timeout-minutes: 45
     steps:
       - name: Check out source
@@ -121,26 +121,26 @@ jobs:
 
       - name: Build and verify Linux release
         env:
-          ZOMMI_LINUX_STARTUP_SMOKE: '1'
-          ZOMMI_VERIFY_SQLITE_CACHE: '1'
+          FOCALET_LINUX_STARTUP_SMOKE: '1'
+          FOCALET_VERIFY_SQLITE_CACHE: '1'
         run: bash scripts/package-linux-self-hosted.sh
 
       - name: Accept GNOME Wayland capture and recovery
-        run: /usr/bin/python3 scripts/accept-linux-wayland.py --package artifacts/zommi-linux-x64
+        run: /usr/bin/python3 scripts/accept-linux-wayland.py --package artifacts/focalet-linux-x64
 
       - name: Show release identity and signing state
         run: |
-          python -c "import glob,json; p=glob.glob('artifacts/zommi-*/release-manifest.json'); assert len(p)==1, p; print(json.dumps(json.load(open(p[0], encoding='utf-8')), indent=2))"
+          python -c "import glob,json; p=glob.glob('artifacts/focalet-*/release-manifest.json'); assert len(p)==1, p; print(json.dumps(json.load(open(p[0], encoding='utf-8')), indent=2))"
 
       - name: Upload native release
         if: github.event_name == 'workflow_dispatch' && inputs.upload_packages
         continue-on-error: ${{ github.event_name == 'workflow_dispatch' && inputs.windows_deploy_downloads }}
         uses: actions/upload-artifact@v7
         with:
-          name: zommi-linux-${{ runner.arch }}-${{ github.sha }}
+          name: focalet-linux-${{ runner.arch }}-${{ github.sha }}
           path: |
-            artifacts/zommi-linux-*.tar.gz
-            artifacts/zommi-linux-*.tar.gz.sha256
+            artifacts/focalet-linux-*.tar.gz
+            artifacts/focalet-linux-*.tar.gz.sha256
           if-no-files-found: error
           compression-level: 0
           retention-days: 3
@@ -149,7 +149,7 @@ jobs:
     name: Native release (windows)
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_shared_runners && !inputs.macos_only }}
     needs: test
-    runs-on: [self-hosted, Windows, X64, zommi-release]
+    runs-on: [self-hosted, Windows, X64, focalet-release]
     timeout-minutes: 45
     steps:
       - name: Check out source
@@ -201,7 +201,7 @@ jobs:
 
       - name: Test Windows session metadata persistence
         shell: pwsh
-        working-directory: src/Zommi.Flutter
+        working-directory: src/Focalet.Flutter
         run: flutter test test/session_catalog_cache_test.dart test/sqlite_session_catalog_test.dart
 
       - name: Verify local .NET capture publisher
@@ -214,41 +214,41 @@ jobs:
       - name: Build and verify Windows release
         shell: pwsh
         env:
-          ZOMMI_WINDOWS_SIGNING_THUMBPRINT: ${{ secrets.ZOMMI_WINDOWS_SIGNING_THUMBPRINT }}
+          FOCALET_WINDOWS_SIGNING_THUMBPRINT: ${{ secrets.FOCALET_WINDOWS_SIGNING_THUMBPRINT }}
         run: ./scripts/package-windows.ps1 -Runtime win-x64
 
       - name: Accept Windows non-visual capture contracts
         shell: pwsh
-        run: ./scripts/accept-windows-capture.ps1 -PackageDirectory ./artifacts/zommi-windows-x64 -NonVisualOnly
+        run: ./scripts/accept-windows-capture.ps1 -PackageDirectory ./artifacts/focalet-windows-x64 -NonVisualOnly
 
       - name: Accept Windows browser DOM and compositor capture
         shell: pwsh
-        run: ./scripts/accept-windows-browser.ps1 -PackageDirectory ./artifacts/zommi-windows-x64
+        run: ./scripts/accept-windows-browser.ps1 -PackageDirectory ./artifacts/focalet-windows-x64
 
       - name: Accept Windows shortcuts and capture UX
         if: github.event_name == 'workflow_dispatch' && inputs.windows_interactive
         shell: pwsh
-        run: ./scripts/accept-windows-capture.ps1 -PackageDirectory ./artifacts/zommi-windows-x64
+        run: ./scripts/accept-windows-capture.ps1 -PackageDirectory ./artifacts/focalet-windows-x64
 
       - name: Accept retained-frame Windows size controls
         if: github.event_name == 'workflow_dispatch' && inputs.windows_interactive
         shell: pwsh
-        run: ./scripts/accept-windows-window-size.ps1 -PackageDirectory ./artifacts/zommi-windows-x64 -ExpectedCommit '${{ github.sha }}' -CaptureBackend Gdi
+        run: ./scripts/accept-windows-window-size.ps1 -PackageDirectory ./artifacts/focalet-windows-x64 -ExpectedCommit '${{ github.sha }}' -CaptureBackend Gdi
 
       - name: Show release identity and signing state
         shell: bash
         run: |
-          python -c "import glob,json; p=glob.glob('artifacts/zommi-*/release-manifest.json'); assert len(p)==1, p; print(json.dumps(json.load(open(p[0], encoding='utf-8')), indent=2))"
+          python -c "import glob,json; p=glob.glob('artifacts/focalet-*/release-manifest.json'); assert len(p)==1, p; print(json.dumps(json.load(open(p[0], encoding='utf-8')), indent=2))"
 
       - name: Upload native release
         if: github.event_name == 'workflow_dispatch' && inputs.upload_packages
         continue-on-error: ${{ github.event_name == 'workflow_dispatch' && inputs.windows_deploy_downloads }}
         uses: actions/upload-artifact@v7
         with:
-          name: zommi-windows-${{ runner.arch }}-${{ github.sha }}
+          name: focalet-windows-${{ runner.arch }}-${{ github.sha }}
           path: |
-            artifacts/zommi-windows-*.zip
-            artifacts/zommi-windows-*.zip.sha256
+            artifacts/focalet-windows-*.zip
+            artifacts/focalet-windows-*.zip.sha256
           if-no-files-found: error
           compression-level: 0
           retention-days: 3
@@ -262,21 +262,21 @@ jobs:
     name: Verify deployed Windows process
     needs: release_windows
     if: github.event_name == 'workflow_dispatch' && inputs.run_shared_runners && !inputs.macos_only && inputs.windows_deploy_downloads
-    runs-on: [self-hosted, Windows, X64, zommi-release]
+    runs-on: [self-hosted, Windows, X64, focalet-release]
     timeout-minutes: 5
     steps:
       - name: Verify exact deployed revision and delayed process health
         shell: pwsh
         run: |
           Start-Sleep -Seconds 5
-          $targetDirectory = Join-Path $env:USERPROFILE 'Downloads/zommi-windows-x64'
-          $targetExecutable = Join-Path $targetDirectory 'Zommi.exe'
+          $targetDirectory = Join-Path $env:USERPROFILE 'Downloads/focalet-windows-x64'
+          $targetExecutable = Join-Path $targetDirectory 'Focalet.exe'
           $manifest = Get-Content -LiteralPath (Join-Path $targetDirectory 'release-manifest.json') -Raw | ConvertFrom-Json
           if ($manifest.gitCommit -ne '${{ github.sha }}') {
             throw "Downloads manifest has revision $($manifest.gitCommit), expected ${{ github.sha }}."
           }
           $processes = @(Get-CimInstance Win32_Process | Where-Object {
-            $_.Name -eq 'Zommi.exe' -and
+            $_.Name -eq 'Focalet.exe' -and
             $_.ExecutablePath -and
             [string]::Equals(
               [IO.Path]::GetFullPath($_.ExecutablePath),
@@ -284,13 +284,13 @@ jobs:
               [StringComparison]::OrdinalIgnoreCase)
           })
           if ($processes.Count -ne 1) {
-            throw "Expected one delayed exact-path Zommi process, found $($processes.Count)."
+            throw "Expected one delayed exact-path Focalet process, found $($processes.Count)."
           }
           $process = Get-Process -Id $processes[0].ProcessId
           if (-not $process.Responding) {
-            throw "Deployed Zommi process $($process.Id) is not responding."
+            throw "Deployed Focalet process $($process.Id) is not responding."
           }
-          $coreExecutable = Join-Path $targetDirectory 'zommi-core-host.exe'
+          $coreExecutable = Join-Path $targetDirectory 'focalet-core-host.exe'
           $runtimeDeadline = [DateTime]::UtcNow.AddSeconds(20)
           $coreProcess = $null
           $proxyProcess = $null
@@ -319,7 +319,7 @@ jobs:
             if ($null -ne $coreProcess -and $null -ne $proxyProcess) { break }
             Start-Sleep -Milliseconds 250
           } while ([DateTime]::UtcNow -lt $runtimeDeadline)
-          $cachePath = Join-Path $env:LOCALAPPDATA 'Zommi/runtime-targets.json'
+          $cachePath = Join-Path $env:LOCALAPPDATA 'Focalet/runtime-targets.json'
           $cache = Get-Content -LiteralPath $cachePath -Raw | ConvertFrom-Json
           $cachedTarget = $cache.targets | Where-Object {
             $_.executionHost.kind -eq 'wsl' -and $_.executionHost.isDefault
@@ -353,7 +353,7 @@ jobs:
           foreach ($argument in @(
             '--wsl-proxy', '--distribution', $distribution,
             '--cwd', '/', '--', '/bin/sh', '-c',
-            'printf ZOMMI_WINDOWS_WSL_RELAY_OK'
+            'printf FOCALET_WINDOWS_WSL_RELAY_OK'
           )) {
             $probe.ArgumentList.Add($argument)
           }
@@ -365,7 +365,7 @@ jobs:
           }
           $probeOutput = $probeProcess.StandardOutput.ReadToEnd()
           $probeError = $probeProcess.StandardError.ReadToEnd()
-          if ($probeProcess.ExitCode -ne 0 -or $probeOutput.Trim() -ne 'ZOMMI_WINDOWS_WSL_RELAY_OK') {
+          if ($probeProcess.ExitCode -ne 0 -or $probeOutput.Trim() -ne 'FOCALET_WINDOWS_WSL_RELAY_OK') {
             throw "The deployed WSL relay probe failed ($($probeProcess.ExitCode)): $probeError"
           }
           Write-Host "Persistent WSL relay probe succeeded for $distribution."
@@ -387,7 +387,7 @@ jobs:
           foreach ($argument in @(
             '--wsl-proxy', '--distribution', $distribution,
             '--cwd', $runtimeHome, '--', '/usr/bin/env',
-            'ZOMMI_RUNTIME_CHILD=1', $runtimeExecutable, 'app-server'
+            'FOCALET_RUNTIME_CHILD=1', $runtimeExecutable, 'app-server'
           )) {
             $handshake.ArgumentList.Add($argument)
           }
@@ -397,8 +397,8 @@ jobs:
             method = 'initialize'
             params = [ordered]@{
               clientInfo = [ordered]@{
-                name = 'zommi-windows-release-gate'
-                title = 'Zommi Windows Release Gate'
+                name = 'focalet-windows-release-gate'
+                title = 'Focalet Windows Release Gate'
                 version = '0.1.0'
               }
             }
@@ -484,37 +484,37 @@ jobs:
       - name: Build and verify macOS release
         id: package
         env:
-          ZOMMI_MACOS_SIGNING_IDENTITY: ${{ secrets.ZOMMI_MACOS_SIGNING_IDENTITY }}
+          FOCALET_MACOS_SIGNING_IDENTITY: ${{ secrets.FOCALET_MACOS_SIGNING_IDENTITY }}
         run: bash scripts/package-unix.sh macos
 
       - name: Test native macOS selection geometry
         run: |
           xcrun swiftc -swift-version 5 \
-            src/Zommi.Flutter/macos/Runner/MacRegionSelector.swift \
+            src/Focalet.Flutter/macos/Runner/MacRegionSelector.swift \
             scripts/test-macos-region-selection.swift \
-            -o /tmp/zommi-macos-region-tests
-          /tmp/zommi-macos-region-tests
+            -o /tmp/focalet-macos-region-tests
+          /tmp/focalet-macos-region-tests
 
       - name: Test macOS capture bridge and UI goldens
-        working-directory: src/Zommi.Flutter
+        working-directory: src/Focalet.Flutter
         run: |
           flutter test --no-pub --concurrency=4 \
             test/desktop_bridge_test.dart \
             test/flutter_ux_parity_test.dart \
             test/runtime_commands_test.dart \
-            test/zommi_app_test.dart
+            test/focalet_app_test.dart
 
       - name: Probe packaged macOS startup and capture permissions
-        run: python3 scripts/accept-macos.py artifacts/zommi-macos-${{ inputs.macos_arch == 'x64' && 'x64' || 'arm64' }} --output artifacts/macos-acceptance --interactive
+        run: python3 scripts/accept-macos.py artifacts/focalet-macos-${{ inputs.macos_arch == 'x64' && 'x64' || 'arm64' }} --output artifacts/macos-acceptance --interactive
 
       - name: Build and verify Mac installer
-        run: python3 scripts/build_installer.py artifacts/zommi-macos-${{ inputs.macos_arch == 'x64' && 'x64' || 'arm64' }} --expected-commit "$GITHUB_SHA" --output artifacts/installers
+        run: python3 scripts/build_installer.py artifacts/focalet-macos-${{ inputs.macos_arch == 'x64' && 'x64' || 'arm64' }} --expected-commit "$GITHUB_SHA" --output artifacts/installers
 
       - name: Upload macOS acceptance evidence
         if: always() && inputs.upload_packages && !inputs.macos_draft_release
         uses: actions/upload-artifact@v7
         with:
-          name: zommi-macos-evidence-${{ runner.arch }}-${{ github.sha }}
+          name: focalet-macos-evidence-${{ runner.arch }}-${{ github.sha }}
           path: artifacts/macos-acceptance
           if-no-files-found: warn
           retention-days: 7
@@ -523,10 +523,10 @@ jobs:
         if: inputs.upload_packages && !inputs.macos_draft_release
         uses: actions/upload-artifact@v7
         with:
-          name: zommi-macos-${{ runner.arch }}-${{ github.sha }}
+          name: focalet-macos-${{ runner.arch }}-${{ github.sha }}
           path: |
-            artifacts/zommi-macos-*.zip
-            artifacts/zommi-macos-*.zip.sha256
+            artifacts/focalet-macos-*.zip
+            artifacts/focalet-macos-*.zip.sha256
             artifacts/installers/*
           if-no-files-found: error
           compression-level: 0
@@ -552,8 +552,8 @@ jobs:
           if ! gh release view "$tag" >/dev/null 2>&1; then
             gh release create "$tag" --draft --target "$GITHUB_SHA" --title "Mac test $MACOS_ARCH ${GITHUB_SHA:0:12}" --notes-file /tmp/macos-release-notes.md
           fi
-          tar -czf "artifacts/zommi-macos-evidence-$MACOS_ARCH.tar.gz" -C artifacts macos-acceptance
-          gh release upload "$tag" "artifacts/zommi-macos-$MACOS_ARCH.zip" "artifacts/zommi-macos-$MACOS_ARCH.zip.sha256" "artifacts/zommi-macos-evidence-$MACOS_ARCH.tar.gz" --clobber
-          if [[ -f "artifacts/installers/Zommi-macOS-$MACOS_ARCH.dmg" ]]; then
+          tar -czf "artifacts/focalet-macos-evidence-$MACOS_ARCH.tar.gz" -C artifacts macos-acceptance
+          gh release upload "$tag" "artifacts/focalet-macos-$MACOS_ARCH.zip" "artifacts/focalet-macos-$MACOS_ARCH.zip.sha256" "artifacts/focalet-macos-evidence-$MACOS_ARCH.tar.gz" --clobber
+          if [[ -f "artifacts/installers/Focalet-macOS-$MACOS_ARCH.dmg" ]]; then
             gh release upload "$tag" artifacts/installers/* --clobber
           fi

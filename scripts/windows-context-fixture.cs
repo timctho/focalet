@@ -5,7 +5,7 @@ using System.Windows.Forms;
 
 // UIA requests require a live message pump while the acceptance driver waits
 // for the separate capture process. Never create this fixture on that driver.
-public sealed class ZommiContextFixture : IDisposable
+public sealed class FocaletContextFixture : IDisposable
 {
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
@@ -18,7 +18,7 @@ public sealed class ZommiContextFixture : IDisposable
     private Exception failure;
     public IntPtr Window { get; private set; }
 
-    public ZommiContextFixture()
+    public FocaletContextFixture()
     {
         thread = new Thread(() =>
         {
@@ -26,7 +26,7 @@ public sealed class ZommiContextFixture : IDisposable
             try
             {
                 form = new Form {
-                    Text = "Zommi native context fixture", FormBorderStyle = FormBorderStyle.None,
+                    Text = "Focalet native context fixture", FormBorderStyle = FormBorderStyle.None,
                     StartPosition = FormStartPosition.Manual, Bounds = new Rectangle(140, 140, 500, 360),
                     TopMost = true, ShowInTaskbar = false, BackColor = Color.White, AutoScaleMode = AutoScaleMode.None,
                 };
@@ -103,6 +103,20 @@ public sealed class ZommiContextFixture : IDisposable
                 foreach (Control child in parent.Controls)
                     if (child is Label) child.Text = "Source changed after capture";
             form.Refresh();
+        }));
+    }
+
+    public void EnableHoverText()
+    {
+        form.Invoke(new Action(() => {
+            foreach (Control parent in form.Controls)
+                foreach (Control child in parent.Controls)
+                    if (child is Label) {
+                        var label = child;
+                        var original = label.Text;
+                        label.MouseEnter += (sender, args) => { label.Text = "Pointer hover changed this line"; };
+                        label.MouseLeave += (sender, args) => { label.Text = original; };
+                    }
         }));
     }
 

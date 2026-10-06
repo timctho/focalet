@@ -1,6 +1,12 @@
-# Releases in the Zommi repository
+# Releases in the Focalet repository
 
-Publish installers in [timctho/zommi Releases](https://github.com/timctho/zommi/releases),
+This policy covers **Focalet Desktop**. New packages, manifests and installers
+use the Focalet name; earlier release assets remain immutable. **Focalet Capture** has a separate Windows
+prototype package from `scripts/package-capture-tool.ps1`, verified and retained
+by the Capture PR job. It is not bundled into Desktop releases or published by
+this release pipeline. See [product boundaries](products.md).
+
+Publish installers in [timctho/focalet Releases](https://github.com/timctho/focalet/releases),
 alongside the source. Release tags point to the exact accepted source revision.
 Releases inherit repository visibility; publishing does not change it. Downloads
 from a private repository require GitHub access. Actions artifacts expire and
@@ -23,7 +29,7 @@ private and is not uploaded by the publisher.
 | Maintainer runs `publish_release.py --publish` with accepted installer metadata | Maintainer's build/publication environment | Publishes the verified installers, checksums and source manifest to GitHub Releases |
 
 PR checks have no path filters: a documentation-only PR also runs those checks.
-Automatic releases watch `src/Zommi.Flutter/pubspec.yaml` on `main` and compare
+Automatic releases watch `src/Focalet.Flutter/pubspec.yaml` on `main` and compare
 its release version before and after the whole push. An unchanged release
 version, a dependency/description edit or a build-number-only change skips
 installer builds and publication. Pushing a Git tag does not trigger a release.
@@ -39,7 +45,7 @@ does not move self-hosted jobs to GitHub's machines or change release triggers.
 Change the app version in a PR, review the changes and merge it into `main`.
 That version change starts the release automatically; no extra button or manual
 Git tag is needed. The committed `version` in
-[`src/Zommi.Flutter/pubspec.yaml`](../src/Zommi.Flutter/pubspec.yaml) is the source:
+[`src/Focalet.Flutter/pubspec.yaml`](../src/Focalet.Flutter/pubspec.yaml) is the source:
 
 ```yaml
 version: 0.1.0-preview.8+1
@@ -98,7 +104,7 @@ actions, gives build jobs read-only access, and grants `contents: write` only to
 the final publication job. It needs no personal access token or self-hosted
 runner; `GITHUB_TOKEN` publishes into this repository.
 
-Ubuntu produces `Zommi-Ubuntu-amd64.deb`, Windows produces `Zommi-Setup-x64.exe`,
+Ubuntu produces `Focalet-Ubuntu-amd64.deb`, Windows produces `Focalet-Setup-x64.exe`,
 and Mac produces architecture-specific DMGs. Ubuntu builds require 24.04 and
 validate bundled ELF runtime requirements against the
 [package compatibility baseline](ubuntu-testing.md#package-compatibility) before
@@ -133,7 +139,7 @@ installation from the DMG.
 With NSIS 3 installed, create the Windows installer:
 
 ```sh
-python scripts/build_installer.py artifacts/zommi-windows-x64 \
+python scripts/build_installer.py artifacts/focalet-windows-x64 \
   --expected-commit <main-sha> --output artifacts/installers
 ```
 
@@ -143,12 +149,12 @@ packaged file, launch and capture from the installed location, uninstall, and
 confirm that unrelated files and user settings remain.
 
 ```powershell
-python scripts/accept_windows_installer.py artifacts/installers/Zommi-Setup-x64.exe `
+python scripts/accept_windows_installer.py artifacts/installers/Focalet-Setup-x64.exe `
   --expected-commit <main-sha> --output artifacts/installer-acceptance
 ```
 
 This requires an interactive Windows desktop and PowerShell 7, and refuses to
-overwrite an already registered Zommi installation. Existing portable Zommi
+overwrite an already registered Focalet installation. Existing portable Focalet
 processes must be closed before the installer runs. The capture acceptance
 helper suspends and restores conflicting app processes during its own checks.
 
@@ -172,11 +178,11 @@ On a local Mac, build the native architecture and create the same verified DMG:
 
 ```sh
 bash scripts/package-unix.sh macos
-python3 scripts/build_installer.py artifacts/zommi-macos-arm64 \
+python3 scripts/build_installer.py artifacts/focalet-macos-arm64 \
   --expected-commit "$(git rev-parse HEAD)" --output artifacts/installers
 ```
 
-Use `zommi-macos-x64` on Intel. The installer builder smoke-tests the bundled
+Use `focalet-macos-x64` on Intel. The installer builder smoke-tests the bundled
 helpers, verifies the DMG, mounts it, compares the app payload and checks its
 signature. Run the [Mac acceptance checks](macos-testing.md) for capture and
 permissions as well. These local builds remain available when hosted Actions
@@ -188,10 +194,10 @@ Collect the accepted installer and its `.release.json` sidecar. With an
 authenticated local `gh` session, prepare a Windows preview:
 
 ```sh
-python scripts/publish_release.py --repository timctho/zommi \
+python scripts/publish_release.py --repository timctho/focalet \
   --tag "$(python scripts/release_version.py)" --expected-commit <main-sha> \
   --windows-only \
-  --metadata installers/Zommi-Setup-x64.exe.release.json \
+  --metadata installers/Focalet-Setup-x64.exe.release.json \
   --output artifacts/release
 ```
 
@@ -211,7 +217,7 @@ still requires both architectures. Automatic version releases still require all
 four installers.
 
 After publication, download the actual installer and checksum files from
-`timctho/zommi` and compare them with the accepted local bytes. Use authenticated
+`timctho/focalet` and compare them with the accepted local bytes. Use authenticated
 downloads for a private repository; also verify anonymous downloads if it is
 public. Keep the repository's visibility unchanged.
 
@@ -236,8 +242,8 @@ approval requirements. SignPath approval and integration are still pending.
 For a normal distribution release, sign the Windows application and installer
 with Authenticode, and sign the Mac app with an Apple Developer ID, notarize and
 staple the distribution. Recompute installer hashes after signing. The existing
-package builders accept `ZOMMI_WINDOWS_SIGNING_THUMBPRINT` and
-`ZOMMI_MACOS_SIGNING_IDENTITY`; signing only the app does not sign the installer
+package builders accept `FOCALET_WINDOWS_SIGNING_THUMBPRINT` and
+`FOCALET_MACOS_SIGNING_IDENTITY`; signing only the app does not sign the installer
 or notarize the Mac distribution.
 
 Local publication needs no additional Actions secret. A workflow publishing in

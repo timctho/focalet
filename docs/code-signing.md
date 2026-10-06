@@ -7,7 +7,7 @@ has been approved or connected to the release workflow. A checksum verifies that
 a download matches a published file; it does not establish publisher identity.
 Consult each release's signing metadata for that release's actual status.
 
-Zommi is evaluating the [SignPath Foundation program](https://signpath.org/).
+Focalet is evaluating the [SignPath Foundation program](https://signpath.org/).
 Acceptance is subject to its review. If approved, its certificate would identify
 **SignPath Foundation** as the publisher. We will update this page and release
 notes when signed distribution is available.
@@ -23,9 +23,9 @@ automatic publication cannot bypass a signing provider's approval requirement.
 
 ## What will be signed
 
-Sign only Zommi's own binaries built from the public repository and the final
+Sign only Focalet's own binaries built from the public repository and the final
 Windows installer. Preserve upstream signatures and notices; do not sign
-third-party libraries as if they were maintained by Zommi. Use timestamped
+third-party libraries as if they were maintained by Focalet. Use timestamped
 Authenticode signatures and verify them before publishing.
 
 The release pipeline must bind the source revision, successful CI checks,

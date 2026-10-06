@@ -1,4 +1,4 @@
-"""Reset may stop only the exact Zommi relay and the runtimes it owns."""
+"""Reset may stop only the exact Focalet relay and the runtimes it owns."""
 import json
 import os
 from pathlib import Path
@@ -9,23 +9,23 @@ import tempfile
 import time
 import unittest
 
-SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/stop-zommi-relay.sh'
+SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/stop-focalet-relay.sh'
 
 
 @unittest.skipUnless(sys.platform.startswith('linux'), 'Linux /proc process identity')
 class RelayResetTests(unittest.TestCase):
     def test_exact_identity_stops_owned_tree_and_preserves_unrelated_process(self):
-        with tempfile.TemporaryDirectory(prefix='zommi relay reset ') as directory:
+        with tempfile.TemporaryDirectory(prefix='focalet relay reset ') as directory:
             root = Path(directory)
             endpoint = root / 'endpoints/fixture.json'
-            fixture = root / 'zommi-wsl-relay.js'
+            fixture = root / 'focalet-wsl-relay.js'
             fixture.write_text("""const {spawn}=require('node:child_process');
 const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true});
 process.on('SIGTERM',()=>{if(child.exitCode!==null || child.signalCode)process.exit(0);else child.once('exit',()=>process.exit(0));});
 console.log(JSON.stringify({child:child.pid}));
 setInterval(()=>{},1000);
 """)
-            bootstrap = root / 'bootstrap/fixture/zommi-wsl-relay.js'
+            bootstrap = root / 'bootstrap/fixture/focalet-wsl-relay.js'
             bootstrap.parent.mkdir(parents=True)
             shutil.copyfile(fixture, bootstrap)
             # An upgrade can leave the old layout and the new layout alive.
@@ -56,16 +56,16 @@ setInterval(()=>{},1000);
                 unrelated.wait()
 
     def test_current_production_relay_stops_without_touching_other_distribution(self):
-        with tempfile.TemporaryDirectory(prefix='zommi relay reset ') as directory:
+        with tempfile.TemporaryDirectory(prefix='focalet relay reset ') as directory:
             root = Path(directory) / 'wsl-relay/v4'
             relays = []
             endpoints = []
             try:
                 for distribution in ('Ubuntu', 'Ubuntu-Other'):
                     name = distribution.lower().encode().hex()
-                    script = root / 'bootstrap' / name / 'zommi-wsl-relay.js'
+                    script = root / 'bootstrap' / name / 'focalet-wsl-relay.js'
                     script.parent.mkdir(parents=True)
-                    shutil.copyfile(SCRIPT.with_name('zommi-wsl-relay.js'), script)
+                    shutil.copyfile(SCRIPT.with_name('focalet-wsl-relay.js'), script)
                     endpoint = root / 'endpoints' / f'{name}.json'
                     endpoints.append(endpoint)
                     relay = subprocess.Popen([
@@ -93,10 +93,10 @@ setInterval(()=>{},1000);
                     relay.stderr.close()
 
     def test_script_and_endpoint_mentions_do_not_identify_a_relay(self):
-        with tempfile.TemporaryDirectory(prefix='zommi relay reset ') as directory:
+        with tempfile.TemporaryDirectory(prefix='focalet relay reset ') as directory:
             root = Path(directory)
             endpoint = root / 'endpoints/fixture.json'
-            fixture = root / 'zommi-wsl-relay.js'
+            fixture = root / 'focalet-wsl-relay.js'
             unrelated = subprocess.Popen([
                 'node', '-e', 'setInterval(()=>{},1000)',
                 str(fixture), '--endpoint', str(endpoint),

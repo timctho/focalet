@@ -12,7 +12,7 @@ import threading
 import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
-HOST = Path(os.environ.get("ZOMMI_TEST_CORE_HOST", ROOT / "target/debug" / ("zommi-core-host.exe" if os.name == "nt" else "zommi-core-host")))
+HOST = Path(os.environ.get("FOCALET_TEST_CORE_HOST", ROOT / "target/debug" / ("focalet-core-host.exe" if os.name == "nt" else "focalet-core-host")))
 
 
 class Core:
@@ -58,23 +58,23 @@ class Core:
 
 class HomePersistenceTests(unittest.TestCase):
     def test_restarts_pin_home_and_reject_mismatch_or_corruption(self):
-        self.assertTrue(HOST.is_file(), "Build zommi-core-host first")
-        with tempfile.TemporaryDirectory(prefix="zommi-home-test-") as directory:
+        self.assertTrue(HOST.is_file(), "Build focalet-core-host first")
+        with tempfile.TemporaryDirectory(prefix="focalet-home-test-") as directory:
             root = Path(directory)
             first = str(root / "first home")
             second = str(root / "second home")
             log = root / "requests.jsonl"
-            environment = dict(os.environ, ZOMMI_CODEX_COMMAND=sys.executable,
-                               ZOMMI_CODEX_ARGS_JSON=json.dumps([str(ROOT / "crates/zommi-core-host/tests/fake_codex_app_server.py")]),
-                               ZOMMI_CORE_STATE_PATH=str(root / "binding.json"),
-                               ZOMMI_RUNTIME_OVERRIDES_PATH=str(root / "overrides.json"),
-                               ZOMMI_RUNTIME_DISCOVERY_CACHE_PATH=str(root / "discovery.json"),
-                               ZOMMI_FAKE_REPORT_CODEX_HOME="1", ZOMMI_FAKE_REQUEST_LOG=str(log))
+            environment = dict(os.environ, FOCALET_CODEX_COMMAND=sys.executable,
+                               FOCALET_CODEX_ARGS_JSON=json.dumps([str(ROOT / "crates/focalet-core-host/tests/fake_codex_app_server.py")]),
+                               FOCALET_CORE_STATE_PATH=str(root / "binding.json"),
+                               FOCALET_RUNTIME_OVERRIDES_PATH=str(root / "overrides.json"),
+                               FOCALET_RUNTIME_DISCOVERY_CACHE_PATH=str(root / "discovery.json"),
+                               FOCALET_FAKE_REPORT_CODEX_HOME="1", FOCALET_FAKE_REQUEST_LOG=str(log))
 
             def connect(home, reported=None):
                 env = dict(environment, CODEX_HOME=home)
                 if reported:
-                    env["ZOMMI_FAKE_REPORTED_HOME"] = reported
+                    env["FOCALET_FAKE_REPORTED_HOME"] = reported
                 core = Core(env)
                 try:
                     self.assertTrue(core.request("core.initialize")["ok"])

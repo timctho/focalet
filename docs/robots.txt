@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://timctho.github.io/zommi/sitemap.xml
+Sitemap: https://timctho.github.io/focalet/sitemap.xml

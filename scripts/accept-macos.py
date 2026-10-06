@@ -42,7 +42,7 @@ def probe_pid(log: Path, executable: Path) -> int | None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('package', type=Path)
-    parser.add_argument('--app', type=Path, help='Test the installed copy, e.g. /Applications/Zommi.app.')
+    parser.add_argument('--app', type=Path, help='Test the installed copy, e.g. /Applications/Focalet.app.')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--require-capture', action='store_true')
     parser.add_argument('--window-title', help='Use an existing uniquely titled fixture instead of opening TextEdit.')
@@ -58,37 +58,37 @@ def main() -> None:
     if platform.system() != 'Darwin':
         parser.error('This probe must run on a Mac with a graphical login session.')
     package = args.package.resolve()
-    application = (args.app or package / 'Zommi.app').resolve()
-    executable = application / 'Contents/MacOS/Zommi'
+    application = (args.app or package / 'Focalet.app').resolve()
+    executable = application / 'Contents/MacOS/Focalet'
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     report_path = output / 'capture-probe.json'
     report_path.unlink(missing_ok=True)
     manifest = json.loads((package / 'release-manifest.json').read_text())
-    # LaunchServices gives Zommi its own TCC identity. Direct exec inherits the
+    # LaunchServices gives Focalet its own TCC identity. Direct exec inherits the
     # terminal/automation host's responsible process and misreports permissions.
-    environment = dict(ZOMMI_MACOS_CAPTURE_PROBE=str(report_path),
-                       ZOMMI_ACCEPTANCE_LOG=str(output / 'desktop-events.jsonl'))
+    environment = dict(FOCALET_MACOS_CAPTURE_PROBE=str(report_path),
+                       FOCALET_ACCEPTANCE_LOG=str(output / 'desktop-events.jsonl'))
     if args.window_title:
-        environment['ZOMMI_MACOS_PROBE_WINDOW_TITLE'] = args.window_title
-        environment['ZOMMI_MACOS_PROBE_EXPECTED_TEXT'] = args.expected_text
+        environment['FOCALET_MACOS_PROBE_WINDOW_TITLE'] = args.window_title
+        environment['FOCALET_MACOS_PROBE_EXPECTED_TEXT'] = args.expected_text
     if args.require_dom:
-        environment['ZOMMI_MACOS_PROBE_DOM'] = '1'
+        environment['FOCALET_MACOS_PROBE_DOM'] = '1'
     if args.browser_endpoint:
-        environment['ZOMMI_BROWSER_CDP_ENDPOINT'] = args.browser_endpoint
-    with tempfile.TemporaryDirectory(prefix='zommi-macos-') as temporary:
+        environment['FOCALET_BROWSER_CDP_ENDPOINT'] = args.browser_endpoint
+    with tempfile.TemporaryDirectory(prefix='focalet-macos-') as temporary:
         input_driver = Path(temporary) / 'capture-input'
         if args.interactive:
             subprocess.run(['swiftc', str(Path(__file__).with_name('macos-capture-input.swift')), '-o', str(input_driver)], check=True)
         if args.interactive or args.manual_interactive:
-            environment['ZOMMI_MACOS_INTERACTIVE_PROBE'] = '1'
+            environment['FOCALET_MACOS_INTERACTIVE_PROBE'] = '1'
         if not args.window_title:
             # Distinguish this document from still-open fixtures of earlier runs.
-            fixture = Path(temporary) / f'zommi-capture-fixture-{Path(temporary).name}.txt'
+            fixture = Path(temporary) / f'focalet-capture-fixture-{Path(temporary).name}.txt'
             # Place the text inside the probe's interior crop; keep the caret
             # on the next line at the left edge, outside that crop.
-            fixture.write_text('\n' * 8 + ' ' * 18 + 'Zommi macOS capture acceptance fixture\n')
-            environment['ZOMMI_MACOS_PROBE_WINDOW_TITLE'] = fixture.stem
+            fixture.write_text('\n' * 8 + ' ' * 18 + 'Focalet macOS capture acceptance fixture\n')
+            environment['FOCALET_MACOS_PROBE_WINDOW_TITLE'] = fixture.stem
             subprocess.run(['open', '-a', 'TextEdit', str(fixture)], check=True)
             time.sleep(0.5)
         with (output / 'startup.log').open('w') as log:
@@ -163,7 +163,7 @@ def main() -> None:
                 if (args.interactive or args.manual_interactive) and report.get('permissions', {}).get('screenRecording') and report.get('interactiveRegionCancellation') != 'passed':
                     raise RuntimeError('Interactive capture/cancellation did not complete.')
                 if (args.require_capture or args.require_dom) and not report['captureVerified']:
-                    raise RuntimeError('Capture is unverified. Enable Zommi capture permissions, restart, and retry.')
+                    raise RuntimeError('Capture is unverified. Enable Focalet capture permissions, restart, and retry.')
             finally:
                 log.flush()
                 print('Packaged app startup log:', flush=True)

@@ -13,7 +13,7 @@ def without_parent_context(environment):
     namespaces = {
         match[1].upper() + "_"
         for key in environment
-        if not key.upper().startswith("ZOMMI_") and (match := CONTEXT_NAMESPACE.match(key))
+        if not key.upper().startswith("FOCALET_") and (match := CONTEXT_NAMESPACE.match(key))
     }
     return {
         key: value for key, value in environment.items()

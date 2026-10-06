@@ -1,0 +1,50 @@
+import 'package:flutter/material.dart';
+import 'package:focalet_flutter/theme/app_preferences.dart';
+
+// Codex follows the host UI font stack. Segoe UI gives the Windows build the
+// same native text rhythm instead of bundling the heavier Geist face.
+const String codexUiFontFamily = 'Segoe UI';
+const List<String> codexUiFontFallback = [
+  'Segoe UI Variable Text',
+  'SF Pro Text',
+  'Helvetica Neue',
+  'Ubuntu Sans',
+  'Noto Sans',
+  'Arial',
+];
+
+// Flutter desktop does not resolve CSS's generic `monospace` family. Avoid
+// inheriting the UI fallback stack for code and file-reference labels.
+const String chatCodeFontFamily = 'Consolas';
+const List<String> chatCodeFontFallback = [
+  'Cascadia Code',
+  'SFMono-Regular',
+  'Menlo',
+  'DejaVu Sans Mono',
+  'Noto Sans Mono',
+];
+
+const double topBarAndChatFontSize = 12;
+const double userMessageFontSize = topBarAndChatFontSize;
+const double assistantMessageFontSize = topBarAndChatFontSize;
+const double chatCodeFontSize = topBarAndChatFontSize;
+const double compactChatCodeFontSize = topBarAndChatFontSize;
+
+const Color chatSelectionColor = Color(0x66617de0);
+// Text backgrounds paint over selection; retain a translucent code tint.
+const Color inlineCodeBackground = Color(0x14616f9b);
+
+const TextStyle topBarAndChatTextStyle = TextStyle(
+  fontFamily: codexUiFontFamily,
+  fontFamilyFallback: codexUiFontFallback,
+  fontSize: topBarAndChatFontSize,
+  fontWeight: FontWeight.w500,
+  height: 1.35,
+);
+
+double chatFontSizeOf(BuildContext context) =>
+    Theme.of(context).extension<FocaletVisualSettings>()?.chatFontSize ??
+    topBarAndChatFontSize;
+
+TextStyle chatTextStyleOf(BuildContext context) => topBarAndChatTextStyle
+    .copyWith(fontSize: chatFontSizeOf(context), fontWeight: FontWeight.w400);
